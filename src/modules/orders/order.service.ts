@@ -345,6 +345,22 @@ class OrderService {
       itemCount: verifiedOrder.items?.length ?? 1,
     });
 
+    // Promote the order + shipment out of their pre-dispatch states so the
+    // UI stops showing "Dispatch Pending". Without these updates the row
+    // would stay on the yellow badge forever even though Delhivery has the
+    // shipment. Pre-PR #10 round-2 finding (round-2 audit G3 was about EPOD
+    // webhook gaps; this is the same class of bug for the dispatch flow).
+    await prisma.$transaction([
+      prisma.shipment.update({
+        where: { orderId: order.id },
+        data: { status: 'CREATED', trackingStatus: 'Label generated' },
+      }),
+      prisma.order.update({
+        where: { id: order.id },
+        data: { status: 'DISPATCHED', dispatchedAt: new Date() },
+      }),
+    ]);
+
     // Sync fulfillment and tracking number directly to Shopify order
     try {
       await shopifyService.fulfillOrderOnShopify(verifiedOrder.shopifyOrderId, result.waybillNumber);

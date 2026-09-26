@@ -18,6 +18,21 @@ api.interceptors.request.use((config) => {
   return config
 })
 
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401 && typeof window !== 'undefined') {
+      // Clear expired credentials and route to login
+      localStorage.removeItem('youthnic_firebase_token')
+      localStorage.removeItem('youthnic_auth_user')
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login'
+      }
+    }
+    return Promise.reject(error)
+  }
+)
+
 export function apiError(error: unknown): string {
   if (axios.isAxiosError(error)) {
     const message = error.response?.data?.error

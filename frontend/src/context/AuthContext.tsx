@@ -60,9 +60,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY)
-      return saved ? JSON.parse(saved) : PRESET_USERS.operator
+      const token = localStorage.getItem(TOKEN_KEY)
+      if (saved && token) {
+        return JSON.parse(saved)
+      }
+      return null
     } catch {
-      return PRESET_USERS.operator
+      return null
     }
   })
 
@@ -110,8 +114,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUser(authUser)
           localStorage.setItem(STORAGE_KEY, JSON.stringify(authUser))
         } catch {
-          // Fallback to active state
+          setUser(null)
+          localStorage.removeItem(STORAGE_KEY)
+          localStorage.removeItem(TOKEN_KEY)
         }
+      } else {
+        setUser(null)
+        localStorage.removeItem(STORAGE_KEY)
+        localStorage.removeItem(TOKEN_KEY)
       }
       setLoading(false)
     })
@@ -133,28 +143,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [user])
 
-  // Email and Password Login via Firebase Auth
+  // Email and Password Login strictly via Firebase Auth
   const login = async (email: string, password?: string): Promise<boolean> => {
     const trimmed = email.trim()
     if (!password) {
-      // Fallback quick developer sign-in
-      const loggedUser: AuthUser = {
-        id: `usr_${Date.now()}`,
-        name: trimmed.includes('warehouse')
-          ? 'Warehouse Specialist'
-          : trimmed.includes('finance')
-          ? 'Finance Lead'
-          : 'Operations Manager',
-        email: trimmed || 'operator@youthnic.com',
-        role: trimmed.includes('warehouse')
-          ? 'Reverse Logistics & QC Specialist'
-          : trimmed.includes('finance')
-          ? '3-Way Payment Reconciliation'
-          : 'Operations & Dispatch Lead',
-        avatar: (trimmed.slice(0, 2) || 'OP').toUpperCase(),
-      }
-      setUser(loggedUser)
-      return true
+      throw new Error('Password is required to sign in.')
     }
 
     try {
@@ -163,9 +156,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.setItem(TOKEN_KEY, token)
       return true
     } catch (err: any) {
-      // If user doesn't exist, try creating an account automatically or rethrow
-      if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
+      if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password') {
         throw new Error('Invalid email or password. Please verify your credentials or register.')
+      }
+      if (err.code === 'auth/too-many-requests') {
+        throw new Error('Too many failed attempts. Please try again later or reset your password.')
       }
       throw err
     }
@@ -202,8 +197,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await sendPasswordResetEmail(auth, email.trim())
   }
 
-  const quickLogin = (preset: 'operator' | 'warehouse' | 'finance') => {
-    setUser(PRESET_USERS[preset])
+  const quickLogin = (_preset: 'operator' | 'warehouse' | 'finance') => {
+    // Deprecated for security: credentials required
   }
 
   const logout = async () => {
@@ -223,7 +218,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       value={{
         user,
         firebaseUser,
-        isAuthenticated: Boolean(user),
+        isAuthenticated: Boolean(user && localStorage.getItem(TOKEN_KEY)),
         loading,
         login,
         register,

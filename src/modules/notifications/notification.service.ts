@@ -8,7 +8,7 @@ import { NotificationPayload } from '../../types';
 /**
  * Notification Engine
  * Central service that triggers critical WhatsApp messages at each order lifecycle stage
- * powered by Kapso AI WhatsApp MCP and Cloud API.
+ * powered by Kapso AI WhatsApp Cloud REST API.
  */
 class NotificationEngine {
   /**

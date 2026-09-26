@@ -670,7 +670,7 @@ export interface SystemStatusData {
   }
   kapso?: {
     status: string
-    mcpEndpoint: string
+    apiEndpoint?: string
     authHeader: string
     senderNumber: string
     criticalTriggers: Array<{ name: string; code: string; action: string }>
@@ -697,14 +697,13 @@ export interface KapsoStatusData {
   success: boolean
   status: 'ok' | 'unauthorized' | 'error'
   latencyMs: number
-  mcpEndpoint: string
+  apiEndpoint?: string
   senderPhone: string
   apiKeyConfigured: boolean
   phoneNumberIdConfigured: boolean
   connectedNumbers: KapsoConnectedNumber[]
   message?: string
   apiUrl?: string
-  mcpUrl?: string
 }
 
 export interface ShopifyProductImage {
@@ -1041,7 +1040,7 @@ export interface SupportDiagnosticsData {
   kapso: {
     status: 'ok' | 'error' | 'unauthorized'
     latencyMs: number
-    mcpEndpoint: string
+    apiEndpoint?: string
     senderPhone: string
     apiKeyConfigured: boolean
     phoneNumberIdConfigured: boolean

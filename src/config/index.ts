@@ -134,10 +134,9 @@ export const config = {
     },
   },
 
-  // Kapso AI WhatsApp Platform & MCP
+  // Kapso AI WhatsApp Platform (REST API)
   kapso: {
     apiUrl: optional('KAPSO_API_URL', 'https://api.kapso.ai'),
-    mcpUrl: optional('KAPSO_MCP_URL', 'https://api.kapso.ai/mcp'),
     apiKey: optional('KAPSO_API_KEY', ''),
     phoneNumberId: optional('KAPSO_PHONE_NUMBER_ID', ''),
     senderPhone: optional('KAPSO_SENDER_PHONE', '+91 88661 54721'),

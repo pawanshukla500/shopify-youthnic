@@ -1,7 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Layout } from './components/Layout'
-import { ToastProvider } from './components/UI'
+import { ToastProvider, LoadingState } from './components/UI'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { ThemeProvider } from './context/ThemeContext'
 import { Dashboard } from './pages/Dashboard'
@@ -26,8 +26,17 @@ const queryClient = new QueryClient({
 })
 
 function RequireAuth({ children }: { children: ReactNode }) {
-  const { isAuthenticated } = useAuth()
+  const { isAuthenticated, loading } = useAuth()
   const location = useLocation()
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', height: '100vh', width: '100vw', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-canvas, #0f172a)' }}>
+        <LoadingState label="Verifying Firebase authentication session..." />
+      </div>
+    )
+  }
+
   if (!isAuthenticated) {
     return <Navigate to="/login" state={{ from: location }} replace />
   }

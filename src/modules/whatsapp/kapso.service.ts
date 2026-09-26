@@ -39,7 +39,7 @@ export interface KapsoConnectedNumber {
 
 /**
  * Kapso WhatsApp Service
- * Connects directly to Kapso Cloud API (https://api.kapso.ai) and Kapso MCP (https://api.kapso.ai/mcp)
+ * Connects directly to Kapso Cloud REST API (https://api.kapso.ai)
  * to send critical trigger WhatsApp messages across the e-commerce order lifecycle.
  */
 class KapsoService {
@@ -138,7 +138,7 @@ class KapsoService {
   async ping(): Promise<{
     status: 'ok' | 'unauthorized' | 'error';
     latencyMs: number;
-    mcpEndpoint: string;
+    apiUrl?: string;
     senderPhone: string;
     apiKeyConfigured: boolean;
     phoneNumberIdConfigured: boolean;
@@ -152,7 +152,7 @@ class KapsoService {
       return {
         status: 'ok',
         latencyMs: 5,
-        mcpEndpoint: config.kapso.mcpUrl,
+        apiUrl: config.kapso.apiUrl,
         senderPhone: config.kapso.senderPhone,
         apiKeyConfigured: false,
         phoneNumberIdConfigured: Boolean(config.kapso.phoneNumberId),
@@ -168,7 +168,7 @@ class KapsoService {
       return {
         status: 'ok',
         latencyMs: Date.now() - start,
-        mcpEndpoint: config.kapso.mcpUrl,
+        apiUrl: config.kapso.apiUrl,
         senderPhone: config.kapso.senderPhone,
         apiKeyConfigured: true,
         phoneNumberIdConfigured: Boolean(phoneId),
@@ -182,7 +182,7 @@ class KapsoService {
       return {
         status: isAuthError ? 'unauthorized' : 'error',
         latencyMs: Date.now() - start,
-        mcpEndpoint: config.kapso.mcpUrl,
+        apiUrl: config.kapso.apiUrl,
         senderPhone: config.kapso.senderPhone,
         apiKeyConfigured: true,
         phoneNumberIdConfigured: Boolean(config.kapso.phoneNumberId),

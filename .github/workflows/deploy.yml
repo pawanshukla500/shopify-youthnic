@@ -93,7 +93,6 @@ jobs:
           DELHIVERY_PICKUP_TIME: ${{ vars.DELHIVERY_PICKUP_TIME || '14:00:00' }}
           KAPSO_API_KEY: ${{ secrets.KAPSO_API_KEY }}
           KAPSO_API_URL: ${{ vars.KAPSO_API_URL || 'https://api.kapso.ai' }}
-          KAPSO_MCP_URL: ${{ vars.KAPSO_MCP_URL || 'https://mcp.kapso.ai/sse' }}
           KAPSO_SENDER_PHONE: ${{ vars.KAPSO_SENDER_PHONE }}
           KAPSO_ENABLED: ${{ vars.KAPSO_ENABLED || 'true' }}
           KAPSO_PHONE_NUMBER_ID: ${{ vars.KAPSO_PHONE_NUMBER_ID }}
@@ -134,7 +133,6 @@ jobs:
           DELHIVERY_PICKUP_TIME=${DELHIVERY_PICKUP_TIME}
           KAPSO_API_KEY=${KAPSO_API_KEY}
           KAPSO_API_URL=${KAPSO_API_URL}
-          KAPSO_MCP_URL=${KAPSO_MCP_URL}
           KAPSO_SENDER_PHONE=${KAPSO_SENDER_PHONE}
           KAPSO_ENABLED=${KAPSO_ENABLED}
           KAPSO_PHONE_NUMBER_ID=${KAPSO_PHONE_NUMBER_ID}

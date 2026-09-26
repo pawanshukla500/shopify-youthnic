@@ -727,7 +727,7 @@ export function Settings() {
                 <Panel>
                   <PanelHeading
                     eyebrow="Automated Customer Communications"
-                    title="Kapso AI WhatsApp Platform & MCP"
+                    title="Kapso AI WhatsApp Platform (Cloud REST API)"
                     action={
                       <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                         <button
@@ -776,9 +776,9 @@ export function Settings() {
                       )}
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '8px', borderBottom: '1px solid var(--line)' }}>
-                      <span style={{ color: '#64748b' }}>MCP Server Endpoint:</span>
+                      <span style={{ color: '#64748b' }}>API Base URL:</span>
                       <code style={{ fontSize: '10.5px', background: 'var(--line-subtle)', padding: '2px 6px', borderRadius: '4px', color: '#2563eb' }}>
-                        https://api.kapso.ai/mcp
+                        https://api.kapso.ai
                       </code>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '8px', borderBottom: '1px solid var(--line)' }}>
@@ -1220,8 +1220,8 @@ export function Settings() {
               )}
 
               <div style={{ background: 'var(--canvas)', border: '1px solid var(--line)', borderRadius: '8px', padding: '12px', fontSize: '11px', color: '#475569' }}>
-                <div style={{ fontWeight: 700, color: 'var(--ink)', marginBottom: '4px' }}>📡 Kapso MCP Integration:</div>
-                <div>Configured MCP endpoint: <code>https://api.kapso.ai/mcp</code></div>
+                <div style={{ fontWeight: 700, color: 'var(--ink)', marginBottom: '4px' }}>📡 Kapso WhatsApp REST API:</div>
+                <div>Configured endpoint: <code>https://api.kapso.ai</code></div>
                 <div style={{ marginTop: '2px' }}>Bearer Token: <code>&#36;{'{env:KAPSO_API_KEY}'}</code></div>
               </div>
 
@@ -1248,7 +1248,7 @@ export function Settings() {
       )}
 
       {/* ─────────────────────────────────────────────────────────────
-          KAPSO WHATSAPP CONFIGURATION & MCP CONNECT MODAL
+          KAPSO WHATSAPP CONFIGURATION MODAL
           ───────────────────────────────────────────────────────────── */}
       {isKapsoConfigModalOpen && (
         <div
@@ -1281,7 +1281,7 @@ export function Settings() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 800, color: 'var(--ink)' }}>
-                  Configure Kapso AI & MCP Integration
+                  Configure Kapso AI WhatsApp REST API
                 </h3>
                 <p style={{ margin: '4px 0 0', fontSize: '11.5px', color: '#64748b' }}>
                   Update live credentials for automated COD confirmation and Delhivery tracking WhatsApp triggers.

@@ -8,17 +8,32 @@ import apiRoutes from './routes/api';
 import webhookRoutes from './routes/webhooks';
 import delhiveryWebhookRoutes from './routes/delhivery-webhooks';
 import scheduler from './jobs/scheduler';
+import { requireAuth } from './middleware/auth.middleware';
 
 import path from 'path';
 import fs from 'fs';
 
 const app = express();
 
-// Security (allow loading images and assets for SPA)
+// Trust reverse proxy (Traefik / Cloudflare)
+app.set('trust proxy', 1);
+
+// Security (allow loading images and assets for SPA, enforce HSTS)
 app.use(helmet({
   crossOriginResourcePolicy: false,
   contentSecurityPolicy: false,
+  hsts: {
+    maxAge: 31536000,
+    includeSubDomains: true,
+    preload: true,
+  },
 }));
+
+// Additional HSTS enforcement middleware
+app.use((_req, res, next) => {
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
+  next();
+});
 
 // CORS
 app.use(cors());
@@ -49,7 +64,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // Routes
 app.use('/webhooks', webhookRoutes);
 app.use('/webhooks', delhiveryWebhookRoutes);
-app.use('/api', apiRoutes);
+app.use('/api', requireAuth, apiRoutes);
 
 // Static frontend build for production
 const clientDist = process.env.CLIENT_DIST_PATH || path.join(__dirname, '../frontend/dist');

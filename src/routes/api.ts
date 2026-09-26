@@ -2543,9 +2543,8 @@ router.get('/settings/system-status', async (_req: Request, res: Response): Prom
         },
       },
       whatsapp: {
-        provider: 'Kapso AI WhatsApp Platform & MCP (Primary)',
-        status: config.kapso.apiKey ? 'CONNECTED' : 'MCP_CONNECTED',
-        mcpUrl: 'https://api.kapso.ai/mcp',
+        provider: 'Kapso AI WhatsApp Platform (REST API)',
+        status: config.kapso.apiKey ? 'CONNECTED' : 'DISCONNECTED',
         apiUrl: config.kapso.apiUrl,
         senderPhone: config.kapso.senderPhone,
         authStatus: config.kapso.apiKey ? 'Bearer Token Active' : 'Bearer ${env:KAPSO_API_KEY} (Configured)',
@@ -2560,8 +2559,8 @@ router.get('/settings/system-status', async (_req: Request, res: Response): Prom
         ],
       },
       kapso: {
-        status: config.kapso.apiKey ? 'LIVE' : 'MCP_ACTIVE',
-        mcpEndpoint: 'https://api.kapso.ai/mcp',
+        status: config.kapso.apiKey ? 'LIVE' : 'DISCONNECTED',
+        apiEndpoint: config.kapso.apiUrl,
         authHeader: 'Authorization: Bearer ${env:KAPSO_API_KEY}',
         senderNumber: config.kapso.senderPhone,
         criticalTriggers: [
@@ -2634,7 +2633,7 @@ router.post('/settings/ping', async (_req: Request, res: Response): Promise<void
     results.delhivery = { status: 'error', latencyMs: Date.now() - delhiveryStart, message: err.message };
   }
 
-  // 4. Test Kapso MCP & WhatsApp API
+  // 4. Test Kapso WhatsApp REST API
   const kapsoStart = Date.now();
   try {
     const kapsoRes = await kapsoService.ping();
@@ -2890,7 +2889,6 @@ router.get('/settings/whatsapp/status', async (_req: Request, res: Response): Pr
       success: true,
       ...pingStatus,
       apiUrl: config.kapso.apiUrl,
-      mcpUrl: config.kapso.mcpUrl,
     });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });

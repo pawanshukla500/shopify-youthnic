@@ -2159,12 +2159,37 @@ router.get('/delhivery/label/:waybill', async (req: Request, res: Response): Pro
 // Direct PDF download stream for a waybill shipping label.
 // Also mirrors the PDF into Firebase Storage so the Order Detail page can render it
 // even after Delhivery's signed URL expires (Delhivery URLs typically expire in 24h).
+//
+// If Delhivery returns no usable URL (manifest still propagating, transient API
+// issue, archived label) we fall back to the printable 4R thermal HTML label
+// instead of returning a bare 404 — operators want a printable label, not a JSON
+// error.
 router.get('/delhivery/label/:waybill/download', async (req: Request, res: Response): Promise<void> => {
   try {
     const waybill = req.params.waybill;
     const labelUrl = await delhiveryService.generateLabel(waybill);
     if (!labelUrl || !labelUrl.startsWith('http')) {
-      res.status(404).json({ error: 'Shipping label PDF not available for this waybill.' });
+      // Fall back to HTML printable label so operators always get something.
+      const shipment = await prisma.shipment.findFirst({
+        where: { waybillNumber: waybill },
+        include: { order: { include: { items: true } } },
+      });
+      if (!shipment?.order) {
+        res.status(404).json({
+          error: 'Shipping label PDF not available for this waybill and no order found in our DB to render an HTML fallback.',
+          waybill,
+        });
+        return;
+      }
+      logger.warn('Delhivery label PDF unavailable, falling back to HTML printable label', {
+        waybill,
+        orderId: shipment.order.id,
+        orderName: shipment.order.shopifyOrderName,
+      });
+      const html = shippingLabelService.generatePrintableLabelPage(shipment.order as any, waybill);
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.setHeader('Content-Disposition', `inline; filename="delhivery-label-${waybill}.html"`);
+      res.send(html);
       return;
     }
     const pdfResponse = await axios.get<ArrayBuffer>(labelUrl, {

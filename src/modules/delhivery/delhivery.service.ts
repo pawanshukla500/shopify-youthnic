@@ -1126,6 +1126,14 @@ class DelhiveryService {
    * Returns: S3 URL of the PDF
    */
   async generateLabel(waybillNumber: string): Promise<string> {
+    // Try the canonical /api/p/packing_slip endpoint first.
+    // Delhivery's response shape varies by account type:
+    //   { packages: [{ pdf_download_link }] } — most common
+    //   { packages: [{ pdf_url }] } — newer accounts
+    //   { label_url, label_pdf } — old API
+    // We pull from every shape we know about before declaring failure.
+    const candidateUrls: Array<string | undefined> = [];
+
     try {
       const response = await this.client.get('/api/p/packing_slip', {
         params: {
@@ -1135,25 +1143,75 @@ class DelhiveryService {
         },
       });
 
-      // Response contains PDF URL (either at packages[0].pdf_download_link, packages[0].pdf_url, or string)
       const rawData = response.data;
-      const labelUrl =
-        rawData?.packages?.[0]?.pdf_download_link ||
-        rawData?.packages?.[0]?.pdf_url ||
-        rawData?.pdf_download_link ||
-        rawData?.pdf_url ||
-        rawData?.url ||
-        (typeof rawData === 'string' ? rawData : '');
-      logger.info('Shipping label generated', { waybillNumber, labelUrl: labelUrl ? 'S3 PDF Ready' : 'None' });
-      return typeof labelUrl === 'string' ? labelUrl : JSON.stringify(labelUrl);
-    } catch (error: any) {
-      logger.error('Failed to generate label', {
+      const pkg = Array.isArray(rawData?.packages) ? rawData.packages[0] : null;
+
+      candidateUrls.push(
+        pkg?.pdf_download_link,
+        pkg?.pdf_url,
+        rawData?.pdf_download_link,
+        rawData?.pdf_url,
+        rawData?.url,
+        pkg?.label_url,
+        rawData?.label_url,
+        typeof rawData === 'string' && rawData.startsWith('http') ? rawData : undefined
+      );
+    } catch (err: any) {
+      logger.warn('generateLabel: /api/p/packing_slip failed', {
         waybillNumber,
-        error: error.message,
+        error: err.message,
+        status: err.response?.status,
       });
-      // Non-critical — shipment is still created
+      // Fall through to the tracking-API fallback below.
+    }
+
+    // If we didn't get a usable URL from /api/p/packing_slip, fall back to the
+    // tracking API which returns the raw ShipmentData[0].Shipment. PDFs are
+    // occasionally keyed off the shipping label URL that some Delhivery
+    // accounts include inline. This recovers shipments where the packing-slip
+    // endpoint returned empty.
+    if (!candidateUrls.some((u) => u && u.startsWith('http'))) {
+      try {
+        const trackingResponse = await this.client.get('/api/v1/packages/json/', {
+          params: { waybill: waybillNumber },
+        });
+        const shipment: any = trackingResponse.data?.ShipmentData?.[0]?.Shipment;
+        if (shipment) {
+          candidateUrls.push(
+            shipment.PDF_URL,
+            shipment.PDFUrl,
+            shipment.label_url,
+            shipment.LabelURL,
+            shipment.label,
+            shipment.shipping_label_url
+          );
+        }
+      } catch (err: any) {
+        logger.warn('generateLabel: tracking-API fallback failed', {
+          waybillNumber,
+          error: err.message,
+        });
+      }
+    }
+
+    const labelUrl = candidateUrls.find(
+      (u): u is string => typeof u === 'string' && u.startsWith('http')
+    );
+
+    if (!labelUrl) {
+      logger.error('generateLabel: no usable PDF URL found for waybill', {
+        waybillNumber,
+        attemptedCandidates: candidateUrls.filter(Boolean).length,
+        labelSize: config.delhivery.labelSize,
+      });
       return '';
     }
+
+    logger.info('generateLabel: shipping label URL resolved', {
+      waybillNumber,
+      url: labelUrl.slice(0, 80) + (labelUrl.length > 80 ? '...' : ''),
+    });
+    return labelUrl;
   }
 
   // ═══════════════════════════════════════════════════════════

@@ -74,6 +74,9 @@ model Order {
   shopifyUpdatedAt DateTime?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
+  dispatchedAt     DateTime? // Set when createShipment succeeds on Delhivery (AWB assigned, label printed)
+  deliveredAt      DateTime? // Set when Delhivery reports delivery
+  cancelledAt      DateTime? // Set when the order is cancelled
 
   // Urgent Customer Support & Return Flagging
   hasUrgentSupport Boolean @default(false)

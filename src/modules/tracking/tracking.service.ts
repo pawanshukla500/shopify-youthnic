@@ -16,11 +16,17 @@ class TrackingService {
    * Called by the cron scheduler.
    */
   async syncAllTracking(): Promise<number> {
-    // Get all active shipments (not delivered, not cancelled, not RTO delivered)
+    // Get all active shipments (not yet delivered/cancelled/RTO).
+    // CRITICAL: include CREATED and PENDING — the dispatchOrder bug fix moves
+    // shipments from PENDING → CREATED on dispatch, but the cron previously
+    // skipped PENDING entirely, so a shipment that just got a waybill but never
+    // moved to PICKED_UP would never be polled. Including them here means a
+    // shipment that has been "Label generated" for >1 cron cycle will get the
+    // first tracking poll automatically.
     const activeShipments = await prisma.shipment.findMany({
       where: {
         status: {
-          notIn: ['DELIVERED', 'CANCELLED', 'RTO_DELIVERED', 'ERROR', 'PENDING'],
+          notIn: ['DELIVERED', 'CANCELLED', 'RTO_DELIVERED', 'ERROR'],
         },
         waybillNumber: { not: null },
       },
@@ -146,6 +152,18 @@ class TrackingService {
 
     // Map shipment status → order status + notifications
     switch (newStatus) {
+      case 'CREATED':
+        // First poll after dispatch — Delhivery has confirmed the manifest
+        // entry but the parcel hasn't been picked up yet. Just ensure the
+        // order.status matches what dispatchOrder already wrote.
+        if (order.status === 'DISPATCH_PENDING') {
+          await prisma.order.update({
+            where: { id: order.id },
+            data: { status: 'DISPATCHED' },
+          });
+        }
+        break;
+
       case 'PICKED_UP':
         await prisma.order.update({
           where: { id: order.id },

@@ -1678,20 +1678,25 @@ export function Orders() {
         {selectedOrderIds.size > 0 && <div style={{ height: '90px', transition: 'height 0.2s ease' }} />}
       </Panel>
 
-      {/* 21st.dev Style Floating Bulk Action Toolbar */}
+      {/* Floating Bulk Action Toolbar */}
       {selectedOrderIds.size > 0 && (
-        <div className="bulk-action-bar">
+        <div className="bulk-action-bar" role="toolbar" aria-label="Bulk actions">
           <span className="bulk-count-badge">{selectedOrderIds.size}</span>
-          <span style={{ fontSize: '12px', fontWeight: 650 }}>orders selected</span>
+          <span className="bulk-count-label">
+            {selectedOrderIds.size === 1 ? 'order' : 'orders'} selected
+          </span>
+
+          <span className="bulk-divider" aria-hidden="true" />
 
           <button
             type="button"
             className="bulk-btn bulk-btn-primary"
             onClick={handleBulkDispatch}
             disabled={isBulkDispatching}
+            title="Create Delhivery shipments for all selected orders"
           >
             <Icon name="package" size={15} />
-            <span>{isBulkDispatching ? 'Dispatching…' : 'Bulk Dispatch (Delhivery)'}</span>
+            <span className="bulk-btn-label">{isBulkDispatching ? 'Dispatching…' : 'Dispatch'}</span>
           </button>
 
           <button
@@ -1702,7 +1707,8 @@ export function Orders() {
             title="Download consolidated Delhivery 4R thermal shipping labels"
           >
             <Icon name="tag" size={15} />
-            <span>{isBulkGeneratingLabels ? 'Generating...' : 'Download Labels (4R)'}</span>
+            <span className="bulk-btn-label">{isBulkGeneratingLabels ? 'Generating…' : 'Labels'}</span>
+            <span className="bulk-btn-meta">4R</span>
           </button>
 
           <button
@@ -1713,18 +1719,18 @@ export function Orders() {
             title="Download consolidated GST tax invoices"
           >
             <Icon name="download" size={15} />
-            <span>{isBulkGeneratingInvoices ? 'Generating...' : 'Download Invoices (GST)'}</span>
+            <span className="bulk-btn-label">{isBulkGeneratingInvoices ? 'Generating…' : 'Invoices'}</span>
+            <span className="bulk-btn-meta">GST</span>
           </button>
 
           <button
             type="button"
             className="bulk-btn bulk-btn-secondary"
-            style={{ background: '#0284c7', color: '#fff', borderColor: '#0284c7' }}
             onClick={() => setShowPickupModal(true)}
             title="Schedule Delhivery courier pickup from Surat Warehouse"
           >
             <Icon name="truck" size={15} />
-            <span>Schedule Pickup</span>
+            <span className="bulk-btn-label">Schedule Pickup</span>
           </button>
 
           <button
@@ -1735,16 +1741,18 @@ export function Orders() {
             title="Confirm selected unconfirmed COD orders"
           >
             <Icon name="check" size={15} />
-            <span>{isBulkConfirmingCod ? 'Confirming…' : 'Confirm COD'}</span>
+            <span className="bulk-btn-label">{isBulkConfirmingCod ? 'Confirming…' : 'Confirm COD'}</span>
           </button>
 
           <button
             type="button"
             className="bulk-btn bulk-btn-secondary"
             onClick={() => exportCsv(filtered.filter((o) => selectedOrderIds.has(o.id)))}
+            title="Export selected orders as CSV"
           >
             <Icon name="download" size={15} />
-            <span>Export Selected (CSV)</span>
+            <span className="bulk-btn-label">Export</span>
+            <span className="bulk-btn-meta">CSV</span>
           </button>
 
           <button
@@ -1752,17 +1760,20 @@ export function Orders() {
             className="bulk-btn bulk-btn-secondary"
             onClick={handleBulkVerify}
             disabled={isBulkVerifying}
+            title="Verify payments for selected orders"
           >
             <Icon name="shield" size={15} />
-            <span>{isBulkVerifying ? 'Verifying…' : 'Verify Payments'}</span>
+            <span className="bulk-btn-label">{isBulkVerifying ? 'Verifying…' : 'Verify Payments'}</span>
           </button>
 
           <button
             type="button"
-            className="bulk-btn bulk-btn-ghost"
+            className="bulk-btn bulk-btn-ghost bulk-btn-icon-only"
             onClick={() => setSelectedOrderIds(new Set())}
+            title="Clear selection"
+            aria-label="Clear selection"
           >
-            Clear
+            <Icon name="close" size={14} />
           </button>
         </div>
       )}

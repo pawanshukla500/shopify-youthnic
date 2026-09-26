@@ -33,6 +33,16 @@ jobs:
       - name: Generate Prisma Client
         run: npx prisma generate
 
+      - name: Apply Prisma schema to production database
+        # Without this step, the generated Prisma client references new columns
+        # (Shipment.epodStoragePath, Return.qcStoragePath, TrackingLog.waybill, ...)
+        # that the running database does not yet have. Result: every page that
+        # touches those tables throws "column does not exist". `db push` is safe
+        # for purely additive changes (new nullable columns, new indexes).
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npx prisma db push --skip-generate --accept-data-loss
+
       - name: Run Backend Unit Tests
         run: npm test
 

@@ -204,6 +204,21 @@ export const config = {
     apiUrl: optional('RESEND_API_URL', 'https://api.resend.com'),
   },
 
+  // Brand identity — used in customer email templates.
+  brand: {
+    // Public HTTPS URL to the Youthnic logo PNG stored on Firebase Storage.
+    // Many email clients (Outlook desktop, older Outlook for Mac) refuse to
+    // render base64 inline images, so the logo must be hosted on a public URL.
+    // Re-run scripts/upload-email-logo.ts to refresh the binary; then update
+    // BRAND_LOGO_URL or set BRAND_LOGO_URL in the .env.
+    logoUrl: optional(
+      'BRAND_LOGO_URL',
+      'https://storage.googleapis.com/shopify-134b9.firebasestorage.app/public/youthnic-logo.png'
+    ),
+    // Mobile-friendly copy shown beneath the logo in the email header.
+    tagline: optional('BRAND_TAGLINE', 'Modernly Ethnic · Surat Fulfillment Center'),
+  },
+
   // Cron schedules
   cron: {
     orderSync: optional('CRON_ORDER_SYNC', '0 * * * *'),

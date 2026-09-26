@@ -15,8 +15,30 @@ import fs from 'fs';
 
 const app = express();
 
-// Trust reverse proxy (Traefik / Cloudflare)
-app.set('trust proxy', 1);
+// Trust reverse proxy (Traefik / Cloudflare multi-hop proxy)
+app.set('trust proxy', true);
+
+// Unconditionally redirect HTTP to HTTPS behind reverse proxies
+app.use((req, res, next) => {
+  const forwardedProto = req.headers['x-forwarded-proto'];
+  const cfVisitor = req.headers['cf-visitor'];
+  const isHttps =
+    req.secure ||
+    forwardedProto === 'https' ||
+    (typeof forwardedProto === 'string' && forwardedProto.split(',')[0].trim() === 'https') ||
+    (typeof cfVisitor === 'string' && cfVisitor.includes('"https"'));
+  const isLocalhost =
+    req.hostname === 'localhost' ||
+    req.hostname === '127.0.0.1' ||
+    req.ip === '127.0.0.1' ||
+    req.ip === '::1';
+
+  if (!isHttps && !isLocalhost) {
+    const host = req.headers.host || 'shopify.youthnic.shop';
+    return res.redirect(301, `https://${host}${req.url}`);
+  }
+  next();
+});
 
 // Security (allow loading images and assets for SPA, enforce HSTS)
 app.use(helmet({
@@ -29,9 +51,16 @@ app.use(helmet({
   },
 }));
 
-// Additional HSTS enforcement middleware
+// Additional HSTS & Upgrade-Insecure-Requests enforcement middleware
 app.use((_req, res, next) => {
   res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
+  res.setHeader(
+    'Content-Security-Policy',
+    "upgrade-insecure-requests; default-src 'self' https: data: blob: 'unsafe-inline' 'unsafe-eval' https://*.firebaseapp.com https://*.googleapis.com https://*.firebaseio.com https://*.gstatic.com https://fonts.googleapis.com https://fonts.gstatic.com;"
+  );
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   next();
 });
 

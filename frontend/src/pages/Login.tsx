@@ -216,7 +216,7 @@ export function Login() {
         )}
 
         {/* Form Inputs */}
-        <form onSubmit={handleSubmit} className="login-minimal-form">
+        <form onSubmit={handleSubmit} action="#" method="post" className="login-minimal-form">
           {mode === 'signup' && (
             <div className="login-field-group">
               <label htmlFor="name" className="login-field-label">

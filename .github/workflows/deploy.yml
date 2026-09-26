@@ -33,6 +33,9 @@ jobs:
       - name: Generate Prisma Client
         run: npx prisma generate
 
+      - name: Run Backend Unit Tests
+        run: npm test
+
       - name: Build TypeScript Backend
         run: npm run build
 

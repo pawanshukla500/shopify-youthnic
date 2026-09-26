@@ -4,6 +4,7 @@ import orderService from '../modules/orders/order.service';
 import trackingService from '../modules/tracking/tracking.service';
 import returnService from '../modules/returns/return.service';
 import shopifyService from '../modules/shopify/shopify.service';
+import delhiveryDocumentFetcher from '../modules/delhivery/delhivery-document-fetcher.service';
 import logger from '../utils/logger';
 
 /**
@@ -56,10 +57,24 @@ class Scheduler {
       })
     );
 
+    // 4. Delhivery document backfill (EPOD / signature / QC / sorter → Firebase Storage)
+    // Runs every 30 minutes by default. Idempotent — only fetches rows missing the artifact.
+    this.jobs.push(
+      cron.schedule(config.cron.delhiveryDocFetch || '*/30 * * * *', async () => {
+        logger.info('[CRON] Running Delhivery document fetcher...');
+        try {
+          await delhiveryDocumentFetcher.runAll();
+        } catch (error: any) {
+          logger.error('[CRON] Delhivery document fetcher failed', { error: error.message });
+        }
+      })
+    );
+
     logger.info('Scheduler started successfully', {
       orderSync: config.cron.orderSync,
       trackingSync: config.cron.trackingSync,
       retryFailed: config.cron.retryFailed,
+      delhiveryDocFetch: config.cron.delhiveryDocFetch || '*/30 * * * *',
     });
   }
 

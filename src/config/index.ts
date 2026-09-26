@@ -190,6 +190,9 @@ export const config = {
     orderSync: optional('CRON_ORDER_SYNC', '0 * * * *'),
     trackingSync: optional('CRON_TRACKING_SYNC', '*/30 * * * *'),
     retryFailed: optional('CRON_RETRY_FAILED', '0 * * * *'),
+    // Backfill POD / signature / QC / sorter images into Firebase Storage.
+    // Every 30 minutes by default; rows already populated are skipped (idempotent).
+    delhiveryDocFetch: optional('CRON_DELHIVERY_DOC_FETCH', '*/30 * * * *'),
   },
 
   // Meta Model API (Muse Spark 1.3 Contributor)

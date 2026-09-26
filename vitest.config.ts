@@ -3,6 +3,7 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     include: ['tests/**/*.spec.ts'],
+    setupFiles: ['./tests/setup.ts'],
     environment: 'node',
     // Run tests serially since some share module-level mocks via vi.mock.
     // Parallel test files are fine; parallel cases within a file are not.

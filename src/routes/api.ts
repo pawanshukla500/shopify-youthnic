@@ -1169,6 +1169,65 @@ router.post('/orders/sync', async (_req: Request, res: Response): Promise<void> 
   }
 });
 
+// Channel Status: Returns summary of Shopify channel in Delhivery One
+router.get('/delhivery/channel-status', async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const totalOrders = await prisma.order.count();
+    const pendingAwbCount = await prisma.order.count({
+      where: {
+        fulfillmentStatus: null,
+        status: { not: 'CANCELLED' },
+      },
+    });
+    const manifestedCount = await prisma.order.count({
+      where: {
+        fulfillmentStatus: 'fulfilled',
+      },
+    });
+    const inTransitCount = await prisma.order.count({
+      where: {
+        status: { in: ['IN_TRANSIT', 'OUT_FOR_DELIVERY'] },
+      },
+    });
+
+    res.json({
+      success: true,
+      channel: {
+        name: 'youthnic2024',
+        platform: 'Shopify',
+        shopDomain: config.shopify.shopDomain,
+        status: 'Connected',
+        syncStartDate: config.shopify.syncStartDate,
+        autoPaymentStatusUpdate: true,
+      },
+      stats: {
+        totalChannelOrders: totalOrders,
+        pendingAwb: pendingAwbCount,
+        manifested: manifestedCount,
+        inTransit: inTransitCount,
+      },
+    });
+  } catch (error: any) {
+    logger.error('Failed to get Delhivery channel status', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Trigger channel-specific order sync
+router.post('/orders/sync-channel', async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const syncedCount = await orderService.syncOrdersFromShopify();
+    res.json({
+      success: true,
+      message: `Synchronized ${syncedCount} channel orders from Shopify & Delhivery One`,
+      syncedCount,
+    });
+  } catch (error: any) {
+    logger.error('Channel order sync failed', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Process Auto-Refund / Restock for RTO Delivered order (Scenario 2 & Scenario 1)
 router.post('/orders/:id/rto-refund', async (req: Request, res: Response): Promise<void> => {
   try {

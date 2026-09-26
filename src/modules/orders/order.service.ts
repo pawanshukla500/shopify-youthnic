@@ -55,10 +55,20 @@ class OrderService {
     });
 
     const orders = await shopifyService.fetchOrdersSince(sinceDate);
+    const unfulfilledChannelOrders = await shopifyService.fetchOpenUnfulfilledOrders().catch((err) => {
+      logger.warn('Could not fetch open unfulfilled channel orders', { error: err.message });
+      return [];
+    });
+
+    // Merge recent orders and unfulfilled channel orders uniquely by Shopify order ID
+    const orderMap = new Map<number | string, any>();
+    for (const o of orders) orderMap.set(o.id, o);
+    for (const o of unfulfilledChannelOrders) orderMap.set(o.id, o);
+    const allOrders = Array.from(orderMap.values());
 
     let syncedCount = 0;
     let skippedAsHistory = 0;
-    for (const order of orders) {
+    for (const order of allOrders) {
       try {
         // Check if order already exists in our DB
         const existing = await prisma.order.findUnique({
@@ -66,10 +76,12 @@ class OrderService {
           include: { shipment: true },
         });
 
-        // Orders created before the start date are history and must never enter
-        // the system. Orders already stored keep syncing whatever their age, so
-        // a later payment or cancellation on them is still picked up.
-        if (!existing && new Date(order.created_at) < syncStartDate) {
+        // Check if this order is an active unfulfilled channel order awaiting AWB in Delhivery One
+        const isPendingChannelOrder = !order.fulfillment_status || order.fulfillment_status === 'unfulfilled';
+
+        // Orders created before the start date are history UNLESS they are open, unfulfilled
+        // channel orders awaiting AWB in Delhivery One ("Pending AWB").
+        if (!existing && new Date(order.created_at) < syncStartDate && !isPendingChannelOrder) {
           skippedAsHistory++;
           continue;
         }
@@ -161,7 +173,7 @@ class OrderService {
 
     logger.info('Order sync complete', {
       syncedCount,
-      totalFetched: orders.length,
+      totalFetched: allOrders.length,
       skippedAsHistory,
       isBackfill: !backfillCompleted,
     });

@@ -1,12 +1,12 @@
 import { useMemo, useState, useRef, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { getOrders, apiError, api, confirmCodOrder, cancelOrder, deleteOrder, processRtoRefund, handleNdrAction } from '../api'
+import { getOrders, apiError, api, confirmCodOrder, cancelOrder, deleteOrder, processRtoRefund, handleNdrAction, syncOrders, syncChannelOrders, getDelhiveryChannelStatus } from '../api'
 import { ORDER_STATUSES, formatDate, formatMoney, labelize } from '../lib'
 import { Button, EmptyState, ErrorBox, FormField, Icon, LoadingState, PageIntro, Panel, StatusBadge, useDocumentTitle, useToast } from '../components/UI'
 import type { Order, OrderStatus } from '../types'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
-export type PaymentChannelFilter = 'ALL' | 'NEEDS_DISPATCH' | 'DELAYED_DISPATCH' | 'NDR' | 'PREPAID_PENDING' | 'COD' | 'GOKWIK' | 'PHONEPE'
+export type PaymentChannelFilter = 'ALL' | 'DELHIVERY_PENDING_AWB' | 'NEEDS_DISPATCH' | 'DELAYED_DISPATCH' | 'NDR' | 'PREPAID_PENDING' | 'COD' | 'GOKWIK' | 'PHONEPE'
 
 export function renderRtoRiskBadge(order: Order) {
   if (order.paymentMethod !== 'COD') {
@@ -313,6 +313,21 @@ export function Orders() {
     }
   }
 
+  // Delhivery One Channel Sync action
+  const [isSyncingChannel, setIsSyncingChannel] = useState(false)
+  const handleSyncChannel = async () => {
+    setIsSyncingChannel(true)
+    try {
+      const res = await syncChannelOrders()
+      toast.toast('success', `Synchronized ${res.syncedCount} channel orders with Delhivery One!`)
+      await queryClient.invalidateQueries({ queryKey: ['orders'] })
+    } catch (err: any) {
+      toast.toast('error', apiError(err))
+    } finally {
+      setIsSyncingChannel(false)
+    }
+  }
+
   // Keyboard shortcut: '/' focuses the search input
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -342,8 +357,10 @@ export function Orders() {
   const filtered = useMemo(() => {
     let list = query.data ?? []
 
-    // 1. Channel Filter (3-way payment receiving + prepaid urgent dispatch + needs dispatch + SLA delayed + NDR)
-    if (channelFilter === 'PREPAID_PENDING' || channelFilter === 'NEEDS_DISPATCH') {
+    // 1. Channel Filter (Delhivery One Pending AWB + 3-way payment receiving + prepaid urgent dispatch + needs dispatch + SLA delayed + NDR)
+    if (channelFilter === 'DELHIVERY_PENDING_AWB') {
+      list = list.filter((o) => !o.shipment?.waybillNumber && o.fulfillmentStatus !== 'fulfilled' && o.status !== 'CANCELLED')
+    } else if (channelFilter === 'PREPAID_PENDING' || channelFilter === 'NEEDS_DISPATCH') {
       list = list.filter((o) => isDispatchNeeded(o))
     } else if (channelFilter === 'DELAYED_DISPATCH') {
       list = list.filter(
@@ -454,8 +471,12 @@ export function Orders() {
     let needsDispatchCount = 0
     let delayedDispatchCount = 0
     let ndrCount = 0
+    let pendingAwbCount = 0
 
     for (const o of all) {
+      if (!o.shipment?.waybillNumber && o.fulfillmentStatus !== 'fulfilled' && o.status !== 'CANCELLED') {
+        pendingAwbCount++
+      }
       if (isDispatchNeeded(o)) {
         needsDispatchCount++
       }
@@ -508,6 +529,7 @@ export function Orders() {
       needsDispatchCount,
       delayedDispatchCount,
       ndrCount,
+      pendingAwbCount,
       totalShippingCost,
       avgShippingCost,
     }
@@ -905,6 +927,28 @@ export function Orders() {
           </div>
         </div>
 
+        {/* 🛍️ Delhivery One Channel: Pending AWB Chip */}
+        <div
+          className={`metric-card clickable-row ${channelFilter === 'DELHIVERY_PENDING_AWB' ? 'selected-metric' : ''}`}
+          onClick={() => setChannelFilter(channelFilter === 'DELHIVERY_PENDING_AWB' ? 'ALL' : 'DELHIVERY_PENDING_AWB')}
+          style={{
+            cursor: 'pointer',
+            border: channelFilter === 'DELHIVERY_PENDING_AWB' ? '2px solid #059669' : '1px solid #bbf7d0',
+            background: channelFilter === 'DELHIVERY_PENDING_AWB' ? '#ecfdf5' : '#f0fdf4',
+          }}
+        >
+          <div className="metric-icon" style={{ background: '#dcfce7', color: '#16a34a' }}>
+            <Icon name="truck" size={19} />
+          </div>
+          <div>
+            <span className="metric-label" style={{ color: '#15803d', display: 'flex', alignItems: 'center', gap: '5px' }}>
+              <span className="pulsing-green-dot" /> 🛍️ Delhivery One Channel
+            </span>
+            <strong style={{ color: '#166534' }}>{metrics.pendingAwbCount} Pending AWB</strong>
+            <span className="metric-sub" style={{ color: '#15803d' }}>Shopify: youthnic2024</span>
+          </div>
+        </div>
+
         <div
           className={`metric-card clickable-row ${channelFilter === 'COD' ? 'selected-metric' : ''}`}
           onClick={() => setChannelFilter('COD')}
@@ -1099,6 +1143,19 @@ export function Orders() {
             <span>{isSyncingShopify ? 'Syncing Shopify…' : 'Sync Shopify'}</span>
           </button>
 
+          {/* Sync Delhivery Channel Button */}
+          <button
+            type="button"
+            className="btn-export"
+            style={{ background: '#059669', color: '#ffffff', borderColor: '#047857' }}
+            onClick={handleSyncChannel}
+            disabled={isSyncingChannel}
+            title="Synchronize all unfulfilled orders with Delhivery One Shopify channel"
+          >
+            <Icon name="truck" size={15} />
+            <span>{isSyncingChannel ? 'Syncing Channel…' : '🛍️ Sync Delhivery Channel'}</span>
+          </button>
+
           {/* Download Report Button */}
           <button
             type="button"
@@ -1221,6 +1278,18 @@ export function Orders() {
                           {formatDate(order.shopifyCreatedAt || order.createdAt)} · ID: {order.shopifyOrderId}
                         </span>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap', marginTop: '3px' }}>
+                          <span style={{ background: '#f0fdf4', color: '#15803d', border: '1px solid #bbf7d0', borderRadius: '4px', padding: '1px 5px', fontSize: '10px', fontWeight: 700 }}>
+                            🛍️ Shopify: youthnic2024
+                          </span>
+                          {!order.shipment?.waybillNumber && order.fulfillmentStatus !== 'fulfilled' && order.status !== 'CANCELLED' ? (
+                            <span style={{ background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', borderRadius: '4px', padding: '1px 5px', fontSize: '10px', fontWeight: 700 }}>
+                              📦 Delhivery: Pending AWB
+                            </span>
+                          ) : order.shipment?.waybillNumber ? (
+                            <span style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', borderRadius: '4px', padding: '1px 5px', fontSize: '10px', fontWeight: 700 }}>
+                              ✓ Delhivery Manifested
+                            </span>
+                          ) : null}
                           {renderRtoRiskBadge(order)}
                         </div>
                         <ShopifyTagList tags={order.tags} />

@@ -745,3 +745,34 @@ export async function executeAgentAction(payload: {
   const response = await api.post('/api/support/agent/actions/execute', payload)
   return response.data
 }
+
+export async function syncOrders(): Promise<{ success: boolean; syncedCount: number; dispatchedCount: number }> {
+  const response = await api.post('/api/orders/sync')
+  return response.data
+}
+
+export async function syncChannelOrders(): Promise<{ success: boolean; syncedCount: number; message?: string }> {
+  const response = await api.post('/api/orders/sync-channel')
+  return response.data
+}
+
+export async function getDelhiveryChannelStatus(): Promise<{
+  success: boolean
+  channel: {
+    name: string
+    platform: string
+    shopDomain: string
+    status: string
+    syncStartDate: string
+    autoPaymentStatusUpdate: boolean
+  }
+  stats: {
+    totalChannelOrders: number
+    pendingAwb: number
+    manifested: number
+    inTransit: number
+  }
+}> {
+  const response = await api.get('/api/delhivery/channel-status')
+  return response.data
+}

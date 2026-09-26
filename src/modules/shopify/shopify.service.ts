@@ -90,6 +90,43 @@ class ShopifyService {
   }
 
   /**
+   * Fetch all open, unfulfilled orders from Shopify channel.
+   * Matches Delhivery One's channel logic ("fetch all unfulfilled orders from channel").
+   */
+  async fetchOpenUnfulfilledOrders(): Promise<ShopifyOrderWebhook[]> {
+    try {
+      const orders: ShopifyOrderWebhook[] = [];
+      let nextUrl: string | null = '/orders.json';
+      let isFirstRequest = true;
+
+      while (nextUrl) {
+        const response = await this.client.get(nextUrl, {
+          params: isFirstRequest
+            ? {
+                status: 'open',
+                fulfillment_status: 'unfulfilled',
+                limit: 250,
+                order: 'created_at desc',
+              }
+            : undefined,
+        });
+
+        orders.push(...((response.data.orders || []) as ShopifyOrderWebhook[]));
+        nextUrl = this.getNextPageUrl(response.headers.link);
+        isFirstRequest = false;
+      }
+
+      logger.info('Fetched open unfulfilled orders from Shopify channel', { count: orders.length });
+      return orders;
+    } catch (error: any) {
+      logger.error('Failed to fetch unfulfilled orders from Shopify channel', {
+        error: error.message,
+      });
+      throw error;
+    }
+  }
+
+  /**
    * Fetch a single order by its Shopify order ID.
    */
   async fetchOrder(shopifyOrderId: string): Promise<ShopifyOrderWebhook> {

@@ -1,7 +1,23 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
-import { api, apiError, getOrder, getPayment, getShippingEstimate, reconcileAwbWithOrder, confirmCodOrder, cancelOrder, deleteOrder, processRtoRefund, handleNdrAction, sendOrderWhatsAppTrigger } from '../api'
+import {
+  api,
+  apiError,
+  getOrder,
+  getPayment,
+  getShippingEstimate,
+  reconcileAwbWithOrder,
+  confirmCodOrder,
+  cancelOrder,
+  deleteOrder,
+  processRtoRefund,
+  handleNdrAction,
+  sendOrderWhatsAppTrigger,
+  downloadSingleLabelPdf,
+  openPrintableOrderLabel,
+  openPrintableOrderInvoice,
+} from '../api'
 import { formatDate, formatMoney, labelize } from '../lib'
 import { Button, ButtonGroup, EmptyState, ErrorBox, FormField, Icon, LoadingState, PageIntro, Panel, PanelHeading, StatusBadge, useDocumentTitle, useToast } from '../components/UI'
 import type { Order, OrderItem } from '../types'
@@ -369,7 +385,7 @@ export function OrderDetail() {
           type="button"
           className="button button-secondary"
           style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', height: '34px', padding: '0 12px', color: '#059669', borderColor: '#a7f3d0', background: '#ecfdf5', fontWeight: 650, cursor: 'pointer' }}
-          onClick={() => window.open(`/api/orders/${order.id}/invoice`, '_blank')}
+          onClick={() => openPrintableOrderInvoice(order.id)}
           title="View and print official GST Commercial Tax Invoice"
         >
           🧾 GST Tax Invoice
@@ -379,7 +395,7 @@ export function OrderDetail() {
           type="button"
           className="button button-secondary"
           style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', height: '34px', padding: '0 12px', color: '#0284c7', borderColor: '#bae6fd', background: '#f0f9ff', fontWeight: 650, cursor: 'pointer' }}
-          onClick={() => window.open(`/api/orders/${order.id}/label`, '_blank')}
+          onClick={() => openPrintableOrderLabel(order.id)}
           title="View and print 4R Delhivery Thermal Shipping Label"
         >
           🏷️ Shipping Label
@@ -436,17 +452,21 @@ export function OrderDetail() {
                   <Icon name="external" size={14} />
                   Print Label
                 </Button>
-                <a
-                  className="button button-secondary"
-                  href={`/api/delhivery/label/${order.shipment.waybillNumber}/download`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  download={`delhivery-label-${order.shipment.waybillNumber}.pdf`}
+                <Button
+                  className="button-secondary"
+                  onClick={async () => {
+                    try {
+                      await downloadSingleLabelPdf(order.shipment!.waybillNumber!)
+                      toast.toast('success', `Downloaded label for ${order.shipment!.waybillNumber}`)
+                    } catch (err: any) {
+                      toast.toast('error', err.message || 'Failed to download label')
+                    }
+                  }}
                   title="Download official PDF label"
                 >
                   <Icon name="download" size={14} />
                   PDF Label
-                </a>
+                </Button>
               </>
             )}
             <a

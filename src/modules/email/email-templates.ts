@@ -138,8 +138,8 @@ function baseEmailLayout(content: string, preheader: string = '', options: BaseL
                     </div>
                   </td>
                   <td align="right" valign="top">
-                    <!-- Right-aligned sender desk pill badge -->
-                    <span style="display: inline-block; padding: 6px 14px; background-color: ${badgeBg}; border: 1px solid ${badgeBorder}; border-radius: 9999px; font-size: 11px; font-weight: 750; color: ${badgeColor}; text-transform: uppercase; letter-spacing: 0.05em; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+                    <!-- Right-aligned sender desk pill badge (lowercase, small) -->
+                    <span style="display: inline-block; padding: 4px 10px; background-color: ${badgeBg}; border: 1px solid ${badgeBorder}; border-radius: 6px; font-size: 10.5px; font-weight: 500; color: ${badgeColor}; letter-spacing: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; mso-line-height-rule: exactly; line-height: 14px;">
                       ${badgeText}
                     </span>
                   </td>
@@ -232,9 +232,10 @@ export function renderTransitDelayEmail(data: EmailTemplateData): { subject: str
 
     <!-- Telemetry Details Box matching media_1790339742746.png -->
     <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px 20px; margin-bottom: 24px;">
+      ${data.waybillNumber ? `
       <div style="margin-bottom: 8px; font-size: 13px; color: #1e293b;">
-        <strong>AWB:</strong> <span style="font-family: monospace; font-size: 12.5px;">${data.waybillNumber || 'PROP0000031386'}</span>
-      </div>
+        <strong>AWB:</strong> <span style="font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace; font-size: 12.5px;">${data.waybillNumber}</span>
+      </div>` : ''}
       <div style="margin-bottom: 8px; font-size: 13px; color: #1e293b;">
         <strong>Current Hub:</strong> <span>${data.currentLocation || 'Bhiwandi Sorting Center Hub'}</span>
       </div>
@@ -244,10 +245,13 @@ export function renderTransitDelayEmail(data: EmailTemplateData): { subject: str
     </div>
 
     <!-- Centered Blue CTA Button matching media_1790339742746.png -->
-    <div style="text-align: center; margin: 24px 0 12px 0;">
-      <a href="${data.trackingUrl || 'https://www.delhivery.com/track/package/' + (data.waybillNumber || '')}" target="_blank" style="display: inline-block; background-color: #2563eb; color: #ffffff; font-size: 13.5px; font-weight: 700; text-decoration: none; padding: 12px 28px; border-radius: 8px; box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);">
-        Track Live Delivery →
+    <div style="text-align: center; margin: 24px 0 8px 0;">
+      <a href="${data.trackingUrl || 'https://www.delhivery.com/track/package/' + (data.waybillNumber || '')}" target="_blank" rel="noopener noreferrer" style="display: inline-block; background-color: #2563eb; color: #ffffff; font-size: 13.5px; font-weight: 700; text-decoration: none; padding: 12px 28px; border-radius: 8px; box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25); font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+        Track on Delhivery →
       </a>
+      <div style="font-size: 11px; color: #64748b; margin-top: 8px;">
+        Live tracking powered by Delhivery Express
+      </div>
     </div>
 
     ${renderItemsSummary(data.items, data.totalAmount)}
@@ -256,9 +260,9 @@ export function renderTransitDelayEmail(data: EmailTemplateData): { subject: str
   return {
     subject,
     html: baseEmailLayout(content, preheader, {
-      badgeText: 'DELIVERY@YOUTHNIC.COM',
-      badgeBg: '#eef2f6',
-      badgeColor: '#334155',
+      badgeText: 'delivery@youthnic.com',
+      badgeBg: '#f1f5f9',
+      badgeColor: '#475569',
       badgeBorder: '#e2e8f0',
     }),
   };
@@ -368,7 +372,7 @@ export function renderReturnInitiatedEmail(data: EmailTemplateData): { subject: 
   return {
     subject,
     html: baseEmailLayout(content, preheader, {
-      badgeText: 'RETURN@YOUTHNIC.COM',
+      badgeText: 'returns@youthnic.com',
       badgeBg: '#f5f3ff',
       badgeColor: '#6d28d9',
       badgeBorder: '#ddd6fe',
@@ -473,7 +477,7 @@ export function renderReturnRefundEmail(data: EmailTemplateData): { subject: str
   return {
     subject,
     html: baseEmailLayout(content, preheader, {
-      badgeText: 'REFUND@YOUTHNIC.COM',
+      badgeText: 'refunds@youthnic.com',
       badgeBg: '#ecfdf5',
       badgeColor: '#059669',
       badgeBorder: '#a7f3d0',
@@ -548,7 +552,7 @@ ${data.customMessage || 'Thank you for contacting Youthnic. Our customer care de
   return {
     subject,
     html: baseEmailLayout(content, preheader, {
-      badgeText: 'CONTACT@YOUTHNIC.COM',
+      badgeText: 'support@youthnic.com',
       badgeBg: '#eff6ff',
       badgeColor: '#1d4ed8',
       badgeBorder: '#bfdbfe',
@@ -595,7 +599,7 @@ export function renderReturnReceivedEmail(data: EmailTemplateData): { subject: s
   return {
     subject,
     html: baseEmailLayout(content, preheader, {
-      badgeText: 'RETURN@YOUTHNIC.COM',
+      badgeText: 'returns@youthnic.com',
       badgeBg: '#ecfdf5',
       badgeColor: '#065f46',
       badgeBorder: '#a7f3d0',
@@ -648,7 +652,7 @@ export function renderDispatchDelayEmail(data: EmailTemplateData): { subject: st
   return {
     subject,
     html: baseEmailLayout(content, preheader, {
-      badgeText: 'DELIVERY@YOUTHNIC.COM',
+      badgeText: 'delivery@youthnic.com',
       badgeBg: '#f5f3ff',
       badgeColor: '#6d28d9',
       badgeBorder: '#ddd6fe',
@@ -705,7 +709,7 @@ export function renderInTransitEmail(data: EmailTemplateData): { subject: string
   return {
     subject,
     html: baseEmailLayout(content, preheader, {
-      badgeText: 'DELIVERY@YOUTHNIC.COM',
+      badgeText: 'delivery@youthnic.com',
       badgeBg: '#eff6ff',
       badgeColor: '#2563eb',
       badgeBorder: '#bfdbfe',
@@ -897,7 +901,7 @@ export function renderOrderConfirmedEmail(data: EmailTemplateData): { subject: s
   return {
     subject,
     html: baseEmailLayout(content, preheader, {
-      badgeText: 'CONTACT@YOUTHNIC.COM',
+      badgeText: 'support@youthnic.com',
       badgeBg: '#f8fafc',
       badgeColor: '#0f172a',
       badgeBorder: '#e2e8f0',

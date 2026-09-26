@@ -104,6 +104,21 @@ export const config = {
     shippingMode: optional('DELHIVERY_SHIPPING_MODE', 'Surface'),
     // Default label size: A4 or 4R
     labelSize: optional('DELHIVERY_LABEL_SIZE', '4R'),
+    // ─── Package dimensions / declared weight ───────────────────────────────
+    // Tuned for minimal logistic cost on Youthnic's current product mix
+    // (cotton kurtas, light ethnic wear, poly-blend dresses).
+    // Single-piece shipment  → 22 × 20 × 3 cm, 500 g (within the 500g slab)
+    // Multi-piece shipment   → 22 × 20 × 5 cm, 500 g (capped — most items are
+    //                          actually 350-450 g; capping avoids an extra
+    //                          weight slab surcharge from Delhivery).
+    // Override via env vars if SKU profile changes.
+    singleItemLengthCm: parseInt(optional('DELHIVERY_SINGLE_ITEM_LENGTH_CM', '22'), 10),
+    singleItemBreadthCm: parseInt(optional('DELHIVERY_SINGLE_ITEM_BREADTH_CM', '20'), 10),
+    singleItemHeightCm: parseInt(optional('DELHIVERY_SINGLE_ITEM_HEIGHT_CM', '3'), 10),
+    multiItemLengthCm: parseInt(optional('DELHIVERY_MULTI_ITEM_LENGTH_CM', '22'), 10),
+    multiItemBreadthCm: parseInt(optional('DELHIVERY_MULTI_ITEM_BREADTH_CM', '20'), 10),
+    multiItemHeightCm: parseInt(optional('DELHIVERY_MULTI_ITEM_HEIGHT_CM', '5'), 10),
+    declaredWeightGrams: parseInt(optional('DELHIVERY_DECLARED_WEIGHT_GRAMS', '500'), 10),
     // Pickup requests are optional and should be batched per warehouse/day.
     autoPickup: optional('DELHIVERY_AUTO_PICKUP', 'false') === 'true',
     pickupTime: optional('DELHIVERY_PICKUP_TIME', '11:00:00'),
@@ -181,7 +196,11 @@ export const config = {
   // Resend Email API
   resend: {
     apiKey: optional('RESEND_API_KEY', ''),
-    fromEmail: optional('RESEND_FROM_EMAIL', 'Youthnic Logistics <onboarding@resend.dev>'),
+    // Display name uses uppercase "Youthnic" for branding; the email address
+    // itself is lowercase (RFC-compliant) and routed by SendGrid/Resend/Postmark
+    // to delivery@youthnic.com mailbox. Override via RESEND_FROM_EMAIL in .env
+    // once the youthnic.com domain is verified in Resend.
+    fromEmail: optional('RESEND_FROM_EMAIL', 'Youthnic <delivery@youthnic.com>'),
     apiUrl: optional('RESEND_API_URL', 'https://api.resend.com'),
   },
 

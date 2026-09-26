@@ -215,7 +215,10 @@ class DelhiveryService {
    * If a pre-fetched waybill is available, it will be passed in the payload.
    * Otherwise, Delhivery will auto-generate one.
    */
-  async createShipment(order: Order): Promise<{ waybillNumber: string; labelUrl?: string }> {
+  async createShipment(
+    order: Order,
+    options: { itemCount?: number } = {}
+  ): Promise<{ waybillNumber: string; labelUrl?: string }> {
     const codAmount = order.paymentMethod === 'COD' ? order.totalAmount : 0;
     const paymentMode = order.paymentMethod === 'COD' ? 'COD' : 'Prepaid';
 
@@ -233,6 +236,24 @@ class DelhiveryService {
         pincode: order.customerPincode,
       });
     }
+
+    // ─── Package dimensions & declared weight ─────────────────────────────────
+    // Single-piece shipment (≤1 unique line item): 22 × 20 × 3 cm
+    // Multi-piece shipment (≥2 line items):       22 × 20 × 5 cm
+    // Declared weight: 500g (caps most SKU profile under Delhivery's 500g slab;
+    //   actual items are typically 350–450g so we never cross into the next slab).
+    const lineItemCount = options.itemCount ?? 1;
+    const isMultiItem = lineItemCount > 1;
+    const shipmentLengthCm = isMultiItem
+      ? config.delhivery.multiItemLengthCm
+      : config.delhivery.singleItemLengthCm;
+    const shipmentBreadthCm = isMultiItem
+      ? config.delhivery.multiItemBreadthCm
+      : config.delhivery.singleItemBreadthCm;
+    const shipmentHeightCm = isMultiItem
+      ? config.delhivery.multiItemHeightCm
+      : config.delhivery.singleItemHeightCm;
+    const declaredWeightGrams = config.delhivery.declaredWeightGrams;
 
     // Build the shipment payload
     const shipmentData = {
@@ -265,6 +286,13 @@ class DelhiveryService {
           channel_name: 'Shopify: youthnic2024',
           source: 'Shopify',
           sales_channel: 'youthnic2024',
+          // Package dimensions & declared weight (kept under Delhivery's 500g slab
+          // and 22×20×5 cm envelope size to minimise logistic cost).
+          shipment_length: shipmentLengthCm,
+          shipment_breadth: shipmentBreadthCm,
+          shipment_height: shipmentHeightCm,
+          weight: declaredWeightGrams,           // grams
+          gm: declaredWeightGrams,               // alias used by some B2C endpoints
           // Pre-allocated Delhivery waybill passed directly to manifest API
           waybill: '',
         },

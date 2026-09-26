@@ -341,7 +341,9 @@ class OrderService {
     }
 
     // Create shipment on Delhivery
-    const result = await delhiveryService.createShipment(verifiedOrder);
+    const result = await delhiveryService.createShipment(verifiedOrder, {
+      itemCount: verifiedOrder.items?.length ?? 1,
+    });
 
     // Sync fulfillment and tracking number directly to Shopify order
     try {

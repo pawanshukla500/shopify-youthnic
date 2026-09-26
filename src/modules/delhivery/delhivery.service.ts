@@ -294,6 +294,7 @@ class DelhiveryService {
       const formData = `format=json&data=${encodeURIComponent(JSON.stringify(shipmentData))}`;
 
       let manifestRemark = '';
+      let packageStatus = '';
       try {
         const response = await this.client.post('/api/cmu/create.json', formData, {
           headers: {
@@ -311,22 +312,68 @@ class DelhiveryService {
           waybillNumber = returnedWaybill;
         }
 
-        const packageStatus = response.data?.packages?.[0]?.status;
-        if (packageStatus === 'Fail') {
-          const remarks = response.data?.packages?.[0]?.remarks || [];
-          manifestRemark = remarks.join('; ') || 'Manifest failed on Delhivery';
-          logger.warn('Delhivery manifest returned non-success remark', {
+        packageStatus = response.data?.packages?.[0]?.status || (response.data?.success === false ? 'Fail' : '');
+        const remarks = response.data?.packages?.[0]?.remarks || [];
+        manifestRemark = remarks.join('; ') || response.data?.rmk || '';
+
+        if (packageStatus === 'Fail' || manifestRemark.toLowerCase().includes('insufficient balance')) {
+          const detailedError = manifestRemark.toLowerCase().includes('insufficient balance')
+            ? 'Delhivery Manifest Failed: Insufficient balance in Delhivery prepaid wallet. Please recharge your Delhivery One account.'
+            : (manifestRemark || 'Delhivery manifest was rejected by courier.');
+          
+          logger.error('Delhivery manifest returned non-success remark', {
             shopifyOrderId: order.shopifyOrderId,
             remarks: manifestRemark,
             waybillNumber,
           });
+
+          await prisma.shipment.upsert({
+            where: { orderId: order.id },
+            create: {
+              orderId: order.id,
+              waybillNumber,
+              paymentMode,
+              codAmount,
+              declaredValue: order.totalAmount,
+              status: 'ERROR',
+              errorMessage: detailedError,
+            },
+            update: {
+              status: 'ERROR',
+              errorMessage: detailedError,
+            },
+          });
+
+          throw new Error(detailedError);
         }
       } catch (cmuErr: any) {
-        manifestRemark = cmuErr.response?.data?.rmk || cmuErr.message;
-        logger.warn('Delhivery /api/cmu/create.json call encountered error', {
-          error: manifestRemark,
+        const rawErr = cmuErr.response?.data?.rmk || cmuErr.message || '';
+        const detailedError = rawErr.toLowerCase().includes('insufficient balance')
+          ? 'Delhivery Manifest Failed: Insufficient balance in Delhivery prepaid wallet. Please recharge your Delhivery One account.'
+          : (rawErr || 'Delhivery manifest API call failed.');
+
+        logger.error('Delhivery /api/cmu/create.json call encountered error', {
+          error: detailedError,
           waybillNumber,
         });
+
+        await prisma.shipment.upsert({
+          where: { orderId: order.id },
+          create: {
+            orderId: order.id,
+            paymentMode,
+            codAmount,
+            declaredValue: order.totalAmount,
+            status: 'ERROR',
+            errorMessage: detailedError,
+          },
+          update: {
+            status: 'ERROR',
+            errorMessage: detailedError,
+          },
+        });
+
+        throw new Error(detailedError);
       }
 
       if (!waybillNumber) {
@@ -347,7 +394,7 @@ class DelhiveryService {
           codAmount: codAmount,
           declaredValue: order.totalAmount,
           status: 'CREATED',
-          errorMessage: manifestRemark || null,
+          errorMessage: null,
         },
         update: {
           waybillNumber,
@@ -355,7 +402,7 @@ class DelhiveryService {
           codAmount: codAmount,
           declaredValue: order.totalAmount,
           status: 'CREATED',
-          errorMessage: manifestRemark || null,
+          errorMessage: null,
         },
       });
 
@@ -1060,14 +1107,16 @@ class DelhiveryService {
         },
       });
 
-      // Response contains PDF URL (either at packages[0].pdf_url, pdf_url, or string)
+      // Response contains PDF URL (either at packages[0].pdf_download_link, packages[0].pdf_url, or string)
       const rawData = response.data;
       const labelUrl =
+        rawData?.packages?.[0]?.pdf_download_link ||
         rawData?.packages?.[0]?.pdf_url ||
+        rawData?.pdf_download_link ||
         rawData?.pdf_url ||
         rawData?.url ||
         (typeof rawData === 'string' ? rawData : '');
-      logger.info('Shipping label generated', { waybillNumber, labelUrl });
+      logger.info('Shipping label generated', { waybillNumber, labelUrl: labelUrl ? 'S3 PDF Ready' : 'None' });
       return typeof labelUrl === 'string' ? labelUrl : JSON.stringify(labelUrl);
     } catch (error: any) {
       logger.error('Failed to generate label', {

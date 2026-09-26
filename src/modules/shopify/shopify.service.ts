@@ -56,7 +56,10 @@ class ShopifyService {
    * Returns raw Shopify order objects.
    */
   async fetchOrdersSince(sinceDate: Date): Promise<ShopifyOrderWebhook[]> {
-    const minDate = sinceDate.toISOString();
+    const minDate = sinceDate < config.shopify.syncStartDate
+      ? config.shopify.syncStartDate.toISOString()
+      : sinceDate.toISOString();
+    const cutoffDate = config.shopify.syncStartDate.toISOString();
     try {
       const orders: ShopifyOrderWebhook[] = [];
       let nextUrl: string | null = '/orders.json';
@@ -67,6 +70,7 @@ class ShopifyService {
           params: isFirstRequest
             ? {
                 updated_at_min: minDate,
+                created_at_min: cutoffDate,
                 status: 'any',
                 limit: 250,
                 order: 'updated_at asc',
@@ -94,6 +98,7 @@ class ShopifyService {
    * Matches Delhivery One's channel logic ("fetch all unfulfilled orders from channel").
    */
   async fetchOpenUnfulfilledOrders(): Promise<ShopifyOrderWebhook[]> {
+    const cutoffDate = config.shopify.syncStartDate.toISOString();
     try {
       const orders: ShopifyOrderWebhook[] = [];
       let nextUrl: string | null = '/orders.json';
@@ -105,6 +110,7 @@ class ShopifyService {
             ? {
                 status: 'open',
                 fulfillment_status: 'unfulfilled',
+                created_at_min: cutoffDate,
                 limit: 250,
                 order: 'created_at desc',
               }
@@ -488,6 +494,59 @@ class ShopifyService {
         error: error.response?.data || error.message,
       });
       throw error;
+    }
+  }
+
+  /**
+   * Cancel an active fulfillment on Shopify.
+   * Restores the order to unfulfilled state.
+   */
+  async cancelFulfillment(
+    fulfillmentId: string
+  ): Promise<{ success: boolean; status?: string }> {
+    try {
+      const response = await this.client.post(`/fulfillments/${fulfillmentId}/cancel.json`);
+      const status = response.data?.fulfillment?.status || 'cancelled';
+      logger.info('Fulfillment cancelled on Shopify', { fulfillmentId, status });
+      return { success: true, status };
+    } catch (error: any) {
+      logger.error('Failed to cancel fulfillment on Shopify', {
+        fulfillmentId,
+        error: error.response?.data || error.message,
+      });
+      return { success: false };
+    }
+  }
+
+  /**
+   * Remove specified tags from a Shopify order.
+   */
+  async removeOrderTags(
+    shopifyOrderId: string,
+    tagsToRemove: string[]
+  ): Promise<{ success: boolean; tags: string[] }> {
+    try {
+      const orderData = await this.fetchOrder(shopifyOrderId);
+      const existingTags = orderData.tags
+        ? orderData.tags.split(',').map((t: string) => t.trim()).filter(Boolean)
+        : [];
+      const lowerRemove = new Set(tagsToRemove.map((t) => t.toLowerCase()));
+      const updatedTags = existingTags.filter((t) => !lowerRemove.has(t.toLowerCase()));
+
+      await this.client.put(`/orders/${shopifyOrderId}.json`, {
+        order: {
+          id: shopifyOrderId,
+          tags: updatedTags.join(', '),
+        },
+      });
+      return { success: true, tags: updatedTags };
+    } catch (error: any) {
+      logger.error('Failed to remove tags from Shopify order', {
+        shopifyOrderId,
+        tagsToRemove,
+        error: error.response?.data || error.message,
+      });
+      return { success: false, tags: [] };
     }
   }
 

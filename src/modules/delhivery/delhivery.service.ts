@@ -260,11 +260,11 @@ class DelhiveryService {
           return_phone: config.delhivery.seller.phone,
           seller_name: config.delhivery.seller.name,
           seller_add: config.delhivery.seller.address,
-          // Attribute to configured Shopify channel in Delhivery One
-          channel: 'Shopify',
-          channel_name: 'Shopify',
+          // Attribute to configured Shopify channel in Delhivery One (Shopify: youthnic2024)
+          channel: 'youthnic2024',
+          channel_name: 'Shopify: youthnic2024',
           source: 'Shopify',
-          sales_channel: 'Shopify',
+          sales_channel: 'youthnic2024',
           // Pre-allocated Delhivery waybill passed directly to manifest API
           waybill: '',
         },

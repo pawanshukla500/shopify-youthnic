@@ -14,5 +14,5 @@ process.env.SHOPIFY_CLIENT_SECRET ||= 'test_client_secret';
 process.env.SHOPIFY_API_VERSION ||= '2026-07';
 process.env.SHOPIFY_WEBHOOK_SECRET ||= 'test_webhook_secret';
 process.env.DELHIVERY_API_TOKEN ||= 'test_delhivery_token';
-process.env.DELHIVERRY_PICKUP_LOCATION ||= 'Test Warehouse';
+process.env.DELHIVERY_PICKUP_LOCATION ||= 'Test Warehouse';
 process.env.NODE_ENV ||= 'test';

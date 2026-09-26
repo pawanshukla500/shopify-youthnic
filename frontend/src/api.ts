@@ -791,3 +791,65 @@ export async function getDelhiveryChannelStatus(): Promise<{
   const response = await api.get('/api/delhivery/channel-status')
   return response.data
 }
+
+export function getAuthToken(): string {
+  return typeof window !== 'undefined' ? (localStorage.getItem('youthnic_firebase_token') || '') : ''
+}
+
+export function getAuthenticatedUrl(path: string): string {
+  const token = getAuthToken()
+  if (!token) return path
+  const separator = path.includes('?') ? '&' : '?'
+  return `${path}${separator}token=${encodeURIComponent(token)}`
+}
+
+export async function downloadBulkLabels(orderIds: number[]): Promise<void> {
+  const response = await api.post('/api/orders/bulk-labels', { orderIds }, { responseType: 'text' })
+  const html = response.data
+  const printWindow = window.open('', '_blank')
+  if (printWindow) {
+    printWindow.document.write(html)
+    printWindow.document.close()
+  } else {
+    const blob = new Blob([html], { type: 'text/html' })
+    const url = URL.createObjectURL(blob)
+    window.open(url, '_blank')
+  }
+}
+
+export async function downloadBulkInvoices(orderIds: number[]): Promise<void> {
+  const response = await api.post('/api/orders/bulk-invoices', { orderIds }, { responseType: 'text' })
+  const html = response.data
+  const printWindow = window.open('', '_blank')
+  if (printWindow) {
+    printWindow.document.write(html)
+    printWindow.document.close()
+  } else {
+    const blob = new Blob([html], { type: 'text/html' })
+    const url = URL.createObjectURL(blob)
+    window.open(url, '_blank')
+  }
+}
+
+export async function downloadSingleLabelPdf(waybillNumber: string): Promise<void> {
+  const response = await api.get(`/api/delhivery/label/${waybillNumber}/download`, {
+    responseType: 'blob',
+  })
+  const blob = new Blob([response.data], { type: 'application/pdf' })
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.setAttribute('download', `delhivery-label-${waybillNumber}.pdf`)
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.URL.revokeObjectURL(url)
+}
+
+export function openPrintableOrderLabel(orderId: number): void {
+  window.open(getAuthenticatedUrl(`/api/orders/${orderId}/label`), '_blank')
+}
+
+export function openPrintableOrderInvoice(orderId: number): void {
+  window.open(getAuthenticatedUrl(`/api/orders/${orderId}/invoice`), '_blank')
+}

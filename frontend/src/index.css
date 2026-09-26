@@ -1081,7 +1081,7 @@ a { color: inherit; text-decoration: none; }
 .search-shortcut { font-size: 9px; font-weight: 700; color: #94a3b8; background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 4px; padding: 1px 5px; }
 
 /* 21st.dev Style Floating Bulk Action Bar */
-.bulk-action-bar { position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%); z-index: 1000; background: rgba(15, 23, 42, 0.94); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); color: #fff; padding: 9px 18px; border-radius: 14px; border: 1px solid rgba(255, 255, 255, 0.16); box-shadow: 0 20px 40px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(0, 0, 0, 0.2); display: flex; align-items: center; gap: 14px; animation: slideUp .2s ease; }
+.bulk-action-bar { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 1000; background: #0f172a; color: #fff; padding: 8px 16px; border-radius: 14px; border: 1px solid rgba(255, 255, 255, 0.2); box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(0, 0, 0, 0.3); display: flex; align-items: center; gap: 10px; max-width: calc(100vw - 32px); overflow-x: auto; animation: slideUp .2s ease; }
 @keyframes slideUp { from { transform: translate(-50%, 20px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
 .bulk-count-badge { background: #2f6df6; color: white; font-weight: 800; font-size: 11px; padding: 3px 9px; border-radius: 999px; }
 .bulk-btn { height: 32px; border-radius: 8px; border: 0; font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; cursor: pointer; transition: all .15s; }

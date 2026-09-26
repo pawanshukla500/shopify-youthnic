@@ -1,4 +1,4 @@
-﻿import { Request, Response, NextFunction } from 'express';
+import { Request, Response, NextFunction } from 'express';
 import firebaseService from '../modules/firebase/firebase.service';
 import logger from '../utils/logger';
 
@@ -30,19 +30,20 @@ export async function requireAuth(
   }
 
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  let idToken = '';
+
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    idToken = authHeader.substring(7).trim();
+  } else if (typeof req.query.token === 'string' && req.query.token.trim()) {
+    idToken = req.query.token.trim();
+  } else if (typeof req.query.auth === 'string' && req.query.auth.trim()) {
+    idToken = req.query.auth.trim();
+  }
+
+  if (!idToken) {
     res.status(401).json({
       error: 'Unauthorized: Authentication required. Please provide a valid Firebase Bearer token.',
       code: 'AUTH_TOKEN_MISSING',
-    });
-    return;
-  }
-
-  const idToken = authHeader.substring(7).trim();
-  if (!idToken) {
-    res.status(401).json({
-      error: 'Unauthorized: Bearer token is empty.',
-      code: 'AUTH_TOKEN_EMPTY',
     });
     return;
   }

@@ -1,6 +1,23 @@
 import { useMemo, useState, useRef, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { getOrders, apiError, api, confirmCodOrder, cancelOrder, deleteOrder, processRtoRefund, handleNdrAction, syncOrders, syncChannelOrders, getDelhiveryChannelStatus } from '../api'
+import {
+  getOrders,
+  apiError,
+  api,
+  confirmCodOrder,
+  cancelOrder,
+  deleteOrder,
+  processRtoRefund,
+  handleNdrAction,
+  syncOrders,
+  syncChannelOrders,
+  getDelhiveryChannelStatus,
+  downloadBulkLabels,
+  downloadBulkInvoices,
+  downloadSingleLabelPdf,
+  openPrintableOrderLabel,
+  openPrintableOrderInvoice,
+} from '../api'
 import { ORDER_STATUSES, formatDate, formatMoney, labelize } from '../lib'
 import { Button, EmptyState, ErrorBox, FormField, Icon, LoadingState, PageIntro, Panel, StatusBadge, useDocumentTitle, useToast } from '../components/UI'
 import type { Order, OrderStatus } from '../types'
@@ -708,17 +725,7 @@ export function Orders() {
     if (!ids.length) return
     setIsBulkGeneratingLabels(true)
     try {
-      const res = await fetch('/api/orders/bulk-labels', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderIds: ids }),
-      })
-      if (!res.ok) {
-        throw new Error(`Failed to generate labels (${res.statusText})`)
-      }
-      const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      window.open(url, '_blank')
+      await downloadBulkLabels(ids)
       toast.toast('success', `Generated 4R shipping labels for ${ids.length} orders!`)
     } catch (err: any) {
       toast.toast('error', err.message || 'Failed to generate bulk shipping labels')
@@ -733,17 +740,7 @@ export function Orders() {
     if (!ids.length) return
     setIsBulkGeneratingInvoices(true)
     try {
-      const res = await fetch('/api/orders/bulk-invoices', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderIds: ids }),
-      })
-      if (!res.ok) {
-        throw new Error(`Failed to generate invoices (${res.statusText})`)
-      }
-      const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      window.open(url, '_blank')
+      await downloadBulkInvoices(ids)
       toast.toast('success', `Generated GST tax invoices for ${ids.length} orders!`)
     } catch (err: any) {
       toast.toast('error', err.message || 'Failed to generate bulk invoices')
@@ -1236,63 +1233,65 @@ export function Orders() {
                       </td>
 
                       {/* 1. Order & Date */}
-                      <td>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                          <a className="order-link">{order.shopifyOrderName}</a>
-                          {order.isDispatchOverdue && (
-                            <span className="sla-delayed-badge" title={`Overdue for dispatch by ${order.dispatchOverdueHours}h (>24h SLA). Expedite shipping.`}>
-                              ⚠️ Overdue (+{order.dispatchOverdueHours}h)
-                            </span>
-                          )}
-                          {(order.hasNdrException || order.status === 'FAILED_DELIVERY') && (
-                            <span className="ndr-badge" title="Delivery attempt failed. Action needed with courier / customer.">
-                              🚨 NDR Exception
-                            </span>
-                          )}
-                          {order.hasUrgentSupport && (
-                            <span
-                              className="sla-delayed-badge"
-                              style={{ background: '#fee2e2', color: '#b91c1c', borderColor: '#fca5a5', cursor: 'pointer' }}
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                navigate(`/support?search=${order.shopifyOrderName}`)
-                              }}
-                              title={`Urgent customer support inquiry: ${order.supportFlag || 'Action needed'}. Click to view in Support Desk.`}
-                            >
-                              🚨 Support Claim ({order.supportFlag || 'Urgent'})
-                            </span>
-                          )}
-                          {needsDispatch && (
-                            isPrepaid ? (
-                              <div className="prepaid-dispatch-flag" title="Customer paid in advance · Priority dispatch needed">
-                                ⚡ Prepaid Dispatch
-                              </div>
-                            ) : (
-                              <div className="cod-confirmed-dispatch-flag" title="Customer intent confirmed · Priority dispatch needed">
-                                ✓ COD Confirmed
-                              </div>
-                            )
-                          )}
-                        </div>
-                        <span className="cell-muted" style={{ fontSize: '11px', display: 'block', marginTop: '2px' }}>
-                          {formatDate(order.shopifyCreatedAt || order.createdAt)} · ID: {order.shopifyOrderId}
-                        </span>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap', marginTop: '3px' }}>
-                          <span style={{ background: '#f0fdf4', color: '#15803d', border: '1px solid #bbf7d0', borderRadius: '4px', padding: '1px 5px', fontSize: '10px', fontWeight: 700 }}>
-                            🛍️ Shopify: youthnic2024
+                      <td style={{ verticalAlign: 'top', minWidth: '220px' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                            <a className="order-link">{order.shopifyOrderName}</a>
+                            {order.isDispatchOverdue && (
+                              <span className="sla-delayed-badge" title={`Overdue for dispatch by ${order.dispatchOverdueHours}h (>24h SLA). Expedite shipping.`}>
+                                ⚠️ Overdue (+{order.dispatchOverdueHours}h)
+                              </span>
+                            )}
+                            {(order.hasNdrException || order.status === 'FAILED_DELIVERY') && (
+                              <span className="ndr-badge" title="Delivery attempt failed. Action needed with courier / customer.">
+                                🚨 NDR Exception
+                              </span>
+                            )}
+                            {order.hasUrgentSupport && (
+                              <span
+                                className="sla-delayed-badge"
+                                style={{ background: '#fee2e2', color: '#b91c1c', borderColor: '#fca5a5', cursor: 'pointer' }}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  navigate(`/support?search=${order.shopifyOrderName}`)
+                                }}
+                                title={`Urgent customer support inquiry: ${order.supportFlag || 'Action needed'}. Click to view in Support Desk.`}
+                              >
+                                🚨 Support Claim ({order.supportFlag || 'Urgent'})
+                              </span>
+                            )}
+                            {needsDispatch && (
+                              isPrepaid ? (
+                                <div className="prepaid-dispatch-flag" title="Customer paid in advance · Priority dispatch needed">
+                                  ⚡ Prepaid Dispatch
+                                </div>
+                              ) : (
+                                <div className="cod-confirmed-dispatch-flag" title="Customer intent confirmed · Priority dispatch needed">
+                                  ✓ COD Confirmed
+                                </div>
+                              )
+                            )}
+                          </div>
+                          <span className="cell-muted" style={{ fontSize: '11px', display: 'block' }}>
+                            {formatDate(order.shopifyCreatedAt || order.createdAt)} · ID: {order.shopifyOrderId}
                           </span>
-                          {!order.shipment?.waybillNumber && order.fulfillmentStatus !== 'fulfilled' && order.status !== 'CANCELLED' ? (
-                            <span style={{ background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', borderRadius: '4px', padding: '1px 5px', fontSize: '10px', fontWeight: 700 }}>
-                              📦 Delhivery: Pending AWB
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
+                            <span style={{ background: '#f0fdf4', color: '#15803d', border: '1px solid #bbf7d0', borderRadius: '4px', padding: '1.5px 6px', fontSize: '10px', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                              🛍️ Shopify
                             </span>
-                          ) : order.shipment?.waybillNumber ? (
-                            <span style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', borderRadius: '4px', padding: '1px 5px', fontSize: '10px', fontWeight: 700 }}>
-                              ✓ Delhivery Manifested
-                            </span>
-                          ) : null}
-                          {renderRtoRiskBadge(order)}
+                            {!order.shipment?.waybillNumber && order.fulfillmentStatus !== 'fulfilled' && order.status !== 'CANCELLED' ? (
+                              <span style={{ background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', borderRadius: '4px', padding: '1.5px 6px', fontSize: '10px', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                                📦 Delhivery: Pending AWB
+                              </span>
+                            ) : order.shipment?.waybillNumber ? (
+                              <span style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', borderRadius: '4px', padding: '1.5px 6px', fontSize: '10px', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                                ✓ Delhivery Manifested
+                              </span>
+                            ) : null}
+                            {renderRtoRiskBadge(order)}
+                          </div>
+                          <ShopifyTagList tags={order.tags} />
                         </div>
-                        <ShopifyTagList tags={order.tags} />
                       </td>
 
                       {/* 2. Product Preview & SKU Column */}
@@ -1402,17 +1401,22 @@ export function Orders() {
                                   {order.shipment.waybillNumber} ↗
                                 </a>
                                 {order.shipment.courier?.toLowerCase() === 'delhivery' && (
-                                  <a
-                                    href={`/api/delhivery/label/${order.shipment.waybillNumber}/download`}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    download={`delhivery-label-${order.shipment.waybillNumber}.pdf`}
+                                  <button
+                                    type="button"
                                     className="btn-label-sm"
-                                    onClick={(e) => e.stopPropagation()}
+                                    onClick={async (e) => {
+                                      e.stopPropagation()
+                                      try {
+                                        await downloadSingleLabelPdf(order.shipment!.waybillNumber!)
+                                        toast.toast('success', `Downloaded label for ${order.shipment!.waybillNumber}`)
+                                      } catch (err: any) {
+                                        toast.toast('error', err.message || 'Failed to download label')
+                                      }
+                                    }}
                                     title="Download Delhivery label PDF"
                                   >
                                     <Icon name="download" size={11} /> Label
-                                  </a>
+                                  </button>
                                 )}
                               </div>
                               <div className="actions-cell-row">
@@ -1457,7 +1461,7 @@ export function Orders() {
                                   style={{ color: '#0284c7', borderColor: 'rgba(2,132,199,0.3)', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
                                   onClick={(e) => {
                                     e.stopPropagation()
-                                    window.open(`/api/orders/${order.id}/label`, '_blank')
+                                    openPrintableOrderLabel(order.id)
                                   }}
                                   title="Print Delhivery 4R Shipping Label"
                                 >
@@ -1470,7 +1474,7 @@ export function Orders() {
                                   style={{ color: '#059669', borderColor: 'rgba(5,150,105,0.3)', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
                                   onClick={(e) => {
                                     e.stopPropagation()
-                                    window.open(`/api/orders/${order.id}/invoice`, '_blank')
+                                    openPrintableOrderInvoice(order.id)
                                   }}
                                   title="Print GST Commercial Tax Invoice"
                                 >
@@ -1635,6 +1639,7 @@ export function Orders() {
             icon="box"
           />
         )}
+        {selectedOrderIds.size > 0 && <div style={{ height: '90px', transition: 'height 0.2s ease' }} />}
       </Panel>
 
       {/* 21st.dev Style Floating Bulk Action Toolbar */}

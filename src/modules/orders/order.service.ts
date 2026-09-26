@@ -54,37 +54,24 @@ class OrderService {
       isBackfill: !backfillCompleted,
     });
 
-    const orders = await shopifyService.fetchOrdersSince(sinceDate);
-    const unfulfilledChannelOrders = await shopifyService.fetchOpenUnfulfilledOrders().catch((err) => {
-      logger.warn('Could not fetch open unfulfilled channel orders', { error: err.message });
-      return [];
-    });
-
-    // Merge recent orders and unfulfilled channel orders uniquely by Shopify order ID
-    const orderMap = new Map<number | string, any>();
-    for (const o of orders) orderMap.set(o.id, o);
-    for (const o of unfulfilledChannelOrders) orderMap.set(o.id, o);
-    const allOrders = Array.from(orderMap.values());
+    // Strictly fetch orders since sinceDate (always >= syncStartDate)
+    const allOrders = await shopifyService.fetchOrdersSince(sinceDate);
 
     let syncedCount = 0;
     let skippedAsHistory = 0;
     for (const order of allOrders) {
       try {
+        // Strict cutoff: Ignore all orders created prior to syncStartDate (25-09-2026 IST)
+        if (new Date(order.created_at) < syncStartDate) {
+          skippedAsHistory++;
+          continue;
+        }
+
         // Check if order already exists in our DB
         const existing = await prisma.order.findUnique({
           where: { shopifyOrderId: order.id.toString() },
           include: { shipment: true },
         });
-
-        // Check if this order is an active unfulfilled channel order awaiting AWB in Delhivery One
-        const isPendingChannelOrder = !order.fulfillment_status || order.fulfillment_status === 'unfulfilled';
-
-        // Orders created before the start date are history UNLESS they are open, unfulfilled
-        // channel orders awaiting AWB in Delhivery One ("Pending AWB").
-        if (!existing && new Date(order.created_at) < syncStartDate && !isPendingChannelOrder) {
-          skippedAsHistory++;
-          continue;
-        }
 
         // Cancelled, voided, and refunded orders must not be dispatched. An
         // order already in our DB has to be marked CANCELLED rather than
@@ -177,6 +164,19 @@ class OrderService {
       skippedAsHistory,
       isBackfill: !backfillCompleted,
     });
+
+    // Reconcile any channel orders awaiting AWB with Delhivery One
+    try {
+      const reconciled = await this.reconcilePendingChannelOrders();
+      if (reconciled > 0) {
+        logger.info('Reconciled Delhivery One channel orders with AWBs', { count: reconciled });
+      }
+    } catch (reconcileErr: any) {
+      logger.warn('Delhivery channel reconciliation encountered non-fatal error', {
+        error: reconcileErr.message,
+      });
+    }
+
     return syncedCount;
   }
 
@@ -206,6 +206,82 @@ class OrderService {
 
     await shopifyService.syncOrderToDb(order);
     return true;
+  }
+
+  /**
+   * Reconcile orders in DB that are pending AWB against Delhivery One channel shipments.
+   * If an order was manifested or created in Delhivery One under the Shopify channel,
+   * its ReferenceNo will match our order name (e.g. 26YOU5761), allowing us to
+   * link the AWB and update tracking immediately!
+   */
+  async reconcilePendingChannelOrders(): Promise<number> {
+    const ordersPendingAwb = await prisma.order.findMany({
+      where: {
+        shopifyCreatedAt: { gte: config.shopify.syncStartDate },
+        status: { in: ['NEW', 'DISPATCH_PENDING', 'SHIPPED', 'IN_TRANSIT'] },
+        OR: [
+          { shipment: null },
+          { shipment: { waybillNumber: null } },
+        ],
+      },
+      select: { id: true, shopifyOrderName: true, totalAmount: true, paymentMethod: true },
+      take: 50,
+    });
+
+    if (!ordersPendingAwb.length) return 0;
+
+    const refIds = ordersPendingAwb.map((o) => o.shopifyOrderName.replace('#', ''));
+    const packages = await delhiveryService.fetchPackagesByRefIds(refIds);
+
+    let reconciledCount = 0;
+    for (const pkg of packages) {
+      const shipment = pkg.Shipment;
+      if (!shipment?.AWB || !shipment?.ReferenceNo) continue;
+
+      const order = ordersPendingAwb.find(
+        (o) => o.shopifyOrderName.replace('#', '') === shipment.ReferenceNo
+      );
+      if (!order) continue;
+
+      const awb = shipment.AWB;
+      const statusDesc = shipment.Status?.Status || 'Manifested';
+      const statusType = shipment.Status?.StatusType || 'UD';
+      const mappedStatus = delhiveryService.mapTrackingToShipmentStatus(statusType, statusDesc);
+
+      await prisma.shipment.upsert({
+        where: { orderId: order.id },
+        create: {
+          orderId: order.id,
+          waybillNumber: awb,
+          courier: 'Delhivery',
+          paymentMode: order.paymentMethod === 'COD' ? 'COD' : 'Prepaid',
+          codAmount: order.paymentMethod === 'COD' ? order.totalAmount : 0,
+          declaredValue: order.totalAmount,
+          status: mappedStatus === 'DELIVERED' ? 'DELIVERED' : 'CREATED',
+          trackingStatus: statusDesc,
+          trackingLocation: shipment.Status?.StatusLocation || null,
+          trackingUpdatedAt: new Date(),
+        },
+        update: {
+          waybillNumber: awb,
+          courier: 'Delhivery',
+          trackingStatus: statusDesc,
+          trackingLocation: shipment.Status?.StatusLocation || null,
+          trackingUpdatedAt: new Date(),
+        },
+      });
+
+      // Also update order status if needed
+      await prisma.order.update({
+        where: { id: order.id },
+        data: {
+          status: mappedStatus === 'DELIVERED' ? 'DELIVERED' : 'SHIPPED',
+        },
+      });
+
+      reconciledCount++;
+    }
+    return reconciledCount;
   }
 
   /**

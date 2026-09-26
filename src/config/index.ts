@@ -30,10 +30,10 @@ function parseSyncStartDate(raw: string): Date {
     return startOfToday;
   }
 
-  // Date-only values must not be parsed as UTC, otherwise "today" in IST starts
-  // 5.5 hours late and the day's first orders are skipped.
+  // Date-only values must be parsed with Indian Standard Time (+05:30) offset
+  // so that midnight IST is accurately represented across all host environments (e.g. Docker UTC containers).
   const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(raw.trim());
-  const parsed = dateOnly ? new Date(`${raw.trim()}T00:00:00`) : new Date(raw.trim());
+  const parsed = dateOnly ? new Date(`${raw.trim()}T00:00:00+05:30`) : new Date(raw.trim());
 
   if (Number.isNaN(parsed.getTime())) {
     // eslint-disable-next-line no-console

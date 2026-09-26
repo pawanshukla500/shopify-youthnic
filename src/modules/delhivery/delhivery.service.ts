@@ -260,6 +260,11 @@ class DelhiveryService {
           return_phone: config.delhivery.seller.phone,
           seller_name: config.delhivery.seller.name,
           seller_add: config.delhivery.seller.address,
+          // Attribute to configured Shopify channel in Delhivery One
+          channel: 'Shopify',
+          channel_name: 'Shopify',
+          source: 'Shopify',
+          sales_channel: 'Shopify',
           // Pre-allocated Delhivery waybill passed directly to manifest API
           waybill: '',
         },
@@ -714,6 +719,38 @@ class DelhiveryService {
       logger.error('Failed to track multiple shipments', { error: error.message });
       throw error;
     }
+  }
+
+  /**
+   * Fetch shipment details for up to 50 order reference IDs at once.
+   * GET /api/v1/packages/json/?ref_ids={ref_ids}
+   * Used to reconcile Delhivery One channel orders against OMS database.
+   */
+  async fetchPackagesByRefIds(refIds: string[]): Promise<any[]> {
+    if (!refIds.length) return [];
+    const chunks: string[] = [];
+    for (let i = 0; i < refIds.length; i += 50) {
+      chunks.push(refIds.slice(i, i + 50).join(','));
+    }
+
+    const allData: any[] = [];
+    for (const chunk of chunks) {
+      try {
+        const response = await this.client.get('/api/v1/packages/json/', {
+          params: { ref_ids: chunk },
+        });
+        const shipmentData = response.data?.ShipmentData || [];
+        if (Array.isArray(shipmentData)) {
+          allData.push(...shipmentData);
+        }
+      } catch (error: any) {
+        logger.warn('Failed to fetch Delhivery packages by ref_ids', {
+          error: error.message,
+          chunk,
+        });
+      }
+    }
+    return allData;
   }
 
   // ═══════════════════════════════════════════════════════════

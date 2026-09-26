@@ -780,7 +780,7 @@ export function renderOutForDeliveryEmail(data: EmailTemplateData): { subject: s
   return {
     subject,
     html: baseEmailLayout(content, preheader, {
-      badgeText: 'DELIVERY@YOUTHNIC.COM',
+      badgeText: 'delivery@youthnic.com',
       badgeBg: '#ecfdf5',
       badgeColor: '#059669',
       badgeBorder: '#a7f3d0',
@@ -825,7 +825,7 @@ export function renderNdrEmail(data: EmailTemplateData): { subject: string; html
   return {
     subject,
     html: baseEmailLayout(content, preheader, {
-      badgeText: 'DELIVERY@YOUTHNIC.COM',
+      badgeText: 'delivery@youthnic.com',
       badgeBg: '#fef2f2',
       badgeColor: '#dc2626',
       badgeBorder: '#fecaca',
@@ -869,7 +869,7 @@ export function renderDeliveredEmail(data: EmailTemplateData): { subject: string
   return {
     subject,
     html: baseEmailLayout(content, preheader, {
-      badgeText: 'DELIVERY@YOUTHNIC.COM',
+      badgeText: 'delivery@youthnic.com',
       badgeBg: '#ecfdf5',
       badgeColor: '#059669',
       badgeBorder: '#a7f3d0',

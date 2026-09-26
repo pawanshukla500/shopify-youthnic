@@ -3387,7 +3387,9 @@ router.post('/communications/notify-delayed-transit', async (req: Request, res: 
       const sendResult = await resendService.sendEmail({
         to: order.customerEmail,
         templateType: 'TRANSIT_DELAY',
-        fromEmail: 'Youthnic Logistics <delivery@youthnic.com>',
+        // Use the configured fromEmail so a one-line .env change updates
+        // every code path that sends a transit-delay email.
+        fromEmail: config.resend.fromEmail,
         replyTo: 'delivery@youthnic.com',
         orderId: order.id,
         data: templateData,
@@ -3400,7 +3402,7 @@ router.post('/communications/notify-delayed-transit', async (req: Request, res: 
         title: `In-Transit Delay Notice: Order ${order.shopifyOrderName}`,
         description: `Shipment delayed in transit. Revised ETA: ${templateData.newEstimatedDelivery}. Delhivery AWB: ${shipment?.waybillNumber || 'N/A'}.`,
         timestamp: new Date().toISOString(),
-        sender: 'Youthnic Logistics <delivery@youthnic.com>',
+        sender: config.resend.fromEmail,
         recipient: order.customerEmail,
         orderId: order.id,
         shopifyOrderName: order.shopifyOrderName,
@@ -3412,7 +3414,7 @@ router.post('/communications/notify-delayed-transit', async (req: Request, res: 
         orderId: order.id,
         shopifyOrderName: order.shopifyOrderName,
         recipient: order.customerEmail,
-        from: 'Youthnic Logistics <delivery@youthnic.com>',
+        from: config.resend.fromEmail,
         success: sendResult.success,
         resendResult: sendResult,
       });

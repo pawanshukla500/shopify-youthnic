@@ -1,6 +1,7 @@
 import { Order, OrderItem } from '@prisma/client';
 import { generateCode128Svg } from './barcode';
 import { config } from '../../config';
+import { YOUTHNIC_LOGO_BASE64, DELHIVERY_LOGO_BASE64 } from './label-logos';
 
 export interface OrderWithDetails extends Order {
   items: OrderItem[];
@@ -51,22 +52,27 @@ export class ShippingLabelService {
     const isCod = order.paymentMethod === 'COD' || order.shipment?.paymentMode === 'COD';
     const totalAmount = order.totalAmount || 0;
     const sortCode = this.getSortCode(order.customerPincode, order.customerCity, order.customerState);
-    const barcodeSvg = generateCode128Svg(waybillNumber, { width: 330, height: 75 });
-    const orderBarcodeSvg = generateCode128Svg(order.shopifyOrderName.replace('#', ''), { width: 200, height: 45, textBelow: order.shopifyOrderName });
+    const barcodeSvg = generateCode128Svg(waybillNumber, { width: 330, height: 68 });
+    const orderBarcodeSvg = generateCode128Svg(order.shopifyOrderName.replace('#', ''), { width: 170, height: 38, textBelow: order.shopifyOrderName.replace('#', '') });
     const formattedDate = new Date(order.shopifyCreatedAt || Date.now()).toLocaleDateString('en-IN', {
       day: '2-digit',
       month: 'short',
       year: 'numeric',
     });
+    const currentTime = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
 
     const itemsRows = (order.items || [])
       .map(
-        (item, idx) =>
+        (item) =>
           `<tr>
-            <td style="padding: 2px 4px; font-size: 10px; font-weight: 600;">${idx + 1}</td>
-            <td style="padding: 2px 4px; font-size: 10px; font-weight: 600;">${item.sku || 'N/A'}</td>
-            <td style="padding: 2px 4px; font-size: 10px;">${item.title.substring(0, 32)}${item.title.length > 32 ? '...' : ''} ${item.variantTitle ? '(' + item.variantTitle + ')' : ''}</td>
-            <td style="padding: 2px 4px; font-size: 10px; text-align: center; font-weight: 700;">${item.quantity}</td>
+            <td class="col-prod">
+              <span class="item-title">${item.title.substring(0, 40)}${item.title.length > 40 ? '...' : ''}</span>
+              ${item.variantTitle ? `<span class="item-variant">(${item.variantTitle})</span>` : ''}
+              ${item.sku ? `<span class="item-sku">SKU: ${item.sku}</span>` : ''}
+            </td>
+            <td class="col-qty">${item.quantity}</td>
+            <td class="col-price">${item.price.toFixed(2)}</td>
+            <td class="col-total">${(item.price * item.quantity).toFixed(2)}</td>
           </tr>`
       )
       .join('');
@@ -74,88 +80,77 @@ export class ShippingLabelService {
     return `
     <div class="label-wrapper">
       <div class="label-container">
-        <!-- Top Header: Delhivery Courier & Routing Sort Code -->
+        <!-- 1. Header: Youthnic Brand & Official Delhivery Logo -->
         <div class="label-row header-row">
-          <div class="header-courier">
-            <span class="courier-brand">DELHIVERY</span>
-            <span class="shipping-mode">SURFACE EXPRESS</span>
+          <div class="header-left">
+            <span class="seller-org">V B EXPORT</span>
+            <div class="brand-logo-wrap">
+              <img src="${YOUTHNIC_LOGO_BASE64}" alt="Youthnic" class="youthnic-logo-img" />
+            </div>
           </div>
-          <div class="header-sort-code">
-            <span class="sort-title">ROUTING HUB</span>
-            <span class="sort-value">${sortCode}</span>
+          <div class="header-right">
+            <img src="${DELHIVERY_LOGO_BASE64}" alt="Delhivery" class="delhivery-logo-img" />
           </div>
         </div>
 
-        <!-- Waybill Barcode -->
+        <!-- 2. AWB Barcode & Destination Hub Row -->
         <div class="label-row barcode-row">
-          <div class="barcode-title">DELHIVERY WAYBILL / AWB</div>
-          <div class="barcode-graphic">${barcodeSvg}</div>
-        </div>
-
-        <!-- Order & Package Metadata Row -->
-        <div class="label-row meta-row">
-          <div class="meta-col">
-            <span class="meta-label">ORDER NUMBER</span>
-            <span class="meta-val">${order.shopifyOrderName}</span>
-          </div>
-          <div class="meta-col">
-            <span class="meta-label">DATE</span>
-            <span class="meta-val">${formattedDate}</span>
-          </div>
-          <div class="meta-col">
-            <span class="meta-label">WEIGHT</span>
-            <span class="meta-val">0.40 Kg</span>
-          </div>
-          <div class="meta-col">
-            <span class="meta-label">PKGS</span>
-            <span class="meta-val">1 / 1</span>
+          <div class="awb-number-top">AWB# ${waybillNumber}</div>
+          <div class="awb-barcode-wrap">${barcodeSvg}</div>
+          <div class="awb-sub-meta">
+            <span class="meta-dest-pin">${order.customerPincode}</span>
+            <span class="meta-center-awb">AWB# ${waybillNumber}</span>
+            <span class="meta-sort-hub">${sortCode}</span>
           </div>
         </div>
 
-        <!-- Payment Mode Banner -->
-        <div class="label-row payment-banner ${isCod ? 'cod-banner' : 'prepaid-banner'}">
-          ${
-            isCod
-              ? `<div class="banner-title">CASH ON DELIVERY (COD)</div>
-                 <div class="banner-amount">COLLECT CASH: ₹${totalAmount.toFixed(2)}</div>`
-              : `<div class="banner-title">PREPAID SHIPMENT</div>
-                 <div class="banner-amount">DO NOT COLLECT CASH (PAID: ₹${totalAmount.toFixed(2)})</div>`
-          }
-        </div>
-
-        <!-- Shipping Address (Consignee) -->
-        <div class="label-row address-row">
-          <div class="address-header">DELIVER TO (CONSIGNEE):</div>
-          <div class="consignee-name">${order.customerName}</div>
-          <div class="consignee-address">${order.customerAddress}</div>
-          <div class="consignee-city-state">
-            ${order.customerCity.toUpperCase()}, ${order.customerState.toUpperCase()}
+        <!-- 3. Consignee (Ship to) & Payment Information (Split 2-Column Grid) -->
+        <div class="label-row split-row mid-row">
+          <div class="split-col-left consignee-col">
+            <div class="ship-to-header">Ship to - <strong class="consignee-name">${order.customerName}</strong></div>
+            <div class="consignee-addr">${order.customerAddress}</div>
+            <div class="consignee-geo"><strong>${order.customerCity.toUpperCase()} (${order.customerState.toUpperCase()})</strong></div>
+            <div class="consignee-pin"><strong>PIN - ${order.customerPincode}</strong></div>
+            <div class="consignee-phone">Phone: ${this.formatPhone(order.customerPhone)}</div>
           </div>
-          <div class="consignee-pincode-box">
-            PINCODE: <span class="huge-pincode">${order.customerPincode}</span>
-          </div>
-          <div class="consignee-phone">
-            <strong>PHONE:</strong> ${this.formatPhone(order.customerPhone)}
+          <div class="split-col-right payment-col">
+            <div class="pay-mode-line"><strong>${isCod ? 'COD - Surface' : 'Pre-paid - Surface'}</strong></div>
+            <div class="pay-amount-line"><strong>INR ${totalAmount.toFixed(2)}</strong></div>
+            ${
+              isCod
+                ? `<div class="cod-action-pill">COLLECT CASH</div>`
+                : `<div class="prepaid-action-pill">DO NOT COLLECT CASH</div>`
+            }
+            <div class="date-block">
+              <div class="date-label">Date</div>
+              <div class="date-val">${formattedDate} | ${currentTime}</div>
+            </div>
           </div>
         </div>
 
-        <!-- Return / Seller Origin Box -->
-        <div class="label-row return-row">
-          <div class="return-title">IF UNDELIVERED, RETURN TO:</div>
-          <div class="return-name"><strong>${config.delhivery.seller.name}</strong> (VB Exports)</div>
-          <div class="return-address">${config.delhivery.seller.address}, ${config.delhivery.seller.city}, ${config.delhivery.seller.state} - ${config.delhivery.seller.pincode}</div>
-          <div class="return-phone">Helpline: ${this.formatPhone(config.delhivery.seller.phone)} | GSTIN: 24AAFFV1234P1Z8</div>
+        <!-- 4. Seller & Order Barcode Row (Split 2-Column Grid) -->
+        <div class="label-row split-row seller-order-row">
+          <div class="split-col-left seller-col">
+            <div class="seller-header">Seller: <strong>Youthnic</strong></div>
+            <div class="seller-addr-text">
+              7004, Hi-tech Textile Centre (HTC Market - 1), Anjana Farm, Near Raghukul Market, Surat, Gujarat - 395002
+            </div>
+          </div>
+          <div class="split-col-right order-barcode-col">
+            <div class="order-code-top">${order.shopifyOrderName.replace('#', '')}</div>
+            <div class="order-barcode-svg">${orderBarcodeSvg}</div>
+          </div>
         </div>
 
-        <!-- Product Contents Table -->
+        <!-- 5. Product Contents Table -->
         <div class="label-row items-row">
           <table class="items-table">
             <thead>
               <tr>
-                <th style="width: 20px;">#</th>
-                <th style="width: 100px;">SKU</th>
-                <th>Item Description</th>
-                <th style="width: 30px;">Qty</th>
+                <th style="width: 58%;">Product Name</th>
+                <th style="width: 12%; text-align: center;">Qty.</th>
+                <th style="width: 15%; text-align: right;">Price</th>
+                <th style="width: 15%; text-align: right;">Total</th>
               </tr>
             </thead>
             <tbody>
@@ -164,13 +159,13 @@ export class ShippingLabelService {
           </table>
         </div>
 
-        <!-- Footer Order Barcode & Verification -->
+        <!-- 6. Footer Return Address & Page -->
         <div class="label-row footer-row">
-          <div class="order-barcode-wrap">
-            ${orderBarcodeSvg}
+          <div class="footer-return-text">
+            <strong>Return Address:</strong> 7004, Hi-tech Textile Centre (HTC Market - 1), Anjana Farm, Near Raghukul Market, Surat - 395002
           </div>
-          <div class="footer-note">
-            Standard Delhivery B2C Surface Manifest · Pack & Ship
+          <div class="footer-page-text">
+            Page 1 of 1
           </div>
         </div>
       </div>
@@ -183,6 +178,8 @@ export class ShippingLabelService {
    */
   public generatePrintableLabelPage(order: OrderWithDetails, waybillNumber: string): string {
     const labelHtml = this.generateSingleLabelHtml(order, waybillNumber);
+    const officialPdfUrl = order.shipment?.labelUrl && order.shipment.labelUrl.startsWith('http') ? order.shipment.labelUrl : '';
+
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -195,10 +192,11 @@ export class ShippingLabelService {
 <body>
   <div class="print-controls no-print">
     <div class="controls-left">
-      <span class="controls-badge">Delhivery 4R Thermal Shipping Label</span>
+      <span class="controls-badge">Youthnic · Delhivery 4R Shipping Label</span>
       <span class="controls-info">Order: ${order.shopifyOrderName} · AWB: ${waybillNumber}</span>
     </div>
     <div class="controls-right">
+      ${officialPdfUrl ? `<a href="${officialPdfUrl}" target="_blank" class="btn btn-delhivery">📄 Download Official Delhivery PDF</a>` : ''}
       <button class="btn btn-primary" onclick="window.print()">🖨️ Print Label</button>
       <button class="btn btn-secondary" onclick="window.close()">✕ Close</button>
     </div>
@@ -228,7 +226,7 @@ export class ShippingLabelService {
 <body>
   <div class="print-controls no-print">
     <div class="controls-left">
-      <span class="controls-badge">Bulk Delhivery 4R Shipping Labels</span>
+      <span class="controls-badge">Youthnic · Bulk Delhivery 4R Shipping Labels</span>
       <span class="controls-info">Total Packages: ${orderList.length}</span>
     </div>
     <div class="controls-right">
@@ -254,7 +252,7 @@ export class ShippingLabelService {
         max-width: 95vw;
         margin-bottom: 16px;
         padding: 10px 16px;
-        background: #1e293b;
+        background: #0f172a;
         color: #fff;
         border-radius: 8px;
         box-shadow: 0 4px 6px rgba(0,0,0,0.1);
@@ -269,10 +267,15 @@ export class ShippingLabelService {
         font-size: 12px;
         font-weight: 600;
         border: none;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
         transition: all 0.2s;
       }
       .btn-primary { background: #0284c7; color: #fff; }
       .btn-primary:hover { background: #0369a1; }
+      .btn-delhivery { background: #dc2626; color: #fff; }
+      .btn-delhivery:hover { background: #b91c1c; }
       .btn-secondary { background: #475569; color: #fff; }
       .btn-secondary:hover { background: #334155; }
 
@@ -290,125 +293,216 @@ export class ShippingLabelService {
         border: 2px solid #000;
         display: flex;
         flex-direction: column;
-        padding: 4mm 5mm;
+        padding: 3mm 4mm;
         box-sizing: border-box;
       }
       .label-row {
         border-bottom: 1.5px solid #000;
-        padding: 4px 0;
+        padding: 3px 0;
       }
       
+      /* 1. Header */
       .header-row {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        padding-bottom: 5px;
+        padding-bottom: 4px;
       }
-      .courier-brand {
-        font-size: 19px;
-        font-weight: 900;
-        letter-spacing: 1.5px;
+      .header-left {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+      }
+      .seller-org {
+        font-size: 10.5px;
+        font-weight: 800;
+        letter-spacing: 0.5px;
         color: #000;
+        text-transform: uppercase;
+      }
+      .brand-logo-wrap {
+        margin-top: 1px;
+      }
+      .youthnic-logo-img {
+        height: 24px;
+        max-width: 135px;
+        object-fit: contain;
         display: block;
       }
-      .shipping-mode {
-        font-size: 10px;
-        font-weight: 700;
-        letter-spacing: 1px;
-        background: #000;
-        color: #fff;
-        padding: 1px 5px;
-        border-radius: 2px;
+      .header-right {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
       }
-      .header-sort-code {
-        text-align: right;
-        border: 1.5px solid #000;
-        padding: 2px 6px;
-        background: #fafafa;
+      .delhivery-logo-img {
+        height: 25px;
+        max-width: 130px;
+        object-fit: contain;
+        display: block;
       }
-      .sort-title { font-size: 8px; font-weight: 700; display: block; color: #555; }
-      .sort-value { font-size: 16px; font-weight: 900; letter-spacing: 1px; color: #000; }
 
+      /* 2. Barcode & Routing */
       .barcode-row {
         text-align: center;
-        padding: 4px 0;
+        padding: 3px 0;
       }
-      .barcode-title {
-        font-size: 9px;
-        font-weight: 700;
+      .awb-number-top {
+        font-size: 11px;
+        font-weight: 800;
         letter-spacing: 0.5px;
-        margin-bottom: 2px;
+        margin-bottom: 1px;
       }
-      .barcode-graphic {
+      .awb-barcode-wrap {
         display: flex;
         justify-content: center;
       }
-
-      .meta-row {
+      .awb-sub-meta {
         display: flex;
         justify-content: space-between;
-        background: #f8fafc;
-        padding: 3px 6px;
+        align-items: center;
+        padding: 2px 4px 0 4px;
+        font-size: 10px;
+        font-weight: 800;
       }
-      .meta-col { text-align: center; }
-      .meta-label { font-size: 7.5px; font-weight: 700; color: #64748b; display: block; }
-      .meta-val { font-size: 11px; font-weight: 800; color: #000; }
+      .meta-dest-pin { font-size: 10px; font-weight: 800; }
+      .meta-center-awb { font-size: 10.5px; font-weight: 800; }
+      .meta-sort-hub { font-size: 11px; font-weight: 900; letter-spacing: 0.5px; }
 
-      .payment-banner {
-        text-align: center;
-        padding: 5px 4px;
-        margin: 2px 0;
+      /* Split Rows */
+      .split-row {
+        display: flex;
       }
-      .prepaid-banner {
-        background: #000;
-        color: #fff;
+      .split-col-left {
+        width: 63%;
+        padding-right: 4px;
       }
-      .prepaid-banner .banner-title { font-size: 11px; font-weight: 900; letter-spacing: 1px; }
-      .prepaid-banner .banner-amount { font-size: 13px; font-weight: 800; }
+      .split-col-right {
+        width: 37%;
+        border-left: 1.5px solid #000;
+        padding-left: 6px;
+      }
 
-      .cod-banner {
-        background: #ffffff;
-        color: #000;
-        border: 2px dashed #000;
+      /* 3. Consignee & Payment */
+      .consignee-col {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
       }
-      .cod-banner .banner-title { font-size: 11px; font-weight: 900; letter-spacing: 1px; color: #b91c1c; }
-      .cod-banner .banner-amount { font-size: 14px; font-weight: 900; color: #000; }
-
-      .address-row {
-        padding: 5px 0;
-        flex-grow: 1;
+      .ship-to-header {
+        font-size: 10.5px;
+        margin-bottom: 2px;
       }
-      .address-header { font-size: 8px; font-weight: 800; letter-spacing: 0.5px; color: #475569; }
-      .consignee-name { font-size: 14px; font-weight: 800; text-transform: uppercase; margin-top: 1px; }
-      .consignee-address { font-size: 10.5px; line-height: 1.25; margin-top: 2px; }
-      .consignee-city-state { font-size: 11px; font-weight: 700; margin-top: 2px; }
-      .consignee-pincode-box {
-        margin-top: 3px;
+      .consignee-name {
+        font-size: 13px;
+        font-weight: 800;
+        text-transform: capitalize;
+      }
+      .consignee-addr {
+        font-size: 9.5px;
+        line-height: 1.2;
+        margin-top: 1px;
+        word-break: break-word;
+      }
+      .consignee-geo {
+        font-size: 10px;
+        font-weight: 800;
+        margin-top: 2px;
+      }
+      .consignee-pin {
         font-size: 11px;
-        font-weight: 700;
-      }
-      .huge-pincode {
-        font-size: 17px;
         font-weight: 900;
-        letter-spacing: 1.5px;
+        margin-top: 1px;
+      }
+      .consignee-phone {
+        font-size: 9.5px;
+        font-weight: 600;
+        margin-top: 2px;
+      }
+
+      .payment-col {
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-start;
+      }
+      .pay-mode-line {
+        font-size: 10.5px;
+        font-weight: 800;
+      }
+      .pay-amount-line {
+        font-size: 13.5px;
+        font-weight: 900;
+        margin-top: 1px;
+      }
+      .cod-action-pill {
+        display: inline-block;
         background: #000;
         color: #fff;
-        padding: 1px 6px;
-        display: inline-block;
+        font-size: 9px;
+        font-weight: 900;
+        padding: 1px 4px;
+        margin-top: 2px;
+        letter-spacing: 0.5px;
       }
-      .consignee-phone { font-size: 10.5px; margin-top: 3px; }
+      .prepaid-action-pill {
+        display: inline-block;
+        border: 1px solid #000;
+        font-size: 8px;
+        font-weight: 800;
+        padding: 1px 3px;
+        margin-top: 2px;
+      }
+      .date-block {
+        margin-top: 5px;
+      }
+      .date-label {
+        font-size: 8.5px;
+        font-weight: 700;
+        color: #333;
+      }
+      .date-val {
+        font-size: 9.5px;
+        font-weight: 600;
+      }
 
-      .return-row {
-        background: #f8fafc;
-        padding: 4px;
+      /* 4. Seller & Order */
+      .seller-order-row {
+        align-items: center;
+      }
+      .seller-col {
         font-size: 8.5px;
         line-height: 1.2;
       }
-      .return-title { font-size: 7.5px; font-weight: 800; color: #64748b; }
+      .seller-header {
+        font-size: 9.5px;
+        font-weight: 800;
+        margin-bottom: 1px;
+      }
+      .seller-addr-text {
+        font-size: 8px;
+        color: #222;
+      }
+      .order-barcode-col {
+        text-align: center;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+      }
+      .order-code-top {
+        font-size: 10.5px;
+        font-weight: 800;
+        letter-spacing: 0.5px;
+      }
+      .order-barcode-svg {
+        display: flex;
+        justify-content: center;
+        margin-top: 1px;
+      }
 
+      /* 5. Products Table */
       .items-row {
         padding: 2px 0;
-        max-height: 25mm;
+        flex-grow: 1;
         overflow: hidden;
       }
       .items-table {
@@ -416,25 +510,48 @@ export class ShippingLabelService {
         border-collapse: collapse;
       }
       .items-table th {
-        font-size: 8px;
+        font-size: 8.5px;
+        font-weight: 800;
         text-align: left;
-        background: #e2e8f0;
-        padding: 2px 4px;
-        border: 1px solid #cbd5e1;
+        padding: 2px 3px;
+        border-bottom: 1px solid #000;
+        background: #f8fafc;
       }
       .items-table td {
-        border: 1px solid #e2e8f0;
+        padding: 2px 3px;
+        vertical-align: top;
       }
+      .col-prod {
+        font-size: 8.5px;
+        line-height: 1.15;
+      }
+      .item-title { font-weight: 600; }
+      .item-variant { font-size: 8px; color: #444; }
+      .item-sku { display: block; font-size: 7.5px; color: #64748b; font-weight: 600; }
+      .col-qty { font-size: 9.5px; font-weight: 800; text-align: center; }
+      .col-price { font-size: 8.5px; text-align: right; }
+      .col-total { font-size: 9px; font-weight: 800; text-align: right; }
 
+      /* 6. Footer */
       .footer-row {
         border-bottom: none;
         display: flex;
         justify-content: space-between;
         align-items: center;
-        padding-top: 4px;
+        padding-top: 3px;
+        font-size: 8px;
       }
-      .order-barcode-wrap { width: 55%; }
-      .footer-note { font-size: 7.5px; font-weight: 600; color: #64748b; text-align: right; width: 42%; }
+      .footer-return-text {
+        width: 82%;
+        font-size: 8px;
+        line-height: 1.15;
+      }
+      .footer-page-text {
+        width: 18%;
+        text-align: right;
+        font-weight: 700;
+        font-size: 8.5px;
+      }
 
       .page-break {
         page-break-after: always;
@@ -460,4 +577,5 @@ export class ShippingLabelService {
   }
 }
 
-export default new ShippingLabelService();
+export const shippingLabelService = new ShippingLabelService();
+export default shippingLabelService;

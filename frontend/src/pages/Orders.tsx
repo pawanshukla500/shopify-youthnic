@@ -78,8 +78,8 @@ export function isCodConfirmed(order: Order): boolean {
 
 export function isDispatchNeeded(order: Order): boolean {
   if (['CANCELLED', 'DELIVERED', 'SHIPPED', 'RTO_DELIVERED'].includes(order.status)) return false
-  if (order.shipment?.waybillNumber) return false
-  if (!['NEW', 'DISPATCH_PENDING'].includes(order.status)) return false
+  if (order.shipment?.waybillNumber && order.shipment?.status !== 'ERROR') return false
+  if (!['NEW', 'DISPATCH_PENDING'].includes(order.status) && order.shipment?.status !== 'ERROR') return false
 
   // 1. Prepaid order needs dispatch
   if (isPrepaidOrder(order)) return true
@@ -1276,6 +1276,14 @@ export function Orders() {
                               <span className="micro-badge micro-badge-gray" title="Delhivery shipment cancelled by seller">
                                 ✕ Cancelled
                               </span>
+                            ) : order.shipment?.status === 'ERROR' ? (
+                              <span
+                                className="micro-badge"
+                                style={{ background: '#fee2e2', color: '#991b1b', border: '1px solid #f87171' }}
+                                title={order.shipment.errorMessage || 'Manifest failed'}
+                              >
+                                ⚠️ Manifest Failed
+                              </span>
                             ) : order.shipment?.waybillNumber ? (
                               <span className="micro-badge micro-badge-green" title={`AWB: ${order.shipment.waybillNumber}`}>
                                 ✓ Manifested
@@ -1517,6 +1525,28 @@ export function Orders() {
                             </>
                           ) : (
                             <>
+                              {order.shipment?.status === 'ERROR' && order.shipment.errorMessage && (
+                                <div
+                                  style={{
+                                    fontSize: '10px',
+                                    color: '#991b1b',
+                                    background: '#fef2f2',
+                                    padding: '3px 6px',
+                                    borderRadius: '4px',
+                                    border: '1px solid #fecaca',
+                                    marginBottom: '4px',
+                                    lineHeight: '1.25',
+                                    maxWidth: '220px',
+                                    wordBreak: 'break-word',
+                                  }}
+                                  title={order.shipment.errorMessage}
+                                >
+                                  ⚠️ <strong>Manifest Failed:</strong>{' '}
+                                  {order.shipment.errorMessage.includes('insufficient balance')
+                                    ? 'Low Delhivery Wallet Balance (Recharge wallet)'
+                                    : order.shipment.errorMessage}
+                                </div>
+                              )}
                               <div className="actions-cell-row">
                                 {(order.hasNdrException || ['FAILED_DELIVERY', 'RTO_INITIATED'].includes(order.status)) && (
                                   <button

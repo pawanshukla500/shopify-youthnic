@@ -876,26 +876,40 @@ router.get('/orders/:id/label', async (req: Request, res: Response): Promise<voi
     }
 
     let waybillNumber = order.shipment?.waybillNumber;
-    if (!waybillNumber) {
+    if (!waybillNumber || order.shipment?.status === 'ERROR') {
+      const err = order.shipment?.errorMessage || 'Order has not been manifested on Delhivery yet. Please click Dispatch to generate an official waybill.';
+      res.status(400).send(`
+        <!DOCTYPE html>
+        <html>
+        <head><title>Label Not Available - ${order.shopifyOrderName}</title></head>
+        <body style="font-family:sans-serif; text-align:center; padding: 50px 20px; background:#f8fafc;">
+          <div style="max-width:500px; margin:0 auto; background:#fff; padding:30px; border-radius:12px; box-shadow:0 4px 12px rgba(0,0,0,0.08); border:1px solid #e2e8f0;">
+            <h2 style="color:#ef4444; margin-top:0;">⚠️ Label Not Available</h2>
+            <p style="color:#334155; font-size:15px; line-height:1.5;">${err}</p>
+            <p style="color:#64748b; font-size:13px;">Please ensure your Delhivery One prepaid wallet has sufficient balance, then click <strong>Dispatch</strong> on the OMS dashboard to create this shipment in the Delhivery portal.</p>
+            <button onclick="window.close()" style="margin-top:15px; padding:8px 20px; background:#0f172a; color:#fff; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Close Window</button>
+          </div>
+        </body>
+        </html>
+      `);
+      return;
+    }
+
+    // Attempt to retrieve official Delhivery S3 PDF if not already saved
+    if (!order.shipment?.labelUrl) {
       try {
-        waybillNumber = await delhiveryService.fetchSingleWaybill();
-        await prisma.shipment.upsert({
-          where: { orderId: order.id },
-          create: {
-            orderId: order.id,
-            waybillNumber,
-            paymentMode: order.paymentMethod === 'COD' ? 'COD' : 'Prepaid',
-            codAmount: order.paymentMethod === 'COD' ? order.totalAmount : 0,
-            declaredValue: order.totalAmount,
-            status: 'CREATED',
-          },
-          update: {
-            waybillNumber,
-            status: 'CREATED',
-          },
-        });
+        const officialUrl = await delhiveryService.generateLabel(waybillNumber);
+        if (officialUrl && officialUrl.startsWith('http')) {
+          if (order.shipment) {
+            order.shipment.labelUrl = officialUrl;
+          }
+          await prisma.shipment.update({
+            where: { orderId: order.id },
+            data: { labelUrl: officialUrl },
+          });
+        }
       } catch {
-        waybillNumber = `PENDING-${order.shopifyOrderName.replace('#', '')}`;
+        // Fallback to thermal HTML
       }
     }
 
@@ -960,31 +974,33 @@ router.post('/orders/bulk-labels', async (req: Request, res: Response): Promise<
     }
 
     const orderList: Array<{ order: any; waybillNumber: string }> = [];
+    const skippedOrders: string[] = [];
+
     for (const order of orders) {
-      let waybill = order.shipment?.waybillNumber;
-      if (!waybill) {
-        try {
-          waybill = await delhiveryService.fetchSingleWaybill();
-          await prisma.shipment.upsert({
-            where: { orderId: order.id },
-            create: {
-              orderId: order.id,
-              waybillNumber: waybill,
-              paymentMode: order.paymentMethod === 'COD' ? 'COD' : 'Prepaid',
-              codAmount: order.paymentMethod === 'COD' ? order.totalAmount : 0,
-              declaredValue: order.totalAmount,
-              status: 'CREATED',
-            },
-            update: {
-              waybillNumber: waybill,
-              status: 'CREATED',
-            },
-          });
-        } catch {
-          waybill = `PENDING-${order.shopifyOrderName.replace('#', '')}`;
-        }
+      const waybill = order.shipment?.waybillNumber;
+      if (!waybill || order.shipment?.status === 'ERROR') {
+        skippedOrders.push(order.shopifyOrderName);
+        continue;
       }
       orderList.push({ order, waybillNumber: waybill });
+    }
+
+    if (!orderList.length) {
+      res.status(400).send(`
+        <!DOCTYPE html>
+        <html>
+        <head><title>No Manifested Labels</title></head>
+        <body style="font-family:sans-serif; text-align:center; padding: 50px 20px; background:#f8fafc;">
+          <div style="max-width:500px; margin:0 auto; background:#fff; padding:30px; border-radius:12px; box-shadow:0 4px 12px rgba(0,0,0,0.08); border:1px solid #e2e8f0;">
+            <h2 style="color:#ef4444; margin-top:0;">⚠️ No Manifested Orders Selected</h2>
+            <p style="color:#334155; font-size:15px; line-height:1.5;">The selected orders (${skippedOrders.join(', ')}) do not have active Delhivery waybills yet.</p>
+            <p style="color:#64748b; font-size:13px;">Please dispatch them first to generate genuine Delhivery shipping labels.</p>
+            <button onclick="window.close()" style="margin-top:15px; padding:8px 20px; background:#0f172a; color:#fff; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Close Window</button>
+          </div>
+        </body>
+        </html>
+      `);
+      return;
     }
 
     const html = shippingLabelService.generateBulkPrintableLabelsPage(orderList);

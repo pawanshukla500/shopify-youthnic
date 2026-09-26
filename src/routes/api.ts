@@ -2156,7 +2156,9 @@ router.get('/delhivery/label/:waybill', async (req: Request, res: Response): Pro
   }
 });
 
-// Direct PDF download stream for a waybill shipping label
+// Direct PDF download stream for a waybill shipping label.
+// Also mirrors the PDF into Firebase Storage so the Order Detail page can render it
+// even after Delhivery's signed URL expires (Delhivery URLs typically expire in 24h).
 router.get('/delhivery/label/:waybill/download', async (req: Request, res: Response): Promise<void> => {
   try {
     const waybill = req.params.waybill;
@@ -2165,11 +2167,46 @@ router.get('/delhivery/label/:waybill/download', async (req: Request, res: Respo
       res.status(404).json({ error: 'Shipping label PDF not available for this waybill.' });
       return;
     }
-    // Stream PDF buffer directly with download attachment headers
-    const pdfResponse = await axios.get(labelUrl, { responseType: 'stream', timeout: 20000 });
+    const pdfResponse = await axios.get<ArrayBuffer>(labelUrl, {
+      responseType: 'arraybuffer',
+      timeout: 20000,
+      maxContentLength: 8 * 1024 * 1024, // 8 MiB safety cap
+    });
+
+    // Mirror into Firebase Storage so the URL is durable (delhivery signed URLs expire).
+    // Best-effort — never block the operator download on a storage failure.
+    try {
+      const ship = await prisma.shipment.findFirst({
+        where: { waybillNumber: waybill },
+        select: { id: true, orderId: true, labelStoragePath: true },
+      });
+      if (ship && !ship.labelStoragePath) {
+        const uploaded = await firebaseService.uploadOrderArtifact(
+          ship.orderId,
+          'label',
+          Buffer.from(pdfResponse.data),
+          'application/pdf',
+          'pdf'
+        );
+        await prisma.shipment.update({
+          where: { id: ship.id },
+          data: { labelStoragePath: uploaded.path },
+        });
+        logger.info('Mirrored shipping label to Firebase Storage', {
+          waybill,
+          path: uploaded.path,
+        });
+      }
+    } catch (mirrorErr: any) {
+      logger.warn('Label Firebase mirror failed (non-fatal)', {
+        waybill,
+        error: mirrorErr.message,
+      });
+    }
+
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="delhivery-label-${waybill}.pdf"`);
-    pdfResponse.data.pipe(res);
+    res.send(Buffer.from(pdfResponse.data));
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

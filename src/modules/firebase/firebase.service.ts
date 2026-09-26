@@ -280,6 +280,34 @@ export class FirebaseService {
   }
 
   /**
+   * Upload an order-scoped artifact to Firebase Storage.
+   * Files are organized per-order so access can be granted per-order later.
+   *
+   * Path convention:
+   *   orders/{orderId}/{type}-{epochMs}.{ext}
+   *
+   * Example: orders/12345/epod-1719430000000.jpg
+   *
+   * Public by default — order artifacts (labels, POD, QC) are operator-facing and
+   * never contain customer payment data. Tighten with `isPublic=false` if you ever
+   * store receipts or proofs of identity.
+   */
+  public async uploadOrderArtifact(
+    orderId: number | string,
+    type: 'label' | 'epod' | 'signature' | 'qc' | 'sorter' | 'invoice' | 'misc',
+    buffer: Buffer,
+    contentType: string,
+    extension: string,
+    isPublic = true
+  ): Promise<{ url: string; path: string; bucket: string }> {
+    const safeOrderId = String(orderId).replace(/[^a-zA-Z0-9_-]/g, '_');
+    const safeType = type.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const safeExt = extension.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() || 'bin';
+    const destinationPath = `orders/${safeOrderId}/${safeType}-${Date.now()}.${safeExt}`;
+    return this.uploadBuffer(destinationPath, buffer, contentType, isPublic);
+  }
+
+  /**
    * Probe Firebase Cloud Storage bucket health and connectivity
    */
   public async checkStorageHealth(): Promise<{

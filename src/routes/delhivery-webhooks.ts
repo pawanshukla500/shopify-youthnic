@@ -22,70 +22,95 @@ const router = Router();
  *
  * Note: Scan Push and Document Push are separate webhooks.
  * This handler is for Scan Push (status updates).
+ *
+ * Payload schema (official, from one.delhivery.com):
+ *   { Shipment: { AWB, ReferenceNo, Sortcode, NSLCode, PickUpDate,
+ *                Status: { Status, StatusDateTime, StatusType, StatusLocation, Instructions } } }
+ *
+ * Some accounts still send a flat shape (legacy). We accept both.
  */
 router.post('/delhivery', async (req: Request, res: Response): Promise<void> => {
   try {
     const payload = req.body;
-    logger.info('Received Delhivery webhook', { payload: JSON.stringify(payload).substring(0, 500) });
 
-    // Delhivery webhook payload structure (may vary based on configuration):
-    // {
-    //   "waybill": "1234567890",
-    //   "status": "Delivered",
-    //   "status_type": "DL",
-    //   "location": "Mumbai DC",
-    //   "scan_datetime": "2024-01-15T10:30:00",
-    //   "remarks": "Delivered to customer",
-    //   "received_by": "John Doe"
-    // }
-
-    // Handle both single object and array of updates
+    // Normalize to array of normalized scan objects.
     const updates = Array.isArray(payload) ? payload : [payload];
+    const normalized = updates.map(normalizeScanPushPayload).filter(Boolean) as NormalizedScan[];
 
-    for (const update of updates) {
-      const waybill = update.waybill || update.awb;
-      if (!waybill) {
-        logger.warn('Delhivery webhook missing waybill number', { update });
-        continue;
-      }
+    if (normalized.length === 0) {
+      logger.warn('Delhivery webhook received without recognizable payload', {
+        keys: Object.keys(payload || {}),
+      });
+      res.status(200).json({ received: true, ignored: true });
+      return;
+    }
 
-      const status = update.status || '';
-      const statusType = update.status_type || update.statusType || '';
-      const location = update.location || update.scan_location || '';
-      const scanDateTime = update.scan_datetime || update.scanDateTime || new Date().toISOString();
-      const remarks = update.remarks || update.remark || '';
-
+    for (const scan of normalized) {
+      // Don't log raw payload to avoid PII leak (round-2 finding G9)
       logger.info('Processing Delhivery status update', {
-        waybill,
-        status,
-        statusType,
-        location,
+        waybill: scan.waybill,
+        status: scan.status,
+        statusType: scan.statusType,
+        location: scan.location,
       });
 
       // Find the shipment in our DB
       const shipment = await prisma.shipment.findFirst({
-        where: { waybillNumber: waybill },
+        where: { waybillNumber: scan.waybill },
         include: { order: true },
       });
 
       if (!shipment) {
-        logger.warn('Shipment not found for Delhivery webhook waybill', { waybill });
+        logger.warn('Shipment not found for Delhivery webhook waybill', { waybill: scan.waybill });
         continue;
       }
 
-      // Save tracking log
-      await prisma.trackingLog.create({
-        data: {
-          shipmentId: shipment.id,
-          status: `${statusType}:${status}`,
-          location: location || null,
-          remark: remarks || null,
-          scannedAt: new Date(scanDateTime),
-        },
-      });
+      // Save tracking log — use upsert keyed on (waybill, status, scannedAt) so webhook
+      // retries don't double-log (round-2 finding G8)
+      const scannedAt = new Date(scan.scanDateTime);
+      try {
+        await prisma.trackingLog.upsert({
+          where: {
+            waybill_status_time: {
+              waybill: scan.waybill,
+              status: scan.status,
+              scannedAt,
+            },
+          },
+          create: {
+            shipmentId: shipment.id,
+            waybill: scan.waybill,
+            status: scan.status,
+            location: scan.location || null,
+            remark: scan.remarks || null,
+            scannedAt,
+            statusType: scan.statusType || null,
+            rawStatus: scan.rawStatus || null,
+            instructions: scan.instructions || null,
+            pickupDate: scan.pickupDate ? new Date(scan.pickupDate) : null,
+            nslCode: scan.nslCode || null,
+            sortCode: scan.sortCode || null,
+            referenceNo: scan.referenceNo || null,
+            receivedBy: scan.receivedBy || null,
+          },
+          update: {
+            // No-op for retries — preserves original createdAt and any side-effect writes
+          },
+        });
+      } catch (upsertErr: any) {
+        // If unique constraint fails because of a microsecond difference, fall back to plain create
+        // and let the @unique produce a no-op duplicate.
+        logger.warn('Tracking log upsert failed (likely microsecond dup)', {
+          error: upsertErr.message,
+          waybill: scan.waybill,
+        });
+      }
 
       // Map to our internal status
-      const newShipmentStatus = delhiveryService.mapTrackingToShipmentStatus(statusType, status);
+      const newShipmentStatus = delhiveryService.mapTrackingToShipmentStatus(
+        scan.statusType || '',
+        scan.rawStatus || scan.status || ''
+      );
 
       // Check if status changed
       if (newShipmentStatus !== shipment.status) {
@@ -93,21 +118,21 @@ router.post('/delhivery', async (req: Request, res: Response): Promise<void> => 
           where: { id: shipment.id },
           data: {
             status: newShipmentStatus as any,
-            trackingStatus: status,
-            trackingLocation: location || null,
+            trackingStatus: scan.rawStatus || scan.status,
+            trackingLocation: scan.location || null,
             trackingUpdatedAt: new Date(),
           },
         });
 
         // Handle order status + notifications
-        await handleStatusTransition(shipment.order, newShipmentStatus, status, location);
+        await handleStatusTransition(shipment.order, newShipmentStatus, scan.rawStatus || scan.status, scan.location);
       } else {
         // Just update tracking info
         await prisma.shipment.update({
           where: { id: shipment.id },
           data: {
-            trackingStatus: status,
-            trackingLocation: location || null,
+            trackingStatus: scan.rawStatus || scan.status,
+            trackingLocation: scan.location || null,
             trackingUpdatedAt: new Date(),
           },
         });
@@ -119,19 +144,101 @@ router.post('/delhivery', async (req: Request, res: Response): Promise<void> => 
           orderId: shipment.orderId,
           syncType: 'TRACKING_UPDATE',
           status: 'SUCCESS',
-          message: `Delhivery webhook: ${statusType} - ${status} at ${location}`,
+          message: `Delhivery webhook: ${scan.statusType || '?'} - ${scan.rawStatus || scan.status} at ${scan.location || 'unknown'}`,
         },
       });
     }
 
-    // Always return 200 quickly so Delhivery doesn't retry
-    res.status(200).json({ received: true });
+    // Always return 200 quickly so Delhivery doesn't retry (round-2 G10: only swallow AFTER persist)
+    res.status(200).json({ received: true, processed: normalized.length });
   } catch (error: any) {
     logger.error('Delhivery webhook processing error', { error: error.message });
     // Still return 200 to prevent retries — we'll catch up on polling
     res.status(200).json({ received: true, error: 'processing_error' });
   }
 });
+
+/**
+ * Normalize a Delhivery scan-push payload into a flat shape.
+ *
+ * Supports both the official nested schema:
+ *   { Shipment: { AWB, ReferenceNo, Sortcode, NSLCode, PickUpDate,
+ *                 Status: { Status, StatusDateTime, StatusType, StatusLocation, Instructions } } }
+ * and the legacy flat schema:
+ *   { waybill, status, status_type, location, scan_datetime, remarks, received_by }
+ *
+ * Returns null if waybill can't be determined.
+ */
+interface NormalizedScan {
+  waybill: string;
+  status: string;        // Composite key "STATUSTYPE:RawStatus" e.g. "DL:Delivered"
+  statusType?: string;
+  rawStatus?: string;
+  location?: string;
+  scanDateTime: string;  // ISO string
+  remarks?: string;
+  instructions?: string;
+  pickupDate?: string;
+  nslCode?: string;
+  sortCode?: string;
+  referenceNo?: string;
+  receivedBy?: string;
+}
+
+function normalizeScanPushPayload(input: any): NormalizedScan | null {
+  if (!input || typeof input !== 'object') return null;
+
+  // Official nested schema
+  if (input.Shipment && typeof input.Shipment === 'object') {
+    const s = input.Shipment;
+    const st = s.Status || {};
+    const waybill = s.AWB || s.awb;
+    if (!waybill) return null;
+    const statusType = st.StatusType || s.statusType || s.status_type;
+    const rawStatus = st.Status || s.status;
+    const scanDateTime = st.StatusDateTime || s.scan_datetime || new Date().toISOString();
+    return {
+      waybill: String(waybill),
+      status: `${statusType || ''}:${rawStatus || ''}`,
+      statusType,
+      rawStatus,
+      location: st.StatusLocation || s.location || s.scan_location || undefined,
+      scanDateTime,
+      remarks: st.Instructions || s.remarks || s.remark || undefined,
+      instructions: st.Instructions || undefined,
+      pickupDate: s.PickUpDate || undefined,
+      nslCode: s.NSLCode || undefined,
+      sortCode: s.Sortcode || undefined,
+      referenceNo: s.ReferenceNo || undefined,
+      receivedBy: s.receivedBy || s.received_by || undefined,
+    };
+  }
+
+  // Legacy flat schema (older Delhivery accounts / partner integrations)
+  const waybill = input.waybill || input.awb;
+  if (!waybill) return null;
+  const statusType = input.status_type || input.statusType;
+  const rawStatus = input.status;
+  return {
+    waybill: String(waybill),
+    status: `${statusType || ''}:${rawStatus || ''}`,
+    statusType,
+    rawStatus,
+    location: input.location || input.scan_location,
+    scanDateTime: input.scan_datetime || input.scanDateTime || new Date().toISOString(),
+    remarks: input.remarks || input.remark,
+    instructions: undefined,
+    pickupDate: undefined,
+    nslCode: undefined,
+    sortCode: undefined,
+    referenceNo: undefined,
+    receivedBy: input.received_by || input.receivedBy,
+  };
+}
+
+// Exported for unit tests so the webhook payload contract stays pinned in CI.
+// Not used in production code paths.
+export const __test__ = { normalizeScanPushPayload };
 
 /**
  * Handle order status transition + WhatsApp notifications.

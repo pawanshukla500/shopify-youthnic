@@ -190,12 +190,7 @@ class OrderService {
    * Returns true when the order was written to the database.
    */
   async syncOrderFromWebhook(order: ShopifyOrderWebhook): Promise<boolean> {
-    const existing = await prisma.order.findUnique({
-      where: { shopifyOrderId: order.id.toString() },
-      select: { id: true },
-    });
-
-    if (!existing && new Date(order.created_at) < config.shopify.syncStartDate) {
+    if (new Date(order.created_at) < config.shopify.syncStartDate) {
       logger.info('Ignoring webhook for order created before the sync start date', {
         orderName: order.name,
         createdAt: order.created_at,
@@ -246,7 +241,15 @@ class OrderService {
       const awb = shipment.AWB;
       const statusDesc = shipment.Status?.Status || 'Manifested';
       const statusType = shipment.Status?.StatusType || 'UD';
-      const mappedStatus = delhiveryService.mapTrackingToShipmentStatus(statusType, statusDesc);
+      const instructions = shipment.Status?.Instructions || '';
+      const isSellerCancelled = instructions.toLowerCase().includes('seller cancelled');
+      const isPickedUp = !!shipment.PickedUpDate || /in transit|dispatched|out for delivery/i.test(statusDesc);
+
+      const mappedStatus = isSellerCancelled
+        ? 'CANCELLED'
+        : isPickedUp
+        ? delhiveryService.mapTrackingToShipmentStatus(statusType, statusDesc)
+        : 'CREATED';
 
       await prisma.shipment.upsert({
         where: { orderId: order.id },
@@ -257,25 +260,34 @@ class OrderService {
           paymentMode: order.paymentMethod === 'COD' ? 'COD' : 'Prepaid',
           codAmount: order.paymentMethod === 'COD' ? order.totalAmount : 0,
           declaredValue: order.totalAmount,
-          status: mappedStatus === 'DELIVERED' ? 'DELIVERED' : 'CREATED',
-          trackingStatus: statusDesc,
+          status: mappedStatus === 'DELIVERED' ? 'DELIVERED' : mappedStatus === 'CANCELLED' ? 'CANCELLED' : 'CREATED',
+          trackingStatus: isSellerCancelled ? 'Not Picked (Seller cancelled)' : statusDesc,
           trackingLocation: shipment.Status?.StatusLocation || null,
           trackingUpdatedAt: new Date(),
         },
         update: {
           waybillNumber: awb,
           courier: 'Delhivery',
-          trackingStatus: statusDesc,
+          status: mappedStatus === 'DELIVERED' ? 'DELIVERED' : mappedStatus === 'CANCELLED' ? 'CANCELLED' : 'CREATED',
+          trackingStatus: isSellerCancelled ? 'Not Picked (Seller cancelled)' : statusDesc,
           trackingLocation: shipment.Status?.StatusLocation || null,
           trackingUpdatedAt: new Date(),
         },
       });
 
-      // Also update order status if needed
+      // Orders that are Manifested or Not Picked remain DISPATCH_PENDING (with AWB recorded)
+      // They are only marked IN_TRANSIT or DELIVERED once physically picked up by Delhivery
+      let newOrderStatus: any = 'DISPATCH_PENDING';
+      if (mappedStatus === 'DELIVERED') {
+        newOrderStatus = 'DELIVERED';
+      } else if (isPickedUp) {
+        newOrderStatus = 'IN_TRANSIT';
+      }
+
       await prisma.order.update({
         where: { id: order.id },
         data: {
-          status: mappedStatus === 'DELIVERED' ? 'DELIVERED' : 'SHIPPED',
+          status: newOrderStatus,
         },
       });
 

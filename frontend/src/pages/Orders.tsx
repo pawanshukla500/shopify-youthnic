@@ -27,30 +27,26 @@ export type PaymentChannelFilter = 'ALL' | 'DELHIVERY_PENDING_AWB' | 'NEEDS_DISP
 
 export function renderRtoRiskBadge(order: Order) {
   if (order.paymentMethod !== 'COD') {
-    return (
-      <span className="rto-risk-pill low" title="Prepaid order · Zero RTO Risk (Payment captured upfront)">
-        ✓ Prepaid (0% Risk)
-      </span>
-    )
+    return null
   }
   const level = order.rtoRiskLevel || 'MEDIUM'
   if (level === 'LOW') {
     return (
-      <span className="rto-risk-pill low" title={order.rtoRiskReason || 'Low risk COD order'}>
-        ✓ Low RTO Risk {order.deliverOrderCount ? `(${order.deliverOrderCount} Deliv.)` : ''}
+      <span className="micro-badge micro-badge-emerald" title={order.rtoRiskReason || 'Low risk COD order'}>
+        ✓ Low RTO
       </span>
     )
   }
   if (level === 'HIGH') {
     return (
-      <span className="rto-risk-pill high" title={order.rtoRiskReason || 'High risk COD order'}>
-        ⛔ High RTO Risk
+      <span className="micro-badge micro-badge-red" title={order.rtoRiskReason || 'High risk COD order'}>
+        ⛔ High RTO
       </span>
     )
   }
   return (
-    <span className="rto-risk-pill medium" title={order.rtoRiskReason || 'Medium risk · Unconfirmed COD'}>
-      ⚡ Medium Risk
+    <span className="micro-badge micro-badge-amber" title={order.rtoRiskReason || 'Medium risk · Unconfirmed COD'}>
+      ⚡ Med RTO
     </span>
   )
 }
@@ -96,33 +92,42 @@ export function isDispatchNeeded(order: Order): boolean {
 
 export function ShopifyTagList({ tags }: { tags?: string | null }) {
   if (!tags) return null
-  const tagList = tags.split(',').map((t) => t.trim()).filter(Boolean)
+  const tagList = tags
+    .split(',')
+    .map((t) => t.trim())
+    .filter(Boolean)
+    // Filter out tags that duplicate badges already shown in column 1
+    .filter((t) => {
+      const lower = t.toLowerCase()
+      if (lower.startsWith('delhivery-awb')) return false
+      if (lower === 'dispatched' || lower === 'shipped') return false
+      if (lower === 'cod' || lower === 'prepaid' || lower === 'pre-paid') return false
+      if (lower === 'cod_confirmed' || lower === 'cod confirmed' || lower === 'confirmed') return false
+      if (lower === 'kc_abc') return false
+      return true
+    })
   if (!tagList.length) return null
 
   return (
-    <div className="shopify-tags-list" style={{ marginTop: '4px', gap: '3px' }}>
-      {tagList.slice(0, 3).map((tag) => {
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', flexWrap: 'wrap' }}>
+      {tagList.slice(0, 2).map((tag) => {
         const lower = tag.toLowerCase()
         let modifier = 'tag-default'
         if (lower.includes('weight-mismatch') || lower.includes('mismatch')) modifier = 'tag-mismatch'
         else if (lower.includes('rebilled')) modifier = 'tag-rebilled'
         else if (lower.includes('gokwik') || lower.includes('kwik')) modifier = 'tag-gokwik'
-        else if (lower.includes('prepaid')) modifier = 'tag-prepaid'
         else if (lower.includes('upi')) modifier = 'tag-upi'
-        else if (lower.includes('cod_confirmed') || lower.includes('confirmed')) modifier = 'tag-prepaid'
-        else if (lower.includes('cod')) modifier = 'tag-cod'
-        else if (lower.includes('dispatch') || lower.includes('awb')) modifier = 'tag-dispatched'
         else if (lower.includes('refund') || lower.includes('cancelled')) modifier = 'tag-refund'
 
         return (
-          <span key={tag} className={`shopify-tag-pill ${modifier}`} title={`Shopify Tag: ${tag}`}>
+          <span key={tag} className={`shopify-tag-pill ${modifier}`} style={{ fontSize: '9px', padding: '1px 5px', height: '17px', lineHeight: '15px' }} title={`Shopify Tag: ${tag}`}>
             {tag}
           </span>
         )
       })}
-      {tagList.length > 3 && (
-        <span className="shopify-tag-pill tag-default" title={tagList.slice(3).join(', ')}>
-          +{tagList.length - 3}
+      {tagList.length > 2 && (
+        <span className="shopify-tag-pill tag-default" style={{ fontSize: '9px', padding: '1px 5px', height: '17px', lineHeight: '15px' }} title={tagList.slice(2).join(', ')}>
+          +{tagList.length - 2}
         </span>
       )}
     </div>
@@ -930,19 +935,18 @@ export function Orders() {
           onClick={() => setChannelFilter(channelFilter === 'DELHIVERY_PENDING_AWB' ? 'ALL' : 'DELHIVERY_PENDING_AWB')}
           style={{
             cursor: 'pointer',
-            border: channelFilter === 'DELHIVERY_PENDING_AWB' ? '2px solid #059669' : '1px solid #bbf7d0',
-            background: channelFilter === 'DELHIVERY_PENDING_AWB' ? '#ecfdf5' : '#f0fdf4',
+            border: channelFilter === 'DELHIVERY_PENDING_AWB' ? '2px solid #059669' : undefined,
           }}
         >
-          <div className="metric-icon" style={{ background: '#dcfce7', color: '#16a34a' }}>
-            <Icon name="truck" size={19} />
+          <div className="metric-icon" style={{ background: '#ecfdf5', color: '#16a34a' }}>
+            <Icon name="truck" size={17} />
           </div>
           <div>
-            <span className="metric-label" style={{ color: '#15803d', display: 'flex', alignItems: 'center', gap: '5px' }}>
-              <span className="pulsing-green-dot" /> 🛍️ Delhivery One Channel
+            <span className="metric-label" style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+              <span className="pulsing-green-dot" /> Delhivery Channel
             </span>
-            <strong style={{ color: '#166534' }}>{metrics.pendingAwbCount} Pending AWB</strong>
-            <span className="metric-sub" style={{ color: '#15803d' }}>Shopify: youthnic2024</span>
+            <strong>{metrics.pendingAwbCount} Pending AWB</strong>
+            <span className="metric-sub" style={{ color: '#16a34a' }}>Shopify: youthnic2024</span>
           </div>
         </div>
 
@@ -1233,64 +1237,66 @@ export function Orders() {
                       </td>
 
                       {/* 1. Order & Date */}
-                      <td style={{ verticalAlign: 'top', minWidth: '220px' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                      <td style={{ verticalAlign: 'top', minWidth: '190px' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
                             <a className="order-link">{order.shopifyOrderName}</a>
                             {order.isDispatchOverdue && (
-                              <span className="sla-delayed-badge" title={`Overdue for dispatch by ${order.dispatchOverdueHours}h (>24h SLA). Expedite shipping.`}>
-                                ⚠️ Overdue (+{order.dispatchOverdueHours}h)
+                              <span className="sla-delayed-badge" style={{ fontSize: '9px', padding: '1px 5px' }} title={`Overdue for dispatch by ${order.dispatchOverdueHours}h (>24h SLA). Expedite shipping.`}>
+                                ⚠️ +{order.dispatchOverdueHours}h
                               </span>
                             )}
                             {(order.hasNdrException || order.status === 'FAILED_DELIVERY') && (
-                              <span className="ndr-badge" title="Delivery attempt failed. Action needed with courier / customer.">
-                                🚨 NDR Exception
+                              <span className="ndr-badge" style={{ fontSize: '9px', padding: '1px 5px' }} title="Delivery attempt failed. Action needed with courier / customer.">
+                                🚨 NDR
                               </span>
                             )}
                             {order.hasUrgentSupport && (
                               <span
                                 className="sla-delayed-badge"
-                                style={{ background: '#fee2e2', color: '#b91c1c', borderColor: '#fca5a5', cursor: 'pointer' }}
+                                style={{ background: '#fee2e2', color: '#b91c1c', borderColor: '#fca5a5', cursor: 'pointer', fontSize: '9px', padding: '1px 5px' }}
                                 onClick={(e) => {
                                   e.stopPropagation()
                                   navigate(`/support?search=${order.shopifyOrderName}`)
                                 }}
                                 title={`Urgent customer support inquiry: ${order.supportFlag || 'Action needed'}. Click to view in Support Desk.`}
                               >
-                                🚨 Support Claim ({order.supportFlag || 'Urgent'})
+                                🚨 Support
                               </span>
                             )}
-                            {needsDispatch && (
-                              isPrepaid ? (
-                                <div className="prepaid-dispatch-flag" title="Customer paid in advance · Priority dispatch needed">
-                                  ⚡ Prepaid Dispatch
-                                </div>
-                              ) : (
-                                <div className="cod-confirmed-dispatch-flag" title="Customer intent confirmed · Priority dispatch needed">
-                                  ✓ COD Confirmed
-                                </div>
-                              )
-                            )}
                           </div>
-                          <span className="cell-muted" style={{ fontSize: '11px', display: 'block' }}>
-                            {formatDate(order.shopifyCreatedAt || order.createdAt)} · ID: {order.shopifyOrderId}
+                          <span className="cell-muted" style={{ fontSize: '10.5px', display: 'block', margin: '1px 0 2px' }}>
+                            {formatDate(order.shopifyCreatedAt || order.createdAt)} · #{order.shopifyOrderId}
                           </span>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
-                            <span style={{ background: '#f0fdf4', color: '#15803d', border: '1px solid #bbf7d0', borderRadius: '4px', padding: '1.5px 6px', fontSize: '10px', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '3px', flexWrap: 'wrap' }}>
+                            <span className="micro-badge micro-badge-channel" title="Store: youthnic2024.myshopify.com">
                               🛍️ Shopify
                             </span>
-                            {!order.shipment?.waybillNumber && order.fulfillmentStatus !== 'fulfilled' && order.status !== 'CANCELLED' ? (
-                              <span style={{ background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', borderRadius: '4px', padding: '1.5px 6px', fontSize: '10px', fontWeight: 700, whiteSpace: 'nowrap' }}>
-                                📦 Delhivery: Pending AWB
+                            {order.shipment?.status === 'CANCELLED' ? (
+                              <span className="micro-badge micro-badge-gray" title="Delhivery shipment cancelled by seller">
+                                ✕ Cancelled
                               </span>
                             ) : order.shipment?.waybillNumber ? (
-                              <span style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', borderRadius: '4px', padding: '1.5px 6px', fontSize: '10px', fontWeight: 700, whiteSpace: 'nowrap' }}>
-                                ✓ Delhivery Manifested
+                              <span className="micro-badge micro-badge-green" title={`AWB: ${order.shipment.waybillNumber}`}>
+                                ✓ Manifested
+                              </span>
+                            ) : order.fulfillmentStatus !== 'fulfilled' && order.status !== 'CANCELLED' ? (
+                              <span className="micro-badge micro-badge-blue" title="Pending Delhivery AWB assignment">
+                                📦 Pending AWB
                               </span>
                             ) : null}
+                            {isPrepaid ? (
+                              <span className="micro-badge micro-badge-blue" title="Prepaid order">
+                                ⚡ Prepaid
+                              </span>
+                            ) : (
+                              <span className="micro-badge micro-badge-amber" title="Cash on Delivery">
+                                COD
+                              </span>
+                            )}
                             {renderRtoRiskBadge(order)}
+                            <ShopifyTagList tags={order.tags} />
                           </div>
-                          <ShopifyTagList tags={order.tags} />
                         </div>
                       </td>
 

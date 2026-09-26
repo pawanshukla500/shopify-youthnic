@@ -25,10 +25,7 @@ class Scheduler {
         logger.info('[CRON] Running order sync...');
         try {
           const count = await orderService.syncOrdersFromShopify();
-          // Auto-dispatch any new orders
-          if (count > 0) {
-            await orderService.autoDispatchPendingOrders();
-          }
+          logger.info('[CRON] Order sync completed', { count });
         } catch (error: any) {
           logger.error('[CRON] Order sync failed', { error: error.message });
         }

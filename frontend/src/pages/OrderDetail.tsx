@@ -1,0 +1,2295 @@
+import { useMemo, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useNavigate, useParams } from 'react-router-dom'
+import { api, apiError, getOrder, getPayment, getShippingEstimate, reconcileAwbWithOrder, confirmCodOrder, cancelOrder, deleteOrder, processRtoRefund, handleNdrAction, sendOrderWhatsAppTrigger } from '../api'
+import { formatDate, formatMoney, labelize } from '../lib'
+import { Button, ButtonGroup, EmptyState, ErrorBox, FormField, Icon, LoadingState, PageIntro, Panel, PanelHeading, StatusBadge, useDocumentTitle, useToast } from '../components/UI'
+import type { Order, OrderItem } from '../types'
+
+export function OrderDetail() {
+  useDocumentTitle('Order detail')
+  const { id = '' } = useParams()
+  const navigate = useNavigate()
+  const toast = useToast()
+  const queryClient = useQueryClient()
+  const orderQuery = useQuery({ queryKey: ['order', id], queryFn: () => getOrder(id), enabled: Boolean(id), retry: false })
+  const paymentQuery = useQuery({ queryKey: ['payment', id], queryFn: () => getPayment(id), enabled: Boolean(id), retry: false })
+  const estimateQuery = useQuery({ queryKey: ['shipping-estimate', id], queryFn: () => getShippingEstimate(id), enabled: Boolean(id), retry: false })
+  const [selected, setSelected] = useState<Record<number, number>>({})
+  const [reason, setReason] = useState('')
+  const [returnTracking, setReturnTracking] = useState('')
+  const [carrier, setCarrier] = useState('Delhivery')
+
+  // Cancel / Delete / Confirm COD States
+  const [showCancelModal, setShowCancelModal] = useState(false)
+  const [cancelReason, setCancelReason] = useState('customer')
+  const [isCancelling, setIsCancelling] = useState(false)
+
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [isConfirmingCod, setIsConfirmingCod] = useState(false)
+
+  // NDR Resolution States
+  const [showNdrModal, setShowNdrModal] = useState(false)
+  const [ndrActionType, setNdrActionType] = useState<'RE-ATTEMPT' | 'RTO'>('RE-ATTEMPT')
+  const [ndrNotes, setNdrNotes] = useState('')
+  const [isSubmittingNdr, setIsSubmittingNdr] = useState(false)
+
+  // RTO Refund State
+  const [isRefundingRto, setIsRefundingRto] = useState(false)
+
+  // Kapso WhatsApp Modal State
+  const [showWhatsAppModal, setShowWhatsAppModal] = useState(false)
+  const [whatsAppTrigger, setWhatsAppTrigger] = useState('COD_CONFIRMATION')
+  const [whatsAppCustomText, setWhatsAppCustomText] = useState('')
+  const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false)
+
+  const order = orderQuery.data
+
+  const reconcileMutation = useMutation({
+    mutationFn: async () => {
+      const waybill = order?.shipment?.waybillNumber
+      if (!waybill) throw new Error('No waybill assigned to reconcile.')
+      return await reconcileAwbWithOrder(waybill)
+    },
+    onSuccess: (data) => {
+      toast.toast('success', `Charges reconciled with Delhivery · Net billed cost: ₹${data.reconciliation.netBilledCost}`)
+      queryClient.invalidateQueries({ queryKey: ['order', id] })
+      queryClient.invalidateQueries({ queryKey: ['shipping-estimate', id] })
+      queryClient.invalidateQueries({ queryKey: ['orders'] })
+    },
+    onError: (err) => toast.toast('error', apiError(err)),
+  })
+
+  const action = useMutation({
+    mutationFn: async (kind: 'dispatch' | 'verify' | 'label' | 'cancel') => {
+      if (kind === 'dispatch') return (await api.post(`/api/orders/${id}/dispatch`)).data
+      if (kind === 'verify') return (await api.post(`/api/orders/${id}/payment/verify`)).data
+      if (kind === 'label') return (await api.get(`/api/delhivery/label/${order?.shipment?.waybillNumber}`)).data
+      return (await api.post(`/api/delhivery/shipment/${order?.shipment?.waybillNumber}/cancel`)).data
+    },
+    onSuccess: async (data, kind) => {
+      if (kind === 'label') {
+        if (data.labelUrl) window.open(data.labelUrl, '_blank', 'noopener,noreferrer')
+        toast.toast('success', 'Label ready. Opening in a new tab.')
+      } else if (kind === 'verify') {
+        toast.toast(data.verified ? 'success' : 'error', data.reason ?? (data.verified ? 'Payment verified.' : 'Payment could not be verified.'))
+      } else if (kind === 'dispatch') {
+        toast.toast('success', `Order dispatched${data.waybillNumber ? ` · Waybill ${data.waybillNumber}` : ''}.`)
+      } else toast.toast('success', 'Shipment cancellation requested.')
+      await queryClient.invalidateQueries({ queryKey: ['order', id] })
+      await queryClient.invalidateQueries({ queryKey: ['orders'] })
+      await queryClient.invalidateQueries({ queryKey: ['payment', id] })
+    },
+    onError: (error) => toast.toast('error', apiError(error)),
+  })
+
+  const refundMutation = useMutation({
+    mutationFn: async () => {
+      const confirmed = window.confirm(`Issue Shopify refund of ${formatMoney(order?.totalAmount || 0)} for order ${order?.shopifyOrderName}? This will process the refund directly through Shopify.`)
+      if (!confirmed) throw new Error('Refund cancelled by user.')
+      return (await api.post(`/api/orders/${id}/refund`, {
+        amount: order?.totalAmount,
+        reason: 'Customer return / Merchant refund',
+      })).data
+    },
+    onSuccess: async (data) => {
+      toast.toast('success', `Shopify refund processed successfully · ID: ${data.refundId}`)
+      await queryClient.invalidateQueries({ queryKey: ['order', id] })
+      await queryClient.invalidateQueries({ queryKey: ['orders'] })
+      await queryClient.invalidateQueries({ queryKey: ['payment', id] })
+      await queryClient.invalidateQueries({ queryKey: ['returns'] })
+    },
+    onError: (error) => toast.toast('error', apiError(error)),
+  })
+
+  const returnMutation = useMutation({
+    mutationFn: async () => {
+      if (!reason.trim()) throw new Error('Add a reason before creating the return.')
+      const items = Object.entries(selected).filter(([, quantity]) => quantity > 0).map(([orderItemId, quantity]) => ({ orderItemId: Number(orderItemId), quantity }))
+      if (!items.length) throw new Error('Select at least one item to return.')
+      return (await api.post(`/api/orders/${id}/returns`, {
+        returnReason: reason.trim(),
+        items,
+        returnWaybillNumber: returnTracking.trim() || undefined,
+        carrierName: carrier.trim() || 'Delhivery',
+        triggerShopify: true,
+      })).data
+    },
+    onSuccess: async (data) => {
+      toast.toast('success', `Return created with waybill ${data.returnWaybill}${data.shopifyTriggered ? ' · Synced to Shopify' : ''}.`)
+      setSelected({})
+      setReason('')
+      setReturnTracking('')
+      await queryClient.invalidateQueries({ queryKey: ['order', id] })
+      await queryClient.invalidateQueries({ queryKey: ['returns'] })
+    },
+    onError: (error) => toast.toast('error', apiError(error)),
+  })
+
+  const canDispatch = order && ['NEW', 'DISPATCH_PENDING'].includes(order.status)
+  if (orderQuery.isLoading) return <LoadingState label="Loading order detail…" />
+  if (orderQuery.isError || !order) return <><PageIntro eyebrow="Order detail" title="Order not found" /><ErrorBox message={orderQuery.error ? apiError(orderQuery.error) : 'The requested order could not be found.'} /></>
+  const payment = paymentQuery.data
+
+  const cleanPhone = (order.customerPhone || '').replace(/\D/g, '')
+
+  const copyAddress = () => {
+    const fullAddr = [order.customerAddress, order.customerCity, `${order.customerState} ${order.customerPincode}`, order.customerCountry].filter(Boolean).join(', ')
+    navigator.clipboard.writeText(fullAddr)
+    toast.toast('success', 'Full customer delivery address copied to clipboard!')
+  }
+
+  const copyWaybill = (awb: string) => {
+    navigator.clipboard.writeText(awb)
+    toast.toast('success', `Delhivery Waybill ${awb} copied!`)
+  }
+
+  const isPrepaid = (
+    order.paymentMethod === 'Pre-paid' ||
+    order.paymentMethod === 'PREPAID' ||
+    (order.paymentGateway || '').toLowerCase().includes('gokwik') ||
+    (order.paymentGateway || '').toLowerCase().includes('phonepe') ||
+    Boolean(order.tags && /prepaid|gokwik|upi/i.test(order.tags))
+  ) && order.paymentMethod !== 'COD'
+
+  const isCodConf = Boolean(order.tags && /cod_confirmed|cod confirmed|cod-confirmed|confirmed/i.test(order.tags))
+
+  const isDispatchNeeded = (isPrepaid || isCodConf) && ['NEW', 'DISPATCH_PENDING'].includes(order.status) && !order.shipment?.waybillNumber
+
+  // Single order COD confirmation handler
+  const handleConfirmCod = async () => {
+    if (!order) return
+    setIsConfirmingCod(true)
+    try {
+      const res = await confirmCodOrder(order.id)
+      toast.toast('success', res.message || 'Order confirmed and ready for dispatch!')
+      await queryClient.invalidateQueries({ queryKey: ['order', id] })
+      await queryClient.invalidateQueries({ queryKey: ['orders'] })
+    } catch (err: any) {
+      toast.toast('error', apiError(err))
+    } finally {
+      setIsConfirmingCod(false)
+    }
+  }
+
+  // Cancel order handler
+  const handleConfirmCancel = async () => {
+    if (!order) return
+    setIsCancelling(true)
+    try {
+      const res = await cancelOrder(order.id, cancelReason)
+      toast.toast('success', res.message || `Order ${order.shopifyOrderName} cancelled.`)
+      setShowCancelModal(false)
+      await queryClient.invalidateQueries({ queryKey: ['order', id] })
+      await queryClient.invalidateQueries({ queryKey: ['orders'] })
+    } catch (err: any) {
+      toast.toast('error', apiError(err))
+    } finally {
+      setIsCancelling(false)
+    }
+  }
+
+  // Delete order handler
+  const handleConfirmDelete = async () => {
+    if (!order) return
+    setIsDeleting(true)
+    try {
+      const res = await deleteOrder(order.id)
+      toast.toast('success', res.message || `Order ${order.shopifyOrderName} deleted.`)
+      setShowDeleteModal(false)
+      navigate('/orders')
+    } catch (err: any) {
+      toast.toast('error', apiError(err))
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
+  // NDR Resolution Handler
+  const handleConfirmNdr = async () => {
+    if (!order) return
+    setIsSubmittingNdr(true)
+    try {
+      const res = await handleNdrAction(order.id, ndrActionType, ndrNotes)
+      toast.toast('success', res.message || 'NDR action scheduled successfully!')
+      setShowNdrModal(false)
+      setNdrNotes('')
+      await queryClient.invalidateQueries({ queryKey: ['order', id] })
+      await queryClient.invalidateQueries({ queryKey: ['orders'] })
+    } catch (err: any) {
+      toast.toast('error', apiError(err))
+    } finally {
+      setIsSubmittingNdr(false)
+    }
+  }
+
+  // RTO Auto-Refund (Prepaid via Shopify to Easebuzz/PhonePe) or Restock (COD) Handler
+  const handleProcessRtoRefund = async () => {
+    if (!order) return
+    if (order.paymentMethod === 'COD') {
+      setIsRefundingRto(true)
+      try {
+        const res = await processRtoRefund(order.id)
+        toast.toast('success', res.message || 'COD Order marked RTO Delivered & Restocked.')
+        await queryClient.invalidateQueries({ queryKey: ['order', id] })
+        await queryClient.invalidateQueries({ queryKey: ['orders'] })
+      } catch (err: any) {
+        toast.toast('error', apiError(err))
+      } finally {
+        setIsRefundingRto(false)
+      }
+      return
+    }
+
+    const confirmed = window.confirm(
+      `Issue automated full refund of ₹${order.totalAmount} for ${order.shopifyOrderName}? Funds will route back through ${order.paymentProvider || order.paymentGateway || 'Easebuzz / PhonePe'}.`
+    )
+    if (!confirmed) return
+
+    setIsRefundingRto(true)
+    try {
+      const res = await processRtoRefund(order.id)
+      toast.toast('success', res.message || 'Auto-refund processed successfully!')
+      await queryClient.invalidateQueries({ queryKey: ['order', id] })
+      await queryClient.invalidateQueries({ queryKey: ['orders'] })
+    } catch (err: any) {
+      toast.toast('error', apiError(err))
+    } finally {
+      setIsRefundingRto(false)
+    }
+  }
+
+  // Kapso WhatsApp Trigger Handler
+  const handleSendWhatsApp = async () => {
+    if (!order) return
+    setIsSendingWhatsApp(true)
+    try {
+      await sendOrderWhatsAppTrigger(order.id, {
+        trigger: whatsAppTrigger,
+        customText: whatsAppCustomText,
+      })
+      toast.toast('success', `WhatsApp notification sent to ${order.customerPhone} via Kapso!`)
+      setShowWhatsAppModal(false)
+      setWhatsAppCustomText('')
+      await queryClient.invalidateQueries({ queryKey: ['order', id] })
+    } catch (err: any) {
+      toast.toast('error', apiError(err))
+    } finally {
+      setIsSendingWhatsApp(false)
+    }
+  }
+
+  return <>
+    {/* ─── 21st.dev Style Modern Header Card ──────────────────── */}
+    <div className="detail-header-card">
+      <div className="detail-header-left">
+        <button
+          type="button"
+          className="detail-back-btn"
+          onClick={() => navigate('/orders')}
+          title="Back to Orders table"
+        >
+          <Icon name="arrow" size={13} />
+          <span>Orders</span>
+        </button>
+
+        <div>
+          <h1 className="order-number-title">
+            <span>{order.shopifyOrderName}</span>
+            <button
+              type="button"
+              className="order-copy-chip"
+              onClick={() => {
+                navigator.clipboard.writeText(order.shopifyOrderName)
+                toast.toast('success', `Order name ${order.shopifyOrderName} copied!`)
+              }}
+              title="Copy order name"
+            >
+              <Icon name="copy" size={14} />
+            </button>
+            <span className="shopify-channel-pill">
+              <Icon name="tag" size={11} />
+              {order.salesChannel || 'Shopify Store'}
+            </span>
+          </h1>
+
+          <div className="detail-header-sub">
+            <span>Customer: <strong>{order.customerName}</strong></span>
+            <span>·</span>
+            <span>Placed: <strong>{formatDate(order.shopifyCreatedAt || order.createdAt)}</strong></span>
+            <span>·</span>
+            <span>Destination: <strong>{order.customerCity}, {order.customerState}</strong></span>
+          </div>
+        </div>
+      </div>
+
+      <div className="detail-header-right">
+        <StatusBadge status={order.status} />
+
+        {order.hasUrgentSupport && (
+          <span
+            className="prepaid-dispatch-flag"
+            style={{ background: '#fee2e2', color: '#b91c1c', borderColor: '#fca5a5', cursor: 'pointer' }}
+            onClick={() => navigate(`/support?search=${order.shopifyOrderName}`)}
+            title={`Urgent support ticket pending: ${order.supportFlag || 'Action required'}. Click to open Support Desk.`}
+          >
+            <span className="pulsing-red-dot" />
+            🚨 Support: {order.supportFlag || 'Urgent Inquiry'}
+          </span>
+        )}
+
+        {isDispatchNeeded && (
+          isPrepaid ? (
+            <span className="prepaid-dispatch-flag">
+              <span className="pulsing-red-dot" />
+              ⚡ Prepaid Dispatch
+            </span>
+          ) : (
+            <span className="cod-confirmed-dispatch-flag">
+              <span className="pulsing-red-dot" />
+              ✓ COD Confirmed
+            </span>
+          )
+        )}
+
+        {/* Kapso WhatsApp Notification Trigger */}
+        <Button
+          className="button-secondary"
+          onClick={() => setShowWhatsAppModal(true)}
+          title="Send WhatsApp trigger via Kapso"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', height: '34px', padding: '0 12px' }}
+        >
+          <Icon name="message" size={14} />
+          <span>WhatsApp Alert</span>
+        </Button>
+
+        {/* GST Tax Invoice & Delhivery Label Quick Actions */}
+        <button
+          type="button"
+          className="button button-secondary"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', height: '34px', padding: '0 12px', color: '#059669', borderColor: '#a7f3d0', background: '#ecfdf5', fontWeight: 650, cursor: 'pointer' }}
+          onClick={() => window.open(`/api/orders/${order.id}/invoice`, '_blank')}
+          title="View and print official GST Commercial Tax Invoice"
+        >
+          🧾 GST Tax Invoice
+        </button>
+
+        <button
+          type="button"
+          className="button button-secondary"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', height: '34px', padding: '0 12px', color: '#0284c7', borderColor: '#bae6fd', background: '#f0f9ff', fontWeight: 650, cursor: 'pointer' }}
+          onClick={() => window.open(`/api/orders/${order.id}/label`, '_blank')}
+          title="View and print 4R Delhivery Thermal Shipping Label"
+        >
+          🏷️ Shipping Label
+        </button>
+
+        {/* Resend Email Notification Trigger */}
+        <Button
+          className="button-secondary"
+          onClick={() => navigate(`/communications?orderId=${order.id}`)}
+          title="Send transit delay, dispatch update, or NDR alert email to customer"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', height: '34px', padding: '0 12px', color: '#6366f1', borderColor: 'rgba(99,102,241,0.3)' }}
+        >
+          <Icon name="mail" size={14} />
+          <span>Email Customer</span>
+        </Button>
+
+        {/* 21st.dev Segmented Button Group */}
+        {canDispatch && isDispatchNeeded ? (
+          <Button
+            className="button-primary"
+            style={{
+              background: isPrepaid ? 'linear-gradient(135deg, #2563eb, #1d4ed8)' : 'linear-gradient(135deg, #059669, #047857)',
+              borderColor: isPrepaid ? '#1d4ed8' : '#047857',
+            }}
+            disabled={action.isPending}
+            loading={action.isPending && action.variables === 'dispatch'}
+            onClick={() => action.mutate('dispatch')}
+          >
+            <Icon name="package" size={15} />
+            {isPrepaid ? '⚡ Priority Delhivery Dispatch' : '⚡ Dispatch Confirmed COD'}
+          </Button>
+        ) : canDispatch && !isCodConf && (order.paymentMethod === 'COD' || order.shipment?.paymentMode === 'COD') ? (
+          <Button
+            className="btn-confirm-cod-sm"
+            style={{ height: '34px', padding: '0 14px' }}
+            disabled={isConfirmingCod}
+            loading={isConfirmingCod}
+            onClick={handleConfirmCod}
+          >
+            <Icon name="check" size={15} />
+            Confirm COD Order
+          </Button>
+        ) : order.shipment?.waybillNumber ? (
+          <ButtonGroup>
+            {order.shipment.courier?.toLowerCase() === 'delhivery' && (
+              <>
+                <Button
+                  className="button-secondary"
+                  disabled={action.isPending}
+                  loading={action.isPending && action.variables === 'label'}
+                  onClick={() => action.mutate('label')}
+                  title="Print Delhivery thermal shipping label"
+                >
+                  <Icon name="external" size={14} />
+                  Print Label
+                </Button>
+                <a
+                  className="button button-secondary"
+                  href={`/api/delhivery/label/${order.shipment.waybillNumber}/download`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  download={`delhivery-label-${order.shipment.waybillNumber}.pdf`}
+                  title="Download official PDF label"
+                >
+                  <Icon name="download" size={14} />
+                  PDF Label
+                </a>
+              </>
+            )}
+            <a
+              className="button button-secondary"
+              href={
+                order.shipment.labelUrl ||
+                (order.shipment.courier?.toLowerCase() === 'ekart'
+                  ? `https://t.proship.in/${order.shipment.waybillNumber}`
+                  : `https://www.delhivery.com/track/package/${order.shipment.waybillNumber}`)
+              }
+              target="_blank"
+              rel="noopener noreferrer"
+              title={`Track directly on ${order.shipment.courier || 'Carrier'}`}
+            >
+              <Icon name="route" size={14} />
+              Track ({order.shipment.courier || 'Carrier'})
+            </a>
+          </ButtonGroup>
+        ) : null}
+
+        {/* Cancellation or Deletion Trigger */}
+        {order.status !== 'CANCELLED' ? (
+          <button
+            type="button"
+            className="btn-row-action danger"
+            style={{ height: '34px', padding: '0 12px', fontSize: '11.5px' }}
+            onClick={() => setShowCancelModal(true)}
+            title="Cancel order and trigger Delhivery cancellation"
+          >
+            ✕ Cancel Order
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="btn-row-action danger"
+            style={{ height: '34px', padding: '0 12px', fontSize: '11.5px' }}
+            onClick={() => setShowDeleteModal(true)}
+            title="Permanently delete cancelled order"
+          >
+            🗑️ Delete Order
+          </button>
+        )}
+      </div>
+    </div>
+
+    {/* ─── UI UX Max Pro: Urgent Dispatch Alert Banner ─────── */}
+    {isDispatchNeeded && (
+      <div className="prepaid-alert-banner">
+        <div className="prepaid-alert-left">
+          <div className="prepaid-alert-icon" style={{ background: isPrepaid ? '#2563eb' : '#059669' }}>⚡</div>
+          <div>
+            <h4 className="prepaid-alert-title" style={{ color: isPrepaid ? '#1e3a8a' : '#065f46' }}>
+              {isPrepaid ? 'URGENT: PREPAID ORDER AWAITING DISPATCH' : 'COD CONFIRMED: READY FOR IMMEDIATE DISPATCH'}
+            </h4>
+            <p className="prepaid-alert-desc">
+              {isPrepaid
+                ? `Customer has paid in advance via ${order.paymentGateway || 'Prepaid / UPI'}. Prioritize Delhivery AWB manifest and handover immediately.`
+                : `Customer purchase intent has been verified via COD confirmation tag. Ready to manifest and book Delhivery shipment.`}
+            </p>
+          </div>
+        </div>
+        <Button
+          className="button-primary"
+          style={{
+            background: isPrepaid ? '#2563eb' : '#059669',
+            borderColor: isPrepaid ? '#1d4ed8' : '#047857',
+            color: '#fff',
+            whiteSpace: 'nowrap'
+          }}
+          disabled={!canDispatch || action.isPending}
+          loading={action.isPending && action.variables === 'dispatch'}
+          onClick={() => action.mutate('dispatch')}
+        >
+          <Icon name="package" size={16} />
+          {isPrepaid ? 'Priority Delhivery Dispatch' : 'Dispatch with Delhivery'}
+        </Button>
+      </div>
+    )}
+
+    {/* Delayed Dispatch SLA Overdue Alert */}
+    {order.isDispatchOverdue && (
+      <div className="sla-warning-banner" style={{ marginTop: '12px', marginBottom: '12px' }}>
+        <div className="sla-warning-left">
+          <div className="sla-warning-icon">⚠️</div>
+          <div>
+            <h4 className="sla-warning-title">
+              Dispatch SLA Breached (+{order.dispatchOverdueHours || 24} Hours Overdue)
+            </h4>
+            <p className="sla-warning-desc">
+              Order placed on {formatDate(order.shopifyCreatedAt || order.createdAt)}. Expected dispatch SLA (within 24 hours) was {formatDate(order.expectedDispatchAt || new Date(new Date(order.shopifyCreatedAt || order.createdAt).getTime() + 24 * 3600 * 1000).toISOString())}. Expedite Delhivery manifest immediately to avoid customer cancellation.
+            </p>
+          </div>
+        </div>
+        {canDispatch && (
+          <Button
+            className="button-primary"
+            style={{ background: '#be123c', borderColor: '#9f1239', color: '#fff', whiteSpace: 'nowrap' }}
+            disabled={action.isPending}
+            loading={action.isPending && action.variables === 'dispatch'}
+            onClick={() => action.mutate('dispatch')}
+          >
+            <Icon name="package" size={15} />
+            Dispatch Urgently
+          </Button>
+        )}
+      </div>
+    )}
+
+    {/* NDR Delivery Exception Alert Card */}
+    {(order.hasNdrException || ['FAILED_DELIVERY', 'RTO_INITIATED'].includes(order.status)) && (
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '12px',
+          background: 'linear-gradient(135deg, #fff1f2 0%, #ffe4e6 100%)',
+          border: '1.5px solid #fecdd3',
+          borderLeft: '5px solid #e11d48',
+          borderRadius: '8px',
+          padding: '12px 16px',
+          marginTop: '12px',
+          marginBottom: '12px',
+          boxShadow: '0 2px 4px rgba(225, 29, 72, 0.08)',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div
+            style={{
+              width: '36px',
+              height: '36px',
+              borderRadius: '50%',
+              background: '#ffe4e6',
+              color: '#e11d48',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '18px',
+              flexShrink: 0,
+            }}
+          >
+            🚨
+          </div>
+          <div>
+            <h4 style={{ margin: 0, color: '#9f1239', fontSize: '14px', fontWeight: 800 }}>
+              NDR Delivery Exception · Action Required
+            </h4>
+            <p style={{ margin: '2px 0 0 0', color: '#be123c', fontSize: '12px' }}>
+              Courier ({order.shipment?.courier || 'Delhivery'}) reported: <strong>{order.shipment?.trackingStatus || 'Delivery attempt failed'}</strong>
+              {order.shipment?.trackingLocation ? ` at ${order.shipment.trackingLocation}` : ''}.
+              Resolve delivery exception with courier re-attempt or mark RTO.
+            </p>
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <Button
+            className="button-primary"
+            style={{ background: '#be123c', borderColor: '#9f1239', color: '#fff', whiteSpace: 'nowrap' }}
+            onClick={() => setShowNdrModal(true)}
+          >
+            <Icon name="alert" size={15} />
+            Resolve NDR Exception
+          </Button>
+        </div>
+      </div>
+    )}
+
+    {/* RTO Delivery & Auto-Refund Banner */}
+    {(order.status === 'RTO_DELIVERED' || order.status === 'RTO_INITIATED') && (
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '12px',
+          background: order.paymentMethod !== 'COD' ? '#eff6ff' : '#f0fdf4',
+          border: order.paymentMethod !== 'COD' ? '1.5px solid #bfdbfe' : '1.5px solid #bbf7d0',
+          borderLeft: order.paymentMethod !== 'COD' ? '5px solid #2563eb' : '5px solid #16a34a',
+          borderRadius: '8px',
+          padding: '12px 16px',
+          marginTop: '12px',
+          marginBottom: '12px',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div
+            style={{
+              width: '36px',
+              height: '36px',
+              borderRadius: '50%',
+              background: order.paymentMethod !== 'COD' ? '#dbeafe' : '#dcfce7',
+              color: order.paymentMethod !== 'COD' ? '#1d4ed8' : '#15803d',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '18px',
+              flexShrink: 0,
+            }}
+          >
+            {order.paymentMethod !== 'COD' ? '💸' : '📦'}
+          </div>
+          <div>
+            <h4 style={{ margin: 0, color: order.paymentMethod !== 'COD' ? '#1e40af' : '#166534', fontSize: '14px', fontWeight: 800 }}>
+              {order.status === 'RTO_DELIVERED' ? 'Returned Package Safely Received at Warehouse' : 'Package in Transit to Warehouse (RTO Initiated)'}
+            </h4>
+            <p style={{ margin: '2px 0 0 0', color: order.paymentMethod !== 'COD' ? '#1d4ed8' : '#15803d', fontSize: '12px' }}>
+              {order.paymentMethod !== 'COD'
+                ? order.financialStatus === 'refunded'
+                  ? `Full refund of ₹${order.totalAmount} has been processed via Shopify back to ${order.paymentProvider || order.paymentGateway || 'Easebuzz / PhonePe'}. Tags applied: RTO_DELIVERED, RTO_AUTO_REFUNDED.`
+                  : `Prepaid Order · Package has been returned. Click below to issue full refund of ₹${order.totalAmount} via Shopify directly to ${order.paymentProvider || order.paymentGateway || 'Easebuzz / PhonePe'}.`
+                : 'COD Order · Returned goods restocked into warehouse inventory. No customer refund required.'}
+            </p>
+          </div>
+        </div>
+        {order.paymentMethod !== 'COD' && order.financialStatus !== 'refunded' && (
+          <Button
+            className="button-primary"
+            style={{ background: '#2563eb', borderColor: '#1d4ed8', color: '#fff', whiteSpace: 'nowrap' }}
+            disabled={isRefundingRto}
+            loading={isRefundingRto}
+            onClick={handleProcessRtoRefund}
+          >
+            <Icon name="check" size={15} />
+            💸 Process Auto-Refund
+          </Button>
+        )}
+      </div>
+    )}
+
+    {/* ─── UI UX Max Pro: Order Lifecycle Stepper ─────────────────── */}
+    <OrderLifecycleStepper order={order} />
+
+    <div className="detail-grid">
+      <div className="detail-main">
+        {/* ─── Customer Details & Quick Communication Actions ─── */}
+        <Panel>
+          <PanelHeading eyebrow="Customer & Destination" title="Delivery details" />
+          <div className="customer-detail">
+            <div className="customer-avatar">
+              {order.customerName.split(' ').map((part) => part[0]).slice(0, 2).join('').toUpperCase()}
+            </div>
+            <div>
+              <strong style={{ fontSize: '14px', color: '#0f172a' }}>{order.customerName}</strong>
+              <span style={{ fontSize: '11px', color: '#475569' }}>{order.customerPhone || 'No phone'}</span>
+              <span style={{ fontSize: '11px', color: '#64748b' }}>{order.customerEmail ?? 'No email provided'}</span>
+            </div>
+          </div>
+
+          <div className="address-card">
+            <Icon name="pin" size={20} />
+            <div style={{ flex: 1 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <strong style={{ fontSize: '12px', color: '#1e293b' }}>{order.customerAddress}</strong>
+                <span className="state-badge">{order.customerState}</span>
+              </div>
+              <span style={{ fontSize: '11px', color: '#475569', marginTop: '2px', display: 'block' }}>
+                {order.customerCity}, {order.customerState} — <strong className="mono" style={{ color: '#0f172a' }}>{order.customerPincode}</strong>
+              </span>
+              <span style={{ fontSize: '10px', color: '#94a3b8' }}>{order.customerCountry}</span>
+            </div>
+          </div>
+
+          {/* Quick Contact & Action Buttons */}
+          <div className="customer-quick-actions">
+            {cleanPhone ? (
+              <a
+                className="quick-action-btn quick-action-wa"
+                href={`https://wa.me/91${cleanPhone}?text=${encodeURIComponent(`Hi ${order.customerName}, this is regarding your order ${order.shopifyOrderName} from our store.`)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <Icon name="message" size={14} />
+                WhatsApp Chat
+              </a>
+            ) : (
+              <button className="quick-action-btn quick-action-wa" disabled>
+                <Icon name="message" size={14} /> No WhatsApp
+              </button>
+            )}
+
+            {cleanPhone ? (
+              <a className="quick-action-btn quick-action-call" href={`tel:${cleanPhone}`}>
+                <Icon name="phone" size={14} />
+                Call Customer
+              </a>
+            ) : (
+              <button className="quick-action-btn quick-action-call" disabled>
+                <Icon name="phone" size={14} /> No Phone
+              </button>
+            )}
+
+            <button className="quick-action-btn quick-action-copy" onClick={copyAddress}>
+              <Icon name="copy" size={14} />
+              Copy Address
+            </button>
+          </div>
+        </Panel>
+
+        {/* ─── UI UX Max Pro: Order Contents Table ─────────────── */}
+        <Panel style={{ paddingBottom: 0 }}>
+          <PanelHeading
+            eyebrow={`${order.items?.length ?? 0} line items`}
+            title="Order contents"
+            action={<span style={{ fontSize: '11px', color: '#64748b' }}>Currency: <strong>{order.currency}</strong></span>}
+          />
+          <ItemsTable items={order.items ?? []} currency={order.currency} order={order} />
+        </Panel>
+
+        {/* ─── Carrier Shipment Details ───────────────────────── */}
+        <Panel>
+          <PanelHeading
+            eyebrow="Carrier Logistics"
+            title={
+              order.shipment?.courier?.toLowerCase() === 'delhivery' ? (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                  <img src="/logos/delhivery.png" alt="Delhivery" style={{ height: '13px', objectFit: 'contain' }} />
+                  <span>Delhivery Shipment</span>
+                </span>
+              ) : (
+                `${order.shipment?.courier || 'Carrier'} Shipment`
+              )
+            }
+            action={order.shipment?.status && <StatusBadge status={order.shipment.status} />}
+          />
+          {order.shipment ? (
+            <>
+              <div className="shipment-summary">
+                <div>
+                  <span className="detail-label">{order.shipment.courier || 'Carrier'} Waybill</span>
+                  {order.shipment.waybillNumber ? (
+                    <div
+                      className="waybill-chip"
+                      onClick={() => copyWaybill(order.shipment?.waybillNumber || '')}
+                      title="Click to copy waybill"
+                    >
+                      <span>{order.shipment.waybillNumber}</span>
+                      <Icon name="copy" size={12} />
+                    </div>
+                  ) : (
+                    <strong>Not assigned</strong>
+                  )}
+                </div>
+                <div>
+                  <span className="detail-label">Carrier</span>
+                  <strong style={{ color: '#0f172a' }}>{order.shipment.courier || 'Delhivery'}</strong>
+                </div>
+                <div>
+                  <span className="detail-label">Tracking status</span>
+                  <strong style={{ color: '#0f172a' }}>{order.shipment.trackingStatus ?? 'Awaiting carrier scan'}</strong>
+                </div>
+                <div>
+                  <span className="detail-label">Last location</span>
+                  <strong>{order.shipment.trackingLocation ?? '—'}</strong>
+                </div>
+                {order.shipment.paymentMode === 'COD' && (
+                  <div style={{ gridColumn: '1 / -1', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '7px', padding: '10px 12px', marginTop: '6px' }}>
+                    <span className="detail-label" style={{ color: '#92400e' }}>
+                      COD Collection · {formatMoney(order.shipment.codAmount, order.currency)}
+                    </span>
+                    <strong style={{ color: '#78350f', fontSize: '11.5px' }}>
+                      {order.shipment.codRemitted
+                        ? `Remitted by ${order.shipment.courier || 'Carrier'}${order.shipment.codRemittanceRef ? ` · Ref: ${order.shipment.codRemittanceRef}` : ''}`
+                        : order.shipment.codCollected
+                        ? 'Collected at delivery · Awaiting bank remittance'
+                        : 'Cash pending delivery collection'}
+                    </strong>
+                  </div>
+                )}
+              </div>
+
+              <div className="shipment-actions">
+                {order.shipment.courier?.toLowerCase() === 'delhivery' && (
+                  <>
+                    <Button
+                      className="button-secondary"
+                      disabled={!order.shipment.waybillNumber || action.isPending}
+                      loading={action.isPending && action.variables === 'label'}
+                      onClick={() => action.mutate('label')}
+                    >
+                      <Icon name="external" size={16} />
+                      Print Shipping Label
+                    </Button>
+
+                    {order.shipment.waybillNumber && (
+                      <a
+                        className="button button-secondary"
+                        href={`/api/delhivery/label/${order.shipment.waybillNumber}/download`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        download={`delhivery-label-${order.shipment.waybillNumber}.pdf`}
+                        title="Directly download official Delhivery PDF shipping label"
+                      >
+                        <Icon name="download" size={16} />
+                        Download PDF Label
+                      </a>
+                    )}
+                  </>
+                )}
+
+                {order.shipment.waybillNumber && (
+                  <a
+                    className="button button-secondary"
+                    href={
+                      order.shipment.labelUrl ||
+                      (order.shipment.courier?.toLowerCase() === 'ekart'
+                        ? `https://t.proship.in/${order.shipment.waybillNumber}`
+                        : `https://www.delhivery.com/track/package/${order.shipment.waybillNumber}`)
+                    }
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <Icon name="route" size={16} />
+                    Track on {order.shipment.courier || 'Carrier'}
+                  </a>
+                )}
+
+                {order.shipment.courier?.toLowerCase() === 'delhivery' && (
+                  <Button
+                    className="button-danger-ghost"
+                    disabled={!order.shipment.waybillNumber || action.isPending || order.shipment.status === 'CANCELLED'}
+                    loading={action.isPending && action.variables === 'cancel'}
+                    onClick={() => {
+                      if (window.confirm('Cancel this Delhivery shipment?')) {
+                        action.mutate('cancel')
+                      }
+                    }}
+                  >
+                    <Icon name="close" size={16} />
+                    Cancel shipment
+                  </Button>
+                )}
+              </div>
+            </>
+          ) : (
+            <EmptyState
+              title="Shipment not created"
+              description="Click 'Dispatch with Delhivery' to generate waybill and assign shipment."
+              icon="route"
+            />
+          )}
+        </Panel>
+
+        {/* ─── Carrier Logistics Charges / Economics ──────────────── */}
+        <Panel>
+          <PanelHeading
+            eyebrow="Carrier economics"
+            title={
+              order.shipment?.courier && order.shipment.courier.toLowerCase() !== 'delhivery' ? (
+                `${order.shipment.courier} Logistics`
+              ) : (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                  <img src="/logos/delhivery.png" alt="Delhivery" style={{ height: '13px', objectFit: 'contain' }} />
+                  <span>Delhivery Logistics Charges</span>
+                </span>
+              )
+            }
+          />
+          {order.shipment?.courier && order.shipment.courier.toLowerCase() !== 'delhivery' ? (
+            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#1e293b', fontWeight: 700, fontSize: '13px' }}>
+                <Icon name="package" size={18} />
+                <span>Fulfilled via {order.shipment.courier} (AWB: {order.shipment.waybillNumber})</span>
+              </div>
+              <p style={{ margin: '8px 0 0 0', fontSize: '12px', color: '#64748b', lineHeight: 1.5 }}>
+                This order was dispatched via external carrier <strong>{order.shipment.courier}</strong>. Live tracking status is synced directly from Shopify fulfillments. Delhivery rate estimation and Delhivery ONE ledger audits apply only to orders dispatched through Delhivery.
+              </p>
+            </div>
+          ) : estimateQuery.isLoading ? (
+            <LoadingState label="Calculating carrier logistics charges…" />
+          ) : estimateQuery.data ? (
+            <div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', background: '#f8fafc', padding: '12px', borderRadius: '8px', marginBottom: '10px' }}>
+                <div>
+                  <span className="detail-label">Origin Pincode</span>
+                  <strong className="mono" style={{ color: '#1e3a8a' }}>{estimateQuery.data.originPincode} (Surat)</strong>
+                </div>
+                <div>
+                  <span className="detail-label">Destination Pincode</span>
+                  <strong className="mono" style={{ color: '#0f172a' }}>{estimateQuery.data.destinationPincode} ({order.customerCity})</strong>
+                </div>
+                <div>
+                  <span className="detail-label">Chargeable Weight</span>
+                  <strong>{estimateQuery.data.chargeableWeightGrams}g</strong>
+                </div>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 14px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px' }}>
+                <div>
+                  <span style={{ fontSize: '10px', color: '#1e40af', textTransform: 'uppercase', fontWeight: 700 }}>
+                    Estimated Shipping Cost
+                  </span>
+                  <strong style={{ display: 'block', fontSize: '20px', color: '#1e3a8a', fontWeight: 800 }}>
+                    {formatMoney(Number(estimateQuery.data.charges?.total_amount ?? estimateQuery.data.charges?.shippingCost ?? estimateQuery.data.charges?.cost ?? estimateQuery.data.charges?.amount ?? 0))}
+                  </strong>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <span style={{ display: 'block', fontSize: '11px', color: '#1d4ed8', fontWeight: 700 }}>
+                    Mode: {order.paymentMethod === 'COD' ? 'Surface COD' : 'Surface Prepaid'}
+                  </span>
+                  <span style={{ fontSize: '9.5px', color: '#64748b' }}>Zone: Domestic Surface</span>
+                </div>
+              </div>
+
+              {/* ─── Actual Billed Breakdown from Delhivery Wallet Ledger ─── */}
+              {estimateQuery.data?.actualAudit && estimateQuery.data.actualAudit.hasLedgerRecords && (
+                <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: '1px dashed #cbd5e1' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontSize: '11px', fontWeight: 800, color: '#0f172a' }}>
+                        🧾 Actual Delhivery Billed Charges (Wallet Ledger)
+                      </span>
+                      {order.shippingAudited && (
+                        <span style={{ fontSize: '9.5px', background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', padding: '1px 6px', borderRadius: '4px', fontWeight: 700 }}>
+                          Synced & Audited
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <Button
+                        className="button-secondary"
+                        onClick={() => reconcileMutation.mutate()}
+                        loading={reconcileMutation.isPending}
+                        style={{ height: '26px', fontSize: '10.5px', padding: '0 8px' }}
+                        title="Reconcile latest charges with Delhivery Ledger"
+                      >
+                        <Icon name="refresh" size={12} />
+                        Reconcile
+                      </Button>
+                      <button
+                        type="button"
+                        onClick={() => navigate(`/ledger?awb=${order.shipment?.waybillNumber}`)}
+                        style={{ background: 'none', border: 0, padding: 0, color: '#2563eb', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}
+                      >
+                        View in Ledger →
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 3-Step Delhivery Re-weighment & Billing Lifecycle */}
+                  {estimateQuery.data.actualAudit.hasReversal ? (
+                    <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '9px', padding: '12px', marginBottom: '10px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                        <span style={{ fontSize: '10.5px', fontWeight: 800, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                          Delhivery Billing Adjustment Lifecycle
+                        </span>
+                        <span style={{ fontSize: '10px', background: '#fee2e2', color: '#b91c1c', fontWeight: 800, padding: '2px 7px', borderRadius: '4px' }}>
+                          Re-weighed Adjustment
+                        </span>
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' }}>
+                        {/* Step 1: Initial Manifest Debit */}
+                        <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '8px' }}>
+                          <span style={{ fontSize: '9.5px', color: '#64748b', display: 'block', fontWeight: 700 }}>1. Manifest Debit</span>
+                          <strong style={{ color: '#be123c', fontSize: '13px', display: 'block', margin: '2px 0' }}>
+                            -{formatMoney(estimateQuery.data.actualAudit.initialCost ?? 70.22, 'INR')}
+                          </strong>
+                          <span style={{ fontSize: '9.5px', color: '#475569' }}>
+                            at {estimateQuery.data.actualAudit.declaredWeightGrams ?? 400}g
+                          </span>
+                        </div>
+
+                        {/* Step 2: Delhivery Reversal Credit */}
+                        <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '6px', padding: '8px' }}>
+                          <span style={{ fontSize: '9.5px', color: '#166534', display: 'block', fontWeight: 700 }}>2. Reversal Credit</span>
+                          <strong style={{ color: '#16a34a', fontSize: '13px', display: 'block', margin: '2px 0' }}>
+                            +{formatMoney(estimateQuery.data.actualAudit.reversalAmount ?? 70.22, 'INR')}
+                          </strong>
+                          <span style={{ fontSize: '9.5px', color: '#166534' }}>
+                            Initial charge reversed
+                          </span>
+                        </div>
+
+                        {/* Step 3: Revised Machine Weighment Debit */}
+                        <div style={{ background: '#fff1f2', border: '1px solid #fecdd3', borderRadius: '6px', padding: '8px' }}>
+                          <span style={{ fontSize: '9.5px', color: '#9f1239', display: 'block', fontWeight: 700 }}>3. Revised Debit</span>
+                          <strong style={{ color: '#e11d48', fontSize: '13px', display: 'block', margin: '2px 0' }}>
+                            -{formatMoney(estimateQuery.data.actualAudit.revisedCost ?? 333.57, 'INR')}
+                          </strong>
+                          <span style={{ fontSize: '9.5px', color: '#9f1239' }}>
+                            at {estimateQuery.data.actualAudit.capturedWeightGrams ?? 2450.2}g
+                          </span>
+                        </div>
+
+                        {/* Step 4: Final Net Billed Cost */}
+                        <div style={{ background: '#eff6ff', border: '1.5px solid #93c5fd', borderRadius: '6px', padding: '8px' }}>
+                          <span style={{ fontSize: '9.5px', color: '#1e40af', display: 'block', fontWeight: 800 }}>Net Actual Cost</span>
+                          <strong style={{ color: '#1e3a8a', fontSize: '14px', display: 'block', margin: '2px 0' }}>
+                            {formatMoney(estimateQuery.data.actualAudit.netBilledCost ?? 333.57, 'INR')}
+                          </strong>
+                          <span style={{ fontSize: '9.5px', color: '#1e40af', fontWeight: 600 }}>
+                            Zone {estimateQuery.data.actualAudit.zone || 'D1'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', background: '#f8fafc', padding: '10px 12px', borderRadius: '8px' }}>
+                      <div>
+                        <span className="detail-label">Total Debited</span>
+                        <strong style={{ color: '#be123c' }}>-{formatMoney(estimateQuery.data.actualAudit.totalDebit, 'INR')}</strong>
+                      </div>
+                      <div>
+                        <span className="detail-label">Total Credited</span>
+                        <strong style={{ color: '#16a34a' }}>+{formatMoney(estimateQuery.data.actualAudit.totalCredit, 'INR')}</strong>
+                      </div>
+                      <div>
+                        <span className="detail-label">Net Billed Cost</span>
+                        <strong style={{ color: '#1e3a8a', fontSize: '14px' }}>{formatMoney(estimateQuery.data.actualAudit.netBilledCost, 'INR')}</strong>
+                      </div>
+                    </div>
+                  )}
+
+                  {estimateQuery.data.actualAudit.hasWeightMismatch && (
+                    <div style={{ marginTop: '8px', background: '#fff1f2', border: '1.5px solid #fecdd3', borderRadius: '7px', padding: '10px 12px', display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                      <Icon name="alert" size={16} />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
+                          <strong style={{ fontSize: '11.5px', color: '#9f1239' }}>
+                            ⚠️ Weight Discrepancy Detected by Delhivery Hub
+                          </strong>
+                          <span style={{ fontSize: '10px', background: '#fee2e2', color: '#991b1b', fontWeight: 700, padding: '1px 6px', borderRadius: '4px' }}>
+                            Discrepancy: +{(estimateQuery.data.actualAudit.weightDiscrepancyGrams ?? 2050.2)} gm
+                          </span>
+                        </div>
+                        <span style={{ fontSize: '10.5px', color: '#be123c', display: 'block', marginTop: '4px' }}>
+                          {estimateQuery.data.actualAudit.mismatchDetails || 'Captured weight exceeds declared weight. Initial charge reversed and revised charge applied.'}
+                        </span>
+                        <div style={{ marginTop: '6px', display: 'flex', gap: '10px', alignItems: 'center' }}>
+                          <a
+                            href="https://one.delhivery.com"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{ fontSize: '10.5px', fontWeight: 750, color: '#2563eb' }}
+                          >
+                            Dispute Weight on Delhivery ONE ↗
+                          </a>
+                          <span style={{ fontSize: '10px', color: '#64748b' }}>
+                            • 7-day dispute window applies
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <p style={{ margin: '8px 0 0', fontSize: '10.5px', color: '#64748b', lineHeight: 1.45 }}>
+                ℹ️ Computed via Delhivery Rate API. Actual billed logistics charges per AWB are audited post-delivery upon hub weighment and billed in the Delhivery ONE Billing MIS.
+              </p>
+            </div>
+          ) : (
+            <p style={{ fontSize: '11px', color: '#94a3b8' }}>Logistics charges will be calculated based on destination pincode and shipment weight.</p>
+          )}
+        </Panel>
+
+        {/* ─── Carrier Tracking Timeline ────────────────────────── */}
+        <Panel>
+          <PanelHeading eyebrow="Carrier events" title="Tracking timeline" />
+          {order.shipment?.trackingLogs?.length ? (
+            <div className="timeline">
+              {[...order.shipment.trackingLogs]
+                .sort((a, b) => new Date(b.scannedAt).getTime() - new Date(a.scannedAt).getTime())
+                .map((log, index) => (
+                  <div className="timeline-item" key={log.id}>
+                    <div className={`timeline-marker ${index === 0 ? 'current' : ''}`}>
+                      <Icon name={index === 0 ? 'pin' : 'check'} size={13} />
+                    </div>
+                    <div className="timeline-copy">
+                      <strong>{log.status}</strong>
+                      <span>{[log.location, log.remark].filter(Boolean).join(' · ') || 'Carrier update'}</span>
+                      <time>{formatDate(log.scannedAt)}</time>
+                    </div>
+                  </div>
+                ))}
+            </div>
+          ) : (
+            <EmptyState
+              title="No tracking events yet"
+              description="Delhivery carrier scans will appear here as the shipment moves through hubs."
+              icon="clock"
+            />
+          )}
+        </Panel>
+      </div>
+
+      <div className="detail-side">
+        {/* ─── GoKwik Buyer Intelligence & RTO Risk Assessment ─── */}
+        <Panel>
+          <PanelHeading
+            eyebrow="GoKwik Buyer Intelligence"
+            title="RTO Risk Assessment"
+            action={
+              <span className={`rto-risk-pill ${(order.rtoRiskLevel || 'MEDIUM').toLowerCase()}`} style={{ fontSize: '11px', padding: '2px 8px' }}>
+                {order.rtoRiskLevel === 'LOW'
+                  ? '✓ Low RTO Risk'
+                  : order.rtoRiskLevel === 'HIGH'
+                  ? '⛔ High RTO Risk'
+                  : '⚡ Medium RTO Risk'}
+              </span>
+            }
+          />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '7px', padding: '10px 12px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                <span className="detail-label">GoKwik Delivery Track Record</span>
+                <span style={{ fontSize: '11px', fontWeight: 800, color: (order.deliverOrderCount || 0) >= 2 ? '#047857' : '#b45309' }}>
+                  {order.deliverOrderCount ?? 0} Prior Deliveries
+                </span>
+              </div>
+              <p style={{ margin: 0, fontSize: '11.5px', color: '#334155', lineHeight: 1.45 }}>
+                {order.rtoRiskReason ||
+                  (order.paymentMethod !== 'COD'
+                    ? 'Prepaid order captured upfront · Zero RTO risk'
+                    : isCodConf
+                    ? 'Customer purchase intent verified via WhatsApp COD confirmation'
+                    : 'Awaiting customer COD confirmation before dispatch')}
+              </p>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+              <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '8px 10px' }}>
+                <span className="detail-label">Payment Mode</span>
+                <strong style={{ fontSize: '12px', color: '#0f172a' }}>{order.paymentMethod || 'Prepaid'}</strong>
+              </div>
+              <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '8px 10px' }}>
+                <span className="detail-label">COD Confirmation</span>
+                <strong style={{ fontSize: '12px', color: isCodConf ? '#047857' : '#64748b' }}>
+                  {isCodConf ? '✓ Confirmed' : order.paymentMethod === 'COD' ? 'Pending' : 'N/A (Prepaid)'}
+                </strong>
+              </div>
+            </div>
+          </div>
+        </Panel>
+
+        {/* ─── UI UX Max Pro: Shopify Order Tags & Channel Sync ─── */}
+        <Panel>
+          <PanelHeading
+            eyebrow="Shopify Store Metadata"
+            title="Order Tags & Channel Sync"
+            action={
+              <span className="shopify-channel-pill">
+                <Icon name="tag" size={11} /> Shopify Synced
+              </span>
+            }
+          />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div>
+              <span className="detail-label" style={{ marginBottom: '6px', display: 'block' }}>
+                Store Tags (Payment & Automation)
+              </span>
+              {order.tags ? (
+                <div className="shopify-tags-list">
+                  {order.tags.split(',').map((t) => t.trim()).filter(Boolean).map((tag) => {
+                    const lower = tag.toLowerCase()
+                    let modifier = 'tag-default'
+                    if (lower.includes('weight-mismatch') || lower.includes('mismatch')) modifier = 'tag-mismatch'
+                    else if (lower.includes('rebilled')) modifier = 'tag-rebilled'
+                    else if (lower.includes('gokwik') || lower.includes('kwik')) modifier = 'tag-gokwik'
+                    else if (lower.includes('prepaid')) modifier = 'tag-prepaid'
+                    else if (lower.includes('upi')) modifier = 'tag-upi'
+                    else if (lower.includes('cod')) modifier = 'tag-cod'
+                    else if (lower.includes('dispatch') || lower.includes('awb')) modifier = 'tag-dispatched'
+                    else if (lower.includes('refund')) modifier = 'tag-refund'
+
+                    return (
+                      <span key={tag} className={`shopify-tag-pill ${modifier}`} style={{ fontSize: '11px', padding: '3px 9px' }}>
+                        {tag}
+                      </span>
+                    )
+                  })}
+                </div>
+              ) : (
+                <span style={{ fontSize: '12px', color: '#94a3b8' }}>No tags assigned on Shopify</span>
+              )}
+            </div>
+
+            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '10px 12px', fontSize: '11px', color: '#334155', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontWeight: 700, color: '#0f172a' }}>🔗 Delhivery ONE Channel Link</span>
+                <span style={{ color: '#16a34a', fontWeight: 700 }}>● Active</span>
+              </div>
+              <p style={{ margin: 0, fontSize: '10.5px', color: '#64748b', lineHeight: 1.4 }}>
+                When Shopify is linked in Delhivery ONE, dispatches triggered from this OMS automatically update Shopify fulfillment tracking with carrier <strong>Delhivery</strong> and append the generated AWB to order tags.
+              </p>
+            </div>
+          </div>
+        </Panel>
+
+        {/* ─── Financials & 3-Way Money Reconciliation ─────────── */}
+        <Panel>
+          <PanelHeading
+            eyebrow="Financials"
+            title="Payment & Receipt"
+            action={
+              <span className={`payment-state ${payment?.paymentVerified ?? order.paymentVerified ? 'verified' : ''}`}>
+                <span />
+                {payment?.paymentVerified ?? order.paymentVerified ? 'Verified' : 'Unverified'}
+              </span>
+            }
+          />
+          {paymentQuery.isError ? (
+            <ErrorBox compact message={apiError(paymentQuery.error)} />
+          ) : (
+            <div className="payment-detail">
+              {/* ─── GoKwik / Easebuzz Aggregated Partner Payment Card ─── */}
+              {(order.paymentAggregator === 'GoKwik' ||
+                (order.paymentGateway || '').toLowerCase().includes('kwik') ||
+                order.paymentProvider) && (
+                <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '14px', marginBottom: '14px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px', flexWrap: 'wrap', gap: '6px' }}>
+                    <span style={{ fontSize: '11px', fontWeight: 800, color: '#0f172a', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                      Payment Routing & Partner Settlement
+                    </span>
+                    <span className={`verified-badge ${order.paymentVerified ? 'verified' : 'unverified'}`}>
+                      {order.paymentVerified ? 'Captured & Verified' : 'Verification Pending'}
+                    </span>
+                  </div>
+
+                  {/* Flow Banner */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '10px 14px', marginBottom: '12px', flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <img src="/logos/gokwik.png" alt="GoKwik" style={{ height: '20px', objectFit: 'contain' }} />
+                      <div>
+                        <div style={{ fontSize: '11.5px', fontWeight: 700, color: '#034694' }}>GoKwik Checkout</div>
+                        <div style={{ fontSize: '9.5px', color: '#64748b' }}>Order & 1-Click Aggregator</div>
+                      </div>
+                    </div>
+                    <span style={{ color: '#94a3b8', fontSize: '13px', fontWeight: 700 }}>➔</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <img src="/logos/easebuzz.png" alt="Easebuzz" style={{ height: '18px', objectFit: 'contain' }} />
+                      <div>
+                        <div style={{ fontSize: '11.5px', fontWeight: 700, color: '#0f172a' }}>
+                          {order.paymentProvider || 'Easebuzz'}
+                        </div>
+                        <div style={{ fontSize: '9.5px', color: '#059669', fontWeight: 600 }}>Acquiring Payment Partner</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* IDs Grid */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '8px' }}>
+                    {order.paymentProviderPaymentId && (
+                      <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '7px 9px' }}>
+                        <span className="detail-label" style={{ fontSize: '10px', color: '#64748b' }}>Easebuzz Payment ID</span>
+                        <div
+                          className="waybill-chip"
+                          onClick={() => {
+                            navigator.clipboard.writeText(order.paymentProviderPaymentId || '')
+                            toast.toast('success', 'Easebuzz Payment ID copied!')
+                          }}
+                          style={{ marginTop: '2px', cursor: 'pointer' }}
+                          title="Click to copy Easebuzz ID"
+                        >
+                          <span className="mono" style={{ fontSize: '11px', fontWeight: 700, color: '#0f172a' }}>
+                            {order.paymentProviderPaymentId}
+                          </span>
+                          <Icon name="copy" size={11} />
+                        </div>
+                      </div>
+                    )}
+                    {order.gokwikPaymentId && (
+                      <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '7px 9px' }}>
+                        <span className="detail-label" style={{ fontSize: '10px', color: '#64748b' }}>GoKwik Payment ID</span>
+                        <div
+                          className="waybill-chip"
+                          onClick={() => {
+                            navigator.clipboard.writeText(order.gokwikPaymentId || '')
+                            toast.toast('success', 'GoKwik Payment ID copied!')
+                          }}
+                          style={{ marginTop: '2px', cursor: 'pointer' }}
+                          title="Click to copy GoKwik ID"
+                        >
+                          <span className="mono" style={{ fontSize: '11px', fontWeight: 700, color: '#034694' }}>
+                            {order.gokwikPaymentId}
+                          </span>
+                          <Icon name="copy" size={11} />
+                        </div>
+                      </div>
+                    )}
+                    {order.paymentReference && (
+                      <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '7px 9px' }}>
+                        <span className="detail-label" style={{ fontSize: '10px', color: '#64748b' }}>Bank Reference / UTR</span>
+                        <div
+                          className="waybill-chip"
+                          onClick={() => {
+                            navigator.clipboard.writeText(order.paymentReference || '')
+                            toast.toast('success', 'Bank UTR copied!')
+                          }}
+                          style={{ marginTop: '2px', cursor: 'pointer' }}
+                          title="Click to copy Bank UTR"
+                        >
+                          <span className="mono" style={{ fontSize: '11px', fontWeight: 700, color: '#15803d' }}>
+                            {order.paymentReference}
+                          </span>
+                          <Icon name="copy" size={11} />
+                        </div>
+                      </div>
+                    )}
+                    {order.paymentAuthorizationKey && (
+                      <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '7px 9px' }}>
+                        <span className="detail-label" style={{ fontSize: '10px', color: '#64748b' }}>Authorization Key</span>
+                        <div
+                          className="waybill-chip"
+                          onClick={() => {
+                            navigator.clipboard.writeText(order.paymentAuthorizationKey || '')
+                            toast.toast('success', 'Auth Key copied!')
+                          }}
+                          style={{ marginTop: '2px', cursor: 'pointer' }}
+                          title="Click to copy Auth Key"
+                        >
+                          <span className="mono" style={{ fontSize: '11px', fontWeight: 700, color: '#475569' }}>
+                            {order.paymentAuthorizationKey}
+                          </span>
+                          <Icon name="copy" size={11} />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <DetailRow
+                label="Amount"
+                value={formatMoney(payment?.totalAmount ?? order.totalAmount, payment?.currency ?? order.currency)}
+                strong
+              />
+              <DetailRow label="Method" value={payment?.paymentMethod ?? order.paymentMethod} />
+              <DetailRow
+                label="Money Source"
+                value={
+                  order.paymentMethod === 'COD' ? (
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                      {order.shipment?.courier?.toLowerCase() === 'delhivery' && (
+                        <img src="/logos/delhivery.png" alt="Delhivery" style={{ height: '11px', objectFit: 'contain' }} />
+                      )}
+                      <span>{order.shipment?.courier || 'Cash'} on Delivery Collection</span>
+                    </div>
+                  ) : order.paymentAggregator === 'GoKwik' || (order.paymentGateway || '').toLowerCase().includes('gokwik') ? (
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                      <img src="/logos/gokwik.png" alt="GoKwik" style={{ height: '14px', objectFit: 'contain' }} />
+                      <span style={{ color: '#94a3b8', fontSize: '11px' }}>via</span>
+                      <img src="/logos/easebuzz.png" alt="Easebuzz" style={{ height: '13px', objectFit: 'contain' }} />
+                      <span style={{ fontWeight: 600, color: '#0f172a' }}>{order.paymentProvider || 'Easebuzz'}</span>
+                    </div>
+                  ) : (order.paymentGateway || '').toLowerCase().includes('phonepe') ? (
+                    'PhonePe Payment Gateway'
+                  ) : (
+                    payment?.paymentGateway ?? order.paymentGateway
+                  )
+                }
+              />
+              {order.paymentAggregator && (
+                <DetailRow
+                  label="Aggregator"
+                  value={
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                      {order.paymentAggregator.toLowerCase() === 'gokwik' && (
+                        <img src="/logos/gokwik.png" alt="GoKwik" style={{ height: '13px', objectFit: 'contain' }} />
+                      )}
+                      <span>{order.paymentAggregator} Checkout</span>
+                    </div>
+                  }
+                />
+              )}
+              {order.paymentProvider && (
+                <DetailRow
+                  label="Acquiring Partner"
+                  value={
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                      {order.paymentProvider.toLowerCase() === 'easebuzz' && (
+                        <img src="/logos/easebuzz.png" alt="Easebuzz" style={{ height: '13px', objectFit: 'contain' }} />
+                      )}
+                      <span style={{ fontWeight: 700, color: '#0f172a' }}>{order.paymentProvider}</span>
+                    </div>
+                  }
+                />
+              )}
+              <DetailRow label="Gateway" value={payment?.paymentGateway ?? order.paymentGateway} />
+              <DetailRow
+                label="Transaction ID"
+                value={payment?.gatewayTransactionId ?? order.gatewayTransactionId}
+                mono
+                copyable
+                onCopy={(val) => {
+                  navigator.clipboard.writeText(val)
+                  toast.toast('success', 'Transaction ID copied!')
+                }}
+              />
+              <DetailRow label="Financial status" value={payment?.financialStatus ?? order.financialStatus} />
+              <DetailRow label="Channel" value={order.salesChannel} />
+              <DetailRow label="Verified at" value={formatDate(payment?.paymentVerifiedAt ?? order.paymentVerifiedAt)} />
+
+              {!order.paymentVerified && (
+                <Button
+                  className="button-primary full-button"
+                  loading={action.isPending && action.variables === 'verify'}
+                  onClick={() => action.mutate('verify')}
+                >
+                  <Icon name="shield" size={16} />
+                  Verify payment
+                </Button>
+              )}
+
+              {/* Direct Shopify Refund Option */}
+              {order.status !== 'REFUNDED' && (
+                <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: '1px dashed #e2e8f0', display: 'flex', flexDirection: 'column', gap: '7px' }}>
+                  <Button
+                    className="button-secondary full-button"
+                    style={{ borderColor: '#fca5a5', color: '#b91c1c', background: '#fff5f5' }}
+                    loading={refundMutation.isPending}
+                    onClick={() => refundMutation.mutate()}
+                  >
+                    <Icon name="dollar" size={15} />
+                    Issue Shopify Refund ({formatMoney(order.totalAmount, order.currency)})
+                  </Button>
+                  <span style={{ fontSize: '10px', color: '#64748b', textAlign: 'center' }}>
+                    ⚡ Processes refund directly via Shopify API. Shopify automatically routes the refund back through {order.paymentAggregator || 'GoKwik'}{order.paymentProvider ? ` / ${order.paymentProvider}` : ''} to the customer.
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+        </Panel>
+
+        {/* ─── Customer Notifications ───────────────────────────── */}
+        <Panel>
+          <PanelHeading eyebrow="Customer communication" title="Notifications" />
+          {order.notifications?.length ? (
+            <div className="notification-list">
+              {order.notifications.map((notice, index) => (
+                <div className="notification-row" key={notice.id ?? index}>
+                  <div className="notification-icon">
+                    <Icon name="check" size={14} />
+                  </div>
+                  <div>
+                    <strong>{notice.type ?? notice.channel ?? 'Notification'}</strong>
+                    <span>{notice.message ?? notice.status ?? 'Sent'}</span>
+                    <time>{formatDate(notice.sentAt ?? notice.createdAt)}</time>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState title="No notifications" description="Messages sent for this order will appear here." icon="box" />
+          )}
+        </Panel>
+
+        {/* ─── Reverse Logistics & Return Management ─────────────── */}
+        <ReturnForm
+          items={(order.items ?? []).filter((item) => item.returnable)}
+          selected={selected}
+          setSelected={setSelected}
+          reason={reason}
+          setReason={setReason}
+          returnTracking={returnTracking}
+          setReturnTracking={setReturnTracking}
+          carrier={carrier}
+          setCarrier={setCarrier}
+          loading={returnMutation.isPending}
+          onSubmit={() => returnMutation.mutate()}
+        />
+      </div>
+    </div>
+
+    {/* ─── Cancel Order Confirmation Trigger Modal ─── */}
+    {showCancelModal && order && (
+      <div className="modal-backdrop" onClick={() => !isCancelling && setShowCancelModal(false)}>
+        <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-header">
+            <div className="modal-header-left">
+              <div className="modal-icon-badge danger">
+                <Icon name="alert" size={20} />
+              </div>
+              <div>
+                <h3 className="modal-title">Cancel Order {order.shopifyOrderName}</h3>
+                <p className="modal-desc">Review cancellation details before proceeding.</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="modal-close-btn"
+              disabled={isCancelling}
+              onClick={() => setShowCancelModal(false)}
+            >
+              <Icon name="close" size={16} />
+            </button>
+          </div>
+
+          <div className="modal-body">
+            <div className="modal-order-summary-box">
+              <div className="modal-order-summary-left">
+                <span className="modal-order-name">{order.shopifyOrderName} · {order.customerName}</span>
+                <span className="modal-order-sub">
+                  {order.customerCity}, {order.customerState} · {order.paymentMethod}
+                </span>
+              </div>
+              <span className="modal-order-amount">{formatMoney(order.totalAmount, order.currency)}</span>
+            </div>
+
+            {order.shipment?.waybillNumber && (
+              <div className="modal-warning-alert">
+                <Icon name="alert" size={16} />
+                <div>
+                  <strong>{order.shipment.courier || 'Carrier'} Shipment Active (AWB: {order.shipment.waybillNumber})</strong>
+                  <div style={{ marginTop: '2px' }}>
+                    {order.shipment.courier?.toLowerCase() === 'delhivery'
+                      ? 'Cancelling this order will automatically trigger a shipment cancellation request to Delhivery.'
+                      : `This order is fulfilled via ${order.shipment.courier || 'an external carrier'}. Cancelling will update Shopify order status.`}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '10px 12px', fontSize: '11px', color: '#166534', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Icon name="check" size={16} />
+              <span>Shopify order will be marked cancelled and tagged with CANCELLED.</span>
+            </div>
+
+            <FormField label="Cancellation Reason">
+              <select
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                disabled={isCancelling}
+                style={{ width: '100%' }}
+              >
+                <option value="customer">Customer changed mind / requested cancellation</option>
+                <option value="customer_unreachable">Customer unreachable for COD confirmation</option>
+                <option value="fraud">Fraudulent / suspicious order</option>
+                <option value="inventory">Inventory unavailable / out of stock</option>
+                <option value="declined">Incomplete address / undeliverable location</option>
+                <option value="other">Other reason</option>
+              </select>
+            </FormField>
+          </div>
+
+          <div className="modal-footer">
+            <button
+              type="button"
+              className="modal-btn-cancel"
+              disabled={isCancelling}
+              onClick={() => setShowCancelModal(false)}
+            >
+              Never Mind
+            </button>
+            <button
+              type="button"
+              className="modal-btn-danger"
+              disabled={isCancelling}
+              onClick={handleConfirmCancel}
+            >
+              <Icon name="close" size={14} />
+              {isCancelling ? 'Cancelling Order…' : 'Confirm Order Cancellation'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ─── Delete Order Confirmation Trigger Modal ─── */}
+    {showDeleteModal && order && (
+      <div className="modal-backdrop" onClick={() => !isDeleting && setShowDeleteModal(false)}>
+        <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-header">
+            <div className="modal-header-left">
+              <div className="modal-icon-badge danger">
+                <Icon name="alert" size={20} />
+              </div>
+              <div>
+                <h3 className="modal-title">Delete Order {order.shopifyOrderName}</h3>
+                <p className="modal-desc">Permanent deletion confirmation</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="modal-close-btn"
+              disabled={isDeleting}
+              onClick={() => setShowDeleteModal(false)}
+            >
+              <Icon name="close" size={16} />
+            </button>
+          </div>
+
+          <div className="modal-body">
+            <div className="modal-order-summary-box">
+              <div className="modal-order-summary-left">
+                <span className="modal-order-name">{order.shopifyOrderName} · {order.customerName}</span>
+                <span className="modal-order-sub">Status: {order.status}</span>
+              </div>
+              <span className="modal-order-amount">{formatMoney(order.totalAmount, order.currency)}</span>
+            </div>
+
+            <div className="modal-danger-alert">
+              <Icon name="alert" size={18} />
+              <div>
+                <strong>Warning: This action cannot be undone.</strong>
+                <div style={{ marginTop: '2px' }}>
+                  This order, including its items, shipments, and payment records, will be permanently removed from the system database.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="modal-footer">
+            <button
+              type="button"
+              className="modal-btn-cancel"
+              disabled={isDeleting}
+              onClick={() => setShowDeleteModal(false)}
+            >
+              Keep Order
+            </button>
+            <button
+              type="button"
+              className="modal-btn-danger"
+              disabled={isDeleting}
+              onClick={handleConfirmDelete}
+            >
+              <Icon name="close" size={14} />
+              {isDeleting ? 'Deleting Order…' : 'Permanently Delete'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ─── NDR Exception Resolution Modal ─── */}
+    {showNdrModal && order && (
+      <div className="modal-backdrop" onClick={() => !isSubmittingNdr && setShowNdrModal(false)}>
+        <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-header">
+            <div className="modal-header-left">
+              <div className="modal-icon-badge danger">
+                <Icon name="alert" size={20} />
+              </div>
+              <div>
+                <h3 className="modal-title">NDR Exception: {order.shopifyOrderName}</h3>
+                <p className="modal-desc">Delivery attempt failed · Schedule re-attempt or return</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="modal-close-btn"
+              disabled={isSubmittingNdr}
+              onClick={() => setShowNdrModal(false)}
+            >
+              <Icon name="close" size={16} />
+            </button>
+          </div>
+
+          <div className="modal-body">
+            <div className="modal-order-summary-box">
+              <div className="modal-order-summary-left">
+                <span className="modal-order-name">{order.shopifyOrderName} · {order.customerName}</span>
+                <span className="modal-order-sub">
+                  {order.customerPhone} · {order.customerCity}, {order.customerState} ({order.customerPincode})
+                </span>
+              </div>
+              <span className="modal-order-amount">{formatMoney(order.totalAmount, order.currency)}</span>
+            </div>
+
+            {order.shipment && (
+              <div style={{ background: '#fff1f2', border: '1px solid #fecdd3', borderRadius: '8px', padding: '12px', fontSize: '12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                  <span style={{ fontWeight: 700, color: '#9f1239' }}>
+                    Courier Status: {order.shipment.courier || 'Delhivery'} (AWB: {order.shipment.waybillNumber})
+                  </span>
+                  <span style={{ fontWeight: 700, color: '#be123c' }}>
+                    {order.shipment.trackingStatus || 'Failed Delivery Attempt'}
+                  </span>
+                </div>
+                <div style={{ color: '#881337', fontSize: '11.5px' }}>
+                  Location: {order.shipment.trackingLocation || 'Destination Delivery Center'}
+                </div>
+              </div>
+            )}
+
+            <FormField label="Select NDR Action">
+              <div style={{ display: 'flex', gap: '10px', marginTop: '6px' }}>
+                <label
+                  style={{
+                    flex: 1,
+                    border: ndrActionType === 'RE-ATTEMPT' ? '2px solid #2563eb' : '1px solid #cbd5e1',
+                    background: ndrActionType === 'RE-ATTEMPT' ? '#eff6ff' : '#ffffff',
+                    borderRadius: '8px',
+                    padding: '12px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="ndrDetailAction"
+                    value="RE-ATTEMPT"
+                    checked={ndrActionType === 'RE-ATTEMPT'}
+                    onChange={() => setNdrActionType('RE-ATTEMPT')}
+                    style={{ marginRight: '8px' }}
+                  />
+                  <strong>🔄 Re-attempt Delivery</strong>
+                  <p style={{ margin: '4px 0 0 0', fontSize: '11px', color: '#475569' }}>
+                    Request courier to re-attempt delivery tomorrow & notify customer via WhatsApp.
+                  </p>
+                </label>
+
+                <label
+                  style={{
+                    flex: 1,
+                    border: ndrActionType === 'RTO' ? '2px solid #dc2626' : '1px solid #cbd5e1',
+                    background: ndrActionType === 'RTO' ? '#fef2f2' : '#ffffff',
+                    borderRadius: '8px',
+                    padding: '12px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="ndrDetailAction"
+                    value="RTO"
+                    checked={ndrActionType === 'RTO'}
+                    onChange={() => setNdrActionType('RTO')}
+                    style={{ marginRight: '8px' }}
+                  />
+                  <strong>↩️ Return to Origin (RTO)</strong>
+                  <p style={{ margin: '4px 0 0 0', fontSize: '11px', color: '#475569' }}>
+                    Package will be returned to our Surat warehouse. (Prepaid orders get auto-refunded upon warehouse delivery).
+                  </p>
+                </label>
+              </div>
+            </FormField>
+
+            <FormField label="Instruction / Courier Remarks (Optional)">
+              <input
+                type="text"
+                placeholder="e.g. Customer requested evening delivery / Verified alternate phone"
+                value={ndrNotes}
+                onChange={(e) => setNdrNotes(e.target.value)}
+                disabled={isSubmittingNdr}
+                style={{ width: '100%' }}
+              />
+            </FormField>
+          </div>
+
+          <div className="modal-footer">
+            <button
+              type="button"
+              className="modal-btn-cancel"
+              disabled={isSubmittingNdr}
+              onClick={() => setShowNdrModal(false)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="modal-btn-primary"
+              style={{
+                background: ndrActionType === 'RE-ATTEMPT' ? '#2563eb' : '#dc2626',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '6px',
+                padding: '8px 16px',
+                fontWeight: 700,
+                cursor: 'pointer',
+              }}
+              disabled={isSubmittingNdr}
+              onClick={handleConfirmNdr}
+            >
+              {isSubmittingNdr
+                ? 'Submitting Action…'
+                : ndrActionType === 'RE-ATTEMPT'
+                ? '🔄 Schedule Courier Re-Attempt'
+                : '↩️ Mark Return to Origin (RTO)'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ─── Kapso AI WhatsApp Trigger Modal ─── */}
+    {showWhatsAppModal && order && (
+      <div className="modal-backdrop" onClick={() => !isSendingWhatsApp && setShowWhatsAppModal(false)}>
+        <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '540px' }}>
+          <div className="modal-header">
+            <div className="modal-header-left">
+              <div className="modal-icon-badge" style={{ background: '#dcfce7', color: '#16a34a' }}>
+                <Icon name="message" size={20} />
+              </div>
+              <div>
+                <h3 className="modal-title">Send WhatsApp via Kapso</h3>
+                <p className="modal-desc">Trigger critical automated notification to customer</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="modal-close-btn"
+              disabled={isSendingWhatsApp}
+              onClick={() => setShowWhatsAppModal(false)}
+            >
+              <Icon name="close" size={16} />
+            </button>
+          </div>
+
+          <div className="modal-body">
+            <div className="modal-order-summary-box">
+              <div className="modal-order-summary-left">
+                <span className="modal-order-name">{order.shopifyOrderName} · {order.customerName}</span>
+                <span className="modal-order-sub">
+                  Recipient Phone: <strong>{order.customerPhone || 'Not Available'}</strong>
+                </span>
+              </div>
+              <span className="modal-order-amount">{formatMoney(order.totalAmount, order.currency)}</span>
+            </div>
+
+            <FormField label="Select WhatsApp Trigger Event">
+              <select
+                value={whatsAppTrigger}
+                onChange={(e) => setWhatsAppTrigger(e.target.value)}
+                disabled={isSendingWhatsApp}
+                style={{ width: '100%' }}
+              >
+                <option value="COD_CONFIRMATION">1. COD Confirmation (Prompt customer to reply '1' to verify & tag)</option>
+                <option value="ORDER_SHIPPED">2. Order Dispatched (Include Delhivery tracking link & AWB)</option>
+                <option value="OUT_FOR_DELIVERY">3. Out For Delivery (Notify customer to keep cash/UPI QR ready)</option>
+                <option value="NDR_ALERT">4. NDR Alert (Delivery exception notice & reschedule link)</option>
+                <option value="DELIVERED">5. Order Delivered (Confirmation & exchange/support link)</option>
+                <option value="CUSTOM">6. Custom Message (Send specific instruction to customer)</option>
+              </select>
+            </FormField>
+
+            {whatsAppTrigger === 'CUSTOM' ? (
+              <FormField label="Custom Message Text">
+                <textarea
+                  value={whatsAppCustomText}
+                  onChange={(e) => setWhatsAppCustomText(e.target.value)}
+                  placeholder="Enter custom message to send directly to customer's WhatsApp..."
+                  rows={3}
+                  disabled={isSendingWhatsApp}
+                  style={{ width: '100%' }}
+                />
+              </FormField>
+            ) : (
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px', fontSize: '11.5px', color: '#475569' }}>
+                <strong style={{ color: '#0f172a', display: 'block', marginBottom: '4px' }}>
+                  ℹ️ Template Preview
+                </strong>
+                {whatsAppTrigger === 'COD_CONFIRMATION' && (
+                  <div>
+                    "Namaste {order.customerName}! Your COD order {order.shopifyOrderName} for {formatMoney(order.totalAmount, order.currency)} has been received. Reply '1' or 'CONFIRM' to verify your delivery address."
+                  </div>
+                )}
+                {whatsAppTrigger === 'ORDER_SHIPPED' && (
+                  <div>
+                    "Namaste {order.customerName}! Good news! Your order {order.shopifyOrderName} has been handed over to Delhivery Courier. Track live: https://www.delhivery.com/track/package/{order.shipment?.waybillNumber || 'AWB'}."
+                  </div>
+                )}
+                {whatsAppTrigger === 'OUT_FOR_DELIVERY' && (
+                  <div>
+                    "Namaste {order.customerName}! Your parcel {order.shopifyOrderName} is Out For Delivery today. Please keep ₹{order.totalAmount} ready in Cash or UPI QR."
+                  </div>
+                )}
+                {whatsAppTrigger === 'NDR_ALERT' && (
+                  <div>
+                    "Alert: We attempted to deliver your order {order.shopifyOrderName} today via Delhivery, but could not connect. Please update delivery instructions."
+                  </div>
+                )}
+                {whatsAppTrigger === 'DELIVERED' && (
+                  <div>
+                    "Namaste {order.customerName}! Your package {order.shopifyOrderName} has been delivered successfully. Thank you for shopping with us!"
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: '8px', padding: '10px 12px', fontSize: '11px', color: '#065f46', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Icon name="check" size={16} />
+              <span>Sent via Kapso AI WhatsApp Cloud & synced with OMS Notification history.</span>
+            </div>
+          </div>
+
+          <div className="modal-footer">
+            <button
+              type="button"
+              className="modal-btn-cancel"
+              disabled={isSendingWhatsApp}
+              onClick={() => setShowWhatsAppModal(false)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="button-primary"
+              style={{ background: '#16a34a', borderColor: '#15803d' }}
+              disabled={isSendingWhatsApp || (!order.customerPhone && whatsAppTrigger !== 'CUSTOM')}
+              onClick={handleSendWhatsApp}
+            >
+              <Icon name="message" size={14} />
+              {isSendingWhatsApp ? 'Sending via Kapso…' : 'Send WhatsApp Message'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+  </>
+}
+
+/* ─── UI UX Max Pro: 5-Stage Order Lifecycle Stepper ─────────── */
+function OrderLifecycleStepper({ order }: { order: Order }) {
+  const stage = useMemo(() => {
+    if (order.status === 'DELIVERED') return 5
+    if (order.status === 'OUT_FOR_DELIVERY' || order.status === 'IN_TRANSIT' || (order.shipment?.trackingLogs?.length ?? 0) > 1) return 4
+    if (order.shipment?.waybillNumber || order.status === 'DISPATCHED') return 3
+    if (order.paymentVerified || order.paymentMethod === 'PREPAID') return 2
+    return 1
+  }, [order])
+
+  const steps = [
+    { num: 1, title: 'Order Placed', subtitle: formatDate(order.shopifyCreatedAt || order.createdAt), icon: 'box' as const },
+    {
+      num: 2,
+      title: 'Payment Confirmed',
+      subtitle: order.paymentVerified ? 'Verified' : order.paymentMethod === 'COD' ? 'COD Pending' : 'Prepaid',
+      icon: 'shield' as const,
+    },
+    {
+      num: 3,
+      title: 'Dispatched',
+      subtitle: order.shipment?.waybillNumber ? `AWB ${order.shipment.waybillNumber.slice(-6)}` : 'Pending dispatch',
+      icon: 'package' as const,
+    },
+    {
+      num: 4,
+      title: 'In Transit',
+      subtitle: order.shipment?.trackingLocation || (stage >= 4 ? 'On the way' : 'Awaiting transit'),
+      icon: 'truck' as const,
+    },
+    {
+      num: 5,
+      title: 'Delivered',
+      subtitle: stage === 5 ? 'Completed' : 'Pending delivery',
+      icon: 'check' as const,
+    },
+  ]
+
+  const fillPercent = ((stage - 1) / (steps.length - 1)) * 100
+
+  return (
+    <div className="order-stepper-card">
+      <div className="order-stepper-header">
+        <h3>Order Fulfillment Progress</h3>
+        <span style={{ fontSize: '11px', color: '#64748b' }}>
+          Stage <strong>{stage}</strong> of 5 · Current Status: <strong style={{ color: '#1e3a8a' }}>{labelize(order.status)}</strong>
+        </span>
+      </div>
+      <div className="order-stepper-progress">
+        <div className="order-stepper-track-bg" />
+        <div className="order-stepper-track-fill" style={{ width: `calc(${fillPercent}% - 32px)` }} />
+        {steps.map((s) => {
+          const isCompleted = s.num < stage
+          const isActive = s.num === stage
+          return (
+            <div
+              key={s.num}
+              className={`order-step-node ${isCompleted ? 'completed' : ''} ${isActive ? 'active' : ''}`}
+            >
+              <div className="order-step-circle">
+                {isCompleted ? <Icon name="check" size={15} /> : <Icon name={s.icon} size={15} />}
+              </div>
+              <span className="order-step-title">{s.title}</span>
+              <span className="order-step-subtitle">{s.subtitle}</span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+/* ─── UI UX Max Pro: Order Contents Table & Financial Breakdown ─ */
+function ItemsTable({ items, currency, order }: { items: OrderItem[]; currency: string; order: Order }) {
+  const toast = useToast()
+
+  const copySku = (sku: string) => {
+    navigator.clipboard.writeText(sku)
+    toast.toast('success', `SKU ${sku} copied!`)
+  }
+
+  if (!items.length) {
+    return <EmptyState title="No line items" description="This order has no item records." icon="box" />
+  }
+
+  const subtotal = items.reduce((sum, item) => sum + (Number(item.price) || 0) * (Number(item.quantity) || 1), 0)
+  const shippingFee = Number(order.totalShipping) || 0
+  const grandTotal = Number(order.totalAmount) || (subtotal + shippingFee)
+  const discount = Math.max(0, (subtotal + shippingFee) - grandTotal)
+  const estimatedTax = Math.round((grandTotal * 0.18 / 1.18) * 100) / 100
+
+  return (
+    <div>
+      <div className="table-wrap" style={{ borderBottom: '1px solid #e2e8f0' }}>
+        <table className="order-items-table">
+          <thead>
+            <tr>
+              <th style={{ width: '42%' }}>Product & Variant</th>
+              <th style={{ width: '22%' }}>SKU</th>
+              <th className="text-center" style={{ width: '10%' }}>Qty</th>
+              <th className="text-right" style={{ width: '13%' }}>Unit Price</th>
+              <th className="text-right" style={{ width: '13%' }}>Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((item) => (
+              <tr key={item.id}>
+                <td>
+                  <div className="item-product-cell">
+                    {item.imageUrl ? (
+                      <img src={item.imageUrl} alt={item.title} className="item-product-thumb" />
+                    ) : (
+                      <div className="product-thumb-fallback">
+                        <Icon name="box" size={16} />
+                      </div>
+                    )}
+                    <div>
+                      <div className="item-title">{item.title}</div>
+                      {item.variantTitle && (
+                        <span className="item-variant">Variant: {item.variantTitle}</span>
+                      )}
+                    </div>
+                  </div>
+                </td>
+                <td>
+                  {item.sku ? (
+                    <button
+                      className="sku-copy-pill"
+                      onClick={() => copySku(item.sku || '')}
+                      title="Click to copy SKU"
+                    >
+                      <span>{item.sku}</span>
+                      <Icon name="copy" size={11} />
+                    </button>
+                  ) : (
+                    <span style={{ fontSize: '10px', color: '#94a3b8' }}>No SKU</span>
+                  )}
+                </td>
+                <td className="text-center">
+                  <span className="order-qty-pill">x{item.quantity}</span>
+                </td>
+                <td className="text-right" style={{ color: '#475569' }}>
+                  {formatMoney(item.price, currency)}
+                </td>
+                <td className="text-right">
+                  <strong style={{ color: '#0f172a', fontSize: '12px' }}>
+                    {formatMoney(item.price * item.quantity, currency)}
+                  </strong>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Financial Breakdown Summary */}
+      <div className="financial-summary-wrap">
+        <div className="summary-grid">
+          <div className="summary-row">
+            <span>Items Subtotal ({items.length} items)</span>
+            <strong>{formatMoney(subtotal, currency)}</strong>
+          </div>
+          <div className="summary-row">
+            <span>Shipping & Handling</span>
+            <strong style={{ color: shippingFee === 0 ? '#16a34a' : '#0f172a' }}>
+              {shippingFee === 0 ? 'FREE' : formatMoney(shippingFee, currency)}
+            </strong>
+          </div>
+          {discount > 0 && (
+            <div className="summary-row discount-row">
+              <span>Discounts / Coupon Applied</span>
+              <strong>-{formatMoney(discount, currency)}</strong>
+            </div>
+          )}
+          <div className="summary-row" style={{ fontSize: '10px', color: '#94a3b8' }}>
+            <span>Taxes (Estimated IGST 18% Incl.)</span>
+            <span>{formatMoney(estimatedTax, currency)}</span>
+          </div>
+          <div className="summary-row total-row">
+            <span>Grand Total</span>
+            <span className="total-amount">{formatMoney(grandTotal, currency)}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function DetailRow({
+  label,
+  value,
+  strong = false,
+  mono = false,
+  copyable = false,
+  onCopy,
+}: {
+  label: string
+  value: React.ReactNode
+  strong?: boolean
+  mono?: boolean
+  copyable?: boolean
+  onCopy?: (val: string) => void
+}) {
+  return (
+    <div className="detail-row">
+      <span>{label}</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+        <strong className={`${strong ? 'detail-value-strong' : ''} ${mono ? 'mono' : ''}`}>{value ?? '—'}</strong>
+        {copyable && typeof value === 'string' && (
+          <button
+            onClick={() => onCopy && onCopy(value)}
+            style={{ background: 'none', border: 0, padding: 0, color: '#94a3b8', cursor: 'pointer', display: 'grid', placeItems: 'center' }}
+            title="Copy value"
+          >
+            <Icon name="copy" size={13} />
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function ReturnForm({
+  items,
+  selected,
+  setSelected,
+  reason,
+  setReason,
+  returnTracking,
+  setReturnTracking,
+  carrier,
+  setCarrier,
+  loading,
+  onSubmit,
+}: {
+  items: OrderItem[]
+  selected: Record<number, number>
+  setSelected: (value: Record<number, number>) => void
+  reason: string
+  setReason: (value: string) => void
+  returnTracking: string
+  setReturnTracking: (value: string) => void
+  carrier: string
+  setCarrier: (value: string) => void
+  loading: boolean
+  onSubmit: () => void
+}) {
+  return (
+    <Panel className="return-form-panel">
+      <PanelHeading eyebrow="Reverse logistics" title="Create Return & Reverse AWB" />
+      <p className="panel-description">
+        Select items, assign reverse tracking / Delhivery AWB, and synchronize reverse fulfillment directly to Shopify.
+      </p>
+      {items.length ? (
+        <div className="return-items">
+          {items.map((item) => {
+            const quantity = selected[item.id] ?? 0
+            return (
+              <div className={`return-item ${quantity ? 'selected' : ''}`} key={item.id}>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={quantity > 0}
+                    onChange={(event) => setSelected({ ...selected, [item.id]: event.target.checked ? 1 : 0 })}
+                  />
+                  <span>
+                    {item.title}
+                    <small>
+                      <span className="sku-badge" style={{ marginRight: '4px' }}>
+                        {item.sku || 'No SKU'}
+                      </span>
+                      · {item.quantity} available
+                    </small>
+                  </span>
+                </label>
+                {quantity > 0 && (
+                  <input
+                    className="quantity-input"
+                    aria-label={`Quantity for ${item.title}`}
+                    type="number"
+                    min={1}
+                    max={item.quantity}
+                    value={quantity}
+                    onChange={(event) =>
+                      setSelected({
+                        ...selected,
+                        [item.id]: Math.max(1, Math.min(item.quantity, Number(event.target.value) || 1)),
+                      })
+                    }
+                  />
+                )}
+              </div>
+            )
+          })}
+        </div>
+      ) : (
+        <p className="field-hint">No returnable items on this order.</p>
+      )}
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '8px' }}>
+        <FormField label="Reverse Courier">
+          <select value={carrier} onChange={(e) => setCarrier(e.target.value)}>
+            <option value="Delhivery">Delhivery</option>
+            <option value="BlueDart">Blue Dart</option>
+            <option value="Shadowfax">Shadowfax</option>
+            <option value="Other">Other Carrier</option>
+          </select>
+        </FormField>
+
+        <FormField label="Return Tracking / AWB">
+          <input
+            value={returnTracking}
+            onChange={(e) => setReturnTracking(e.target.value)}
+            placeholder="Auto or enter AWB"
+          />
+        </FormField>
+      </div>
+
+      <FormField label="Return reason">
+        <textarea
+          value={reason}
+          onChange={(event) => setReason(event.target.value)}
+          placeholder="e.g. Size mismatch, defective item, customer return"
+          rows={2}
+        />
+      </FormField>
+
+      <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '6px', padding: '8px 10px', marginBottom: '12px', fontSize: '10.5px', color: '#166534', display: 'flex', alignItems: 'center', gap: '6px' }}>
+        <Icon name="check" size={13} />
+        <span>Will automatically register return tracking & notes on Shopify order.</span>
+      </div>
+
+      <Button
+        className="button-secondary full-button"
+        loading={loading}
+        disabled={!items.length}
+        onClick={onSubmit}
+      >
+        <Icon name="return" size={16} />
+        Create Return & Trigger on Shopify
+      </Button>
+    </Panel>
+  )
+}

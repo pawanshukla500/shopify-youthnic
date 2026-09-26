@@ -1,0 +1,252 @@
+import prisma from '../../database/prisma';
+import delhiveryService from '../delhivery/delhivery.service';
+import notificationEngine from '../notifications/notification.service';
+import logger from '../../utils/logger';
+import { ShipmentStatus } from '@prisma/client';
+
+/**
+ * Tracking Service
+ * Periodically pulls tracking updates from Delhivery for all active shipments.
+ * When status changes, it updates the DB, triggers WhatsApp notifications,
+ * and transitions the order lifecycle.
+ */
+class TrackingService {
+  /**
+   * Sync tracking for all shipments that are not yet delivered/cancelled.
+   * Called by the cron scheduler.
+   */
+  async syncAllTracking(): Promise<number> {
+    // Get all active shipments (not delivered, not cancelled, not RTO delivered)
+    const activeShipments = await prisma.shipment.findMany({
+      where: {
+        status: {
+          notIn: ['DELIVERED', 'CANCELLED', 'RTO_DELIVERED', 'ERROR', 'PENDING'],
+        },
+        waybillNumber: { not: null },
+      },
+      include: { order: true },
+    });
+
+    logger.info('Syncing tracking for active shipments', {
+      count: activeShipments.length,
+    });
+
+    let updatedCount = 0;
+    for (const shipment of activeShipments) {
+      if (!shipment.waybillNumber) continue;
+
+      try {
+        const tracking = await delhiveryService.trackShipment(shipment.waybillNumber);
+
+        // Determine new shipment status
+        const newShipmentStatus = delhiveryService.mapTrackingToShipmentStatus(
+          tracking.statusType,
+          tracking.status
+        ) as ShipmentStatus;
+
+        // Check if status actually changed
+        if (newShipmentStatus !== shipment.status) {
+          await this.handleStatusChange(
+            shipment,
+            shipment.status,
+            newShipmentStatus,
+            tracking.status,
+            tracking.location
+          );
+          updatedCount++;
+        }
+
+        // Save tracking history
+        if (tracking.history.length > 0) {
+          // Save new tracking logs
+          const existingLogs = await prisma.trackingLog.findMany({
+            where: { shipmentId: shipment.id },
+            select: { scannedAt: true, status: true },
+          });
+
+          for (const scan of tracking.history) {
+            const scanDate = new Date(scan.dateTime);
+            const exists = existingLogs.some(
+              (log) =>
+                log.status === scan.status &&
+                log.scannedAt.getTime() === scanDate.getTime()
+            );
+
+            if (!exists) {
+              await prisma.trackingLog.create({
+                data: {
+                  shipmentId: shipment.id,
+                  status: scan.status,
+                  location: scan.location || null,
+                  remark: scan.remark || null,
+                  scannedAt: scanDate,
+                },
+              });
+            }
+          }
+        }
+
+        // Update shipment tracking fields
+        await prisma.shipment.update({
+          where: { id: shipment.id },
+          data: {
+            trackingStatus: tracking.status,
+            trackingLocation: tracking.location || null,
+            trackingUpdatedAt: new Date(),
+            trackingHistory: tracking.history as any,
+          },
+        });
+      } catch (error: any) {
+        logger.error('Failed to sync tracking for shipment', {
+          shipmentId: shipment.id,
+          waybill: shipment.waybillNumber,
+          error: error.message,
+        });
+
+        await prisma.syncLog.create({
+          data: {
+            orderId: shipment.orderId,
+            syncType: 'TRACKING_UPDATE',
+            status: 'FAILED',
+            message: `Tracking sync failed for ${shipment.waybillNumber}`,
+            errorMessage: error.message,
+          },
+        });
+      }
+    }
+
+    logger.info('Tracking sync complete', { updatedCount, totalShipped: activeShipments.length });
+    return updatedCount;
+  }
+
+  /**
+   * Handle a status change: update DB, transition order status, send notifications.
+   */
+  private async handleStatusChange(
+    shipment: any,
+    oldStatus: ShipmentStatus,
+    newStatus: ShipmentStatus,
+    delhiveryStatusText: string,
+    location?: string
+  ): Promise<void> {
+    logger.info('Shipment status changed', {
+      waybill: shipment.waybillNumber,
+      oldStatus,
+      newStatus,
+      delhiveryStatusText,
+    });
+
+    // Update shipment status
+    await prisma.shipment.update({
+      where: { id: shipment.id },
+      data: { status: newStatus },
+    });
+
+    const order = shipment.order;
+
+    // Map shipment status → order status + notifications
+    switch (newStatus) {
+      case 'PICKED_UP':
+        await prisma.order.update({
+          where: { id: order.id },
+          data: { status: 'SHIPPED' },
+        });
+        break;
+
+      case 'IN_TRANSIT':
+        await prisma.order.update({
+          where: { id: order.id },
+          data: { status: 'IN_TRANSIT' },
+        });
+        break;
+
+      case 'OUT_FOR_DELIVERY':
+        await prisma.order.update({
+          where: { id: order.id },
+          data: { status: 'OUT_FOR_DELIVERY' },
+        });
+        await notificationEngine.notifyOutForDelivery(order);
+        break;
+
+      case 'DELIVERED':
+        await prisma.order.update({
+          where: { id: order.id },
+          data: { status: 'DELIVERED' },
+        });
+        // The courier collects the cash at delivery, so a delivered COD
+        // shipment's COD amount is now "collected" and awaiting remittance
+        // from Delhivery (Finances > Remittance in the Delhivery panel).
+        if (
+          shipment.paymentMode === 'COD' &&
+          (shipment.codAmount || 0) > 0 &&
+          !shipment.codCollected
+        ) {
+          await prisma.shipment.update({
+            where: { id: shipment.id },
+            data: { codCollected: true, codCollectedAt: new Date() },
+          });
+          logger.info('COD marked collected on delivery', {
+            waybill: shipment.waybillNumber,
+            codAmount: shipment.codAmount,
+          });
+        }
+        await notificationEngine.notifyDelivered(order);
+        break;
+
+      case 'FAILED':
+        await prisma.order.update({
+          where: { id: order.id },
+          data: { status: 'FAILED_DELIVERY' },
+        });
+        await notificationEngine.notifyNDR(
+          order,
+          `Delivery attempt failed at ${location || 'location unknown'}. Status: ${delhiveryStatusText}`
+        );
+        break;
+
+      case 'RTO':
+        await prisma.order.update({
+          where: { id: order.id },
+          data: { status: 'RTO_INITIATED' },
+        });
+        await notificationEngine.sendCustomMessage(
+          order,
+          `Hi ${order.customerName}, your order ${order.shopifyOrderName} is being returned to us (RTO initiated). If you'd like to re-attempt delivery, please contact us.`
+        );
+        break;
+
+      case 'RTO_DELIVERED':
+        try {
+          const orderService = (await import('../orders/order.service')).default;
+          await orderService.processRtoRefund(order.id);
+        } catch (rtoErr: any) {
+          logger.error('Failed to auto-process RTO refund during tracking update', { error: rtoErr.message });
+          await prisma.order.update({
+            where: { id: order.id },
+            data: { status: 'RTO_DELIVERED' },
+          });
+        }
+        break;
+    }
+
+    // Record sync log
+    await prisma.syncLog.create({
+      data: {
+        orderId: order.id,
+        syncType: 'TRACKING_UPDATE',
+        status: 'SUCCESS',
+        message: `Shipment ${shipment.waybillNumber} status changed from ${oldStatus} to ${newStatus} (${delhiveryStatusText})`,
+      },
+    });
+  }
+
+  /**
+   * Track a single shipment by waybill number (manual lookup).
+   */
+  async trackShipment(waybillNumber: string): Promise<any> {
+    const tracking = await delhiveryService.trackShipment(waybillNumber);
+    return tracking;
+  }
+}
+
+export default new TrackingService();

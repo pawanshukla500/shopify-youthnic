@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "kapso": {
+      "url": "https://api.kapso.ai/mcp",
+      "headers": {
+        "Authorization": "Bearer ${env:KAPSO_API_KEY}"
+      }
+    }
+  }
+}

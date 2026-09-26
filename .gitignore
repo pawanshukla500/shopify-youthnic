@@ -1,0 +1,16 @@
+node_modules/
+frontend/node_modules/
+dist/
+frontend/dist/
+.env
+*.log
+logs/
+.DS_Store
+prisma/migrations/
+firebase-service-account*.json
+.system_generated/
+*.tar.gz
+.agent/
+scratch_*.js
+
+

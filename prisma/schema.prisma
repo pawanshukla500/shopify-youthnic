@@ -1,0 +1,515 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Orders synced from Shopify ───────────────────────────
+model Order {
+  id              Int        @id @default(autoincrement())
+  // Shopify order ID (GraphQL gid or REST id)
+  shopifyOrderId  String     @unique
+  shopifyOrderName String    // e.g. #1001
+  shopifyOrderNumber Int
+
+  // Customer details
+  customerName    String
+  customerPhone   String     // E.164 format, e.g. 919999999999
+  customerEmail   String?
+  customerAddress String
+  customerCity    String
+  customerState   String
+  customerPincode String
+  customerCountry String     @default("India")
+
+  // Order details
+  totalAmount     Float
+  currency        String     @default("INR")
+  paymentMethod   String?    // COD, prepaid, etc.
+  financialStatus String?    // paid, pending, refunded, etc.
+  fulfillmentStatus String?  // fulfilled, unfulfilled, etc.
+  tags            String?    // Shopify order tags, e.g. "GoKwik, PREPAID-DISCOUNT, UPI"
+
+  // Where the order came from. Shopify reports this as an app/channel, e.g.
+  // "web" for the online store or a numeric app id for a checkout app.
+  sourceName      String?    // raw Shopify source_name ("web", "249596116993")
+  salesChannel    String?    // resolved name ("Online Store", "Youthnic <> Gokwik")
+
+  // Payment gateway tracking (GoKwik, Easebuzz, PhonePe, etc.)
+  paymentGateway  String?    // gokwik, phonepe, shopify_payments, etc.
+  paymentAggregator String?  // e.g. "GoKwik" (checkout aggregator)
+  paymentProvider   String?  // e.g. "Easebuzz", "PhonePe" (the actual partner receiving the funds)
+  paymentProviderPaymentId String? // e.g. "E26092416XTT5X" (Easebuzz payment ID)
+  gokwikPaymentId   String?  // e.g. "KWIKKFZJVFXO7380932MP"
+  gatewayTransactionId String? // transaction ID from the gateway (e.g. #26YOU5754.1)
+  paymentAuthorizationKey String? // authorization key from gateway (e.g. KWIK001VLQBP7380871)
+  paymentVerified Boolean    @default(false) // true after payment confirmed for prepaid orders
+  paymentVerifiedAt DateTime?
+  paymentVerificationSource String? // shopify_transaction, gokwik_easebuzz, phonepe_api
+  paymentReference String?   // merchant transaction reference / UTR at gateway (e.g. 614686239240)
+
+  // Our internal status
+  status          OrderStatus @default(NEW)
+
+  // Logistics cost & audit against Delhivery Wallet Ledger
+  actualShippingCost Float?   @default(0) // Net actual debited logistics cost (e.g. 333.57)
+  shippingAudited    Boolean  @default(false) // True when reconciled against Delhivery ledger
+  weightDiscrepancy  Boolean  @default(false) // True if Delhivery machine captured higher weight
+  weightDiscrepancyNote String? // Explanation of weight mismatch & re-bill
+
+  // GoKwik RTO prediction & risk analysis
+  deliverOrderCount Int?     // Number of prior successful deliveries on GoKwik network (e.g. 2, 9)
+  rtoRiskLevel      String?  // LOW, MEDIUM, HIGH
+  rtoRiskReason     String?  // Reason from GoKwik / WhatsApp verification
+
+  // Dispatch SLA tracking
+  expectedDispatchAt DateTime? // Expected dispatch deadline (default: shopifyCreatedAt + 24 hours)
+  dispatchDelayed    Boolean   @default(false) // True if overdue past expectedDispatchAt
+
+  // Timestamps
+  shopifyCreatedAt DateTime
+  shopifyUpdatedAt DateTime?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  // Urgent Customer Support & Return Flagging
+  hasUrgentSupport   Boolean   @default(false)
+  supportFlag        String?   // e.g. "URGENT_DAMAGE_CLAIM", "RETURN_WINDOW_EXPIRING", "DELAY_COMPLAINT"
+
+  // Relations
+  items           OrderItem[]
+  shipment        Shipment?
+  returns         Return[]
+  notifications   Notification[]
+  syncLogs        SyncLog[]
+  emailLogs       EmailLog[]
+  inboundEmails   InboundEmail[]
+
+  @@index([status])
+  @@index([shopifyUpdatedAt])
+}
+
+model OrderItem {
+  id              Int     @id @default(autoincrement())
+  orderId         Int
+  order           Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  shopifyVariantId String?
+  sku             String?
+  title           String
+  variantTitle    String?
+  imageUrl        String?
+  quantity        Int
+  price           Float
+  // Whether this item is eligible for return
+  returnable      Boolean @default(true)
+
+  // Relations
+  returns         ReturnItem[]
+
+  @@index([orderId])
+}
+
+// ─── Shipments via Delhivery ──────────────────────────────
+model Shipment {
+  id              Int      @id @default(autoincrement())
+  orderId         Int      @unique
+  order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  // Delhivery details
+  waybillNumber   String?  @unique // AWB number from Delhivery
+  orderIdDelhivery String? // Delhivery's internal order ID
+  courier         String?
+  paymentMode     String?  // COD / Pre-paid
+  codAmount       Float?   @default(0)
+  declaredValue   Float?
+
+  // COD reconciliation. Delhivery's public API exposes no remittance endpoint,
+  // so "collected" is derived from delivery status (the courier takes the cash
+  // at delivery) while "remitted" is recorded from the Delhivery panel report
+  // under Finances > Remittance. Comparing the two shows what is still owed.
+  codCollected     Boolean   @default(false)
+  codCollectedAt   DateTime?
+  codRemitted      Boolean   @default(false)
+  codRemittedAt    DateTime?
+  codRemittanceRef String?   // Delhivery remittance number
+  codRemittedAmount Float?   // amount actually credited, may differ from codAmount
+
+  // Shipment status
+  status          ShipmentStatus @default(PENDING)
+
+  // Tracking
+  trackingStatus  String?  // Latest status from Delhivery
+  trackingLocation String?
+  trackingUpdatedAt DateTime?
+  trackingHistory  Json?   // Full tracking timeline
+
+  // Label
+  labelUrl       String?   // PDF label download URL
+
+  // Actual Delhivery Billed Charges & Weight Audit (from Wallet Ledger)
+  declaredWeightGrams Float?   @default(400) // Initial declared weight when shipment manifested (e.g. 400 gm)
+  billedWeightGrams   Float?   // Weight captured by Delhivery hub (e.g. 2450.2 gm)
+  chargedZone         String?  // Zone billed (e.g. D1, E, B)
+  initialCost         Float?   @default(0) // Initial debit at manifestation (e.g. 70.22)
+  reversalAmount      Float?   @default(0) // Amount credited back upon machine re-weighment (e.g. 70.22)
+  revisedCost         Float?   @default(0) // New debit after machine re-weighment (e.g. 333.57)
+  hasReversal         Boolean  @default(false) // True if Delhivery reversed and recharged
+  reversalReason      String?  // Description of reversal e.g. "Captured weight is higher than declared weight"
+  totalDebited        Float?   @default(0) // Total wallet debits for this AWB (e.g. 403.79)
+  totalCredited       Float?   @default(0) // Total wallet credits for this AWB (e.g. 70.22)
+  netBilledCost       Float?   @default(0) // Actual net cost = debits - credits (e.g. 333.57)
+  weightMismatch      Boolean  @default(false) // Captured weight > declared weight
+  mismatchDetails     String?  // e.g. "Captured 2450.2 gm vs Declared 400 gm (+2050.2 gm)"
+  billingStatus       String?  @default("ESTIMATED") // ESTIMATED, MANIFESTED, BILLED, AUDITED, WEIGHT_MISMATCH, REBILLED
+  lastBilledAt        DateTime?
+
+  // Error/retry
+  errorMessage    String?
+  retryCount      Int      @default(0)
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  trackingLogs    TrackingLog[]
+
+  @@index([status])
+  @@index([waybillNumber])
+}
+
+// ─── Delhivery Wallet & AWB Ledger Transactions ──────────
+model DelhiveryLedgerTransaction {
+  id               Int      @id @default(autoincrement())
+  transactionId    String   @unique // e.g. MTX17862213974511190
+  accountName      String?  // e.g. fa5d92-VBEXPORT-do
+  orderId          String?  // e.g. Zepto-Lehenga Choli / #1001
+  waybillNumber    String   // e.g. 30100810009251
+  weightGrams      Float?   // e.g. 2450.2
+  zone             String?  // e.g. D1, E, B
+  description      String   // e.g. "Captured weight is higher than declared weight", "Shipment Delivered", "Shipment Manifested"
+  creditAmount     Float?   @default(0) // e.g. 70.22
+  debitAmount      Float?   @default(0) // e.g. 333.57
+  isWeightMismatch Boolean  @default(false)
+  transactionDate  DateTime
+  rawDetails       Json?
+
+  createdAt        DateTime @default(now())
+
+  @@index([waybillNumber])
+  @@index([transactionDate])
+}
+
+model TrackingLog {
+  id           Int      @id @default(autoincrement())
+  shipmentId   Int
+  shipment     Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  status       String
+  location     String?
+  remark       String?
+  scannedAt    DateTime
+
+  createdAt    DateTime @default(now())
+
+  @@index([shipmentId])
+}
+
+// ─── Returns ──────────────────────────────────────────────
+model Return {
+  id              Int      @id @default(autoincrement())
+  orderId         Int
+  order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  // Shopify return ID if synced
+  shopifyReturnId String?
+
+  // Return details
+  returnReason    String
+  returnStatus    ReturnStatus @default(INITIATED)
+
+  // Return shipment (reverse logistics via Delhivery)
+  returnWaybillNumber String?
+  returnShipmentStatus String?
+
+  // Refund
+  refundStatus    RefundStatus @default(NONE)
+  refundAmount    Float?
+  shopifyRefundId String?
+  refundProcessedAt DateTime?
+
+  // Quality check on returned goods
+  qcStatus        QcStatus?   // set when return is scanned/delivered back
+  qcRemark        String?
+  qcCheckedAt     DateTime?
+
+  // WhatsApp notification for return
+  customerNotified Boolean @default(false)
+
+  errorMessage     String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  // Relations
+  items            ReturnItem[]
+  notifications    Notification[]
+
+  @@index([returnStatus])
+  @@index([refundStatus])
+}
+
+model ReturnItem {
+  id          Int     @id @default(autoincrement())
+  returnId    Int
+  returnObj   Return  @relation(fields: [returnId], references: [id], onDelete: Cascade)
+
+  orderItemId Int
+  orderItem   OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+
+  quantity    Int
+  qcStatus    QcStatus?
+  qcRemark    String?
+}
+
+// ─── WhatsApp Notifications ───────────────────────────────
+model Notification {
+  id           Int      @id @default(autoincrement())
+  orderId      Int?
+  order        Order?   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  returnId     Int?
+  returnObj    Return?  @relation(fields: [returnId], references: [id], onDelete: Cascade)
+
+  type         NotificationType
+  recipient    String   // phone number
+  templateName String?
+  messageBody  String?
+  status       NotificationStatus @default(PENDING)
+  providerMessageId String?
+  errorMessage String?
+
+  createdAt    DateTime @default(now())
+  sentAt       DateTime?
+
+  @@index([orderId])
+  @@index([status])
+}
+
+// ─── Customer Email Communications & Conversion Logs ──────
+model EmailLog {
+  id                    Int       @id @default(autoincrement())
+  orderId               Int?
+  order                 Order?    @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  shopifyOrderName      String?   // e.g. #26YOU5752
+  recipientEmail        String
+  recipientName         String?
+  subject               String
+  templateType          String    // TRANSIT_DELAY, DISPATCH_DELAY, IN_TRANSIT, OUT_FOR_DELIVERY, NDR_ALERT, DELIVERED, ORDER_CONFIRMED, CUSTOM
+  status                String    @default("PENDING") // SENT, DELIVERED, FAILED, SIMULATED
+  resendId              String?   // ID returned by Resend API
+  waybillNumber         String?   // Delhivery AWB
+  courier               String?   @default("Delhivery Express")
+  currentLocation       String?
+  delayReason           String?
+  expectedDeliveryDate  String?
+  htmlPreview           String?   @db.Text
+  errorMessage          String?
+
+  // Conversion & Engagement Tracking
+  converted             Boolean   @default(false)
+  conversionAction      String?   // TRACKING_CLICKED, DELIVERY_CONFIRMED, ADDRESS_CONFIRMED, RTO_PREVENTED
+  conversionAt          DateTime?
+  openCount             Int       @default(0)
+  clickCount            Int       @default(0)
+  lastEngagedAt         DateTime?
+
+  metadata              Json?
+  createdAt             DateTime  @default(now())
+  sentAt                DateTime?
+
+  @@index([orderId])
+  @@index([recipientEmail])
+  @@index([templateType])
+  @@index([status])
+  @@index([converted])
+  @@index([createdAt])
+}
+
+// ─── Inbound Customer Support Emails & AI Triage ──────────
+model InboundEmail {
+  id              Int       @id @default(autoincrement())
+  orderId         Int?
+  shopifyOrderId  String?
+  shopifyOrderName String?
+  fromEmail       String
+  fromName        String?
+  toEmail         String    @default("return@youthnic.com")
+  subject         String
+  bodyText        String?   @db.Text
+  bodyHtml        String?   @db.Text
+  category        String    // RETURN_REQUEST, EXCHANGE_REQUEST, TRANSIT_DELAY, DAMAGED_ITEM, CANCELLATION, GENERAL_INQUIRY
+  urgency         String    // URGENT, HIGH, NORMAL, LOW
+  sentiment       String    @default("NEUTRAL") // FRUSTRATED, URGENT, NEUTRAL, POSITIVE
+  flagReason      String?
+  aiAnalysis      Json?
+  suggestedReply  String?   @db.Text
+  status          String    @default("OPEN") // OPEN, IN_REVIEW, REPLIED, RESOLVED, CLOSED
+  replyText       String?   @db.Text
+  repliedAt       DateTime?
+  resolvedBy      String?
+  channel         String    @default("EMAIL") // EMAIL, WHATSAPP
+  firebaseRtdbPath String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  order           Order?    @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@index([orderId])
+  @@index([fromEmail])
+  @@index([urgency])
+  @@index([category])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// ─── Self-Learning Knowledge Base & Pattern Cache ────────
+model SupportKnowledgePattern {
+  id                 Int       @id @default(autoincrement())
+  patternKey         String    @unique
+  intent             String
+  keywords           String    // Comma-separated triggers
+  recommendedUrgency String    // URGENT, HIGH, NORMAL
+  suggestedAction    String
+  autoReplyTemplate  String    @db.Text
+  confidence         Float     @default(1.0)
+  usageCount         Int       @default(0)
+  isLearned          Boolean   @default(true)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@index([patternKey])
+  @@index([intent])
+}
+
+// ─── Sync Logs ────────────────────────────────────────────
+model SyncLog {
+  id           Int      @id @default(autoincrement())
+  orderId      Int?
+  order        Order?   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  syncType     SyncType
+  status       SyncLogStatus
+  message      String?
+  payload      Json?
+  errorMessage String?
+
+  createdAt    DateTime @default(now())
+
+  @@index([syncType])
+  @@index([status])
+}
+
+// ─── Settings (key-value store for runtime config) ────────
+model Setting {
+  key    String   @id
+  value  String
+  updatedAt DateTime @updatedAt
+}
+
+// ─── Enums ────────────────────────────────────────────────
+enum OrderStatus {
+  NEW                 // Just synced from Shopify, not yet processed
+  DISPATCH_PENDING    // Ready to be pushed to Delhivery
+  DISPATCHED          // AWB generated, label printed
+  SHIPPED             // Picked up by courier
+  IN_TRANSIT          // In transit
+  OUT_FOR_DELIVERY    // Out for delivery
+  DELIVERED           // Delivered to customer
+  FAILED_DELIVERY     // Delivery failed / NDR
+  RTO_INITIATED       // Return to origin initiated
+  RTO_DELIVERED       // Returned back to seller
+  RETURN_REQUESTED    // Customer requested return
+  RETURN_DISPATCHED   // Return shipment dispatched
+  RETURN_RECEIVED     // Return received at warehouse (scanned)
+  REFUNDED            // Refund processed
+  CANCELLED           // Order cancelled
+}
+
+enum ShipmentStatus {
+  PENDING         // Created in our system, not yet pushed to Delhivery
+  CREATED         // Pushed to Delhivery, AWB generated
+  PICKED_UP       // Picked up by courier
+  IN_TRANSIT
+  OUT_FOR_DELIVERY
+  DELIVERED
+  FAILED          // Delivery failed
+  RTO             // Return to origin
+  RTO_DELIVERED
+  CANCELLED       // Cancelled before dispatch
+  ERROR           // Error creating/managing shipment
+}
+
+enum ReturnStatus {
+  INITIATED            // Return request created
+  PICKUP_SCHEDULED     // Return pickup scheduled with Delhivery
+  PICKED_UP            // Return picked up from customer
+  IN_TRANSIT           // Return in transit to warehouse
+  RECEIVED             // Return received at warehouse (scanned)
+  QC_PENDING           // Received, quality check pending
+  QC_APPROVED          // QC passed
+  QC_REJECTED          // QC failed
+  REFUND_PENDING       // Approved, refund pending
+  REFUNDED             // Refund processed on Shopify
+  CANCELLED            // Return cancelled
+}
+
+enum RefundStatus {
+  NONE
+  PENDING
+  PROCESSED
+  FAILED
+}
+
+enum QcStatus {
+  APPROVED
+  REJECTED
+  PARTIAL
+}
+
+enum NotificationType {
+  ORDER_CONFIRMED
+  ORDER_SHIPPED
+  OUT_FOR_DELIVERY
+  DELIVERED
+  RETURN_INITIATED
+  RETURN_PICKED_UP
+  RETURN_RECEIVED
+  REFUND_PROCESSED
+  NDR_ALERT
+  CUSTOM
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+enum SyncType {
+  ORDER_FETCH
+  SHIPMENT_CREATE
+  TRACKING_UPDATE
+  RETURN_CREATE
+  RETURN_TRACKING
+  REFUND_PROCESS
+  PAYMENT_VERIFY
+  WEBHOOK_RECEIVE
+}
+
+enum SyncLogStatus {
+  SUCCESS
+  FAILED
+  RETRY
+}

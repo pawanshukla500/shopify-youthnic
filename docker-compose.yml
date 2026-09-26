@@ -1,0 +1,62 @@
+name: shopify
+
+services:
+  shopify:
+    container_name: Shopify
+    image: shopify:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    expose:
+      - "3000"
+    ports:
+      - "127.0.0.1:3000:3000"
+    env_file:
+      - ./.env
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      TZ: Asia/Kolkata
+      CLIENT_DIST_PATH: /app/frontend/dist
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - shared_infra
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=shared_infra"
+      - "traefik.http.routers.shopify.rule=Host(`shopify.youthnic.shop`)"
+      - "traefik.http.routers.shopify.entrypoints=websecure"
+      - "traefik.http.routers.shopify.tls=true"
+      - "traefik.http.routers.shopify.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.shopify.service=shopify"
+      - "traefik.http.routers.shopify-fallback.rule=Host(`shopify.srv1845788.hstgr.cloud`)"
+      - "traefik.http.routers.shopify-fallback.entrypoints=websecure"
+      - "traefik.http.routers.shopify-fallback.tls=true"
+      - "traefik.http.routers.shopify-fallback.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.shopify-fallback.service=shopify"
+      - "traefik.http.services.shopify.loadbalancer.server.port=3000"
+      - "com.docker.compose.project=shopify"
+      - "com.docker.compose.service=Shopify"
+    volumes:
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+networks:
+  shared_infra:
+    external: true

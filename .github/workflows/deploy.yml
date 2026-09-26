@@ -1,0 +1,233 @@
+name: Production Build & Deploy to Hostinger VPS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build & Validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
+
+      - name: Install Root & Backend Dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npx prisma generate
+
+      - name: Build TypeScript Backend
+        run: npm run build
+
+      - name: Install Frontend Dependencies
+        run: cd frontend && npm ci
+
+      - name: Build Vite React Frontend
+        run: cd frontend && npm run build
+
+  deploy:
+    name: Deploy to Hostinger VPS
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure SSH Key
+        env:
+          HOSTINGER_SSH_KEY: ${{ secrets.HOSTINGER_SSH_KEY }}
+          HOSTINGER_HOST: ${{ secrets.HOSTINGER_HOST || '200.141.1.119' }}
+          HOSTINGER_PORT: ${{ secrets.HOSTINGER_SSH_PORT || 22 }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$HOSTINGER_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          for i in {1..5}; do
+            ssh-keyscan -p "$HOSTINGER_PORT" "$HOSTINGER_HOST" >> ~/.ssh/known_hosts 2>/dev/null && break || sleep 2
+          done
+
+      - name: Prepare Production Bundle & Secrets
+        env:
+          HOSTINGER_HOST: ${{ secrets.HOSTINGER_HOST || '200.141.1.119' }}
+          HOSTINGER_USER: ${{ secrets.HOSTINGER_USER || 'root' }}
+          HOSTINGER_PORT: ${{ secrets.HOSTINGER_SSH_PORT || 22 }}
+          APP_DOMAIN: ${{ vars.APP_DOMAIN || 'shopify.youthnic.shop' }}
+          FALLBACK_DOMAIN: ${{ vars.FALLBACK_DOMAIN || 'shopify.srv1845788.hstgr.cloud' }}
+          PORT: ${{ vars.PORT || '3000' }}
+          TZ: ${{ vars.TZ || 'Asia/Kolkata' }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SHOPIFY_SHOP_DOMAIN: ${{ vars.SHOPIFY_SHOP_DOMAIN }}
+          SHOPIFY_CLIENT_ID: ${{ vars.SHOPIFY_CLIENT_ID }}
+          SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
+          SHOPIFY_API_VERSION: ${{ vars.SHOPIFY_API_VERSION || '2026-07' }}
+          ORDER_SYNC_START_DATE: ${{ vars.ORDER_SYNC_START_DATE || '2026-09-25' }}
+          CRON_ORDER_SYNC: ${{ vars.CRON_ORDER_SYNC || '0 * * * *' }}
+          DELHIVERY_API_TOKEN: ${{ secrets.DELHIVERY_API_TOKEN }}
+          DELHIVERY_PICKUP_LOCATION: ${{ vars.DELHIVERY_PICKUP_LOCATION }}
+          DELHIVERY_SELLER_NAME: ${{ vars.DELHIVERY_SELLER_NAME }}
+          DELHIVERY_SELLER_ADDRESS: ${{ vars.DELHIVERY_SELLER_ADDRESS }}
+          DELHIVERY_SELLER_CITY: ${{ vars.DELHIVERY_SELLER_CITY }}
+          DELHIVERY_SELLER_STATE: ${{ vars.DELHIVERY_SELLER_STATE }}
+          DELHIVERY_SELLER_PINCODE: ${{ vars.DELHIVERY_SELLER_PINCODE }}
+          DELHIVERY_SELLER_PHONE: ${{ vars.DELHIVERY_SELLER_PHONE }}
+          DELHIVERY_SHIPPING_MODE: ${{ vars.DELHIVERY_SHIPPING_MODE || 'Surface' }}
+          DELHIVERY_LABEL_SIZE: ${{ vars.DELHIVERY_LABEL_SIZE || '4R' }}
+          DELHIVERY_AUTO_PICKUP: ${{ vars.DELHIVERY_AUTO_PICKUP || 'false' }}
+          DELHIVERY_PICKUP_TIME: ${{ vars.DELHIVERY_PICKUP_TIME || '14:00:00' }}
+          KAPSO_API_KEY: ${{ secrets.KAPSO_API_KEY }}
+          KAPSO_API_URL: ${{ vars.KAPSO_API_URL || 'https://api.kapso.ai' }}
+          KAPSO_MCP_URL: ${{ vars.KAPSO_MCP_URL || 'https://mcp.kapso.ai/sse' }}
+          KAPSO_SENDER_PHONE: ${{ vars.KAPSO_SENDER_PHONE }}
+          KAPSO_ENABLED: ${{ vars.KAPSO_ENABLED || 'true' }}
+          KAPSO_PHONE_NUMBER_ID: ${{ vars.KAPSO_PHONE_NUMBER_ID }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          FIREBASE_STORAGE_BUCKET: ${{ vars.FIREBASE_STORAGE_BUCKET }}
+          FIREBASE_RTDB_URL: ${{ vars.FIREBASE_RTDB_URL }}
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+          META_API_KEY: ${{ secrets.META_API_KEY }}
+          MODEL_API_KEY: ${{ secrets.MODEL_API_KEY }}
+          META_LLM_MODEL: ${{ vars.META_LLM_MODEL }}
+          META_LLM_FALLBACK_MODEL: ${{ vars.META_LLM_FALLBACK_MODEL }}
+          META_LLM_BASE_URL: ${{ vars.META_LLM_BASE_URL }}
+        run: |
+          cat <<EOF > /tmp/hostinger.env
+          NODE_ENV=production
+          PORT=${PORT}
+          TZ=${TZ}
+          LOG_LEVEL=info
+          APP_BASE_URL=https://${APP_DOMAIN}
+          DATABASE_URL=${DATABASE_URL}
+          SHOPIFY_SHOP_DOMAIN=${SHOPIFY_SHOP_DOMAIN}
+          SHOPIFY_CLIENT_ID=${SHOPIFY_CLIENT_ID}
+          SHOPIFY_CLIENT_SECRET=${SHOPIFY_CLIENT_SECRET}
+          SHOPIFY_API_VERSION=${SHOPIFY_API_VERSION}
+          ORDER_SYNC_START_DATE=${ORDER_SYNC_START_DATE}
+          CRON_ORDER_SYNC=${CRON_ORDER_SYNC}
+          DELHIVERY_API_TOKEN=${DELHIVERY_API_TOKEN}
+          DELHIVERY_PICKUP_LOCATION=${DELHIVERY_PICKUP_LOCATION}
+          DELHIVERY_SELLER_NAME=${DELHIVERY_SELLER_NAME}
+          DELHIVERY_SELLER_ADDRESS=${DELHIVERY_SELLER_ADDRESS}
+          DELHIVERY_SELLER_CITY=${DELHIVERY_SELLER_CITY}
+          DELHIVERY_SELLER_STATE=${DELHIVERY_SELLER_STATE}
+          DELHIVERY_SELLER_PINCODE=${DELHIVERY_SELLER_PINCODE}
+          DELHIVERY_SELLER_PHONE=${DELHIVERY_SELLER_PHONE}
+          DELHIVERY_SHIPPING_MODE=${DELHIVERY_SHIPPING_MODE}
+          DELHIVERY_LABEL_SIZE=${DELHIVERY_LABEL_SIZE}
+          DELHIVERY_AUTO_PICKUP=${DELHIVERY_AUTO_PICKUP}
+          DELHIVERY_PICKUP_TIME=${DELHIVERY_PICKUP_TIME}
+          KAPSO_API_KEY=${KAPSO_API_KEY}
+          KAPSO_API_URL=${KAPSO_API_URL}
+          KAPSO_MCP_URL=${KAPSO_MCP_URL}
+          KAPSO_SENDER_PHONE=${KAPSO_SENDER_PHONE}
+          KAPSO_ENABLED=${KAPSO_ENABLED}
+          KAPSO_PHONE_NUMBER_ID=${KAPSO_PHONE_NUMBER_ID}
+          RESEND_API_KEY=${RESEND_API_KEY}
+          FIREBASE_STORAGE_BUCKET=${FIREBASE_STORAGE_BUCKET}
+          FIREBASE_RTDB_URL=${FIREBASE_RTDB_URL}
+          META_API_KEY=${META_API_KEY}
+          MODEL_API_KEY=${MODEL_API_KEY}
+          META_LLM_MODEL=${META_LLM_MODEL}
+          META_LLM_FALLBACK_MODEL=${META_LLM_FALLBACK_MODEL}
+          META_LLM_BASE_URL=${META_LLM_BASE_URL}
+          EOF
+
+          if [ -n "$FIREBASE_SERVICE_ACCOUNT_JSON" ]; then
+            printf 'FIREBASE_SERVICE_ACCOUNT_JSON=%s\n' "$(printf '%s' "$FIREBASE_SERVICE_ACCOUNT_JSON" | tr -d '\r\n')" >> /tmp/hostinger.env
+          fi
+
+          tar --warning=no-file-changed \
+              --exclude='./node_modules' \
+              --exclude='./frontend/node_modules' \
+              --exclude='./dist' \
+              --exclude='./frontend/dist' \
+              --exclude='./.git' \
+              -czf /tmp/shopify-source.tar.gz .
+
+          ssh -p "$HOSTINGER_PORT" -i ~/.ssh/id_ed25519 "${HOSTINGER_USER}@${HOSTINGER_HOST}" "mkdir -p /opt/shopify"
+          scp -P "$HOSTINGER_PORT" -i ~/.ssh/id_ed25519 /tmp/hostinger.env "${HOSTINGER_USER}@${HOSTINGER_HOST}:/opt/shopify/hostinger.env"
+          scp -P "$HOSTINGER_PORT" -i ~/.ssh/id_ed25519 /tmp/shopify-source.tar.gz "${HOSTINGER_USER}@${HOSTINGER_HOST}:/opt/shopify/shopify-source.tar.gz"
+
+      - name: Execute Remote Hostinger VPS Deployment
+        env:
+          HOSTINGER_HOST: ${{ secrets.HOSTINGER_HOST || '200.141.1.119' }}
+          HOSTINGER_USER: ${{ secrets.HOSTINGER_USER || 'root' }}
+          HOSTINGER_PORT: ${{ secrets.HOSTINGER_SSH_PORT || 22 }}
+          APP_DOMAIN: ${{ vars.APP_DOMAIN || 'shopify.youthnic.shop' }}
+          FALLBACK_DOMAIN: ${{ vars.FALLBACK_DOMAIN || 'shopify.srv1845788.hstgr.cloud' }}
+        run: |
+          ssh -p "$HOSTINGER_PORT" -i ~/.ssh/id_ed25519 "${HOSTINGER_USER}@${HOSTINGER_HOST}" 'bash -s' <<'EOF'
+          set -euo pipefail
+
+          echo ">>> [1/7] Preparing directory structure in /opt/shopify/Shopify..."
+          mkdir -p /opt/shopify/Shopify
+          cd /opt/shopify
+          tar -xzf shopify-source.tar.gz -C Shopify
+          cd Shopify
+
+          echo ">>> [2/7] Installing production configuration..."
+          mv /opt/shopify/hostinger.env .env
+          chmod 600 .env
+          ln -sf docker-compose.production.yml docker-compose.yml
+
+          echo ">>> [3/7] Deploying Docker container Shopify under project shopify..."
+          docker compose -p shopify -f docker-compose.production.yml --env-file .env up -d --build --remove-orphans
+
+          echo ">>> [4/7] Linking to /docker/shopify for Hostinger hPanel Docker Manager..."
+          mkdir -p /docker
+          ln -sfn /opt/shopify/Shopify /docker/shopify
+
+          echo ">>> [5/7] Verifying Shopify container is running..."
+          sleep 10
+          docker ps --filter "name=Shopify"
+
+          echo ">>> [6/7] Checking internal health endpoint..."
+          healthy=0
+          for i in {1..20}; do
+            if curl -fsS http://127.0.0.1:3000/api/health >/dev/null 2>&1; then
+              echo "✓ Internal health check passed at http://127.0.0.1:3000/api/health"
+              healthy=1
+              break
+            fi
+            echo "Waiting for Shopify container to report healthy ($i/20)..."
+            sleep 4
+          done
+
+          if [ "$healthy" -ne 1 ]; then
+            echo "❌ Container failed internal health check."
+            docker logs Shopify --tail=200
+            exit 1
+          fi
+
+          echo ">>> [7/7] Verifying Traefik reverse proxy routing..."
+          for domain in "shopify.youthnic.shop" "shopify.srv1845788.hstgr.cloud"; do
+            echo "Testing routing for https://$domain/api/health..."
+            curl -k -fsS "https://$domain/api/health" || echo "Note: DNS for $domain may take a moment to propagate or resolve."
+          done
+
+          echo "Cleaning up dangling Docker build images..."
+          docker image prune -f
+
+          echo "=========================================================================="
+          echo "🎉 Shopify OMS is LIVE on Hostinger VPS!"
+          echo "Container: Shopify"
+          echo "Hostinger hPanel: /docker/shopify"
+          echo "URLs: https://shopify.youthnic.shop | https://shopify.srv1845788.hstgr.cloud"
+          echo "=========================================================================="
+          EOF

@@ -2,6 +2,7 @@ import axios, { AxiosInstance } from 'axios';
 import { config } from '../../config';
 import prisma from '../../database/prisma';
 import logger from '../../utils/logger';
+import { withRetry } from '../../utils/retry';
 import { Order } from '@prisma/client';
 
 /**
@@ -738,9 +739,14 @@ class DelhiveryService {
     }>;
   }> {
     try {
-      const response = await this.client.get('/api/v1/packages/json/', {
-        params: { waybill: waybillNumber },
-      });
+      // Retry transient courier blips (429/5xx/timeout) instead of falling back to UNKNOWN.
+      const response = await withRetry(
+        () =>
+          this.client.get('/api/v1/packages/json/', {
+            params: { waybill: waybillNumber },
+          }),
+        { attempts: 3, baseDelayMs: 500 }
+      );
 
       const shipmentData = response.data?.ShipmentData?.[0]?.Shipment;
       const scanDetails = response.data?.ShipmentData?.[0]?.ScanDetail || [];
@@ -786,9 +792,13 @@ class DelhiveryService {
     }
     const combined = waybillNumbers.join(',');
     try {
-      const response = await this.client.get('/api/v1/packages/json/', {
-        params: { waybill: combined },
-      });
+      const response = await withRetry(
+        () =>
+          this.client.get('/api/v1/packages/json/', {
+            params: { waybill: combined },
+          }),
+        { attempts: 3, baseDelayMs: 500 }
+      );
       return response.data?.ShipmentData || [];
     } catch (error: any) {
       logger.error('Failed to track multiple shipments', { error: error.message });

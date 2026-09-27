@@ -122,6 +122,10 @@ export const config = {
     // Pickup requests are optional and should be batched per warehouse/day.
     autoPickup: optional('DELHIVERY_AUTO_PICKUP', 'false') === 'true',
     pickupTime: optional('DELHIVERY_PICKUP_TIME', '11:00:00'),
+    // Optional shared secret for Delhivery scan-push webhooks.
+    // When set, /webhooks/delhivery requires ?secret= or x-delhivery-secret header.
+    // When empty (default), webhooks stay open for backward compatibility.
+    webhookSecret: optional('DELHIVERY_WEBHOOK_SECRET', ''),
     seller: {
       name: optional('DELHIVERY_SELLER_NAME', 'Store Name'),
       address: optional('DELHIVERY_SELLER_ADDRESS', 'Warehouse Address'),
@@ -227,6 +231,13 @@ export const config = {
     // Backfill POD / signature / QC / sorter images into Firebase Storage.
     // Every 30 minutes by default; rows already populated are skipped (idempotent).
     delhiveryDocFetch: optional('CRON_DELHIVERY_DOC_FETCH', '*/30 * * * *'),
+  },
+
+  // Tracking sync resilience — prevents Delhivery 429 fallback during large backlogs.
+  // Stale-first + batch cap + min-interval skip keeps each cron cycle bounded.
+  tracking: {
+    batchLimit: parseInt(optional('TRACKING_SYNC_BATCH_LIMIT', '200'), 10),
+    minIntervalMinutes: parseInt(optional('TRACKING_SYNC_MIN_INTERVAL_MINUTES', '10'), 10),
   },
 
   // Meta Model API (Muse Spark 1.3 Contributor)

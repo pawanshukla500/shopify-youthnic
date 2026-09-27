@@ -12,6 +12,31 @@ import { NotificationPayload } from '../../types';
  */
 class NotificationEngine {
   /**
+   * Best-effort KwiKenage fallback when Kapso is down/misconfigured.
+   * Never throws — CRM notifications must not break order state transitions.
+   */
+  private async fallbackToKwiKenage(
+    order: Order,
+    type: 'ORDER_CONFIRMED' | 'ORDER_SHIPPED' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'NDR_ALERT' | 'RETURN_INITIATED' | 'REFUND_PROCESSED',
+    extra: Partial<NotificationPayload> = {}
+  ): Promise<void> {
+    try {
+      const payload: NotificationPayload = {
+        customerName: order.customerName,
+        orderNumber: order.shopifyOrderName,
+        ...extra,
+      };
+      await kwikenageService.sendNotification(order.customerPhone, type as any, payload, order.id);
+    } catch (fallbackErr: any) {
+      logger.warn('KwiKenage fallback also failed', {
+        type,
+        orderId: order.id,
+        error: fallbackErr?.message,
+      });
+    }
+  }
+
+  /**
    * Order confirmed — sent when a new order is synced from Shopify.
    */
   async notifyOrderConfirmed(order: Order): Promise<void> {
@@ -76,18 +101,20 @@ class NotificationEngine {
     try {
       await kapsoService.sendCriticalTrigger('OUT_FOR_DELIVERY', order, { waybillNumber });
     } catch (err) {
-      logger.warn('Kapso send failed for OUT_FOR_DELIVERY', { err });
+      logger.warn('Kapso send failed for OUT_FOR_DELIVERY, attempting fallback', { err });
+      await this.fallbackToKwiKenage(order, 'OUT_FOR_DELIVERY', { trackingNumber: waybillNumber });
     }
   }
 
   /**
    * Delivered — sent when tracking shows delivery confirmation.
    */
-  async notifyDelivered(order: Order): Promise<void> {
+  async notifyDelivered(order: Order, waybillNumber?: string): Promise<void> {
     try {
-      await kapsoService.sendCriticalTrigger('DELIVERED', order);
+      await kapsoService.sendCriticalTrigger('DELIVERED', order, { waybillNumber });
     } catch (err) {
-      logger.warn('Kapso send failed for DELIVERED', { err });
+      logger.warn('Kapso send failed for DELIVERED, attempting fallback', { err });
+      await this.fallbackToKwiKenage(order, 'DELIVERED', { trackingNumber: waybillNumber });
     }
   }
 
@@ -101,7 +128,8 @@ class NotificationEngine {
         waybillNumber,
       });
     } catch (err) {
-      logger.warn('Kapso send failed for NDR_ALERT', { err });
+      logger.warn('Kapso send failed for NDR_ALERT, attempting fallback', { err });
+      await this.fallbackToKwiKenage(order, 'NDR_ALERT', { trackingNumber: waybillNumber } as any);
     }
   }
 
@@ -115,7 +143,10 @@ class NotificationEngine {
         ndrReason: returnRecord.returnReason,
       });
     } catch (err) {
-      logger.warn('Kapso send failed for RETURN_INITIATED', { err });
+      logger.warn('Kapso send failed for RETURN_INITIATED, attempting fallback', { err });
+      await this.fallbackToKwiKenage(order, 'RETURN_INITIATED', {
+        trackingNumber: returnRecord.returnWaybillNumber || undefined,
+      });
     }
   }
 
@@ -139,17 +170,23 @@ class NotificationEngine {
     try {
       await kapsoService.sendCriticalTrigger('REFUND_PROCESSED', order);
     } catch (err) {
-      logger.warn('Kapso send failed for REFUND_PROCESSED', { err });
+      logger.warn('Kapso send failed for REFUND_PROCESSED, attempting fallback', { err });
+      await this.fallbackToKwiKenage(order, 'REFUND_PROCESSED');
     }
   }
 
   /**
    * Send a custom message to a customer.
+   * Never throws — tracking/RTO flows must continue even if WhatsApp is down.
    */
   async sendCustomMessage(order: Order, message: string): Promise<void> {
-    await kapsoService.sendCriticalTrigger('CUSTOM', order, {
-      customText: message,
-    });
+    try {
+      await kapsoService.sendCriticalTrigger('CUSTOM', order, {
+        customText: message,
+      });
+    } catch (err: any) {
+      logger.warn('Kapso send failed for CUSTOM message', { orderId: order.id, error: err?.message });
+    }
   }
 }
 

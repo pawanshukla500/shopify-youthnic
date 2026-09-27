@@ -1618,10 +1618,12 @@ router.get('/tracking/:waybill', async (req: Request, res: Response): Promise<vo
 });
 
 // Manually trigger tracking sync for all active shipments
-router.post('/tracking/sync', async (_req: Request, res: Response): Promise<void> => {
+// ?force=true bypasses the stale-interval skip (dashboard "Sync now" button).
+router.post('/tracking/sync', async (req: Request, res: Response): Promise<void> => {
   try {
-    const count = await trackingService.syncAllTracking();
-    res.json({ success: true, updatedCount: count });
+    const force = req.query.force === 'true' || req.body?.force === true;
+    const count = await trackingService.syncAllTracking(force);
+    res.json({ success: true, updatedCount: count, forced: force });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -4142,15 +4144,36 @@ router.post('/support/agent/actions/execute', async (req: Request, res: Response
   }
 });
 
+// GET /api/webhooks/whatsapp — Meta Cloud API verification challenge (must be public, no auth).
+// Meta sends GET during webhook setup; POST-only handlers never complete verification.
+router.get('/webhooks/whatsapp', (req: Request, res: Response): void => {
+  if (req.query['hub.mode'] === 'subscribe' && req.query['hub.challenge']) {
+    res.status(200).send(req.query['hub.challenge']);
+    return;
+  }
+  res.status(200).json({ received: true });
+});
+
 // POST /api/webhooks/whatsapp — Inbound WhatsApp messages webhook from Kapso / Meta
+// Public (exempted in requireAuth). Always 200 fast so providers don't retry-storm.
 router.post('/webhooks/whatsapp', async (req: Request, res: Response): Promise<void> => {
   try {
     const payload = req.body;
-    logger.info('Received WhatsApp inbound webhook', { payload });
+    // Don't log raw payload — may contain customer PII / message text.
+    logger.info('Received WhatsApp inbound webhook', {
+      hasSender: Boolean(payload?.sender || payload?.from || payload?.entry),
+    });
 
-    // Handle verification challenge if sent by WhatsApp Cloud API
+    // Handle verification challenge if sent by WhatsApp Cloud API via POST
     if (req.query['hub.mode'] === 'subscribe' && req.query['hub.challenge']) {
       res.status(200).send(req.query['hub.challenge']);
+      return;
+    }
+
+    // Guard against oversized/batch-abuse payloads
+    if (Array.isArray(payload) && payload.length > 100) {
+      logger.warn('WhatsApp webhook batch too large, truncating', { size: payload.length });
+      res.status(200).json({ received: true, ignored: true, reason: 'batch_too_large' });
       return;
     }
 
@@ -4190,7 +4213,8 @@ router.post('/webhooks/whatsapp', async (req: Request, res: Response): Promise<v
     res.status(200).json({ received: true });
   } catch (error: any) {
     logger.error('WhatsApp webhook processing error', { error: error.message });
-    res.status(500).json({ error: 'Webhook processing error' });
+    // Still 200 — provider retries would duplicate CRM agent work; cron/backfill catches up.
+    res.status(200).json({ received: true, error: 'processing_error' });
   }
 });
 

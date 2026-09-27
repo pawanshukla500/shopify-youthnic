@@ -2,6 +2,7 @@ import axios, { AxiosInstance } from 'axios';
 import { config } from '../../config';
 import prisma from '../../database/prisma';
 import logger from '../../utils/logger';
+import { withRetry } from '../../utils/retry';
 import { ShopifyOrderWebhook } from '../../types';
 import { OrderStatus } from '@prisma/client';
 import { shopifyTokenProvider } from './token.provider';
@@ -66,16 +67,20 @@ class ShopifyService {
       let isFirstRequest = true;
 
       while (nextUrl) {
-        const response = await this.client.get(nextUrl, {
-          params: isFirstRequest
-            ? {
-                updated_at_min: minDate,
-                created_at_min: cutoffDate,
-                status: 'any',
-                limit: 250,
-                order: 'updated_at asc',
-              }
-            : undefined,
+        const url = nextUrl;
+        const params = isFirstRequest
+          ? {
+              updated_at_min: minDate,
+              created_at_min: cutoffDate,
+              status: 'any',
+              limit: 250,
+              order: 'updated_at asc',
+            }
+          : undefined;
+        // Retry transient Shopify 429/5xx so order sync doesn't fall back to empty.
+        const response = await withRetry(() => this.client.get(url, { params }), {
+          attempts: 3,
+          baseDelayMs: 600,
         });
 
         orders.push(...((response.data.orders || []) as ShopifyOrderWebhook[]));

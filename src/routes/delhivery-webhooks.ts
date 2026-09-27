@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import prisma from '../database/prisma';
 import delhiveryService from '../modules/delhivery/delhivery.service';
 import notificationEngine from '../modules/notifications/notification.service';
+import { config } from '../config';
 import logger from '../utils/logger';
 
 const router = Router();
@@ -31,10 +32,25 @@ const router = Router();
  */
 router.post('/delhivery', async (req: Request, res: Response): Promise<void> => {
   try {
+    // Optional shared-secret gate. When DELHIVERY_WEBHOOK_SECRET is set, reject
+    // calls without a matching ?secret= or x-delhivery-secret header.
+    // When unset (default), stay open for backward compatibility.
+    const expected = config.delhivery.webhookSecret;
+    if (expected) {
+      const provided =
+        (req.query.secret as string | undefined) ||
+        (req.headers['x-delhivery-secret'] as string | undefined);
+      if (provided !== expected) {
+        logger.warn('Delhivery webhook rejected: bad secret');
+        res.status(401).json({ received: false, error: 'invalid_secret' });
+        return;
+      }
+    }
+
     const payload = req.body;
 
-    // Normalize to array of normalized scan objects.
-    const updates = Array.isArray(payload) ? payload : [payload];
+    // Normalize to array of normalized scan objects (cap to prevent DoS).
+    const updates = Array.isArray(payload) ? payload.slice(0, 500) : [payload];
     const normalized = updates.map(normalizeScanPushPayload).filter(Boolean) as NormalizedScan[];
 
     if (normalized.length === 0) {

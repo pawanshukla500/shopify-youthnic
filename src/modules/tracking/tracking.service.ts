@@ -2,6 +2,7 @@ import prisma from '../../database/prisma';
 import delhiveryService from '../delhivery/delhivery.service';
 import notificationEngine from '../notifications/notification.service';
 import logger from '../../utils/logger';
+import { config } from '../../config';
 import { ShipmentStatus } from '@prisma/client';
 
 /**
@@ -15,7 +16,7 @@ class TrackingService {
    * Sync tracking for all shipments that are not yet delivered/cancelled.
    * Called by the cron scheduler.
    */
-  async syncAllTracking(): Promise<number> {
+  async syncAllTracking(force = false): Promise<number> {
     // Get all active shipments (not yet delivered/cancelled/RTO).
     // CRITICAL: include CREATED and PENDING — the dispatchOrder bug fix moves
     // shipments from PENDING → CREATED on dispatch, but the cron previously
@@ -23,14 +24,31 @@ class TrackingService {
     // moved to PICKED_UP would never be polled. Including them here means a
     // shipment that has been "Label generated" for >1 cron cycle will get the
     // first tracking poll automatically.
+    //
+    // Resilience guards (prevent Delhivery 429 fallback on large backlogs):
+    // - stale-first ordering (oldest trackingUpdatedAt first)
+    // - batch cap via TRACKING_SYNC_BATCH_LIMIT (default 200)
+    // - skip-fresh: ignore rows polled within TRACKING_SYNC_MIN_INTERVAL_MINUTES
+    //   unless force=true (manual "Sync now" button passes force).
+    const batchLimit = Math.max(1, Math.min(config.tracking.batchLimit || 200, 500));
+    const minIntervalMs = (config.tracking.minIntervalMinutes || 10) * 60 * 1000;
+    const staleBefore = new Date(Date.now() - minIntervalMs);
+
     const activeShipments = await prisma.shipment.findMany({
       where: {
         status: {
           notIn: ['DELIVERED', 'CANCELLED', 'RTO_DELIVERED', 'ERROR'],
         },
         waybillNumber: { not: null },
+        ...(force
+          ? {}
+          : {
+              OR: [{ trackingUpdatedAt: null }, { trackingUpdatedAt: { lt: staleBefore } }],
+            }),
       },
       include: { order: true },
+      orderBy: { trackingUpdatedAt: 'asc' },
+      take: batchLimit,
     });
 
     logger.info('Syncing tracking for active shipments', {

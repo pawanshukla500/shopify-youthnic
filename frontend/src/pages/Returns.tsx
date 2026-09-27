@@ -35,7 +35,7 @@ export function Returns() {
   const refund = useMutation({
     mutationFn: async ({ id, amount, orderName }: { id: number; amount: number; orderName?: string }) => {
       const confirmed = window.confirm(`Process refund of ${formatMoney(amount)} for ${orderName || `Return #${id}`} directly via Shopify?`)
-      if (!confirmed) throw new Error('Refund cancelled.')
+      if (!confirmed) throw new Error('USER_CANCELLED_REFUND')
       return (await api.post(`/api/returns/${id}/refund`, { partial: false })).data
     },
     onSuccess: async (data) => {
@@ -43,12 +43,19 @@ export function Returns() {
       await queryClient.invalidateQueries({ queryKey: ['returns'] })
       await queryClient.invalidateQueries({ queryKey: ['orders'] })
     },
-    onError: (error) => toast.toast('error', apiError(error)),
+    onError: (error) => {
+      if (error instanceof Error && error.message === 'USER_CANCELLED_REFUND') return
+      toast.toast('error', apiError(error))
+    },
   })
 
-  const copyWaybill = (awb: string) => {
-    navigator.clipboard.writeText(awb)
-    toast.toast('success', `Waybill ${awb} copied!`)
+  const copyWaybill = async (awb: string) => {
+    try {
+      await navigator.clipboard.writeText(awb)
+      toast.toast('success', `Waybill ${awb} copied!`)
+    } catch {
+      window.prompt('Copy waybill:', awb)
+    }
   }
 
   const returnsList = query.data ?? []

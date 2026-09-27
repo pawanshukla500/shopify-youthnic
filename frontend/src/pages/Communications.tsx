@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
+import { useDebouncedValue } from '../hooks/useDebouncedValue'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
@@ -145,12 +146,13 @@ export function Communications() {
     }
   }, [searchParams])
 
+  const debouncedCommsSearch = useDebouncedValue(search, 400)
   // Queries
   const logsQuery = useQuery({
-    queryKey: ['email-logs', search, selectedTab],
+    queryKey: ['email-logs', debouncedCommsSearch, selectedTab],
     queryFn: () =>
       getEmailLogs({
-        search: search.trim() || undefined,
+        search: debouncedCommsSearch.trim() || undefined,
         templateType:
           selectedTab === 'TRANSIT_DELAY' || selectedTab === 'DISPATCH_DELAY'
             ? selectedTab
@@ -158,18 +160,18 @@ export function Communications() {
         converted: selectedTab === 'converted' ? true : undefined,
         limit: 50,
       }),
-    refetchInterval: 20_000,
+    refetchInterval: 60_000,
   })
 
   const statsQuery = useQuery({
     queryKey: ['communication-stats'],
     queryFn: getCommunicationStats,
-    refetchInterval: 20_000,
+    refetchInterval: 60_000,
   })
 
   const ordersQuery = useQuery({
     queryKey: ['orders-for-email'],
-    queryFn: () => getOrders(),
+    queryFn: () => getOrders({ limit: 50 } as any),
     staleTime: 60_000,
   })
 
@@ -177,7 +179,7 @@ export function Communications() {
   const delayedShipmentsQuery = useQuery({
     queryKey: ['delayed-in-transit-shipments'],
     queryFn: () => getDelayedInTransitShipments(),
-    refetchInterval: 25_000,
+    refetchInterval: 60_000,
   })
 
   const notifyDelayedMutation = useMutation({

@@ -16,7 +16,7 @@ const PRESET_PINCODES = [
 export function Tools() {
   useDocumentTitle('Carrier Tools')
   const [pincode, setPincode] = useState('400001')
-  const [pincodeRun, setPincodeRun] = useState('400001')
+  const [pincodeRun, setPincodeRun] = useState<string | null>(null)
   const [origin, setOrigin] = useState('395002')
   const [destination, setDestination] = useState('400001')
   const [mot, setMot] = useState<'S' | 'E'>('S')
@@ -29,18 +29,11 @@ export function Tools() {
     shipmentStatus: 'Delivered',
     paymentType: 'Pre-paid',
   })
-  const [costRun, setCostRun] = useState<typeof cost | null>({
-    mode: 'S',
-    weight: '500',
-    origin: '395002',
-    destination: '400001',
-    shipmentStatus: 'Delivered',
-    paymentType: 'Pre-paid',
-  })
+  const [costRun, setCostRun] = useState<typeof cost | null>(null)
 
   const serviceability = useQuery({
-    queryKey: ['serviceability', pincodeRun],
-    queryFn: async () => (await api.get(`/api/delhivery/serviceability/${encodeURIComponent(pincodeRun)}`)).data,
+    queryKey: ['serviceability', pincodeRun ?? ''],
+    queryFn: async () => (await api.get(`/api/delhivery/serviceability/${encodeURIComponent(pincodeRun ?? '')}`)).data,
     enabled: Boolean(pincodeRun),
     retry: false,
   })
@@ -60,7 +53,7 @@ export function Tools() {
           params: costRun
             ? {
                 mode: costRun.mode,
-                chargeableWeightGrams: costRun.weight,
+                chargeableWeightGrams: Math.max(50, parseInt(costRun.weight, 10) || 500),
                 originPincode: costRun.origin,
                 destinationPincode: costRun.destination,
                 shipmentStatus: costRun.shipmentStatus,

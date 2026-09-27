@@ -688,8 +688,11 @@ router.get('/orders', async (req: Request, res: Response): Promise<void> => {
     const verified = req.query.verified !== undefined ? req.query.verified === 'true' : undefined;
     const search = req.query.search as string | undefined;
     const filter = req.query.filter as string | undefined;
-    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
-    const offset = req.query.offset ? parseInt(req.query.offset as string, 10) : undefined;
+    const rawLimit = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
+    const rawOffset = req.query.offset ? parseInt(req.query.offset as string, 10) : undefined;
+    // Clamp pagination to prevent full-table fallback scans on large stores.
+    const limit = rawLimit === undefined ? undefined : Math.max(1, Math.min(Number.isFinite(rawLimit) ? rawLimit : 100, 500));
+    const offset = rawOffset === undefined ? undefined : Math.max(0, Number.isFinite(rawOffset) ? rawOffset : 0);
 
     const orders = await orderService.getOrders({
       status: status || undefined,
@@ -2453,10 +2456,63 @@ router.post('/delhivery/waybills/fetch', async (req: Request, res: Response): Pr
 // ─── Setup ───────────────────────────────────────────────
 
 // Register Shopify webhooks (call once after deployment)
+// Returns per-topic results so the Settings UI can show created/exists/failed.
 router.post('/setup/webhooks', async (_req: Request, res: Response): Promise<void> => {
   try {
-    await shopifyService.registerWebhooks();
-    res.json({ success: true, message: 'Webhooks registered. Check logs for details.' });
+    const results = await shopifyService.registerWebhooks();
+    const failed = results.filter((r) => r.status === 'failed');
+    res.json({
+      success: failed.length === 0,
+      results,
+      appBaseUrl: config.appBaseUrl,
+      https: /^https:\/\//i.test(config.appBaseUrl || ''),
+      hint:
+        'Shopify webhooks → ${config.appBaseUrl}/webhooks/shopify. ' +
+        'Delhivery scan-push is manual: email lastmile-integration@delhivery.com with ${config.appBaseUrl}/webhooks/delhivery' +
+        (config.delhivery.webhookSecret ? ' + your DELHIVERY_WEBHOOK_SECRET.' : '.'),
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Webhook + Delhivery access status (no secrets leaked — booleans + counts only).
+// Used by Settings UI and scripts/check-delhivery-access.ts.
+router.get('/setup/webhooks/status', async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const base = (config.appBaseUrl || '').replace(/\/$/, '');
+    const shopifyWebhooks = await shopifyService.listWebhooks();
+    res.json({
+      success: true,
+      appBaseUrl: base,
+      https: /^https:\/\//i.test(base),
+      shopify: {
+        expectedAddress: `${base}/webhooks/shopify`,
+        topics: ['orders/create', 'orders/paid', 'orders/updated', 'orders/cancelled', 'refunds/create'],
+        registered: shopifyWebhooks.map((w: any) => ({ topic: w.topic, address: w.address })),
+        webhookSecretConfigured: Boolean(config.shopify.webhookSecret),
+      },
+      delhivery: {
+        expectedAddress: `${base}/webhooks/delhivery`,
+        // Manual registration via Delhivery integration team — no self-register API.
+        setup: 'manual — email lastmile-integration@delhivery.com with the address above',
+        apiTokenConfigured: Boolean(config.delhivery.apiToken),
+        baseUrl: config.delhivery.baseUrl,
+        pickupLocation: config.delhivery.pickupLocation,
+        webhookSecretConfigured: Boolean(config.delhivery.webhookSecret),
+        limits: {
+          trackSingle: 'GET /api/v1/packages/json/?waybill= (retry 3x, 30s timeout)',
+          trackBulk: 'max 50 waybills/request',
+          trackingCronBatch: `${config.tracking.batchLimit} shipments/cycle, skip-fresh ${config.tracking.minIntervalMinutes}min`,
+          webhookBatch: 'max 500 scans/request',
+        },
+      },
+      whatsapp: {
+        expectedAddress: `${base}/api/webhooks/whatsapp`,
+        public: true,
+        note: 'Exempted from Firebase auth; GET verifies hub.challenge, POST ingests inbound.',
+      },
+    });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -2667,10 +2723,9 @@ router.get('/settings/system-status', async (_req: Request, res: Response): Prom
         maskedKey: metaLlmService.getConfig().maskedKey,
       },
       webhooks: [
-        { name: 'Shopify Order Create', path: '/api/webhooks/shopify/orders-create', method: 'POST', active: true, latency: '8ms' },
-        { name: 'Shopify Order Update', path: '/api/webhooks/shopify/orders-update', method: 'POST', active: true, latency: '11ms' },
-        { name: 'Delhivery Scan Events', path: '/api/webhooks/delhivery/tracking', method: 'POST', active: true, latency: '15ms' },
-        { name: 'Kapso WhatsApp Webhook', path: '/api/webhooks/whatsapp', method: 'POST', active: true, latency: '12ms' },
+        { name: 'Shopify Orders (create/paid/updated/cancelled + refunds/create)', path: '/webhooks/shopify', method: 'POST', active: true, latency: '8ms' },
+        { name: 'Delhivery Scan-Push', path: '/webhooks/delhivery', method: 'POST', active: true, latency: '15ms' },
+        { name: 'WhatsApp Inbound (Kapso/Meta)', path: '/api/webhooks/whatsapp', method: 'GET+POST', active: true, latency: '12ms' },
       ],
     });
   } catch (error: any) {
@@ -2701,13 +2756,18 @@ router.post('/settings/ping', async (_req: Request, res: Response): Promise<void
     results.shopify = { status: 'error', latencyMs: Date.now() - shopifyStart, message: err.message };
   }
 
-  // 3. Test Delhivery
+  // 3. Test Delhivery — live serviceability probe (not just token presence).
   const delhiveryStart = Date.now();
   try {
-    if (config.delhivery.apiToken) {
-      results.delhivery = { status: 'ok', latencyMs: Date.now() - delhiveryStart, message: 'Token Valid' };
-    } else {
+    if (!config.delhivery.apiToken) {
       results.delhivery = { status: 'error', latencyMs: 0, message: 'No API Token configured' };
+    } else {
+      const probe = await delhiveryService.checkPincodeServiceability(
+        config.delhivery.seller.pincode || '395002'
+      );
+      results.delhivery = probe.serviceable || probe.remark !== 'SERVICEABILITY_CHECK_FAILED'
+        ? { status: 'ok', latencyMs: Date.now() - delhiveryStart, message: `Live OK · ${probe.remark || 'serviceable'}` }
+        : { status: 'error', latencyMs: Date.now() - delhiveryStart, message: probe.remark };
     }
   } catch (err: any) {
     results.delhivery = { status: 'error', latencyMs: Date.now() - delhiveryStart, message: err.message };
@@ -2775,12 +2835,25 @@ router.get('/settings/users', async (_req: Request, res: Response): Promise<void
   }
 });
 
-// POST /api/settings/users
+// Only ADMIN roster members may manage operators (passwords + Firebase Auth linkage).
+function isAdminRequest(req: Request): boolean {
+  return (req as any)?.user?.role === 'ADMIN';
+}
+
+// POST /api/settings/users — Admin creates operator WITH password (Firebase login + roster row).
 router.post('/settings/users', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { name, email, role, department, phone, status } = req.body;
+    if (!isAdminRequest(req)) {
+      res.status(403).json({ error: 'Only admins can create operators.' });
+      return;
+    }
+    const { name, email, role, department, phone, status, password } = req.body;
     if (!name || !email || !role) {
       res.status(400).json({ error: 'Name, email, and role are required' });
+      return;
+    }
+    if (password && String(password).length < 6) {
+      res.status(400).json({ error: 'Password must be at least 6 characters.' });
       return;
     }
 
@@ -2788,6 +2861,38 @@ router.post('/settings/users', async (req: Request, res: Response): Promise<void
     if (currentUsers.some((u: any) => u.email.toLowerCase() === email.toLowerCase().trim())) {
       res.status(400).json({ error: 'An operator with this email already exists' });
       return;
+    }
+
+    let firebaseUid: string | null = null;
+    let loginWarning: string | null = null;
+    if (password) {
+      try {
+        const created = await firebaseService.createUserWithPassword({
+          email: email.trim(),
+          password: String(password),
+          displayName: name.trim(),
+          role: role.trim(),
+        });
+        firebaseUid = created.uid;
+      } catch (fbErr: any) {
+        // Firebase email-already-exists → link roster to existing auth user instead of failing.
+        if (fbErr?.code === 'auth/email-already-exists') {
+          try {
+            const linked = await firebaseService.updateUserByEmail(email.trim(), {
+              displayName: name.trim(),
+              role: role.trim(),
+              disabled: status === 'INACTIVE',
+            });
+            firebaseUid = linked.uid;
+          } catch {
+            loginWarning = 'Login account already exists; roster linked without password change.';
+          }
+        } else {
+          loginWarning = `Roster created but Firebase login failed: ${fbErr.message}`;
+        }
+      }
+    } else {
+      loginWarning = 'No password provided — roster-only account, user cannot sign in until admin sets a password.';
     }
 
     const newUser = {
@@ -2801,22 +2906,32 @@ router.post('/settings/users', async (req: Request, res: Response): Promise<void
       avatar: (name.trim().split(' ').map((n: string) => n[0]).join('').slice(0, 2) || 'OP').toUpperCase(),
       createdAt: new Date().toISOString(),
       lastActive: 'Just created',
+      firebaseUid,
+      loginEnabled: Boolean(firebaseUid),
     };
 
     const updated = [newUser, ...currentUsers];
     await saveStoredOperators(updated);
 
-    res.status(201).json({ success: true, user: newUser, users: updated });
+    res.status(201).json({ success: true, user: newUser, users: updated, warning: loginWarning });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// PUT /api/settings/users/:id
+// PUT /api/settings/users/:id — Admin edits profile + optional newPassword + enable/disable login.
 router.put('/settings/users/:id', async (req: Request, res: Response): Promise<void> => {
   try {
+    if (!isAdminRequest(req)) {
+      res.status(403).json({ error: 'Only admins can update operators.' });
+      return;
+    }
     const { id } = req.params;
-    const { name, email, role, department, phone, status } = req.body;
+    const { name, email, role, department, phone, status, newPassword } = req.body;
+    if (newPassword && String(newPassword).length < 6) {
+      res.status(400).json({ error: 'New password must be at least 6 characters.' });
+      return;
+    }
 
     const currentUsers = await getStoredOperators();
     const index = currentUsers.findIndex((u: any) => u.id === id);
@@ -2826,6 +2941,7 @@ router.put('/settings/users/:id', async (req: Request, res: Response): Promise<v
     }
 
     const user = { ...currentUsers[index] };
+    const oldEmail = user.email;
     if (name) user.name = name.trim();
     if (email) user.email = email.trim().toLowerCase();
     if (role) user.role = role.trim();
@@ -2836,20 +2952,88 @@ router.put('/settings/users/:id', async (req: Request, res: Response): Promise<v
       user.avatar = (name.trim().split(' ').map((n: string) => n[0]).join('').slice(0, 2) || 'OP').toUpperCase();
     }
 
+    // Sync login credentials (Firebase) — password change, disable on INACTIVE, role claims.
+    let loginWarning: string | null = null;
+    try {
+      await firebaseService.updateUserByEmail(oldEmail, {
+        ...(newPassword ? { newPassword: String(newPassword) } : {}),
+        ...(name ? { displayName: name.trim() } : {}),
+        ...(status ? { disabled: status === 'INACTIVE' } : {}),
+        ...(role ? { role: role.trim() } : {}),
+      });
+      user.loginEnabled = user.status !== 'INACTIVE';
+    } catch (fbErr: any) {
+      if (fbErr?.code !== 'auth/user-not-found') {
+        loginWarning = `Profile saved but login update failed: ${fbErr.message}`;
+      }
+    }
+
     currentUsers[index] = user;
     await saveStoredOperators(currentUsers);
 
-    res.json({ success: true, user, users: currentUsers });
+    res.json({ success: true, user, users: currentUsers, warning: loginWarning });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// DELETE /api/settings/users/:id
-router.delete('/settings/users/:id', async (req: Request, res: Response): Promise<void> => {
+// POST /api/settings/users/:id/set-password — Admin sets a new password directly.
+router.post('/settings/users/:id/set-password', async (req: Request, res: Response): Promise<void> => {
   try {
+    if (!isAdminRequest(req)) {
+      res.status(403).json({ error: 'Only admins can change passwords.' });
+      return;
+    }
+    const { id } = req.params;
+    const { newPassword } = req.body;
+    if (!newPassword || String(newPassword).length < 6) {
+      res.status(400).json({ error: 'New password must be at least 6 characters.' });
+      return;
+    }
+    const currentUsers = await getStoredOperators();
+    const user = currentUsers.find((u: any) => u.id === id);
+    if (!user) {
+      res.status(404).json({ error: 'Operator not found' });
+      return;
+    }
+    await firebaseService.updateUserByEmail(user.email, { newPassword: String(newPassword) });
+    res.json({ success: true, message: `Password updated for ${user.email}. Old sessions revoked.` });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/settings/users/:id/reset-link — Admin generates a Firebase reset link to share.
+router.post('/settings/users/:id/reset-link', async (req: Request, res: Response): Promise<void> => {
+  try {
+    if (!isAdminRequest(req)) {
+      res.status(403).json({ error: 'Only admins can generate reset links.' });
+      return;
+    }
     const { id } = req.params;
     const currentUsers = await getStoredOperators();
+    const user = currentUsers.find((u: any) => u.id === id);
+    if (!user) {
+      res.status(404).json({ error: 'Operator not found' });
+      return;
+    }
+    const resetLink = await firebaseService.generatePasswordResetLink(user.email);
+    res.json({ success: true, email: user.email, resetLink });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// DELETE /api/settings/users/:id — Admin removes roster row + disables Firebase login.
+router.delete('/settings/users/:id', async (req: Request, res: Response): Promise<void> => {
+  try {
+    if (!isAdminRequest(req)) {
+      res.status(403).json({ error: 'Only admins can delete operators.' });
+      return;
+    }
+    const { id } = req.params;
+    const currentUsers = await getStoredOperators();
+    const target = currentUsers.find((u: any) => u.id === id);
     const filtered = currentUsers.filter((u: any) => u.id !== id);
 
     if (filtered.length === currentUsers.length) {
@@ -2857,6 +3041,9 @@ router.delete('/settings/users/:id', async (req: Request, res: Response): Promis
       return;
     }
 
+    if (target?.email) {
+      await firebaseService.deleteUserByEmail(target.email).catch(() => {});
+    }
     await saveStoredOperators(filtered);
     res.json({ success: true, users: filtered });
   } catch (error: any) {

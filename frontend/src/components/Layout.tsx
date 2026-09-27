@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { getHealth, getOrders, apiError } from '../api'
@@ -40,12 +40,13 @@ export function Layout() {
   const { user, logout } = useAuth()
   const { theme, toggleTheme } = useTheme()
   const [quickSearch, setQuickSearch] = useState('')
+  const [navOpen, setNavOpen] = useState(false)
 
-  const health = useQuery({ queryKey: ['health'], queryFn: getHealth, retry: false, refetchInterval: 30_000 })
+  const health = useQuery({ queryKey: ['health'], queryFn: getHealth, retry: false, refetchInterval: 60_000 })
   const pendingOrdersQuery = useQuery({
     queryKey: ['pending-count'],
     queryFn: () => getOrders({ status: 'NEW' }),
-    refetchInterval: 30_000,
+    refetchInterval: 60_000,
     retry: false,
   })
 
@@ -56,7 +57,13 @@ export function Layout() {
     if (!quickSearch.trim()) return
     navigate(`/orders?search=${encodeURIComponent(quickSearch.trim())}`)
     setQuickSearch('')
+    setNavOpen(false)
   }
+
+  // Close mobile nav on route change
+  useEffect(() => {
+    setNavOpen(false)
+  }, [location.pathname])
 
   const handleLogout = () => {
     logout()
@@ -67,7 +74,8 @@ export function Layout() {
   const current = allNav.find((item) => (item.end ? location.pathname === item.to : location.pathname.startsWith(item.to)))
 
   return (
-    <div className={`app-shell theme-${theme}`}>
+    <div className={`app-shell theme-${theme}${navOpen ? ' nav-open' : ''}`}>
+      {navOpen && <button type="button" aria-label="Close menu" className="sidebar-backdrop" onClick={() => setNavOpen(false)} />}
       <aside className="sidebar">
         {/* Brand Header with 3D Youthnic Logo */}
         <div className="brand">
@@ -184,9 +192,10 @@ export function Layout() {
       <main className="main-content">
         <header className="topbar">
           <div className="breadcrumb">
+            <button type="button" className="topbar-menu-btn" aria-label="Open menu" onClick={() => setNavOpen((v) => !v)}>☰</button>
             <span>Youthnic</span>
             <span className="breadcrumb-slash">/</span>
-            <strong>{current?.label ?? 'Console'}</strong>
+            <strong>{location.pathname === '/reports' ? 'Reports & Analytics' : current?.label ?? 'Console'}</strong>
           </div>
           <div className="topbar-actions">
             {/* Topbar Theme Toggle */}

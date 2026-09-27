@@ -7,6 +7,9 @@ import {
   signOut,
   updateProfile,
   sendPasswordResetEmail,
+  setPersistence,
+  browserLocalPersistence,
+  browserSessionPersistence,
   type User as FirebaseUser,
 } from 'firebase/auth'
 import { auth, googleProvider } from '../firebase'
@@ -17,7 +20,7 @@ interface AuthContextType {
   firebaseUser: FirebaseUser | null
   isAuthenticated: boolean
   loading: boolean
-  login: (email: string, password?: string) => Promise<boolean>
+  login: (email: string, password?: string, rememberMe?: boolean) => Promise<boolean>
   register: (email: string, password?: string, name?: string) => Promise<boolean>
   loginWithGoogle: () => Promise<boolean>
   resetPassword: (email: string) => Promise<void>
@@ -144,13 +147,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [user])
 
   // Email and Password Login strictly via Firebase Auth
-  const login = async (email: string, password?: string): Promise<boolean> => {
+  const login = async (email: string, password?: string, rememberMe = true): Promise<boolean> => {
     const trimmed = email.trim()
     if (!password) {
       throw new Error('Password is required to sign in.')
     }
 
     try {
+      await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence)
       const userCredential = await signInWithEmailAndPassword(auth, trimmed, password)
       const token = await userCredential.user.getIdToken()
       localStorage.setItem(TOKEN_KEY, token)

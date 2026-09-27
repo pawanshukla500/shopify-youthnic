@@ -29,7 +29,7 @@ export function Dashboard() {
   const { data: stats, isLoading, isError, error, refetch, isFetching } = useQuery<DashboardStats>({
     queryKey: ['dashboard-stats'],
     queryFn: getDashboardStats,
-    refetchInterval: 30000,
+    refetchInterval: 60_000,
   })
 
   // Quick Shipping Rate Estimator state
@@ -104,7 +104,16 @@ export function Dashboard() {
   }
 
   if (isError && !stats) {
-    return <ErrorBox message={apiError(error)} />
+    return (
+      <>
+        <ErrorBox message={apiError(error)} />
+        <div style={{ marginTop: 12 }}>
+          <button type="button" className="button button-primary" onClick={() => refetch()} disabled={isFetching}>
+            {isFetching ? 'Retrying…' : 'Retry'}
+          </button>
+        </div>
+      </>
+    )
   }
 
   const kpis = stats?.kpis

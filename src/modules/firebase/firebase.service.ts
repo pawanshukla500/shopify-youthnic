@@ -347,6 +347,108 @@ export class FirebaseService {
     }
     return getAuth(firebaseAdminApp).verifyIdToken(idToken);
   }
+
+  public isAdminReady(): boolean {
+    return Boolean(firebaseAdminApp);
+  }
+
+  /**
+   * Admin: create a Firebase Auth user with a chosen password (for Settings → Create Operator).
+   * Sets displayName + role custom claims (admin=true for Admin roles).
+   */
+  public async createUserWithPassword(input: {
+    email: string;
+    password: string;
+    displayName?: string;
+    role?: string;
+  }): Promise<{ uid: string; email: string }> {
+    if (!firebaseAdminApp) throw new Error('Firebase Admin SDK not initialized — cannot create login user.');
+    if (!input.password || input.password.length < 6) {
+      throw new Error('Password must be at least 6 characters.');
+    }
+    const isAdmin = /admin/i.test(input.role || '');
+    const user = await getAuth(firebaseAdminApp).createUser({
+      email: input.email.toLowerCase().trim(),
+      password: input.password,
+      displayName: input.displayName?.trim() || undefined,
+      emailVerified: false,
+      disabled: false,
+    });
+    await getAuth(firebaseAdminApp).setCustomUserClaims(user.uid, {
+      admin: isAdmin,
+      role: input.role || 'OPERATOR',
+    });
+    logger.info('Firebase user created by admin', { uid: user.uid, email: user.email, isAdmin });
+    return { uid: user.uid, email: user.email || input.email };
+  }
+
+  /**
+   * Admin: set a new password / displayName / disabled flag / role claims for an existing user.
+   * Lookup by email when uid is unknown (roster rows predate Firebase linkage).
+   */
+  public async updateUserByEmail(
+    email: string,
+    patch: { newPassword?: string; displayName?: string; disabled?: boolean; role?: string }
+  ): Promise<{ uid: string }> {
+    if (!firebaseAdminApp) throw new Error('Firebase Admin SDK not initialized — cannot update login user.');
+    const auth = getAuth(firebaseAdminApp);
+    const existing = await auth.getUserByEmail(email.toLowerCase().trim());
+    const update: any = {};
+    if (patch.newPassword) {
+      if (patch.newPassword.length < 6) throw new Error('Password must be at least 6 characters.');
+      update.password = patch.newPassword;
+    }
+    if (patch.displayName !== undefined) update.displayName = patch.displayName;
+    if (patch.disabled !== undefined) update.disabled = patch.disabled;
+    if (Object.keys(update).length) await auth.updateUser(existing.uid, update);
+    if (patch.role !== undefined) {
+      await auth.setCustomUserClaims(existing.uid, {
+        admin: /admin/i.test(patch.role),
+        role: patch.role,
+      });
+    }
+    // Revoke sessions when password/disabled changes so old tokens stop working.
+    if (patch.newPassword || patch.disabled !== undefined) {
+      await auth.revokeRefreshTokens(existing.uid).catch(() => {});
+    }
+    logger.info('Firebase user updated by admin', { uid: existing.uid, email });
+    return { uid: existing.uid };
+  }
+
+  /**
+   * Admin: generate a password-reset link (for “send reset email” without knowing the password).
+   */
+  public async generatePasswordResetLink(email: string): Promise<string> {
+    if (!firebaseAdminApp) throw new Error('Firebase Admin SDK not initialized.');
+    return getAuth(firebaseAdminApp).generatePasswordResetLink(email.toLowerCase().trim());
+  }
+
+  /**
+   * Admin: disable (or delete) a Firebase user when the roster row is suspended/removed.
+   */
+  public async disableUserByEmail(email: string, disabled = true): Promise<void> {
+    if (!firebaseAdminApp) return;
+    try {
+      const auth = getAuth(firebaseAdminApp);
+      const existing = await auth.getUserByEmail(email.toLowerCase().trim());
+      await auth.updateUser(existing.uid, { disabled });
+      if (disabled) await auth.revokeRefreshTokens(existing.uid).catch(() => {});
+    } catch (e: any) {
+      // Roster-only users (never had Firebase login) — nothing to disable.
+      if (e?.code !== 'auth/user-not-found') throw e;
+    }
+  }
+
+  public async deleteUserByEmail(email: string): Promise<void> {
+    if (!firebaseAdminApp) return;
+    try {
+      const auth = getAuth(firebaseAdminApp);
+      const existing = await auth.getUserByEmail(email.toLowerCase().trim());
+      await auth.deleteUser(existing.uid);
+    } catch (e: any) {
+      if (e?.code !== 'auth/user-not-found') throw e;
+    }
+  }
 }
 
 export const firebaseService = new FirebaseService();

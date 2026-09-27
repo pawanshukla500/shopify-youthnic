@@ -1,4 +1,5 @@
 import { useState, useMemo, type FormEvent } from 'react'
+import { useDebouncedValue } from '../hooks/useDebouncedValue'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
@@ -31,6 +32,7 @@ export function SupportDesk() {
 
   const [activeTab, setActiveTab] = useState<FilterTab>('ALL')
   const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || '')
+  const debouncedSearch = useDebouncedValue(searchQuery, 400)
   const [selectedTicketId, setSelectedTicketId] = useState<number | null>(null)
 
   // Reply Composer State
@@ -40,15 +42,13 @@ export function SupportDesk() {
   const [learnPatternToggle, setLearnPatternToggle] = useState(true)
   const [markResolvedToggle, setMarkResolvedToggle] = useState(false)
 
-  // Simulation Modal State
+  // Simulation Modal State — blank by default so a misclick never sends test data to prod.
   const [isSimulateModalOpen, setIsSimulateModalOpen] = useState(false)
-  const [simFromEmail, setSimFromEmail] = useState('neha.verma@example.com')
-  const [simFromName, setSimFromName] = useState('Neha Verma')
-  const [simOrderNumber, setSimOrderNumber] = useState('26YOU5752')
-  const [simSubject, setSimSubject] = useState('Received damaged floral kurti with torn stitch')
-  const [simBody, setSimBody] = useState(
-    'Hi Youthnic, I received my order #26YOU5752 today and upon opening the packet, the floral kurti has torn stitching on the left seam. This is very defective. I want an immediate return and refund. Please arrange pickup.'
-  )
+  const [simFromEmail, setSimFromEmail] = useState('')
+  const [simFromName, setSimFromName] = useState('')
+  const [simOrderNumber, setSimOrderNumber] = useState('')
+  const [simSubject, setSimSubject] = useState('')
+  const [simBody, setSimBody] = useState('')
 
   // History Tab
   const [showHistoryDrawer, setShowHistoryDrawer] = useState(false)
@@ -68,7 +68,7 @@ export function SupportDesk() {
   })
 
   const emailsQuery = useQuery({
-    queryKey: ['support-emails', activeTab, searchQuery],
+    queryKey: ['support-emails', activeTab, debouncedSearch],
     queryFn: () => {
       let urgency: string | undefined = undefined
       let category: string | undefined = undefined
@@ -83,10 +83,10 @@ export function SupportDesk() {
         urgency,
         category,
         status,
-        search: searchQuery || undefined,
+        search: debouncedSearch || undefined,
       })
     },
-    refetchInterval: 15_000,
+    refetchInterval: 30_000,
   })
 
   const selectedEmailQuery = useQuery({

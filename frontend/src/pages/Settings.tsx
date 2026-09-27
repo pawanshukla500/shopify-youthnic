@@ -1,4 +1,4 @@
-import { useState, useMemo, type FormEvent } from 'react'
+import { useState, useMemo, useEffect, type FormEvent } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   getSystemStatus,
@@ -7,6 +7,10 @@ import {
   createSystemUser,
   updateSystemUser,
   deleteSystemUser,
+  setSystemUserPassword,
+  getSystemUserResetLink,
+  getWebhookSetupStatus,
+  registerShopifyWebhooks,
   testWhatsAppNotification,
   getKapsoStatus,
   updateKapsoConfig,
@@ -66,7 +70,7 @@ export function Settings() {
   const [testEmailTo, setTestEmailTo] = useState('pawanshukla@example.com')
   const [testEmailTemplate, setTestEmailTemplate] = useState('TRANSIT_DELAY')
 
-  // Form state
+  // Form state — password at creation + optional new password on edit (admin only).
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -74,7 +78,23 @@ export function Settings() {
     department: DEPARTMENT_OPTIONS[1],
     phone: '',
     status: 'ACTIVE' as 'ACTIVE' | 'INACTIVE',
+    password: '',
+    newPassword: '',
   })
+
+  // Webhook setup state
+  const [webhookStatus, setWebhookStatus] = useState<any>(null)
+  const [webhookBusy, setWebhookBusy] = useState(false)
+
+  // Esc closes the operator modal (focus-trap lite: autofocus first field via required input).
+  useEffect(() => {
+    if (!isAddModalOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsAddModalOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [isAddModalOpen])
 
   // Queries
   const statusQuery = useQuery({
@@ -177,8 +197,8 @@ export function Settings() {
 
   const createUserMutation = useMutation({
     mutationFn: createSystemUser,
-    onSuccess: (data) => {
-      toast.toast('success', `Created operator ${data.user.name} successfully!`)
+    onSuccess: (data: any) => {
+      toast.toast('success', `Created operator ${data.user.name} with login ${data.user.loginEnabled ? 'enabled' : 'roster-only'}!${data.warning ? ` ${data.warning}` : ''}`)
       queryClient.invalidateQueries({ queryKey: ['system-users'] })
       setIsAddModalOpen(false)
       resetForm()
@@ -189,16 +209,44 @@ export function Settings() {
   })
 
   const updateUserMutation = useMutation({
-    mutationFn: ({ id, payload }: { id: string; payload: Partial<SystemUser> }) =>
+    mutationFn: ({ id, payload }: { id: string; payload: Partial<SystemUser> & { newPassword?: string } }) =>
       updateSystemUser(id, payload),
-    onSuccess: (data) => {
-      toast.toast('success', `Updated ${data.user.name} successfully!`)
+    onSuccess: (data: any) => {
+      toast.toast('success', `Updated ${data.user.name} successfully!${data.warning ? ` ${data.warning}` : ''}`)
       queryClient.invalidateQueries({ queryKey: ['system-users'] })
       setEditingUser(null)
+      setIsAddModalOpen(false)
       resetForm()
     },
     onError: (err) => {
       toast.toast('error', `Update failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
+    },
+  })
+
+  const setPasswordMutation = useMutation({
+    mutationFn: ({ id, newPassword }: { id: string; newPassword: string }) =>
+      setSystemUserPassword(id, newPassword),
+    onSuccess: (data) => {
+      toast.toast('success', data.message || 'Password updated. Old sessions revoked.')
+      setFormData((f) => ({ ...f, newPassword: '' }))
+    },
+    onError: (err) => {
+      toast.toast('error', `Password change failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
+    },
+  })
+
+  const resetLinkMutation = useMutation({
+    mutationFn: (id: string) => getSystemUserResetLink(id),
+    onSuccess: async (data) => {
+      try {
+        await navigator.clipboard.writeText(data.resetLink)
+        toast.toast('success', `Reset link for ${data.email} copied to clipboard!`)
+      } catch {
+        window.prompt('Copy reset link:', data.resetLink)
+      }
+    },
+    onError: (err) => {
+      toast.toast('error', `Reset link failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
     },
   })
 
@@ -221,6 +269,8 @@ export function Settings() {
       department: DEPARTMENT_OPTIONS[1],
       phone: '',
       status: 'ACTIVE',
+      password: '',
+      newPassword: '',
     })
   }
 
@@ -239,6 +289,8 @@ export function Settings() {
       department: user.department,
       phone: user.phone || '',
       status: user.status,
+      password: '',
+      newPassword: '',
     })
     setIsAddModalOpen(true)
   }
@@ -249,14 +301,48 @@ export function Settings() {
       toast.toast('error', 'Name and email are required')
       return
     }
+    if (!editingUser && (!formData.password || formData.password.length < 6)) {
+      toast.toast('error', 'Set a password (min 6 characters) so the operator can sign in.')
+      return
+    }
+    if (editingUser && formData.newPassword && formData.newPassword.length < 6) {
+      toast.toast('error', 'New password must be at least 6 characters.')
+      return
+    }
 
     if (editingUser) {
+      const { password: _omit, ...rest } = formData
       updateUserMutation.mutate({
         id: editingUser.id,
-        payload: formData,
+        payload: rest,
       })
     } else {
       createUserMutation.mutate(formData)
+    }
+  }
+
+  const loadWebhookStatus = async () => {
+    setWebhookBusy(true)
+    try {
+      const data = await getWebhookSetupStatus()
+      setWebhookStatus(data)
+    } catch (err) {
+      toast.toast('error', `Webhook status failed: ${err instanceof Error ? err.message : 'Unknown'}`)
+    } finally {
+      setWebhookBusy(false)
+    }
+  }
+
+  const handleRegisterWebhooks = async () => {
+    setWebhookBusy(true)
+    try {
+      const data = await registerShopifyWebhooks()
+      toast.toast(data.success ? 'success' : 'error', data.success ? 'Shopify webhooks registered!' : `Some webhooks failed: ${data.results?.filter((r: any) => r.status === 'failed').map((r: any) => r.topic).join(', ')}`)
+      await loadWebhookStatus()
+    } catch (err) {
+      toast.toast('error', `Register failed: ${err instanceof Error ? err.message : 'Unknown'}`)
+    } finally {
+      setWebhookBusy(false)
     }
   }
 
@@ -338,7 +424,7 @@ export function Settings() {
           onClick={() => setActiveTab('users')}
         >
           <Icon name="users" size={16} />
-          <span>User Creation & Team Access ({usersQuery.data?.length ?? 4})</span>
+          <span>User Creation & Team Access ({usersQuery.data?.length ?? 0})</span>
         </button>
       </div>
 
@@ -347,6 +433,26 @@ export function Settings() {
           ───────────────────────────────────────────────────────────── */}
       {activeTab === 'stack' && (
         <div style={{ display: 'grid', gap: '22px' }}>
+          <Panel style={{ padding: '18px 20px' }}>
+            <PanelHeading title="Webhook Setup & Delhivery Access" eyebrow="One-click Shopify registration + Delhivery manual checklist" />
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginTop: 12 }}>
+              <button type="button" className="button button-secondary" disabled={webhookBusy} onClick={loadWebhookStatus}>
+                {webhookBusy ? 'Checking…' : 'Check webhook status'}
+              </button>
+              <button type="button" className="button button-primary" disabled={webhookBusy} onClick={handleRegisterWebhooks}>
+                {webhookBusy ? 'Working…' : 'Register Shopify webhooks'}
+              </button>
+            </div>
+            {webhookStatus && (
+              <div style={{ marginTop: 12, fontSize: 12, display: 'grid', gap: 6, color: '#334155' }}>
+                <div>APP_BASE_URL: <code>{webhookStatus.appBaseUrl}</code> {webhookStatus.https ? '· HTTPS OK' : '· NOT HTTPS — webhooks will fail'}</div>
+                <div>Shopify → <code>{webhookStatus.shopify?.expectedAddress}</code> · registered: {webhookStatus.shopify?.registered?.length ?? 0}/5 · secret: {webhookStatus.shopify?.webhookSecretConfigured ? 'set' : 'missing'}</div>
+                <div>Delhivery → <code>{webhookStatus.delhivery?.expectedAddress}</code> · {webhookStatus.delhivery?.setup} · token: {webhookStatus.delhivery?.apiTokenConfigured ? 'set' : 'missing'} · pickup: <code>{webhookStatus.delhivery?.pickupLocation}</code></div>
+                <div>WhatsApp → <code>{webhookStatus.whatsapp?.expectedAddress}</code> · public GET+POST</div>
+                <div style={{ color: '#64748b' }}>Limits: {webhookStatus.delhivery?.limits?.trackingCronBatch} · {webhookStatus.delhivery?.limits?.trackBulk} · CLI: <code>npm run delhivery:check</code></div>
+              </div>
+            )}
+          </Panel>
           {statusQuery.isLoading && (
             <LoadingState label="Inspecting live connection to Shopify, Hostinger VPS, and Delhivery APIs…" />
           )}
@@ -1100,6 +1206,58 @@ export function Settings() {
                   <option value="INACTIVE">INACTIVE (Access Suspended)</option>
                 </select>
               </div>
+
+              {!editingUser ? (
+                <div className="form-field">
+                  <label className="field-label">Login Password (min 6 chars)</label>
+                  <input
+                    type="password"
+                    required
+                    minLength={6}
+                    autoComplete="new-password"
+                    placeholder="Set initial password for sign-in"
+                    value={formData.password}
+                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                  />
+                  <span style={{ fontSize: '11px', color: '#64748b' }}>Admin sets this now — operator signs in with email + this password.</span>
+                </div>
+              ) : (
+                <>
+                  <div className="form-field">
+                    <label className="field-label">Change Password (optional)</label>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <input
+                        type="password"
+                        minLength={6}
+                        autoComplete="new-password"
+                        placeholder="New password — leave blank to keep current"
+                        value={formData.newPassword}
+                        onChange={(e) => setFormData({ ...formData, newPassword: e.target.value })}
+                        style={{ flex: 1 }}
+                      />
+                      <button
+                        type="button"
+                        className="button button-secondary"
+                        disabled={!formData.newPassword || formData.newPassword.length < 6 || setPasswordMutation.isPending}
+                        onClick={() => setPasswordMutation.mutate({ id: editingUser.id, newPassword: formData.newPassword })}
+                      >
+                        {setPasswordMutation.isPending ? 'Saving…' : 'Set'}
+                      </button>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <span style={{ fontSize: '11px', color: '#64748b' }}>Login: {editingUser.loginEnabled === false ? 'disabled (roster-only)' : editingUser.firebaseUid ? `Firebase linked` : 'roster-only'}</span>
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      disabled={resetLinkMutation.isPending}
+                      onClick={() => resetLinkMutation.mutate(editingUser.id)}
+                    >
+                      {resetLinkMutation.isPending ? 'Generating…' : 'Copy reset link'}
+                    </button>
+                  </div>
+                </>
+              )}
 
               <div style={{ display: 'flex', gap: '10px', marginTop: '10px', justifyContent: 'flex-end' }}>
                 <button

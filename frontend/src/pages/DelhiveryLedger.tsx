@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef } from 'react'
+import { useDebouncedValue } from '../hooks/useDebouncedValue'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -41,6 +42,7 @@ export function DelhiveryLedger() {
   const [activeTab, setActiveTab] = useState<LedgerTab>('TRANSACTIONS')
   const [remittanceView, setRemittanceView] = useState<RemittanceView>('OUTSTANDING')
   const [awbSearch, setAwbSearch] = useState('')
+  const debouncedAwb = useDebouncedValue(awbSearch, 400)
   const [txTypeFilter, setTxTypeFilter] = useState<'ALL' | 'MISMATCH' | 'DELIVERED' | 'MANIFESTED'>('ALL')
   const [dateRange, setDateRange] = useState('90')
   const [reconcilingAwb, setReconcilingAwb] = useState<string | null>(null)
@@ -50,10 +52,10 @@ export function DelhiveryLedger() {
   const [manualWaybills, setManualWaybills] = useState('')
 
   const query = useQuery({
-    queryKey: ['delhivery-wallet-ledger', awbSearch, activeTab],
+    queryKey: ['delhivery-wallet-ledger', debouncedAwb, activeTab],
     queryFn: () =>
       getDelhiveryWalletLedger({
-        awb: awbSearch || undefined,
+        awb: debouncedAwb || undefined,
         mismatchOnly: activeTab === 'MISMATCHES',
       }),
   })

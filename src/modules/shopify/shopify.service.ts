@@ -170,7 +170,7 @@ class ShopifyService {
    * Register webhooks for order creation, updates, and refunds.
    * Call this once during setup.
    */
-  async registerWebhooks(): Promise<void> {
+  async registerWebhooks(): Promise<Array<{ topic: string; address: string; status: 'created' | 'exists' | 'failed'; message?: string }>> {
     const webhookTopics = [
       'orders/create',
       'orders/paid',
@@ -179,33 +179,59 @@ class ShopifyService {
       'refunds/create',
     ];
 
-    const baseUrl = config.appBaseUrl;
+    const baseUrl = (config.appBaseUrl || '').replace(/\/$/, '');
+    const results: Array<{ topic: string; address: string; status: 'created' | 'exists' | 'failed'; message?: string }> = [];
+
+    // Shopify rejects non-HTTPS callback URLs — surface it before attempting registration.
+    if (!/^https:\/\//i.test(baseUrl)) {
+      logger.warn('APP_BASE_URL is not public HTTPS — Shopify webhook registration will fail', { baseUrl });
+    }
 
     for (const topic of webhookTopics) {
+      const address = `${baseUrl}/webhooks/shopify`;
       try {
         // Check if webhook already exists
-        const existing = await this.client.get('/webhooks.json', {
-          params: { topic, address: `${baseUrl}/webhooks/shopify` },
-        });
+        const existing = await withRetry(
+          () => this.client.get('/webhooks.json', { params: { topic, address } }),
+          { attempts: 2, baseDelayMs: 400 }
+        );
 
         if (existing.data.webhooks && existing.data.webhooks.length > 0) {
           logger.info(`Webhook already registered: ${topic}`);
+          results.push({ topic, address, status: 'exists' });
           continue;
         }
 
-        await this.client.post('/webhooks.json', {
-          webhook: {
-            topic,
-            address: `${baseUrl}/webhooks/shopify`,
-            format: 'json',
-          },
-        });
+        await withRetry(
+          () =>
+            this.client.post('/webhooks.json', {
+              webhook: { topic, address, format: 'json' },
+            }),
+          { attempts: 2, baseDelayMs: 400 }
+        );
         logger.info(`Registered webhook: ${topic}`);
+        results.push({ topic, address, status: 'created' });
       } catch (error: any) {
-        logger.error(`Failed to register webhook: ${topic}`, {
-          error: error.message,
-        });
+        logger.error(`Failed to register webhook: ${topic}`, { error: error.message });
+        results.push({ topic, address, status: 'failed', message: error.message });
       }
+    }
+    return results;
+  }
+
+  /**
+   * List currently registered Shopify webhooks (for setup-status endpoint).
+   */
+  async listWebhooks(): Promise<any[]> {
+    try {
+      const response = await withRetry(() => this.client.get('/webhooks.json'), {
+        attempts: 2,
+        baseDelayMs: 400,
+      });
+      return response.data?.webhooks || [];
+    } catch (error: any) {
+      logger.warn('Failed to list Shopify webhooks', { error: error.message });
+      return [];
     }
   }
 

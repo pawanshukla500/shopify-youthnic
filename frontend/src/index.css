@@ -2435,3 +2435,40 @@ code {
 [data-theme="dark"] .order-step-node.completed .order-step-title {
   color: #f8fafc;
 }
+
+/* ── Responsive: remove desktop-only floor, collapse sidebar, stack grids ── */
+body { min-width: 0; }
+.main-content { min-width: 0; }
+.page-content { min-width: 0; }
+.table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.modal-overlay { padding: 16px; }
+.modal-panel { max-width: min(520px, calc(100vw - 32px)) !important; width: 100%; }
+
+.sidebar-backdrop { display: none; }
+.topbar-menu-btn { display: none; }
+
+@media (max-width: 1100px) {
+  .page-content { padding: 20px 20px 60px; }
+  .topbar { padding: 0 20px; }
+  .page-intro { flex-direction: column; align-items: stretch; }
+}
+
+@media (max-width: 900px) {
+  .sidebar { transform: translateX(-105%); transition: transform .2s ease; width: 260px; }
+  .app-shell.nav-open .sidebar { transform: translateX(0); }
+  .sidebar-backdrop { display: block; position: fixed; inset: 0; background: rgba(15,23,42,.55); z-index: 45; border: 0; padding: 0; }
+  .app-shell:not(.nav-open) .sidebar-backdrop { display: none; }
+  .topbar-menu-btn { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); }
+  .main-content { margin-left: 0; width: 100%; }
+  /* Stack common inline grids used across tabs */
+  .metric-grid, .kpi-grid, .stat-grid, .cards-4, .cards-3 { grid-template-columns: repeat(2, minmax(0,1fr)) !important; }
+  .detail-grid-2, .form-grid-2 { grid-template-columns: 1fr !important; }
+}
+
+@media (max-width: 560px) {
+  .metric-grid, .kpi-grid, .stat-grid, .cards-4, .cards-3 { grid-template-columns: 1fr !important; }
+  .page-intro h1 { font-size: 21px; }
+  .topbar-actions { gap: 8px; }
+  .live-chip { display: none; }
+  .data-table { min-width: 640px; }
+}

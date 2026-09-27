@@ -59,7 +59,7 @@ export function Products() {
 
   const statusParam = activeTab === 'all' || activeTab === 'low_stock' ? 'all' : activeTab
   const productsQuery = useQuery({
-    queryKey: ['products', statusParam],
+    queryKey: ['products', statusParam, searchQuery, selectedType, sortBy],
     queryFn: () => getProducts({ status: statusParam, limit: 100 }),
     staleTime: 30_000,
   })

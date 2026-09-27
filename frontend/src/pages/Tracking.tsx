@@ -22,21 +22,26 @@ export function Tracking() {
   const [viewMode, setViewMode] = useState<'timeline' | 'raw'>('timeline')
   const waybill = params.get('waybill') ?? ''
 
-  // Recent shipments query for 1-click test pills
-  const ordersQuery = useQuery({ queryKey: ['recent-shipments-tracking'], queryFn: () => getOrders(), retry: false })
+  // Recent shipments query for 1-click test pills — capped server-side to avoid fetching all orders.
+  const ordersQuery = useQuery({ queryKey: ['recent-shipments-tracking'], queryFn: () => getOrders({ limit: 20 } as any), retry: false })
 
+  const waybillValid = /^[0-9]{10,16}$/.test(waybill.trim())
   const query = useQuery({
     queryKey: ['tracking', waybill],
     queryFn: async () => (await api.get<{ tracking: unknown }>(`/api/tracking/${encodeURIComponent(waybill)}`)).data.tracking,
-    enabled: Boolean(waybill),
+    enabled: Boolean(waybill) && waybillValid,
     retry: false,
   })
 
   const events = extractEvents(query.data)
 
-  const copyWaybill = (awb: string) => {
-    navigator.clipboard.writeText(awb)
-    toast.toast('success', `Waybill ${awb} copied!`)
+  const copyWaybill = async (awb: string) => {
+    try {
+      await navigator.clipboard.writeText(awb)
+      toast.toast('success', `Waybill ${awb} copied!`)
+    } catch {
+      window.prompt('Copy waybill:', awb)
+    }
   }
 
   const recentWaybills = (ordersQuery.data ?? [])
@@ -130,6 +135,9 @@ export function Tracking() {
         )}
       </Panel>
 
+      {waybill && !waybillValid && (
+        <ErrorBox message="Enter a valid 10–16 digit Delhivery waybill number — no API call made." />
+      )}
       {query.isError && <ErrorBox message={apiError(query.error)} />}
       {query.isLoading && (
         <Panel>

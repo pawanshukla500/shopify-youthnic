@@ -581,6 +581,8 @@ export interface SystemUser {
   avatar: string
   createdAt: string
   lastActive: string
+  firebaseUid?: string | null
+  loginEnabled?: boolean
 }
 
 export interface WebhookEndpoint {

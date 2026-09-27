@@ -13,8 +13,8 @@ export function Login() {
 
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
   const [name, setName] = useState('')
-  const [email, setEmail] = useState('returnorders@vbexports.co.in')
-  const [password, setPassword] = useState('Xchange4SHOPIFY$')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [rememberMe, setRememberMe] = useState(true)
   const [loading, setLoading] = useState(false)
@@ -40,7 +40,7 @@ export function Login() {
         }
         await register(email, password, name)
       } else {
-        await login(email, password)
+        await login(email, password, rememberMe)
       }
       navigate(redirectPath, { replace: true })
     } catch (err: any) {
@@ -216,7 +216,7 @@ export function Login() {
         )}
 
         {/* Form Inputs */}
-        <form onSubmit={handleSubmit} action="#" method="post" className="login-minimal-form">
+        <form onSubmit={handleSubmit} className="login-minimal-form">
           {mode === 'signup' && (
             <div className="login-field-group">
               <label htmlFor="name" className="login-field-label">

@@ -103,7 +103,7 @@ export function OrderDetail() {
   const refundMutation = useMutation({
     mutationFn: async () => {
       const confirmed = window.confirm(`Issue Shopify refund of ${formatMoney(order?.totalAmount || 0)} for order ${order?.shopifyOrderName}? This will process the refund directly through Shopify.`)
-      if (!confirmed) throw new Error('Refund cancelled by user.')
+      if (!confirmed) throw new Error('USER_CANCELLED_REFUND')
       return (await api.post(`/api/orders/${id}/refund`, {
         amount: order?.totalAmount,
         reason: 'Customer return / Merchant refund',
@@ -116,7 +116,10 @@ export function OrderDetail() {
       await queryClient.invalidateQueries({ queryKey: ['payment', id] })
       await queryClient.invalidateQueries({ queryKey: ['returns'] })
     },
-    onError: (error) => toast.toast('error', apiError(error)),
+    onError: (error) => {
+      if (error instanceof Error && error.message === 'USER_CANCELLED_REFUND') return
+      toast.toast('error', apiError(error))
+    },
   })
 
   const returnMutation = useMutation({

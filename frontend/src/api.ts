@@ -48,6 +48,8 @@ export interface GetOrdersParams {
   paymentMethod?: string
   search?: string
   filter?: string
+  limit?: number
+  offset?: number
 }
 
 export async function getOrders(paramsOrStatus?: OrderStatus | '' | GetOrdersParams): Promise<Order[]> {
@@ -60,6 +62,8 @@ export async function getOrders(paramsOrStatus?: OrderStatus | '' | GetOrdersPar
     if (paramsOrStatus.paymentMethod) params.paymentMethod = paramsOrStatus.paymentMethod
     if (paramsOrStatus.search) params.search = paramsOrStatus.search
     if (paramsOrStatus.filter) params.filter = paramsOrStatus.filter
+    if (paramsOrStatus.limit) params.limit = String(paramsOrStatus.limit)
+    if (paramsOrStatus.offset) params.offset = String(paramsOrStatus.offset)
   }
 
   const response = await api.get<{ orders: Order[] }>('/api/orders', {
@@ -306,6 +310,26 @@ export async function deleteSystemUser(id: string): Promise<{
   users: import('./types').SystemUser[]
 }> {
   const response = await api.delete(`/api/settings/users/${id}`)
+  return response.data
+}
+
+export async function setSystemUserPassword(id: string, newPassword: string): Promise<{ success: boolean; message: string }> {
+  const response = await api.post(`/api/settings/users/${id}/set-password`, { newPassword })
+  return response.data
+}
+
+export async function getSystemUserResetLink(id: string): Promise<{ success: boolean; email: string; resetLink: string }> {
+  const response = await api.post(`/api/settings/users/${id}/reset-link`)
+  return response.data
+}
+
+export async function getWebhookSetupStatus(): Promise<any> {
+  const response = await api.get('/api/setup/webhooks/status')
+  return response.data
+}
+
+export async function registerShopifyWebhooks(): Promise<any> {
+  const response = await api.post('/api/setup/webhooks')
   return response.data
 }
 

@@ -21,7 +21,9 @@ import { Order } from '@prisma/client';
  *   7. Generate Label:           GET  /api/p/packing_slip?wbns={awb}&pdf=true&pdf_size={size}
  *   8. Pickup Request:           POST /fm/request/new/  (JSON body)
  *   9. Shipment Cancellation:    POST /api/p/edit  (JSON body: {waybill, cancellation})
- *  10. NDR Action:               POST /api/p/update  (JSON body: {data:[{waybill, act}]})
+ *  10. NDR Action:               POST /api/p/update  (RE-ATTEMPT/PICKUP_RESCHEDULE/DEFER_DLV/EDIT_DETAILS → UPL id)
+ *      NDR UPL status:           GET  /api/cmu/get_bulk_upl/{uplId}?verbose=true
+ *  11. Warehouse create/edit:    POST /api/backend/clientwarehouse/create|edit/ (one-time pickup registration)
  *  11. Download Document:        GET  /api/rest/fetch/pkg/document/?doc_type={type}&waybill={awb}
  *  12. RVP with QC:              POST /api/cmu/create.json  (same as creation, with qc_type + custom_qc)
  */
@@ -903,6 +905,37 @@ class DelhiveryService {
       lengthCm?: number;
     }
   ): Promise<any> {
+    // Fail fast per Edit Order docs: allowed = Manifested/In Transit/Pending/Scheduled;
+    // blocked = Delivered/Dispatched/LOST/RTO/DTO/Picked Up/Collected.
+    // Our equivalents of blocked: DELIVERED, OUT_FOR_DELIVERY (Dispatched), RTO,
+    // RTO_DELIVERED (DTO), PICKED_UP (Picked Up), CANCELLED.
+    try {
+      const current = await prisma.shipment.findFirst({
+        where: { waybillNumber },
+        select: { status: true },
+      });
+      const blocked: string[] = [
+        'DELIVERED',
+        'OUT_FOR_DELIVERY',
+        'RTO',
+        'RTO_DELIVERED',
+        'PICKED_UP',
+        'CANCELLED',
+      ];
+      if (current && blocked.includes(current.status)) {
+        throw new Error(
+          `Edit blocked: package is ${current.status} (Delhivery allows edits only for Manifested/In Transit/Pending/Scheduled).`
+        );
+      }
+    } catch (guardErr: any) {
+      if (guardErr.message?.startsWith('Edit blocked:')) throw guardErr;
+      // DB lookup failure must not block the edit itself — log and continue.
+      logger.warn('Edit guard lookup failed, proceeding with Delhivery edit', {
+        waybillNumber,
+        error: guardErr.message,
+      });
+    }
+
     const payload: Record<string, unknown> = { waybill: waybillNumber };
 
     if (updates.name !== undefined) payload.name = updates.name;
@@ -1331,6 +1364,114 @@ class DelhiveryService {
   }
 
   // ═══════════════════════════════════════════════════════════
+  // 10b. CLIENT WAREHOUSE CREATION / UPDATION (portal tabs 3-4)
+  // ═══════════════════════════════════════════════════════════
+
+  /**
+   * Register a pickup warehouse in Delhivery's system.
+   * POST /api/backend/clientwarehouse/create/
+   *
+   * Optional one-time activity (FMS team can do it manually), but required
+   * before manifesting with a new pickup_location name — otherwise manifestation
+   * fails with "ClientWarehouse matching query doesn't exist".
+   * Only the documented keys are sent; random extra keys are rejected by Delhivery.
+   */
+  async createWarehouse(input: {
+    name: string;
+    phone: string;
+    city: string;
+    pin: string;
+    address: string;
+    email: string;
+    registeredName?: string;
+    returnAddress?: string;
+    returnPin?: string;
+    returnCity?: string;
+    returnState?: string;
+    returnCountry?: string;
+    country?: string;
+  }): Promise<any> {
+    const payload: Record<string, unknown> = {
+      name: input.name,
+      phone: input.phone,
+      city: input.city,
+      pin: input.pin,
+      address: input.address,
+      country: input.country || 'India',
+      email: input.email,
+      registered_name: input.registeredName || input.name,
+      return_address: input.returnAddress || input.address,
+      return_pin: input.returnPin || input.pin,
+      return_city: input.returnCity || input.city,
+      return_state: input.returnState || '',
+      return_country: input.returnCountry || 'India',
+    };
+    try {
+      const response = await withRetry(
+        () => this.client.post('/api/backend/clientwarehouse/create/', payload),
+        { attempts: 2, baseDelayMs: 500 }
+      );
+      logger.info('Delhivery warehouse created', { name: input.name });
+      return response.data;
+    } catch (error: any) {
+      logger.error('Failed to create Delhivery warehouse', {
+        name: input.name,
+        error: error.response?.data || error.message,
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Update an existing warehouse (e.g. phone/address changed).
+   * POST /api/backend/clientwarehouse/edit/
+   */
+  async updateWarehouse(
+    name: string,
+    updates: Partial<{
+      phone: string;
+      city: string;
+      pin: string;
+      address: string;
+      email: string;
+      returnAddress: string;
+      returnPin: string;
+      returnCity: string;
+      returnState: string;
+    }>
+  ): Promise<any> {
+    const keyMap: Record<string, string> = {
+      phone: 'phone',
+      city: 'city',
+      pin: 'pin',
+      address: 'address',
+      email: 'email',
+      returnAddress: 'return_address',
+      returnPin: 'return_pin',
+      returnCity: 'return_city',
+      returnState: 'return_state',
+    };
+    const payload: Record<string, unknown> = { name };
+    for (const [k, v] of Object.entries(updates)) {
+      if (v !== undefined && keyMap[k]) payload[keyMap[k]] = v;
+    }
+    try {
+      const response = await withRetry(
+        () => this.client.post('/api/backend/clientwarehouse/edit/', payload),
+        { attempts: 2, baseDelayMs: 500 }
+      );
+      logger.info('Delhivery warehouse updated', { name });
+      return response.data;
+    } catch (error: any) {
+      logger.error('Failed to update Delhivery warehouse', {
+        name,
+        error: error.response?.data || error.message,
+      });
+      throw error;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
   // 11. SHIPMENT CANCELLATION
   // ═══════════════════════════════════════════════════════════
 
@@ -1367,30 +1508,71 @@ class DelhiveryService {
 
   /**
    * Take action on an NDR (failed delivery) shipment.
-   * POST /api/p/update
-   * Body: { "data": [{ "waybill": "xxx", "act": "RE-ATTEMPT" }] }
+   * POST /api/p/update (asynchronous — returns UPL id, check via getNDRStatus).
    *
-   * Actions:
-   *   RE-ATTEMPT: Re-attempt delivery (NSL codes: EOD-74, EOD-15, EOD-104, EOD-43, EOD-86, EOD-11, EOD-69, EOD-6)
-   *   PICKUP_RESCHEDULE: Reschedule pickup (NSL codes: EOD-777, EOD-21)
-   *
-   * Returns UPL ID which can be used to check status via GET /api/cmu/get_bulk_upl/{uplId}
+   * Actions (portal tab 11):
+   *   RE-ATTEMPT: re-attempt as per NDR instructions (pending + NSL EOD-74/15/104/43/86/11/16/69/6, ST-108)
+   *   PICKUP_RESCHEDULE: reschedule pickup (NSL EOD-777, EOD-21)
+   *   DEFER_DLV: defer delivery to deferred_date (YYYY-MM-DD, max +6 days from first
+   *     pending date; NSL EOD-74/15/11/3/16/6, ST-108 — read StatusCode from tracking)
+   *   EDIT_DETAILS: correct name/phone/address while package is pending
    */
   async ndrAction(
     waybillNumber: string,
-    action: 'RE-ATTEMPT' | 'PICKUP_RESCHEDULE'
-  ): Promise<{ uplId?: string; success: boolean }> {
-    try {
-      const response = await this.client.post('/api/p/update', {
-        data: [
-          {
-            waybill: waybillNumber,
-            act: action,
-          },
-        ],
-      });
+    action: 'RE-ATTEMPT' | 'PICKUP_RESCHEDULE' | 'DEFER_DLV' | 'EDIT_DETAILS',
+    options?: {
+      deferredDate?: string;
+      name?: string;
+      phone?: string;
+      address?: string;
+    }
+  ): Promise<{ uplId?: string; success: boolean; message?: string }> {
+    const entry: Record<string, unknown> = { waybill: waybillNumber, act: action };
 
-      const uplId = response.data?.upl_id || response.data?.data?.upl_id;
+    if (action === 'DEFER_DLV') {
+      const date = (options?.deferredDate || '').trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        return { success: false, message: 'deferredDate must be YYYY-MM-DD.' };
+      }
+      const target = new Date(`${date}T00:00:00`);
+      const maxAllowed = new Date();
+      maxAllowed.setDate(maxAllowed.getDate() + 6);
+      maxAllowed.setHours(23, 59, 59, 999);
+      if (Number.isNaN(target.getTime()) || target > maxAllowed) {
+        return {
+          success: false,
+          message: 'deferredDate must be a valid date no more than 6 days out (Delhivery rule).',
+        };
+      }
+      entry.deferred_date = date;
+    }
+
+    if (action === 'EDIT_DETAILS') {
+      if (options?.name) entry.name = options.name;
+      if (options?.phone) entry.phone = options.phone;
+      if (options?.address) entry.add = options.address;
+      if (!entry.name && !entry.phone && !entry.add) {
+        return {
+          success: false,
+          message: 'EDIT_DETAILS needs at least one of name, phone, address.',
+        };
+      }
+    }
+
+    try {
+      const response = await withRetry(
+        () =>
+          this.client.post('/api/p/update', {
+            data: [entry],
+          }),
+        { attempts: 2, baseDelayMs: 500 }
+      );
+
+      const uplId =
+        response.data?.upl_id ||
+        response.data?.data?.upl_id ||
+        response.data?.uplId ||
+        response.data?.data?.uplId;
       logger.info('NDR action submitted', { waybillNumber, action, uplId });
       return { uplId, success: true };
     } catch (error: any) {

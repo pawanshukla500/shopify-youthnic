@@ -2438,18 +2438,72 @@ router.get('/delhivery/document/:waybill', async (req: Request, res: Response): 
   }
 });
 
-// Take NDR action (RE-ATTEMPT or PICKUP_RESCHEDULE)
+// Take NDR action: RE-ATTEMPT | PICKUP_RESCHEDULE | DEFER_DLV (+deferredDate YYYY-MM-DD, ≤6d) | EDIT_DETAILS (+name/phone/address).
+// Async — returns UPL id; check via GET /api/delhivery/ndr/:uplId. StatusCode gating (EOD-*/ST-108) readable from tracking.
 router.post('/delhivery/ndr', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { waybill, action } = req.body;
+    const { waybill, action, deferredDate, name, phone, address } = req.body;
     if (!waybill || !action) {
       res.status(400).json({ error: 'waybill and action are required' });
       return;
     }
-    const result = await delhiveryService.ndrAction(waybill, action);
+    if (!['RE-ATTEMPT', 'PICKUP_RESCHEDULE', 'DEFER_DLV', 'EDIT_DETAILS'].includes(action)) {
+      res.status(400).json({ error: 'action must be RE-ATTEMPT, PICKUP_RESCHEDULE, DEFER_DLV, or EDIT_DETAILS' });
+      return;
+    }
+    const result = await delhiveryService.ndrAction(waybill, action, {
+      deferredDate,
+      name,
+      phone,
+      address,
+    });
+    if (!result.success && result.message) {
+      res.status(400).json(result);
+      return;
+    }
     res.json(result);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// Check NDR action (UPL) status
+router.get('/delhivery/ndr/:uplId', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const result = await delhiveryService.getNDRStatus(req.params.uplId);
+    res.json(result);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Register a pickup warehouse (one-time; avoids "ClientWarehouse matching query doesn't exist" on manifest)
+router.post('/delhivery/warehouse', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { name, phone, city, pin, address, email } = req.body;
+    if (!name || !phone || !city || !pin || !address || !email) {
+      res.status(400).json({ error: 'name, phone, city, pin, address, and email are required' });
+      return;
+    }
+    const result = await delhiveryService.createWarehouse(req.body);
+    res.json(result);
+  } catch (error: any) {
+    res.status(500).json({ error: error.response?.data || error.message });
+  }
+});
+
+// Update a registered pickup warehouse
+router.put('/delhivery/warehouse', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { name, ...updates } = req.body;
+    if (!name) {
+      res.status(400).json({ error: 'name is required' });
+      return;
+    }
+    const result = await delhiveryService.updateWarehouse(name, updates);
+    res.json(result);
+  } catch (error: any) {
+    res.status(500).json({ error: error.response?.data || error.message });
   }
 });
 

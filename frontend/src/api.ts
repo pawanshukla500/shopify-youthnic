@@ -271,6 +271,43 @@ export async function handleNdrAction(
   return response.data
 }
 
+export type DelhiveryNdrAction = 'RE-ATTEMPT' | 'PICKUP_RESCHEDULE' | 'DEFER_DLV' | 'EDIT_DETAILS'
+
+export async function submitDelhiveryNdr(payload: {
+  waybill: string
+  action: DelhiveryNdrAction
+  deferredDate?: string
+  name?: string
+  phone?: string
+  address?: string
+}): Promise<{ success: boolean; uplId?: string; message?: string }> {
+  const response = await api.post('/api/delhivery/ndr', payload)
+  return response.data
+}
+
+export async function getDelhiveryNdrStatus(uplId: string): Promise<any> {
+  const response = await api.get(`/api/delhivery/ndr/${encodeURIComponent(uplId)}`)
+  return response.data
+}
+
+export async function createDelhiveryWarehouse(payload: Record<string, string>): Promise<any> {
+  const response = await api.post('/api/delhivery/warehouse', payload)
+  return response.data
+}
+
+export async function updateDelhiveryWarehouse(payload: Record<string, string>): Promise<any> {
+  const response = await api.put('/api/delhivery/warehouse', payload)
+  return response.data
+}
+
+export async function editDelhiveryShipment(
+  waybill: string,
+  updates: Partial<{ name: string; phone: string[]; address: string; codAmount: number; weightGrams: number }>
+): Promise<any> {
+  const response = await api.patch(`/api/delhivery/shipment/${encodeURIComponent(waybill)}`, updates)
+  return response.data
+}
+
 export async function getAnalyticsReport(): Promise<import('./types').AnalyticsData> {
   const response = await api.get('/api/reports/analytics')
   return response.data

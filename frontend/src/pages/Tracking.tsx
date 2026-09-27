@@ -34,6 +34,7 @@ export function Tracking() {
   })
 
   const events = extractEvents(query.data)
+  const detail = (query.data && typeof query.data === 'object' ? (query.data as Record<string, any>) : null)
 
   const copyWaybill = async (awb: string) => {
     try {
@@ -147,6 +148,21 @@ export function Tracking() {
 
       {query.data !== undefined && !query.isLoading && (
         <div>
+          {detail && (
+            <Panel>
+              <PanelHeading eyebrow="Delivery intelligence" title="Pickup & Promise Dates" />
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px', fontSize: '12px' }}>
+                <div><span style={{ color: '#64748b' }}>Latest status: </span><strong>{detail.status || '—'}</strong>{detail.statusType ? ` (${detail.statusType})` : ''}</div>
+                <div><span style={{ color: '#64748b' }}>Status code: </span><strong style={{ fontFamily: 'monospace' }}>{detail.statusCode || '—'}</strong></div>
+                <div><span style={{ color: '#64748b' }}>Expected delivery: </span><strong>{detail.expectedDeliveryDate ? formatDate(detail.expectedDeliveryDate) : '—'}</strong></div>
+                <div><span style={{ color: '#64748b' }}>Pickup: </span><strong>{detail.pickupDone ? `✓ Done${detail.pickedupDate ? ` · ${formatDate(detail.pickedupDate)}` : ''}` : '⏳ Not picked yet'}</strong></div>
+                <div><span style={{ color: '#64748b' }}>Manifested: </span><strong>{detail.pickUpDate ? formatDate(detail.pickUpDate) : '—'}</strong></div>
+                <div><span style={{ color: '#64748b' }}>Dispatch count: </span><strong>{detail.dispatchCount ?? '—'}</strong></div>
+                {detail.referenceNo && <div><span style={{ color: '#64748b' }}>Reference: </span><strong style={{ fontFamily: 'monospace' }}>{detail.referenceNo}</strong></div>}
+                {detail.remarks && <div style={{ gridColumn: '1 / -1' }}><span style={{ color: '#64748b' }}>Instructions: </span><strong>{detail.remarks}</strong></div>}
+              </div>
+            </Panel>
+          )}
           {/* View toggle tabs */}
           <div style={{ display: 'flex', gap: '8px', marginBottom: '14px' }}>
             <button

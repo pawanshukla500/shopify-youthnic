@@ -51,6 +51,12 @@ export function OrderDetail() {
   const [ndrNotes, setNdrNotes] = useState('')
   const [isSubmittingNdr, setIsSubmittingNdr] = useState(false)
 
+  // Edit delivery details (Delhivery Edit Order API: phone/address while Manifested/In Transit/Pending)
+  const [showEditDetails, setShowEditDetails] = useState(false)
+  const [editPhone, setEditPhone] = useState('')
+  const [editAddress, setEditAddress] = useState('')
+  const [isSavingEdit, setIsSavingEdit] = useState(false)
+
   // RTO Refund State
   const [isRefundingRto, setIsRefundingRto] = useState(false)
 
@@ -901,7 +907,72 @@ export function OrderDetail() {
                     Cancel shipment
                   </Button>
                 )}
+
+                {order.shipment.courier?.toLowerCase() === 'delhivery' && order.shipment.waybillNumber && (
+                  <Button
+                    className="button-secondary"
+                    onClick={() => {
+                      setEditPhone(order.customerPhone || '')
+                      setEditAddress(
+                        [order.customerAddress, order.customerCity, order.customerState, order.customerPincode]
+                          .filter(Boolean)
+                          .join(', ')
+                      )
+                      setShowEditDetails((v) => !v)
+                    }}
+                  >
+                    <Icon name="tool" size={16} />
+                    {showEditDetails ? 'Hide correction' : 'Correct phone / address'}
+                  </Button>
+                )}
               </div>
+
+              {showEditDetails && order.shipment?.waybillNumber && (
+                <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px', marginTop: '10px', display: 'grid', gap: '8px' }}>
+                  <span style={{ fontSize: '11px', color: '#64748b' }}>
+                    Pushes corrected details to Delhivery (Edit Order API — allowed while Manifested / In Transit / Pending).
+                  </span>
+                  <input
+                    type="text"
+                    placeholder="Corrected 10-digit phone"
+                    value={editPhone}
+                    onChange={(e) => setEditPhone(e.target.value)}
+                    style={{ width: '100%' }}
+                  />
+                  <input
+                    type="text"
+                    placeholder="Corrected address with pincode"
+                    value={editAddress}
+                    onChange={(e) => setEditAddress(e.target.value)}
+                    style={{ width: '100%' }}
+                  />
+                  <div>
+                    <Button
+                      className="button-primary"
+                      disabled={isSavingEdit || (!editPhone.trim() && !editAddress.trim())}
+                      loading={isSavingEdit}
+                      onClick={async () => {
+                        setIsSavingEdit(true)
+                        try {
+                          await api.patch(`/api/delhivery/shipment/${encodeURIComponent(order.shipment?.waybillNumber || '')}`, {
+                            ...(editPhone.trim() ? { phone: [editPhone.trim()] } : {}),
+                            ...(editAddress.trim() ? { address: editAddress.trim() } : {}),
+                          })
+                          toast.toast('success', 'Corrected details pushed to Delhivery!')
+                          setShowEditDetails(false)
+                          await queryClient.invalidateQueries({ queryKey: ['order', id] })
+                        } catch (err: any) {
+                          toast.toast('error', apiError(err))
+                        } finally {
+                          setIsSavingEdit(false)
+                        }
+                      }}
+                    >
+                      Push to Delhivery
+                    </Button>
+                  </div>
+                </div>
+              )}
             </>
           ) : (
             <EmptyState

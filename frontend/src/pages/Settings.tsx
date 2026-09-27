@@ -11,6 +11,8 @@ import {
   getSystemUserResetLink,
   getWebhookSetupStatus,
   registerShopifyWebhooks,
+  createDelhiveryWarehouse,
+  updateDelhiveryWarehouse,
   testWhatsAppNotification,
   getKapsoStatus,
   updateKapsoConfig,
@@ -85,6 +87,17 @@ export function Settings() {
   // Webhook setup state
   const [webhookStatus, setWebhookStatus] = useState<any>(null)
   const [webhookBusy, setWebhookBusy] = useState(false)
+
+  // Delhivery warehouse register/update (portal tabs 3-4, one-time setup)
+  const [whForm, setWhForm] = useState({
+    name: 'Surat Warehouse',
+    phone: '',
+    city: 'Surat',
+    pin: '395002',
+    address: '',
+    email: '',
+  })
+  const [whBusy, setWhBusy] = useState(false)
 
   // Esc closes the operator modal (focus-trap lite: autofocus first field via required input).
   useEffect(() => {
@@ -452,6 +465,60 @@ export function Settings() {
                 <div style={{ color: '#64748b' }}>Limits: {webhookStatus.delhivery?.limits?.trackingCronBatch} · {webhookStatus.delhivery?.limits?.trackBulk} · CLI: <code>npm run delhivery:check</code></div>
               </div>
             )}
+          </Panel>
+          <Panel style={{ padding: '18px 20px' }}>
+            <PanelHeading title="Delhivery Pickup Warehouse" eyebrow="One-time registration · avoids ClientWarehouse-mismatch manifest failures" />
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px', marginTop: 12 }}>
+              {(['name', 'phone', 'city', 'pin', 'address', 'email'] as const).map((field) => (
+                <label key={field} style={{ display: 'grid', gap: 4, fontSize: 11, color: '#64748b', textTransform: 'capitalize' }}>
+                  {field}
+                  <input
+                    value={whForm[field]}
+                    onChange={(e) => setWhForm({ ...whForm, [field]: e.target.value })}
+                    placeholder={field === 'name' ? 'Surat Warehouse' : field}
+                    style={{ fontSize: 12 }}
+                  />
+                </label>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginTop: 12 }}>
+              <button
+                type="button"
+                className="button button-secondary"
+                disabled={whBusy}
+                onClick={async () => {
+                  setWhBusy(true)
+                  try {
+                    await createDelhiveryWarehouse(whForm)
+                    toast.toast('success', `Warehouse "${whForm.name}" registered with Delhivery!`)
+                  } catch (err) {
+                    toast.toast('error', `Warehouse create failed: ${err instanceof Error ? err.message : 'Unknown'}`)
+                  } finally {
+                    setWhBusy(false)
+                  }
+                }}
+              >
+                {whBusy ? 'Working…' : 'Register warehouse'}
+              </button>
+              <button
+                type="button"
+                className="button button-secondary"
+                disabled={whBusy || !whForm.name.trim()}
+                onClick={async () => {
+                  setWhBusy(true)
+                  try {
+                    await updateDelhiveryWarehouse({ name: whForm.name.trim(), phone: whForm.phone, city: whForm.city, pin: whForm.pin, address: whForm.address, email: whForm.email })
+                    toast.toast('success', `Warehouse "${whForm.name}" updated!`)
+                  } catch (err) {
+                    toast.toast('error', `Warehouse update failed: ${err instanceof Error ? err.message : 'Unknown'}`)
+                  } finally {
+                    setWhBusy(false)
+                  }
+                }}
+              >
+                Update warehouse
+              </button>
+            </div>
           </Panel>
           {statusQuery.isLoading && (
             <LoadingState label="Inspecting live connection to Shopify, Hostinger VPS, and Delhivery APIs…" />

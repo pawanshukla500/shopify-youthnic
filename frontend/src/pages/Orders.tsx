@@ -170,9 +170,27 @@ export function Orders() {
 
   // NDR Resolution Modal States
   const [orderForNdr, setOrderForNdr] = useState<Order | null>(null)
-  const [ndrActionType, setNdrActionType] = useState<'RE-ATTEMPT' | 'RTO'>('RE-ATTEMPT')
+  const [ndrActionType, setNdrActionType] = useState<'RE-ATTEMPT' | 'RTO' | 'DEFER_DLV' | 'EDIT_DETAILS'>('RE-ATTEMPT')
   const [ndrNotes, setNdrNotes] = useState('')
+  const [ndrDeferDate, setNdrDeferDate] = useState(() => new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10))
+  const [ndrEditPhone, setNdrEditPhone] = useState('')
+  const [ndrEditAddress, setNdrEditAddress] = useState('')
   const [isSubmittingNdr, setIsSubmittingNdr] = useState(false)
+
+  // Prefill correction fields + reset action when the NDR modal opens
+  useEffect(() => {
+    if (orderForNdr) {
+      setNdrActionType('RE-ATTEMPT')
+      setNdrNotes('')
+      setNdrDeferDate(new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10))
+      setNdrEditPhone(orderForNdr.customerPhone || '')
+      setNdrEditAddress(
+        [orderForNdr.customerAddress, orderForNdr.customerCity, orderForNdr.customerState, orderForNdr.customerPincode]
+          .filter(Boolean)
+          .join(', ')
+      )
+    }
+  }, [orderForNdr])
 
   // RTO Auto-Refund action state
   const [refundingOrderId, setRefundingOrderId] = useState<number | null>(null)
@@ -293,12 +311,34 @@ export function Orders() {
   }
 
   // Handle NDR Action confirmation
+  // RE-ATTEMPT/RTO go through the order-level flow (internal status + WhatsApp);
+  // DEFER_DLV/EDIT_DETAILS call Delhivery's async NDR API directly (returns UPL id).
   const handleConfirmNdr = async () => {
     if (!orderForNdr) return
     setIsSubmittingNdr(true)
     try {
-      const res = await handleNdrAction(orderForNdr.id, ndrActionType, ndrNotes)
-      toast.toast('success', res.message || 'NDR action recorded successfully!')
+      if (ndrActionType === 'DEFER_DLV' || ndrActionType === 'EDIT_DETAILS') {
+        const waybill = orderForNdr.shipment?.waybillNumber
+        if (!waybill) throw new Error('No AWB on this order — cannot raise a Delhivery NDR action.')
+        if (ndrActionType === 'DEFER_DLV' && !/^\d{4}-\d{2}-\d{2}$/.test(ndrDeferDate)) {
+          throw new Error('Pick a deferred date (YYYY-MM-DD, within 6 days).')
+        }
+        if (ndrActionType === 'EDIT_DETAILS' && !ndrEditPhone.trim() && !ndrEditAddress.trim()) {
+          throw new Error('Enter a corrected phone and/or address.')
+        }
+        const res = await api.post('/api/delhivery/ndr', {
+          waybill,
+          action: ndrActionType,
+          deferredDate: ndrActionType === 'DEFER_DLV' ? ndrDeferDate : undefined,
+          phone: ndrActionType === 'EDIT_DETAILS' ? ndrEditPhone.trim() || undefined : undefined,
+          address: ndrActionType === 'EDIT_DETAILS' ? ndrEditAddress.trim() || undefined : undefined,
+        })
+        const uplId = res.data?.uplId
+        toast.toast('success', `Delhivery NDR ${ndrActionType} submitted${uplId ? ` · UPL: ${uplId}` : ''}! Check status via AWB Tracking.`)
+      } else {
+        const res = await handleNdrAction(orderForNdr.id, ndrActionType, ndrNotes)
+        toast.toast('success', res.message || 'NDR action recorded successfully!')
+      }
       setOrderForNdr(null)
       setNdrNotes('')
       await queryClient.invalidateQueries({ queryKey: ['orders'] })
@@ -2189,10 +2229,9 @@ export function Orders() {
               )}
 
               <FormField label="Select NDR Action">
-                <div style={{ display: 'flex', gap: '10px', marginTop: '6px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '6px' }}>
                   <label
                     style={{
-                      flex: 1,
                       border: ndrActionType === 'RE-ATTEMPT' ? '2px solid #2563eb' : '1px solid #cbd5e1',
                       background: ndrActionType === 'RE-ATTEMPT' ? '#eff6ff' : '#ffffff',
                       borderRadius: '8px',
@@ -2216,7 +2255,52 @@ export function Orders() {
 
                   <label
                     style={{
-                      flex: 1,
+                      border: ndrActionType === 'DEFER_DLV' ? '2px solid #7c3aed' : '1px solid #cbd5e1',
+                      background: ndrActionType === 'DEFER_DLV' ? '#f5f3ff' : '#ffffff',
+                      borderRadius: '8px',
+                      padding: '12px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="ndrAction"
+                      value="DEFER_DLV"
+                      checked={ndrActionType === 'DEFER_DLV'}
+                      onChange={() => setNdrActionType('DEFER_DLV')}
+                      style={{ marginRight: '8px' }}
+                    />
+                    <strong>📅 Defer Delivery Date</strong>
+                    <p style={{ margin: '4px 0 0 0', fontSize: '11px', color: '#475569' }}>
+                      Delhivery async NDR API — deferred date max 6 days out. Returns UPL id.
+                    </p>
+                  </label>
+
+                  <label
+                    style={{
+                      border: ndrActionType === 'EDIT_DETAILS' ? '2px solid #059669' : '1px solid #cbd5e1',
+                      background: ndrActionType === 'EDIT_DETAILS' ? '#ecfdf5' : '#ffffff',
+                      borderRadius: '8px',
+                      padding: '12px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="ndrAction"
+                      value="EDIT_DETAILS"
+                      checked={ndrActionType === 'EDIT_DETAILS'}
+                      onChange={() => setNdrActionType('EDIT_DETAILS')}
+                      style={{ marginRight: '8px' }}
+                    />
+                    <strong>✏️ Correct Phone / Address</strong>
+                    <p style={{ margin: '4px 0 0 0', fontSize: '11px', color: '#475569' }}>
+                      Push corrected consignee details to Delhivery while package is pending.
+                    </p>
+                  </label>
+
+                  <label
+                    style={{
                       border: ndrActionType === 'RTO' ? '2px solid #dc2626' : '1px solid #cbd5e1',
                       background: ndrActionType === 'RTO' ? '#fef2f2' : '#ffffff',
                       borderRadius: '8px',
@@ -2239,6 +2323,45 @@ export function Orders() {
                   </label>
                 </div>
               </FormField>
+
+              {ndrActionType === 'DEFER_DLV' && (
+                <FormField label="Deferred delivery date (max 6 days out)">
+                  <input
+                    type="date"
+                    value={ndrDeferDate}
+                    min={new Date().toISOString().slice(0, 10)}
+                    max={new Date(Date.now() + 6 * 86400000).toISOString().slice(0, 10)}
+                    onChange={(e) => setNdrDeferDate(e.target.value)}
+                    disabled={isSubmittingNdr}
+                    style={{ width: '100%' }}
+                  />
+                </FormField>
+              )}
+
+              {ndrActionType === 'EDIT_DETAILS' && (
+                <>
+                  <FormField label="Corrected phone">
+                    <input
+                      type="text"
+                      placeholder="10-digit customer phone"
+                      value={ndrEditPhone}
+                      onChange={(e) => setNdrEditPhone(e.target.value)}
+                      disabled={isSubmittingNdr}
+                      style={{ width: '100%' }}
+                    />
+                  </FormField>
+                  <FormField label="Corrected address">
+                    <input
+                      type="text"
+                      placeholder="Full corrected delivery address with pincode"
+                      value={ndrEditAddress}
+                      onChange={(e) => setNdrEditAddress(e.target.value)}
+                      disabled={isSubmittingNdr}
+                      style={{ width: '100%' }}
+                    />
+                  </FormField>
+                </>
+              )}
 
               <FormField label="Instruction / Courier Remarks (Optional)">
                 <input
@@ -2265,7 +2388,14 @@ export function Orders() {
                 type="button"
                 className="modal-btn-primary"
                 style={{
-                  background: ndrActionType === 'RE-ATTEMPT' ? '#2563eb' : '#dc2626',
+                  background:
+                    ndrActionType === 'RE-ATTEMPT'
+                      ? '#2563eb'
+                      : ndrActionType === 'DEFER_DLV'
+                        ? '#7c3aed'
+                        : ndrActionType === 'EDIT_DETAILS'
+                          ? '#059669'
+                          : '#dc2626',
                   color: '#fff',
                   border: 'none',
                   borderRadius: '6px',
@@ -2279,8 +2409,12 @@ export function Orders() {
                 {isSubmittingNdr
                   ? 'Submitting Action…'
                   : ndrActionType === 'RE-ATTEMPT'
-                  ? '🔄 Schedule Re-Attempt'
-                  : '↩️ Mark Return to Origin (RTO)'}
+                    ? '🔄 Schedule Re-Attempt'
+                    : ndrActionType === 'DEFER_DLV'
+                      ? '📅 Defer Delivery'
+                      : ndrActionType === 'EDIT_DETAILS'
+                        ? '✏️ Push Corrected Details'
+                        : '↩️ Mark Return to Origin (RTO)'}
               </button>
             </div>
           </div>

@@ -18,6 +18,34 @@ export const ORDER_STATUSES: OrderStatus[] = [
   'CANCELLED',
 ]
 
+export type OrderTabKey = 'all' | 'new' | 'ready' | 'transit' | 'delivered' | 'return' | 'cancel'
+
+export interface OrderTabDef {
+  key: OrderTabKey
+  label: string
+  statuses: OrderStatus[]
+  color: string
+}
+
+/** Operational segregation for the Orders page — 6 stages + All. */
+export const ORDER_TABS: OrderTabDef[] = [
+  { key: 'all', label: 'All', statuses: [], color: '#2563eb' },
+  { key: 'new', label: 'New Order', statuses: ['NEW'], color: '#2563eb' },
+  { key: 'ready', label: 'Ready to Ship', statuses: ['DISPATCH_PENDING', 'DISPATCHED'], color: '#d97706' },
+  { key: 'transit', label: 'In Transit', statuses: ['SHIPPED', 'IN_TRANSIT', 'OUT_FOR_DELIVERY', 'FAILED_DELIVERY'], color: '#7c3aed' },
+  { key: 'delivered', label: 'Delivered', statuses: ['DELIVERED'], color: '#059669' },
+  { key: 'return', label: 'Return', statuses: ['RTO_INITIATED', 'RTO_DELIVERED', 'RETURN_REQUESTED', 'RETURN_DISPATCHED', 'RETURN_RECEIVED', 'REFUNDED'], color: '#9333ea' },
+  { key: 'cancel', label: 'Cancel', statuses: ['CANCELLED'], color: '#dc2626' },
+]
+
+/** Map a legacy ?status= value to its tab (deep-link compat). */
+export function tabForStatus(status: string | null | undefined): OrderTabKey {
+  if (!status) return 'all'
+  const upper = status.toUpperCase()
+  const found = ORDER_TABS.find((t) => t.statuses.includes(upper as OrderStatus))
+  return found ? found.key : 'all'
+}
+
 export const RETURN_STATUSES: ReturnStatus[] = [
   'INITIATED',
   'PICKUP_SCHEDULED',

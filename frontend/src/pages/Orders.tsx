@@ -18,7 +18,8 @@ import {
   openPrintableOrderLabel,
   openPrintableOrderInvoice,
 } from '../api'
-import { ORDER_STATUSES, formatDate, formatMoney, labelize } from '../lib'
+import { ORDER_TABS, tabForStatus, formatDate, formatMoney, labelize, type OrderTabKey } from '../lib'
+import { getOrderTabCounts } from '../api'
 import { Button, EmptyState, ErrorBox, FormField, Icon, LoadingState, PageIntro, Panel, StatusBadge, useDocumentTitle, useToast } from '../components/UI'
 import type { Order, OrderStatus } from '../types'
 import { useNavigate, useSearchParams } from 'react-router-dom'
@@ -150,9 +151,10 @@ export function Orders() {
       : searchParams.get('filter') === 'NDR'
       ? 'NDR'
       : 'ALL'
-  const initialStatus = (searchParams.get('status') as OrderStatus) || ''
+  const initialTab: OrderTabKey = (searchParams.get('tab') as OrderTabKey) ||
+    tabForStatus(searchParams.get('status') as OrderStatus | null)
   const [channelFilter, setChannelFilter] = useState<PaymentChannelFilter>(initialFilter)
-  const [status, setStatus] = useState<OrderStatus | ''>(initialStatus)
+  const [activeTab, setActiveTab] = useState<OrderTabKey>(initialTab)
   const [selectedState, setSelectedState] = useState<string>('')
   const [search, setSearch] = useState('')
   const [dispatchingId, setDispatchingId] = useState<number | null>(null)
@@ -189,10 +191,28 @@ export function Orders() {
   const [isSubmittingPickup, setIsSubmittingPickup] = useState(false)
 
   const query = useQuery({
-    queryKey: ['orders', status || 'all'],
-    queryFn: () => getOrders(status),
+    queryKey: ['orders', activeTab],
+    queryFn: () => getOrders(activeTab === 'all' ? '' : { tab: activeTab }),
     retry: false,
   })
+
+  const tabCountsQuery = useQuery({
+    queryKey: ['orders', 'tab-counts'],
+    queryFn: getOrderTabCounts,
+    retry: false,
+    staleTime: 15_000,
+  })
+  const tabCounts = tabCountsQuery.data ?? {}
+
+  const setTabAndUrl = (tab: OrderTabKey) => {
+    setActiveTab(tab)
+    setSelectedOrderIds(new Set())
+    const next = new URLSearchParams(searchParams)
+    if (tab === 'all') next.delete('tab')
+    else next.set('tab', tab)
+    next.delete('status')
+    navigate(`/orders${next.toString() ? `?${next.toString()}` : ''}`, { replace: true })
+  }
 
   useEffect(() => {
     const f = searchParams.get('filter')
@@ -203,9 +223,12 @@ export function Orders() {
     } else if (f === 'NDR') {
       setChannelFilter('NDR')
     }
-    const st = searchParams.get('status') as OrderStatus | null
-    if (st) {
-      setStatus(st)
+    const tabParam = searchParams.get('tab') as OrderTabKey | null
+    if (tabParam && ORDER_TABS.some((t) => t.key === tabParam)) {
+      setActiveTab(tabParam)
+    } else {
+      const st = searchParams.get('status') as OrderStatus | null
+      if (st) setActiveTab(tabForStatus(st))
     }
   }, [searchParams])
 
@@ -1081,6 +1104,31 @@ export function Orders() {
         </div>
       )}
 
+      {/* Operational stage tabs — New / Ready to Ship / In Transit / Delivered / Return / Cancel */}
+      <div className="analytics-tabs-bar" style={{ marginBottom: '16px', flexWrap: 'wrap' }} role="tablist" aria-label="Order stages">
+        {ORDER_TABS.map((tab) => {
+          const count = tabCounts[tab.key]
+          const isActive = activeTab === tab.key
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              role="tab"
+              aria-selected={isActive}
+              className={`analytics-tab-btn ${isActive ? 'active' : ''}`}
+              onClick={() => setTabAndUrl(tab.key)}
+              title={tab.key === 'all' ? 'All orders' : `${tab.label}: ${tab.statuses.join(', ')}`}
+              style={isActive ? { borderColor: tab.color, color: tab.color } : undefined}
+            >
+              <span>{tab.label}</span>
+              <span className="tab-badge" style={isActive ? { background: tab.color, color: '#fff' } : undefined}>
+                {count ?? '…'}
+              </span>
+            </button>
+          )
+        })}
+      </div>
+
       <Panel className="filters-panel">
         <div className="filters-row" style={{ flexWrap: 'wrap', gap: '12px', alignItems: 'center' }}>
           {/* Enhanced Search Bar */}
@@ -1120,12 +1168,15 @@ export function Orders() {
             </select>
           </FormField>
 
-          <FormField label="Status">
-            <select value={status} onChange={(event) => setStatus(event.target.value as OrderStatus | '')}>
-              <option value="">All statuses</option>
-              {ORDER_STATUSES.map((item) => (
-                <option key={item} value={item}>
-                  {labelize(item)}
+          <FormField label="Stage">
+            <select
+              value={activeTab}
+              onChange={(event) => setTabAndUrl(event.target.value as OrderTabKey)}
+              title="Order stage — same as tabs above"
+            >
+              {ORDER_TABS.map((tab) => (
+                <option key={tab.key} value={tab.key}>
+                  {tab.label}{tabCounts[tab.key] !== undefined ? ` (${tabCounts[tab.key]})` : ''}
                 </option>
               ))}
             </select>
@@ -1668,9 +1719,11 @@ export function Orders() {
           <EmptyState
             title="No matching orders"
             description={
-              search || selectedState
-                ? 'Try a different search term or clear your state/status filters.'
-                : 'Orders from Shopify will appear here after your first sync.'
+              search || selectedState || channelFilter !== 'ALL'
+                ? 'Try a different search term or clear your state/stage filters.'
+                : activeTab === 'all'
+                  ? 'Orders from Shopify will appear here after your first sync.'
+                  : `No orders in “${ORDER_TABS.find((t) => t.key === activeTab)?.label}” stage yet.`
             }
             icon="box"
           />

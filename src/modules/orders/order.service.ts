@@ -13,7 +13,38 @@ import { ShopifyOrderWebhook } from '../../types';
  * Orchestrates the full order lifecycle:
  *   NEW → DISPATCH_PENDING → DISPATCHED → SHIPPED → IN_TRANSIT → OUT_FOR_DELIVERY → DELIVERED
  * Each transition triggers appropriate WhatsApp notifications.
+ *
+ * Operational tabs (Orders page) group raw statuses into 6 stages:
+ *   new: NEW
+ *   ready: DISPATCH_PENDING, DISPATCHED (ready to ship / label generated)
+ *   transit: SHIPPED, IN_TRANSIT, OUT_FOR_DELIVERY, FAILED_DELIVERY (NDR still in transit loop)
+ *   delivered: DELIVERED
+ *   return: RTO_INITIATED, RTO_DELIVERED, RETURN_REQUESTED, RETURN_DISPATCHED, RETURN_RECEIVED, REFUNDED
+ *   cancel: CANCELLED
  */
+export const ORDER_TABS = {
+  new: ['NEW'],
+  ready: ['DISPATCH_PENDING', 'DISPATCHED'],
+  transit: ['SHIPPED', 'IN_TRANSIT', 'OUT_FOR_DELIVERY', 'FAILED_DELIVERY'],
+  delivered: ['DELIVERED'],
+  return: [
+    'RTO_INITIATED',
+    'RTO_DELIVERED',
+    'RETURN_REQUESTED',
+    'RETURN_DISPATCHED',
+    'RETURN_RECEIVED',
+    'REFUNDED',
+  ],
+  cancel: ['CANCELLED'],
+} as const;
+
+export type OrderTab = keyof typeof ORDER_TABS | 'all';
+
+export function resolveOrderTabStatuses(tab?: string): string[] | undefined {
+  if (!tab || tab === 'all') return undefined;
+  const key = tab.toLowerCase() as keyof typeof ORDER_TABS;
+  return ORDER_TABS[key] ? [...ORDER_TABS[key]] : undefined;
+}
 class OrderService {
   /**
    * Sync new/updated orders from Shopify into our DB.
@@ -491,6 +522,8 @@ class OrderService {
   async getOrders(
     optionsOrStatus?: string | {
       status?: string;
+      statuses?: string[];
+      tab?: string;
       gateway?: string;
       paymentMethod?: string;
       paymentVerified?: boolean;
@@ -501,6 +534,8 @@ class OrderService {
     }
   ): Promise<Order[]> {
     let status: string | undefined;
+    let statuses: string[] | undefined;
+    let tab: string | undefined;
     let gateway: string | undefined;
     let paymentMethod: string | undefined;
     let paymentVerified: boolean | undefined;
@@ -513,6 +548,8 @@ class OrderService {
       status = optionsOrStatus;
     } else if (optionsOrStatus && typeof optionsOrStatus === 'object') {
       status = optionsOrStatus.status;
+      statuses = optionsOrStatus.statuses;
+      tab = optionsOrStatus.tab;
       gateway = optionsOrStatus.gateway;
       paymentMethod = optionsOrStatus.paymentMethod;
       paymentVerified = optionsOrStatus.paymentVerified;
@@ -562,7 +599,11 @@ class OrderService {
       andConditions.push({ paymentMethod: { not: 'COD' } });
     }
 
-    if (status) {
+    const tabStatuses = resolveOrderTabStatuses(tab);
+    const explicitStatuses = statuses?.length ? statuses : tabStatuses;
+    if (explicitStatuses?.length) {
+      where.status = { in: explicitStatuses };
+    } else if (status) {
       where.status = status;
     }
 
@@ -623,6 +664,32 @@ class OrderService {
     });
 
     return orders.map((o) => this.enrichOrderMetadata(o));
+  }
+
+  /**
+   * Counts per operational tab (single groupBy, no full-table fetch).
+   * Used for Orders page tab badges.
+   */
+  async getOrderTabCounts(): Promise<Record<OrderTab | 'all', number> & { byStatus: Record<string, number> }> {
+    const grouped = await prisma.order.groupBy({ by: ['status'], _count: { status: true } });
+    const byStatus: Record<string, number> = {};
+    let total = 0;
+    for (const row of grouped) {
+      byStatus[row.status] = row._count.status;
+      total += row._count.status;
+    }
+    const countFor = (statuses: readonly string[]): number =>
+      statuses.reduce((sum, s) => sum + (byStatus[s] || 0), 0);
+    return {
+      all: total,
+      new: countFor(ORDER_TABS.new),
+      ready: countFor(ORDER_TABS.ready),
+      transit: countFor(ORDER_TABS.transit),
+      delivered: countFor(ORDER_TABS.delivered),
+      return: countFor(ORDER_TABS.return),
+      cancel: countFor(ORDER_TABS.cancel),
+      byStatus,
+    };
   }
 
   /**

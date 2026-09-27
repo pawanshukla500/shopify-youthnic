@@ -680,9 +680,22 @@ router.get('/reports/analytics', async (_req: Request, res: Response): Promise<v
 // ─── Orders ──────────────────────────────────────────────
 
 // Get all orders (supports status, gateway, paymentMethod, verified, search, pagination)
+router.get('/orders/tab-counts', async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const counts = await orderService.getOrderTabCounts();
+    res.json({ success: true, counts });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.get('/orders', async (req: Request, res: Response): Promise<void> => {
   try {
     const status = req.query.status as string | undefined;
+    const tab = (req.query.tab as string | undefined)?.toLowerCase();
+    const statuses = req.query.statuses
+      ? String(req.query.statuses).split(',').map((s) => s.trim().toUpperCase()).filter(Boolean)
+      : undefined;
     const gateway = req.query.gateway as string | undefined;
     const paymentMethod = req.query.paymentMethod as string | undefined;
     const verified = req.query.verified !== undefined ? req.query.verified === 'true' : undefined;
@@ -696,6 +709,8 @@ router.get('/orders', async (req: Request, res: Response): Promise<void> => {
 
     const orders = await orderService.getOrders({
       status: status || undefined,
+      statuses,
+      tab: tab || undefined,
       gateway: gateway || undefined,
       paymentMethod: paymentMethod || undefined,
       paymentVerified: verified,

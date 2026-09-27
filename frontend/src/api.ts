@@ -44,6 +44,7 @@ export function apiError(error: unknown): string {
 
 export interface GetOrdersParams {
   status?: OrderStatus | ''
+  tab?: string
   gateway?: string
   paymentMethod?: string
   search?: string
@@ -58,6 +59,7 @@ export async function getOrders(paramsOrStatus?: OrderStatus | '' | GetOrdersPar
     if (paramsOrStatus) params.status = paramsOrStatus
   } else if (paramsOrStatus) {
     if (paramsOrStatus.status) params.status = paramsOrStatus.status
+    if (paramsOrStatus.tab) params.tab = paramsOrStatus.tab
     if (paramsOrStatus.gateway) params.gateway = paramsOrStatus.gateway
     if (paramsOrStatus.paymentMethod) params.paymentMethod = paramsOrStatus.paymentMethod
     if (paramsOrStatus.search) params.search = paramsOrStatus.search
@@ -70,6 +72,11 @@ export async function getOrders(paramsOrStatus?: OrderStatus | '' | GetOrdersPar
     params: Object.keys(params).length ? params : undefined,
   })
   return response.data.orders
+}
+
+export async function getOrderTabCounts(): Promise<Record<string, number> & { byStatus?: Record<string, number> }> {
+  const response = await api.get<{ success: boolean; counts: Record<string, number> }>('/api/orders/tab-counts')
+  return response.data.counts
 }
 
 export async function getOrder(id: string): Promise<Order> {

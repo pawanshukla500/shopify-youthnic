@@ -802,18 +802,33 @@ export function Orders() {
     }
   }
 
-  // Bulk Download GST Invoices
+  // Bulk Download GST Invoices — one file per order, sequentially in download mode
+  const [invoiceProgress, setInvoiceProgress] = useState<{ done: number; total: number } | null>(null)
   const handleBulkDownloadInvoices = async () => {
     const ids = Array.from(selectedOrderIds)
     if (!ids.length) return
     setIsBulkGeneratingInvoices(true)
+    setInvoiceProgress({ done: 0, total: ids.length })
     try {
-      await downloadBulkInvoices(ids)
-      toast.toast('success', `Generated GST tax invoices for ${ids.length} orders!`)
+      const { downloaded, failed } = await downloadBulkInvoices(ids, (done, total) =>
+        setInvoiceProgress({ done, total })
+      )
+      if (failed.length === 0) {
+        toast.toast(
+          'success',
+          `Downloaded ${downloaded}/${ids.length} GST invoices — open each file and Print → Save as PDF.`
+        )
+      } else {
+        toast.toast(
+          'error',
+          `Downloaded ${downloaded}/${ids.length} invoices. ${failed.length} failed — retry them individually. If the browser blocked multiple downloads, click Allow in the address bar and retry.`
+        )
+      }
     } catch (err: any) {
       toast.toast('error', err.message || 'Failed to generate bulk invoices')
     } finally {
       setIsBulkGeneratingInvoices(false)
+      setInvoiceProgress(null)
     }
   }
 
@@ -1828,10 +1843,16 @@ export function Orders() {
             className="bulk-btn bulk-btn-secondary"
             onClick={handleBulkDownloadInvoices}
             disabled={isBulkGeneratingInvoices}
-            title="Download consolidated GST tax invoices"
+            title="Download one GST invoice file per selected order, sequentially"
           >
             <Icon name="download" size={15} />
-            <span className="bulk-btn-label">{isBulkGeneratingInvoices ? 'Generating…' : 'Invoices'}</span>
+            <span className="bulk-btn-label">
+              {isBulkGeneratingInvoices && invoiceProgress
+                ? `Invoice ${invoiceProgress.done}/${invoiceProgress.total}…`
+                : isBulkGeneratingInvoices
+                  ? 'Generating…'
+                  : 'Invoices'}
+            </span>
             <span className="bulk-btn-meta">GST</span>
           </button>
 

@@ -885,18 +885,64 @@ export async function downloadBulkLabels(orderIds: number[]): Promise<void> {
   }
 }
 
-export async function downloadBulkInvoices(orderIds: number[]): Promise<void> {
-  const response = await api.post('/api/orders/bulk-invoices', { orderIds }, { responseType: 'text' })
-  const html = response.data
-  const printWindow = window.open('', '_blank')
-  if (printWindow) {
-    printWindow.document.write(html)
-    printWindow.document.close()
-  } else {
-    const blob = new Blob([html], { type: 'text/html' })
-    const url = URL.createObjectURL(blob)
-    window.open(url, '_blank')
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function filenameFromDisposition(header: string | undefined, fallback: string): string {
+  if (header) {
+    const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(header)
+    if (match?.[1]) return decodeURIComponent(match[1].trim())
   }
+  return fallback
+}
+
+/**
+ * Download GST invoices ONE BY ONE in download mode — one file per order ID,
+ * in the order selected. Sequential (not parallel) with a short pause so the
+ * browser queues each download instead of blocking them, and with zero
+ * window.open calls so pop-up blockers can never swallow them.
+ *
+ * NOTE: invoice files are print-optimized HTML (the backend has no PDF
+ * renderer). Each downloaded file opens in the browser → Ctrl/Cmd+P →
+ * "Save as PDF". Filenames come from the server (Invoice-<orderName>.html).
+ */
+export async function downloadBulkInvoices(
+  orderIds: number[],
+  onProgress?: (done: number, total: number) => void
+): Promise<{ downloaded: number; failed: number[] }> {
+  const failed: number[] = []
+  let downloaded = 0
+  for (let i = 0; i < orderIds.length; i++) {
+    const id = orderIds[i]
+    try {
+      const response = await api.get(`/api/orders/${id}/invoice/download`, {
+        responseType: 'blob',
+      })
+      const blob = new Blob([response.data], { type: 'text/html;charset=utf-8' })
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute(
+        'download',
+        filenameFromDisposition(response.headers?.['content-disposition'], `Invoice-${id}.html`)
+      )
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      // Let the browser finish queuing this download before starting the next.
+      await sleep(300)
+      window.URL.revokeObjectURL(url)
+      downloaded++
+    } catch {
+      failed.push(id)
+    } finally {
+      onProgress?.(i + 1, orderIds.length)
+    }
+    // Stagger files so multi-download permission prompts trigger once, not per file.
+    if (i < orderIds.length - 1) await sleep(600)
+  }
+  return { downloaded, failed }
 }
 
 export async function downloadSingleLabelPdf(waybillNumber: string): Promise<void> {

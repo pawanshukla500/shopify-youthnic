@@ -160,66 +160,9 @@ export async function getDashboardStats(): Promise<import('./types').DashboardSt
   return response.data
 }
 
-export async function getDelhiveryWalletLedger(params?: {
-  awb?: string
-  orderId?: string
-  mismatchOnly?: boolean
-  limit?: number
-  offset?: number
-}): Promise<import('./types').DelhiveryWalletLedgerStats> {
-  const response = await api.get<import('./types').DelhiveryWalletLedgerStats>(
-    '/api/delhivery/wallet/ledger',
-    { params }
-  )
-  return response.data
-}
-
-export async function getAwbChargesAudit(waybill: string): Promise<import('./types').AwbChargesAudit> {
-  const response = await api.get<import('./types').AwbChargesAudit>(`/api/delhivery/awb/${waybill}/charges`)
-  return response.data
-}
-
-export async function importDelhiveryLedger(payload: {
-  csvContent?: string
-  transactions?: any[]
-}): Promise<{
-  success: boolean
-  message: string
-  imported: number
-  updatedShipments: number
-}> {
-  const response = await api.post('/api/delhivery/wallet/ledger/import', payload)
-  return response.data
-}
-
-export async function reconcileAwbWithOrder(waybill: string): Promise<{
-  success: boolean
-  waybill: string
-  reconciliation: {
-    shipmentUpdated: boolean
-    orderUpdated: boolean
-    orderName?: string
-    netBilledCost: number
-    initialCost: number
-    reversalAmount: number
-    revisedCost: number
-    hasMismatch: boolean
-    hasReversal: boolean
-  }
-}> {
-  const response = await api.post(`/api/delhivery/awb/${waybill}/reconcile`)
-  return response.data
-}
-
-export async function reconcileAllLedgerWithOrders(): Promise<{
-  success: boolean
-  totalWaybills: number
-  reconciledShipments: number
-  reconciledOrders: number
-}> {
-  const response = await api.post('/api/delhivery/wallet/ledger/reconcile')
-  return response.data
-}
+// NOTE: Delhivery wallet/ledger helpers removed 2026-09-28 — no wallet API
+// exists (manual CSV removed as not useful). Wallet lives in the ONE panel:
+// Finances > Wallet. Per-AWB estimates still come from the live rate API.
 
 export async function confirmCodOrder(orderId: number): Promise<{
   success: boolean

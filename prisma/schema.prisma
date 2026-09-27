@@ -194,27 +194,9 @@ model Shipment {
   @@index([waybillNumber])
 }
 
-// ─── Delhivery Wallet & AWB Ledger Transactions ──────────
-model DelhiveryLedgerTransaction {
-  id               Int      @id @default(autoincrement())
-  transactionId    String   @unique // e.g. MTX17862213974511190
-  accountName      String? // e.g. fa5d92-VBEXPORT-do
-  orderId          String? // e.g. Zepto-Lehenga Choli / #1001
-  waybillNumber    String // e.g. 30100810009251
-  weightGrams      Float? // e.g. 2450.2
-  zone             String? // e.g. D1, E, B
-  description      String // e.g. "Captured weight is higher than declared weight", "Shipment Delivered", "Shipment Manifested"
-  creditAmount     Float?   @default(0) // e.g. 70.22
-  debitAmount      Float?   @default(0) // e.g. 333.57
-  isWeightMismatch Boolean  @default(false)
-  transactionDate  DateTime
-  rawDetails       Json?
-
-  createdAt DateTime @default(now())
-
-  @@index([waybillNumber])
-  @@index([transactionDate])
-}
+// NOTE: DelhiveryLedgerTransaction removed 2026-09-28 — Delhivery has no
+// wallet/ledger API (manual CSV was not useful). Wallet lives in the ONE
+// panel only. Deploy runs `prisma db push`, which will drop the table.
 
 model TrackingLog {
   id         Int      @id @default(autoincrement())

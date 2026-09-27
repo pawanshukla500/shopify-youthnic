@@ -635,7 +635,7 @@ export function Settings() {
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span style={{ color: '#64748b' }}>Wallet Ledger:</span>
-                      <span style={{ color: '#059669', fontWeight: 700 }}>3-Way Audit Live</span>
+                      <span style={{ color: '#64748b', fontWeight: 600 }}>ONE panel only (no API)</span>
                     </div>
                   </div>
                 </Panel>
@@ -843,7 +843,7 @@ export function Settings() {
                     </div>
                     <div style={{ fontSize: '10.5px', color: '#475569', display: 'grid', gap: '4px' }}>
                       <div>• Cash on Delivery collection</div>
-                      <div>• Delhivery Wallet Ledger audit</div>
+                      <div>• Live rate-API freight estimates</div>
                       <div>• Automated discrepancy flagging</div>
                     </div>
                   </div>

@@ -7,7 +7,6 @@ import {
   getOrder,
   getPayment,
   getShippingEstimate,
-  reconcileAwbWithOrder,
   confirmCodOrder,
   cancelOrder,
   deleteOrder,
@@ -67,21 +66,6 @@ export function OrderDetail() {
   const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false)
 
   const order = orderQuery.data
-
-  const reconcileMutation = useMutation({
-    mutationFn: async () => {
-      const waybill = order?.shipment?.waybillNumber
-      if (!waybill) throw new Error('No waybill assigned to reconcile.')
-      return await reconcileAwbWithOrder(waybill)
-    },
-    onSuccess: (data) => {
-      toast.toast('success', `Charges reconciled with Delhivery · Net billed cost: ₹${data.reconciliation.netBilledCost}`)
-      queryClient.invalidateQueries({ queryKey: ['order', id] })
-      queryClient.invalidateQueries({ queryKey: ['shipping-estimate', id] })
-      queryClient.invalidateQueries({ queryKey: ['orders'] })
-    },
-    onError: (err) => toast.toast('error', apiError(err)),
-  })
 
   const action = useMutation({
     mutationFn: async (kind: 'dispatch' | 'verify' | 'label' | 'cancel') => {
@@ -1005,7 +989,7 @@ export function OrderDetail() {
                 <span>Fulfilled via {order.shipment.courier} (AWB: {order.shipment.waybillNumber})</span>
               </div>
               <p style={{ margin: '8px 0 0 0', fontSize: '12px', color: '#64748b', lineHeight: 1.5 }}>
-                This order was dispatched via external carrier <strong>{order.shipment.courier}</strong>. Live tracking status is synced directly from Shopify fulfillments. Delhivery rate estimation and Delhivery ONE ledger audits apply only to orders dispatched through Delhivery.
+                This order was dispatched via external carrier <strong>{order.shipment.courier}</strong>. Live tracking status is synced directly from Shopify fulfillments. Delhivery rate estimation applies only to orders dispatched through Delhivery; billed amounts are checked in the Delhivery ONE panel.
               </p>
             </div>
           ) : estimateQuery.isLoading ? (
@@ -1043,147 +1027,15 @@ export function OrderDetail() {
                 </div>
               </div>
 
-              {/* ─── Actual Billed Breakdown from Delhivery Wallet Ledger ─── */}
-              {estimateQuery.data?.actualAudit && estimateQuery.data.actualAudit.hasLedgerRecords && (
+              {/* ─── Actual billed charges live in the Delhivery ONE panel ─── */}
+              {order.shipment?.waybillNumber && (
                 <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: '1px dashed #cbd5e1' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <span style={{ fontSize: '11px', fontWeight: 800, color: '#0f172a' }}>
-                        🧾 Actual Delhivery Billed Charges (Wallet Ledger)
-                      </span>
-                      {order.shippingAudited && (
-                        <span style={{ fontSize: '9.5px', background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', padding: '1px 6px', borderRadius: '4px', fontWeight: 700 }}>
-                          Synced & Audited
-                        </span>
-                      )}
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <Button
-                        className="button-secondary"
-                        onClick={() => reconcileMutation.mutate()}
-                        loading={reconcileMutation.isPending}
-                        style={{ height: '26px', fontSize: '10.5px', padding: '0 8px' }}
-                        title="Reconcile latest charges with Delhivery Ledger"
-                      >
-                        <Icon name="refresh" size={12} />
-                        Reconcile
-                      </Button>
-                      <button
-                        type="button"
-                        onClick={() => navigate(`/ledger?awb=${order.shipment?.waybillNumber}`)}
-                        style={{ background: 'none', border: 0, padding: 0, color: '#2563eb', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}
-                      >
-                        View in Ledger →
-                      </button>
-                    </div>
+                  <div style={{ fontSize: '11px', color: '#475569', lineHeight: 1.6 }}>
+                    🧾 Actual billed debits, weight re-weighments and reversals live in{' '}
+                    <strong>Delhivery ONE → Finances → Wallet → Transactions</strong> (search AWB{' '}
+                    <code>{order.shipment.waybillNumber}</code>). Delhivery offers no wallet
+                    API, so billed amounts are checked in the panel, not here.
                   </div>
-
-                  {/* 3-Step Delhivery Re-weighment & Billing Lifecycle */}
-                  {estimateQuery.data.actualAudit.hasReversal ? (
-                    <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '9px', padding: '12px', marginBottom: '10px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                        <span style={{ fontSize: '10.5px', fontWeight: 800, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
-                          Delhivery Billing Adjustment Lifecycle
-                        </span>
-                        <span style={{ fontSize: '10px', background: '#fee2e2', color: '#b91c1c', fontWeight: 800, padding: '2px 7px', borderRadius: '4px' }}>
-                          Re-weighed Adjustment
-                        </span>
-                      </div>
-
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' }}>
-                        {/* Step 1: Initial Manifest Debit */}
-                        <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '8px' }}>
-                          <span style={{ fontSize: '9.5px', color: '#64748b', display: 'block', fontWeight: 700 }}>1. Manifest Debit</span>
-                          <strong style={{ color: '#be123c', fontSize: '13px', display: 'block', margin: '2px 0' }}>
-                            -{formatMoney(estimateQuery.data.actualAudit.initialCost ?? 70.22, 'INR')}
-                          </strong>
-                          <span style={{ fontSize: '9.5px', color: '#475569' }}>
-                            at {estimateQuery.data.actualAudit.declaredWeightGrams ?? 400}g
-                          </span>
-                        </div>
-
-                        {/* Step 2: Delhivery Reversal Credit */}
-                        <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '6px', padding: '8px' }}>
-                          <span style={{ fontSize: '9.5px', color: '#166534', display: 'block', fontWeight: 700 }}>2. Reversal Credit</span>
-                          <strong style={{ color: '#16a34a', fontSize: '13px', display: 'block', margin: '2px 0' }}>
-                            +{formatMoney(estimateQuery.data.actualAudit.reversalAmount ?? 70.22, 'INR')}
-                          </strong>
-                          <span style={{ fontSize: '9.5px', color: '#166534' }}>
-                            Initial charge reversed
-                          </span>
-                        </div>
-
-                        {/* Step 3: Revised Machine Weighment Debit */}
-                        <div style={{ background: '#fff1f2', border: '1px solid #fecdd3', borderRadius: '6px', padding: '8px' }}>
-                          <span style={{ fontSize: '9.5px', color: '#9f1239', display: 'block', fontWeight: 700 }}>3. Revised Debit</span>
-                          <strong style={{ color: '#e11d48', fontSize: '13px', display: 'block', margin: '2px 0' }}>
-                            -{formatMoney(estimateQuery.data.actualAudit.revisedCost ?? 333.57, 'INR')}
-                          </strong>
-                          <span style={{ fontSize: '9.5px', color: '#9f1239' }}>
-                            at {estimateQuery.data.actualAudit.capturedWeightGrams ?? 2450.2}g
-                          </span>
-                        </div>
-
-                        {/* Step 4: Final Net Billed Cost */}
-                        <div style={{ background: '#eff6ff', border: '1.5px solid #93c5fd', borderRadius: '6px', padding: '8px' }}>
-                          <span style={{ fontSize: '9.5px', color: '#1e40af', display: 'block', fontWeight: 800 }}>Net Actual Cost</span>
-                          <strong style={{ color: '#1e3a8a', fontSize: '14px', display: 'block', margin: '2px 0' }}>
-                            {formatMoney(estimateQuery.data.actualAudit.netBilledCost ?? 333.57, 'INR')}
-                          </strong>
-                          <span style={{ fontSize: '9.5px', color: '#1e40af', fontWeight: 600 }}>
-                            Zone {estimateQuery.data.actualAudit.zone || 'D1'}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', background: '#f8fafc', padding: '10px 12px', borderRadius: '8px' }}>
-                      <div>
-                        <span className="detail-label">Total Debited</span>
-                        <strong style={{ color: '#be123c' }}>-{formatMoney(estimateQuery.data.actualAudit.totalDebit, 'INR')}</strong>
-                      </div>
-                      <div>
-                        <span className="detail-label">Total Credited</span>
-                        <strong style={{ color: '#16a34a' }}>+{formatMoney(estimateQuery.data.actualAudit.totalCredit, 'INR')}</strong>
-                      </div>
-                      <div>
-                        <span className="detail-label">Net Billed Cost</span>
-                        <strong style={{ color: '#1e3a8a', fontSize: '14px' }}>{formatMoney(estimateQuery.data.actualAudit.netBilledCost, 'INR')}</strong>
-                      </div>
-                    </div>
-                  )}
-
-                  {estimateQuery.data.actualAudit.hasWeightMismatch && (
-                    <div style={{ marginTop: '8px', background: '#fff1f2', border: '1.5px solid #fecdd3', borderRadius: '7px', padding: '10px 12px', display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
-                      <Icon name="alert" size={16} />
-                      <div style={{ flex: 1 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
-                          <strong style={{ fontSize: '11.5px', color: '#9f1239' }}>
-                            ⚠️ Weight Discrepancy Detected by Delhivery Hub
-                          </strong>
-                          <span style={{ fontSize: '10px', background: '#fee2e2', color: '#991b1b', fontWeight: 700, padding: '1px 6px', borderRadius: '4px' }}>
-                            Discrepancy: +{(estimateQuery.data.actualAudit.weightDiscrepancyGrams ?? 2050.2)} gm
-                          </span>
-                        </div>
-                        <span style={{ fontSize: '10.5px', color: '#be123c', display: 'block', marginTop: '4px' }}>
-                          {estimateQuery.data.actualAudit.mismatchDetails || 'Captured weight exceeds declared weight. Initial charge reversed and revised charge applied.'}
-                        </span>
-                        <div style={{ marginTop: '6px', display: 'flex', gap: '10px', alignItems: 'center' }}>
-                          <a
-                            href="https://one.delhivery.com"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            style={{ fontSize: '10.5px', fontWeight: 750, color: '#2563eb' }}
-                          >
-                            Dispute Weight on Delhivery ONE ↗
-                          </a>
-                          <span style={{ fontSize: '10px', color: '#64748b' }}>
-                            • 7-day dispute window applies
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
                 </div>
               )}
 

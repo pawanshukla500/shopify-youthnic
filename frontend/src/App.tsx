@@ -10,7 +10,6 @@ import { OrderDetail } from './pages/OrderDetail'
 import { Returns } from './pages/Returns'
 import { Tracking } from './pages/Tracking'
 import { Tools } from './pages/Tools'
-import { DelhiveryLedger } from './pages/DelhiveryLedger'
 import { Analytics } from './pages/Analytics'
 import { Login } from './pages/Login'
 import { Settings } from './pages/Settings'
@@ -67,7 +66,7 @@ export function App() {
                   <Route path="/reports" element={<Analytics />} />
                   <Route path="/returns" element={<Returns />} />
                   <Route path="/tracking" element={<Tracking />} />
-                  <Route path="/ledger" element={<DelhiveryLedger />} />
+                  <Route path="/ledger" element={<Navigate to="/tools" replace />} />
                   <Route path="/tools" element={<Tools />} />
                   <Route path="/communications" element={<Communications />} />
                   <Route path="/support" element={<SupportDesk />} />

@@ -107,61 +107,12 @@ export interface Shipment {
   trackingLogs?: TrackingLog[]
 }
 
-export interface DelhiveryLedgerTransaction {
-  id: number
-  transactionId: string
-  accountName?: string | null
-  orderId?: string | null
-  waybillNumber: string
-  weightGrams?: number | null
-  zone?: string | null
-  description: string
-  creditAmount: number
-  debitAmount: number
-  isWeightMismatch: boolean
-  transactionDate: string
-  orderName?: string
-  dbOrderId?: number | null
-  customerName?: string | null
-  customerCity?: string | null
-  declaredWeightGrams?: number
-}
-
-export interface DelhiveryWalletLedgerStats {
-  currentBalance: number
-  totalCredit: number
-  totalDebit: number
-  netDebited: number
-  totalTransactions: number
-  mismatchCount: number
-  mismatchDebitedAmount: number
-  transactions: DelhiveryLedgerTransaction[]
-}
-
+// NOTE: Delhivery wallet/ledger types removed 2026-09-28 — no wallet API
+// exists (manual CSV removed as not useful). AwbChargesAudit kept as a stub
+// so ShippingEstimate.actualAudit typing stays valid (always null now).
 export interface AwbChargesAudit {
   waybill: string
   hasLedgerRecords: boolean
-  initialCost?: number
-  reversalAmount?: number
-  revisedCost?: number
-  hasReversal?: boolean
-  totalDebit: number
-  totalCredit: number
-  netBilledCost: number
-  capturedWeightGrams?: number | null
-  declaredWeightGrams: number
-  weightDiscrepancyGrams?: number
-  zone: string
-  hasWeightMismatch: boolean
-  mismatchDetails?: string | null
-  disputeUrl?: string
-  transactions: DelhiveryLedgerTransaction[]
-  shipment?: {
-    orderName: string
-    customerName: string
-    status: string
-    trackingStatus?: string | null
-  } | null
 }
 
 export interface ReturnItem {

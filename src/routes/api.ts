@@ -6,7 +6,6 @@ import trackingService from '../modules/tracking/tracking.service';
 import shopifyService from '../modules/shopify/shopify.service';
 import paymentService from '../modules/payments/payment.service';
 import delhiveryService from '../modules/delhivery/delhivery.service';
-import delhiveryLedgerService from '../modules/delhivery/delhivery-ledger.service';
 import { config } from '../config';
 import prisma from '../database/prisma';
 import logger from '../utils/logger';
@@ -751,10 +750,6 @@ router.get('/orders/:id/shipping-estimate', async (req: Request, res: Response):
     }
     const weightGrams = req.query.weight ? parseInt(req.query.weight as string, 10) : 500;
     const charges = await delhiveryService.calculateOrderLogisticCharges(order, weightGrams);
-    let actualAudit = null;
-    if (order.shipment?.waybillNumber) {
-      actualAudit = await delhiveryLedgerService.getAwbChargesAudit(order.shipment.waybillNumber);
-    }
     res.json({
       success: true,
       orderId: order.id,
@@ -765,8 +760,8 @@ router.get('/orders/:id/shipping-estimate', async (req: Request, res: Response):
       paymentMode: order.paymentMethod === 'COD' ? 'COD' : 'Pre-paid',
       chargeableWeightGrams: weightGrams,
       charges,
-      actualAudit,
-      note: 'Delhivery calculates logistics charges per order based on weight and pincodes. Billed debits, credits, and weight adjustments are synchronized with Delhivery ONE Wallet Ledger.',
+      actualAudit: null,
+      note: 'Delhivery calculates logistics charges per order based on weight and pincodes. Wallet debits/credits live only in the Delhivery ONE panel (Finances > Wallet) — no wallet API exists, so check billed amounts there.',
     });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -2257,84 +2252,12 @@ router.get('/delhivery/label/:waybill/download', async (req: Request, res: Respo
   }
 });
 
-// ─── Delhivery Wallet Ledger & AWB Charges ────────────────
-
-// Get wallet balance, debits, credits, and ledger transactions
-router.get('/delhivery/wallet/ledger', async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { awb, orderId, mismatchOnly, limit, offset } = req.query;
-    const result = await delhiveryLedgerService.getWalletLedger({
-      awb: awb as string | undefined,
-      orderId: orderId as string | undefined,
-      mismatchOnly: mismatchOnly === 'true',
-      limit: limit ? Number(limit) : undefined,
-      offset: offset ? Number(offset) : undefined,
-    });
-    res.json(result);
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Fetch detailed AWB charges audit for a specific waybill
-router.get('/delhivery/awb/:waybill/charges', async (req: Request, res: Response): Promise<void> => {
-  try {
-    const waybill = req.params.waybill;
-    const result = await delhiveryLedgerService.getAwbChargesAudit(waybill);
-    res.json(result);
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Reconcile a specific AWB with Shipment and Order
-router.post('/delhivery/awb/:waybill/reconcile', async (req: Request, res: Response): Promise<void> => {
-  try {
-    const waybill = req.params.waybill;
-    const result = await delhiveryLedgerService.reconcileAwbWithShipmentAndOrder(waybill);
-    res.json({ success: true, ...result });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Reconcile all orders in DB against all unique waybills in Delhivery Ledger
-router.post('/delhivery/wallet/ledger/reconcile', async (_req: Request, res: Response): Promise<void> => {
-  try {
-    const result = await delhiveryLedgerService.reconcileAllOrdersAndLedger();
-    res.json({ success: true, ...result });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Import Delhivery ONE Wallet Ledger transactions (CSV text or JSON array)
-router.post('/delhivery/wallet/ledger/import', async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { csvContent, transactions } = req.body;
-    if (csvContent && typeof csvContent === 'string') {
-      const result = await delhiveryLedgerService.importLedgerCsv(csvContent);
-      res.json({
-        success: true,
-        message: `Successfully imported ${result.imported} transactions from Delhivery Ledger CSV.`,
-        ...result,
-      });
-      return;
-    }
-    if (Array.isArray(transactions)) {
-      const result = await delhiveryLedgerService.importLedgerTransactions(transactions);
-      res.json({
-        success: true,
-        message: `Successfully imported ${result.imported} transactions.`,
-        ...result,
-      });
-      return;
-    }
-    res.status(400).json({ error: 'Please provide csvContent (string) or transactions (array).' });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
-});
+// NOTE: Delhivery exposes NO wallet/ledger API (verified 2026-09-28: the
+// api-bird wallet proxy hard-403s every B2C-token auth style, cl-api host is
+// dead, and the portal docs list transactions as panel-only Download Ledger
+// Excel). The manual CSV ledger was removed as not useful — check
+// Delhivery ONE > Finances > Wallet for balance, spends, refunds & recharges.
+// Per-AWB estimates still come from the live kinko rate API + local matrix.
 
 // Update supported shipment fields
 router.patch('/delhivery/shipment/:waybill', async (req: Request, res: Response): Promise<void> => {

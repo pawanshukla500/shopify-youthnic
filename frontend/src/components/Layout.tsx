@@ -26,7 +26,6 @@ const operationsNav: NavItem[] = [
 ]
 
 const financeNav: NavItem[] = [
-  { to: '/ledger', label: 'Delhivery Wallet & Ledger', icon: 'creditCard' },
   { to: '/tools', label: 'Rate & Serviceability', icon: 'tool' },
 ]
 

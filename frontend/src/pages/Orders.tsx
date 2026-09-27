@@ -1430,9 +1430,20 @@ export function Orders() {
                       {/* 5. Payment Stream */}
                       <td>{renderPaymentBadge(order)}</td>
 
-                      {/* 6. Status */}
+                      {/* 6. Status + pickup state (Ready tab: label generated → awaiting pickup vs picked) */}
                       <td>
                         <StatusBadge status={order.status} />
+                        {(activeTab === 'ready' || activeTab === 'transit' || activeTab === 'all') && order.shipment?.waybillNumber && (
+                          order.shipment?.status === 'CREATED' || /manifest/i.test(order.shipment?.trackingStatus || '') ? (
+                            <span className="micro-badge micro-badge-amber" title={`Label generated ${order.shipment?.waybillNumber} — courier has not picked up yet (Delhivery: ${order.shipment?.trackingStatus || 'Manifested'}). Hand over the parcel + refresh tracking.`}>
+                              ⏳ Awaiting pickup
+                            </span>
+                          ) : ['PICKED_UP', 'IN_TRANSIT', 'OUT_FOR_DELIVERY', 'DELIVERED'].includes(order.shipment?.status || '') ? (
+                            <span className="micro-badge micro-badge-emerald" title={`Courier picked up ${order.shipment?.waybillNumber}${order.shipment?.trackingLocation ? ` — ${order.shipment.trackingLocation}` : ''}.`}>
+                              ✓ Picked up
+                            </span>
+                          ) : null
+                        )}
                       </td>
 
                       {/* 7. Logistics & Interactive Actions */}

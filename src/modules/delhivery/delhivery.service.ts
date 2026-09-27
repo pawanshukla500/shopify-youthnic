@@ -737,6 +737,14 @@ class DelhiveryService {
       dateTime: string;
       remark?: string;
     }>;
+    pickupDone?: boolean;
+    pickedupDate?: string | null;
+    pickUpDate?: string | null;
+    dispatchCount?: number;
+    originRecieveDate?: string | null;
+    expectedDeliveryDate?: string | null;
+    statusCode?: string;
+    referenceNo?: string;
   }> {
     try {
       // Retry transient courier blips (429/5xx/timeout) instead of falling back to UNKNOWN.
@@ -749,30 +757,61 @@ class DelhiveryService {
       );
 
       const shipmentData = response.data?.ShipmentData?.[0]?.Shipment;
-      const scanDetails = response.data?.ShipmentData?.[0]?.ScanDetail || [];
 
       if (!shipmentData) {
         logger.warn('No tracking data found for waybill', { waybillNumber });
         return { status: 'UNKNOWN', statusType: '', history: [] };
       }
 
-      const latestStatus = shipmentData.Status;
+      // Real shape: scans live at Shipment.Scans[].ScanDetail (verified 2026-09-28
+      // against live AWB 30100810010054). Legacy top-level ScanDetail kept as fallback.
+      const rawScans: any[] = Array.isArray(shipmentData.Scans)
+        ? shipmentData.Scans.map((w: any) => w?.ScanDetail).filter(Boolean)
+        : [];
+      const legacyScans: any[] = Array.isArray(response.data?.ShipmentData?.[0]?.ScanDetail)
+        ? response.data.ShipmentData[0].ScanDetail
+        : [];
+      const scanDetails = rawScans.length ? rawScans : legacyScans;
+
+      const latestStatus = shipmentData.Status || {};
       const history = scanDetails.map((scan: any) => ({
         status: scan.Scan || scan.Instructions || 'SCAN',
         statusType: scan.ScanType || '',
         location: scan.ScanLocation || scan.ScannedLocation || '',
-        dateTime: scan.ScanDateTime,
+        dateTime: scan.ScanDateTime || scan.StatusDateTime,
         remark: scan.Instructions,
       }));
+
+      // Pickup-done signals straight from Delhivery (null = not yet picked up):
+      //   PickedupDate (note Delhivery's typo, single 'e'), OriginRecieveDate, DispatchCount.
+      const pickedupDate: string | null = shipmentData.PickedupDate || null;
+      const pickUpDate: string | null = shipmentData.PickUpDate || null;
+      const dispatchCount: number = Number(shipmentData.DispatchCount || 0);
+      const originRecieveDate: string | null = shipmentData.OriginRecieveDate || null;
+      const pickupDone = Boolean(
+        pickedupDate ||
+          originRecieveDate ||
+          dispatchCount > 0 ||
+          history.some((h: any) => /pick.*up|received|reached.*origin|in transit|dispatched|out for delivery|delivered/i.test(`${h.status} ${h.remark || ''}`))
+      );
 
       return {
         status: latestStatus.Status,
         statusType: latestStatus.StatusType,
         location: latestStatus.StatusLocation,
-        scanDateTime: latestStatus.ScanDateTime,
+        scanDateTime: latestStatus.ScanDateTime || latestStatus.StatusDateTime,
         remarks: latestStatus.Instructions,
         receivedBy: latestStatus.RecievedBy,
         history,
+        pickupDone,
+        pickedupDate,
+        pickUpDate,
+        dispatchCount,
+        originRecieveDate,
+        expectedDeliveryDate:
+          shipmentData.ExpectedDeliveryDate || shipmentData.PromisedDeliveryDate || null,
+        statusCode: latestStatus.StatusCode,
+        referenceNo: shipmentData.ReferenceNo,
       };
     } catch (error: any) {
       logger.error('Failed to track shipment', {
@@ -1434,10 +1473,11 @@ class DelhiveryService {
    */
   mapTrackingToShipmentStatus(
     statusType: string,
-    status: string
+    status: string,
+    pickupDone?: boolean
   ): 'PICKED_UP' | 'IN_TRANSIT' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'FAILED' | 'RTO' | 'RTO_DELIVERED' | 'CANCELLED' | 'CREATED' {
-    const st = statusType.toUpperCase();
-    const s = status.toUpperCase();
+    const st = (statusType || '').toUpperCase();
+    const s = (status || '').toUpperCase();
 
     // Delivered
     if (st === 'DL' && s === 'DELIVERED') return 'DELIVERED';
@@ -1449,6 +1489,20 @@ class DelhiveryService {
 
     // Canceled
     if (st === 'CN') return 'CANCELLED';
+
+    // Forward pickup confirmed — Delhivery sets PickedupDate / DispatchCount>0 and
+    // scans like "Picked Up", "Received at origin", "Reached Surat hub".
+    if (
+      s.includes('PICKED UP') ||
+      s.includes('PICKUP DONE') ||
+      s.includes('PICKEDUP') ||
+      s.includes('RECEIVED AT') ||
+      s.includes('REACHED AT') ||
+      s.includes('REACHED ') ||
+      (pickupDone === true && (s.includes('IN TRANSIT') || s.includes('DISPATCHED')))
+    ) {
+      return 'PICKED_UP';
+    }
 
     // Dispatched = Out for delivery
     if (s === 'DISPATCHED') return 'OUT_FOR_DELIVERY';
@@ -1462,11 +1516,13 @@ class DelhiveryService {
     // Pickup planned (PP = reverse pickup scheduled)
     if (st === 'PP') return 'CREATED';
 
-    // Manifested = created but not picked up yet
-    if (s === 'MANIFESTED') return 'CREATED';
+    // Manifested / manifest uploaded = label generated, awaiting courier pickup
+    if (s === 'MANIFESTED' || s.includes('MANIFEST')) return 'CREATED';
 
-    // Not Picked = failed
-    if (s === 'NOT PICKED') return 'FAILED';
+    // Not Picked = courier hasn't reached warehouse yet — still awaiting pickup,
+    // NOT a failed delivery. (Previously mapped to FAILED, which wrongly moved
+    // Ready-to-ship orders into exception state.)
+    if (s.includes('NOT PICK')) return 'CREATED';
 
     // Pending = at destination hub, waiting for dispatch
     if (s === 'PENDING') return 'IN_TRANSIT';

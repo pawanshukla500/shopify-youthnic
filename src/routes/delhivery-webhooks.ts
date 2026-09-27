@@ -122,10 +122,12 @@ router.post('/delhivery', async (req: Request, res: Response): Promise<void> => 
         });
       }
 
-      // Map to our internal status
+      // Map to our internal status (pickup hint from scan text for PICKED_UP detection)
+      const scanText = scan.rawStatus || scan.status || '';
       const newShipmentStatus = delhiveryService.mapTrackingToShipmentStatus(
         scan.statusType || '',
-        scan.rawStatus || scan.status || ''
+        scanText,
+        /pick.*up|pickedup|received at|reached/i.test(scanText)
       );
 
       // Check if status changed
@@ -267,6 +269,17 @@ async function handleStatusTransition(
   location?: string
 ): Promise<void> {
   switch (newShipmentStatus) {
+    case 'CREATED':
+      // Manifested / Not Picked — label generated, courier hasn't picked up yet.
+      // Keep/correct order in DISPATCHED so Ready-to-ship shows "awaiting pickup".
+      if (['DISPATCH_PENDING', 'SHIPPED', 'IN_TRANSIT'].includes(order.status)) {
+        await prisma.order.update({
+          where: { id: order.id },
+          data: { status: 'DISPATCHED' },
+        });
+      }
+      break;
+
     case 'PICKED_UP':
       await prisma.order.update({
         where: { id: order.id },

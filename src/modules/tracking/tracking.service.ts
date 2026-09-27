@@ -62,10 +62,12 @@ class TrackingService {
       try {
         const tracking = await delhiveryService.trackShipment(shipment.waybillNumber);
 
-        // Determine new shipment status
+        // Determine new shipment status — pass pickupDone so "Picked Up" scans and
+        // PickedupDate/DispatchCount promote CREATED → PICKED_UP (pickup confirmed).
         const newShipmentStatus = delhiveryService.mapTrackingToShipmentStatus(
           tracking.statusType,
-          tracking.status
+          tracking.status,
+          (tracking as any).pickupDone
         ) as ShipmentStatus;
 
         // Check if status actually changed
@@ -178,6 +180,18 @@ class TrackingService {
           await prisma.order.update({
             where: { id: order.id },
             data: { status: 'DISPATCHED' },
+          });
+        } else if (['SHIPPED', 'IN_TRANSIT'].includes(order.status)) {
+          // Correction: DB overstated pickup (e.g. legacy NOT-PICKED→FAILED or
+          // default→IN_TRANSIT) while courier still reports Manifested.
+          // Move back to DISPATCHED so Ready-to-ship shows "awaiting pickup".
+          await prisma.order.update({
+            where: { id: order.id },
+            data: { status: 'DISPATCHED' },
+          });
+          logger.info('Corrected overstated pickup — courier still Manifested', {
+            waybill: shipment.waybillNumber,
+            fromOrderStatus: order.status,
           });
         }
         break;

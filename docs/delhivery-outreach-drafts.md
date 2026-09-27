@@ -84,19 +84,40 @@ return `200 { received: true }`. Until then, tracking works via polling
 
 ---
 
-## Mail 2 — Warehouse verification / creation
+## Mail 2 — Warehouse verification / creation (COPY-PASTE READY)
 
 **To:** vendordesk@delhivery.com
 **Cc:** (your Delhivery business SPOC)
-**Subject:** Verify pickup warehouse "Surat Warehouse" for Youthnic API manifestation
+**Subject:** Verify pickup warehouse "Surat Warehouse" — Domestic fa5d92-VBEXPORT-do / V B EXPORT
 
 ```
 Hello Delhivery Vendor Desk,
 
-Please confirm that the pickup warehouse below is active on our account
-(it was created for API manifestation). If it does not exist, please create
-it with these exact details — manifestation fails otherwise with
-"ClientWarehouse matching query doesn't exist".
+Please confirm that the pickup warehouse below is Active on our account for
+API manifestation under our Domestic profile. If it is missing or Inactive,
+please create/activate it with these exact details — otherwise our
+manifestation API fails with "ClientWarehouse matching query doesn't exist".
+
+  Client profile : Domestic (fa5d92-VBEXPORT-do)
+  Company        : V B EXPORT (GST: 24AERPB8666E1ZB)
+  Facility name (exact, case-sensitive): Surat Warehouse
+  Status         : Active (used for all Domestic B2C pickups, ~100 pkgs/month)
+  Address line   : 7004, Hi-tech Textile Centre (HTC Market - 1),
+                   Anjana Farm, Near Raghukul Market, Surat
+  City / State / Pin : Surat / Gujarat / 395002
+  Contact person : Pawan Shukla
+  Phone          : +91 7984984563
+  Email          : returnorders@vbexports.co.in
+  Return address : same as pickup address (Surat Warehouse, 395002)
+
+Note: our Pickup Location panel currently shows the email as
+returnorders@vbexport.co.in (without "s") while Company Details shows
+returnorders@vbexports.co.in — please confirm the correct registered email
+and we will fix the panel entry accordingly.
+
+Once done, please reply confirming the exact registered warehouse name so
+our DELHIVERY_PICKUP_LOCATION value matches it character-for-character
+(our API sends it case-sensitive under pickup_location.name).
 
   Warehouse name (exact, case-sensitive): Surat Warehouse
   Brand / Seller name : V B EXPORT (storefront: Youthnic)

@@ -18,32 +18,40 @@ export const ORDER_STATUSES: OrderStatus[] = [
   'CANCELLED',
 ]
 
-export type OrderTabKey = 'all' | 'new' | 'ready' | 'transit' | 'delivered' | 'return' | 'cancel'
+export type OrderTabKey = 'all' | 'new' | 'dispatch' | 'ready' | 'transit' | 'delivered' | 'return' | 'cancel'
 
 export interface OrderTabDef {
   key: OrderTabKey
   label: string
   statuses: OrderStatus[]
+  hasWaybill?: boolean
   color: string
 }
 
-/** Operational segregation for the Orders page — 6 stages + All. */
+/** Operational segregation — Ready split by AWB (no-AWB needs Dispatch click, AWB needs pickup). */
 export const ORDER_TABS: OrderTabDef[] = [
   { key: 'all', label: 'All', statuses: [], color: '#2563eb' },
   { key: 'new', label: 'New Order', statuses: ['NEW'], color: '#2563eb' },
-  { key: 'ready', label: 'Ready to Ship', statuses: ['DISPATCH_PENDING', 'DISPATCHED'], color: '#d97706' },
+  { key: 'dispatch', label: 'Ready to Dispatch', statuses: ['DISPATCH_PENDING', 'DISPATCHED'], hasWaybill: false, color: '#dc2626' },
+  { key: 'ready', label: 'Ready to Ship', statuses: ['DISPATCH_PENDING', 'DISPATCHED'], hasWaybill: true, color: '#059669' },
   { key: 'transit', label: 'In Transit', statuses: ['SHIPPED', 'IN_TRANSIT', 'OUT_FOR_DELIVERY', 'FAILED_DELIVERY'], color: '#7c3aed' },
   { key: 'delivered', label: 'Delivered', statuses: ['DELIVERED'], color: '#059669' },
   { key: 'return', label: 'Return', statuses: ['RTO_INITIATED', 'RTO_DELIVERED', 'RETURN_REQUESTED', 'RETURN_DISPATCHED', 'RETURN_RECEIVED', 'REFUNDED'], color: '#9333ea' },
-  { key: 'cancel', label: 'Cancel', statuses: ['CANCELLED'], color: '#dc2626' },
+  { key: 'cancel', label: 'Cancel', statuses: ['CANCELLED'], color: '#64748b' },
 ]
 
-/** Map a legacy ?status= value to its tab (deep-link compat). */
-export function tabForStatus(status: string | null | undefined): OrderTabKey {
+/** Map a legacy ?status= value to its tab (deep-link compat). AWB decides dispatch vs ready. */
+export function tabForStatus(status: string | null | undefined, hasWaybill?: boolean | null): OrderTabKey {
   if (!status) return 'all'
   const upper = status.toUpperCase()
+  if ((upper === 'DISPATCH_PENDING' || upper === 'DISPATCHED') && hasWaybill !== undefined && hasWaybill !== null) {
+    return hasWaybill ? 'ready' : 'dispatch'
+  }
   const found = ORDER_TABS.find((t) => t.statuses.includes(upper as OrderStatus))
-  return found ? found.key : 'all'
+  if (!found) return 'all'
+  // Ambiguous without AWB info → default to dispatch queue (needs action first).
+  if (found.key === 'ready' && (hasWaybill === undefined || hasWaybill === null)) return 'dispatch'
+  return found.key
 }
 
 export const RETURN_STATUSES: ReturnStatus[] = [

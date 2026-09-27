@@ -14,9 +14,11 @@ import { ShopifyOrderWebhook } from '../../types';
  *   NEW → DISPATCH_PENDING → DISPATCHED → SHIPPED → IN_TRANSIT → OUT_FOR_DELIVERY → DELIVERED
  * Each transition triggers appropriate WhatsApp notifications.
  *
- * Operational tabs (Orders page) group raw statuses into 6 stages:
- *   new: NEW
- *   ready: DISPATCH_PENDING, DISPATCHED (ready to ship / label generated)
+ * Operational tabs (Orders page). Ready is split by AWB so the warehouse sees
+ * two distinct queues (verified 2026-09-28: 9 no-AWB + 9 label-ready = 18):
+ *   new: NEW (fresh, needs confirmation/payment verify)
+ *   dispatch: DISPATCH_PENDING/DISPATCHED WITHOUT waybill (needs Dispatch click → AWB+label)
+ *   ready: DISPATCH_PENDING/DISPATCHED WITH waybill (label generated, awaiting courier pickup)
  *   transit: SHIPPED, IN_TRANSIT, OUT_FOR_DELIVERY, FAILED_DELIVERY (NDR still in transit loop)
  *   delivered: DELIVERED
  *   return: RTO_INITIATED, RTO_DELIVERED, RETURN_REQUESTED, RETURN_DISPATCHED, RETURN_RECEIVED, REFUNDED
@@ -24,6 +26,7 @@ import { ShopifyOrderWebhook } from '../../types';
  */
 export const ORDER_TABS = {
   new: ['NEW'],
+  dispatch: ['DISPATCH_PENDING', 'DISPATCHED'],
   ready: ['DISPATCH_PENDING', 'DISPATCHED'],
   transit: ['SHIPPED', 'IN_TRANSIT', 'OUT_FOR_DELIVERY', 'FAILED_DELIVERY'],
   delivered: ['DELIVERED'],
@@ -40,10 +43,28 @@ export const ORDER_TABS = {
 
 export type OrderTab = keyof typeof ORDER_TABS | 'all';
 
+/** dispatch tab = no AWB yet; ready tab = label generated (AWB assigned). */
+export function resolveOrderTabWaybill(tab?: string): boolean | undefined {
+  if (!tab) return undefined;
+  const key = tab.toLowerCase();
+  if (key === 'dispatch') return false;
+  if (key === 'ready') return true;
+  return undefined;
+}
+
 export function resolveOrderTabStatuses(tab?: string): string[] | undefined {
   if (!tab || tab === 'all') return undefined;
   const key = tab.toLowerCase() as keyof typeof ORDER_TABS;
+  // Back-compat: old ?tab=ready links meant both queues; now they mean label-ready.
   return ORDER_TABS[key] ? [...ORDER_TABS[key]] : undefined;
+}
+
+export function resolveOrderTabFilter(tab?: string): {
+  statuses?: string[];
+  hasWaybill?: boolean;
+} {
+  if (!tab || tab === 'all') return {};
+  return { statuses: resolveOrderTabStatuses(tab), hasWaybill: resolveOrderTabWaybill(tab) };
 }
 class OrderService {
   /**
@@ -524,6 +545,7 @@ class OrderService {
       status?: string;
       statuses?: string[];
       tab?: string;
+      hasWaybill?: boolean;
       gateway?: string;
       paymentMethod?: string;
       paymentVerified?: boolean;
@@ -536,6 +558,7 @@ class OrderService {
     let status: string | undefined;
     let statuses: string[] | undefined;
     let tab: string | undefined;
+    let hasWaybill: boolean | undefined;
     let gateway: string | undefined;
     let paymentMethod: string | undefined;
     let paymentVerified: boolean | undefined;
@@ -550,6 +573,8 @@ class OrderService {
       status = optionsOrStatus.status;
       statuses = optionsOrStatus.statuses;
       tab = optionsOrStatus.tab;
+      // Explicit hasWaybill wins; otherwise derive from tab (dispatch=false, ready=true).
+      hasWaybill = optionsOrStatus.hasWaybill ?? resolveOrderTabWaybill(tab);
       gateway = optionsOrStatus.gateway;
       paymentMethod = optionsOrStatus.paymentMethod;
       paymentVerified = optionsOrStatus.paymentVerified;
@@ -605,6 +630,16 @@ class OrderService {
       where.status = { in: explicitStatuses };
     } else if (status) {
       where.status = status;
+    }
+
+    // AWB segregation: dispatch tab = shipment missing/waybill null (needs Dispatch
+    // click); ready tab = waybill assigned (label generated, awaiting pickup).
+    if (hasWaybill === true) {
+      andConditions.push({ shipment: { waybillNumber: { not: null } } });
+    } else if (hasWaybill === false) {
+      andConditions.push({
+        OR: [{ shipment: null }, { shipment: { waybillNumber: null } }],
+      });
     }
 
     if (gateway) {
@@ -667,7 +702,8 @@ class OrderService {
   }
 
   /**
-   * Counts per operational tab (single groupBy, no full-table fetch).
+   * Counts per operational tab. Status-only tabs use one groupBy; the AWB-split
+   * dispatch/ready tabs use two targeted counts (no full-table fetch).
    * Used for Orders page tab badges.
    */
   async getOrderTabCounts(): Promise<Record<OrderTab | 'all', number> & { byStatus: Record<string, number> }> {
@@ -680,10 +716,26 @@ class OrderService {
     }
     const countFor = (statuses: readonly string[]): number =>
       statuses.reduce((sum, s) => sum + (byStatus[s] || 0), 0);
+    // AWB split for the two Ready queues (verified live split 9/9 on 2026-09-28).
+    const [dispatchNoAwb, readyWithAwb] = await Promise.all([
+      prisma.order.count({
+        where: {
+          status: { in: [...ORDER_TABS.dispatch] },
+          OR: [{ shipment: null }, { shipment: { waybillNumber: null } }],
+        },
+      }),
+      prisma.order.count({
+        where: {
+          status: { in: [...ORDER_TABS.ready] },
+          shipment: { waybillNumber: { not: null } },
+        },
+      }),
+    ]);
     return {
       all: total,
       new: countFor(ORDER_TABS.new),
-      ready: countFor(ORDER_TABS.ready),
+      dispatch: dispatchNoAwb,
+      ready: readyWithAwb,
       transit: countFor(ORDER_TABS.transit),
       delivered: countFor(ORDER_TABS.delivered),
       return: countFor(ORDER_TABS.return),

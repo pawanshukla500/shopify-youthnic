@@ -1117,7 +1117,15 @@ export function Orders() {
               aria-selected={isActive}
               className={`analytics-tab-btn ${isActive ? 'active' : ''}`}
               onClick={() => setTabAndUrl(tab.key)}
-              title={tab.key === 'all' ? 'All orders' : `${tab.label}: ${tab.statuses.join(', ')}`}
+              title={
+                tab.key === 'all'
+                  ? 'All orders'
+                  : tab.key === 'dispatch'
+                    ? 'No AWB yet — click Dispatch to generate AWB + label'
+                    : tab.key === 'ready'
+                      ? 'AWB + label generated — hand over to courier for pickup'
+                      : `${tab.label}: ${tab.statuses.join(', ')}`
+              }
               style={isActive ? { borderColor: tab.color, color: tab.color } : undefined}
             >
               <span>{tab.label}</span>

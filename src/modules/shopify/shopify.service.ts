@@ -3,6 +3,7 @@ import { config } from '../../config';
 import prisma from '../../database/prisma';
 import logger from '../../utils/logger';
 import { withRetry } from '../../utils/retry';
+import { isDelhiveryCourier } from '../../utils/courier';
 import { ShopifyOrderWebhook } from '../../types';
 import { OrderStatus } from '@prisma/client';
 import { shopifyTokenProvider } from './token.provider';
@@ -1148,12 +1149,38 @@ class ShopifyService {
         else if (primaryFulfillment.shipment_status === 'in_transit') shipmentStatus = 'IN_TRANSIT';
 
         if (waybillNumber) {
+          // Delhivery is fulfilled under several carrier labels ("Delhivery",
+          // "Delhivery Express", "Delhivery Surface", "Delhivery B2C"). Detect any
+          // variant case-insensitively (/delhivery/i) so it stays on the Delhivery
+          // tracking/label/audit path; anything else is a third-party courier.
+          const isNonDelhivery = !isDelhiveryCourier(courier);
+
+          // On a third-party AWB the Delhivery weight/billing audit values are
+          // meaningless, so hold them at safe defaults — otherwise Delhivery
+          // reconciliation raises false discrepancies against a courier it doesn't own.
+          const delhiveryAuditReset = {
+            weightMismatch: false,
+            mismatchDetails: null,
+            declaredWeightGrams: null,
+            billedWeightGrams: null,
+            chargedZone: null,
+            initialCost: 0,
+            reversalAmount: 0,
+            revisedCost: 0,
+            hasReversal: false,
+            reversalReason: null,
+            totalDebited: 0,
+            totalCredited: 0,
+            netBilledCost: 0,
+            billingStatus: null,
+            lastBilledAt: null,
+          };
+
           const existingShipment = await prisma.shipment.findFirst({
             where: { orderId: dbOrder.id },
           });
 
           if (existingShipment) {
-            const isNonDelhivery = courier.toLowerCase() !== 'delhivery';
             await prisma.shipment.update({
               where: { id: existingShipment.id },
               data: {
@@ -1167,21 +1194,7 @@ class ShopifyService {
                 // If courier is not Delhivery, clear any false Delhivery audit discrepancy fields
                 ...(isNonDelhivery
                   ? {
-                      weightMismatch: false,
-                      mismatchDetails: null,
-                      declaredWeightGrams: null,
-                      billedWeightGrams: null,
-                      chargedZone: null,
-                      initialCost: 0,
-                      reversalAmount: 0,
-                      revisedCost: 0,
-                      hasReversal: false,
-                      reversalReason: null,
-                      totalDebited: 0,
-                      totalCredited: 0,
-                      netBilledCost: 0,
-                      billingStatus: null,
-                      lastBilledAt: null,
+                      ...delhiveryAuditReset,
                       codRemitted: false,
                       codRemittedAt: null,
                       codCollected: false,
@@ -1224,6 +1237,7 @@ class ShopifyService {
                   ? `In Transit · ${primaryFulfillment.shipment_status}`
                   : 'In Transit',
                 labelUrl: trackingUrl,
+                ...(isNonDelhivery ? delhiveryAuditReset : {}),
               },
             });
           }

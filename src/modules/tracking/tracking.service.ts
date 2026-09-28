@@ -3,6 +3,7 @@ import delhiveryService from '../delhivery/delhivery.service';
 import notificationEngine from '../notifications/notification.service';
 import logger from '../../utils/logger';
 import { config } from '../../config';
+import { isDelhiveryCourier } from '../../utils/courier';
 import { ShipmentStatus } from '@prisma/client';
 
 /**
@@ -40,6 +41,11 @@ class TrackingService {
           notIn: ['DELIVERED', 'CANCELLED', 'RTO_DELIVERED', 'ERROR'],
         },
         waybillNumber: { not: null },
+        // Only Delhivery shipments are tracked via the Delhivery API. Filtering
+        // here (ILIKE '%delhivery%') keeps third-party couriers (Blue Dart, DTDC,
+        // India Post, ...) out of the batch so their waybills never trigger the
+        // Delhivery 404/not-found poll loops the cron would otherwise generate.
+        courier: { contains: 'delhivery', mode: 'insensitive' },
         ...(force
           ? {}
           : {
@@ -58,6 +64,9 @@ class TrackingService {
     let updatedCount = 0;
     for (const shipment of activeShipments) {
       if (!shipment.waybillNumber) continue;
+      // Defense-in-depth alongside the query filter: never hand a third-party
+      // waybill to the Delhivery API, even if a legacy row slips through.
+      if (!isDelhiveryCourier(shipment.courier)) continue;
 
       try {
         const tracking = await delhiveryService.trackShipment(shipment.waybillNumber);

@@ -65,6 +65,21 @@ router.post('/shopify', async (req: Request, res: Response): Promise<void> => {
         await orderService.handleOrderCancelled(payload.id.toString());
         break;
 
+      case 'fulfillments/create':
+      case 'fulfillments/update': {
+        // External fulfillments (Delhivery One portal / Shopify Admin) arrive as
+        // fulfillment webhooks that only carry the parent order_id. Fetch the
+        // full parent order so its fulfillments, tracking, and status sync in.
+        const parentOrderId = payload?.order_id;
+        if (!parentOrderId) {
+          logger.warn('Fulfillment webhook missing order_id — skipping', { topic });
+          break;
+        }
+        const parentOrder = await shopifyService.fetchOrder(parentOrderId.toString());
+        await shopifyService.syncOrderToDb(parentOrder);
+        break;
+      }
+
       case 'refunds/create':
         logger.info('Refund webhook received (refund processed on Shopify)', {
           orderId: payload.order_id,

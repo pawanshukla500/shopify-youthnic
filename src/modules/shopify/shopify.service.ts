@@ -176,6 +176,8 @@ class ShopifyService {
       'orders/paid',
       'orders/updated',
       'orders/cancelled',
+      'fulfillments/create',
+      'fulfillments/update',
       'refunds/create',
     ];
 
@@ -802,6 +804,18 @@ class ShopifyService {
    * Sync (or upsert) a Shopify order into our database.
    */
   async syncOrderToDb(order: ShopifyOrderWebhook): Promise<void> {
+    // Strict historical cutoff (mission invariant): never create or modify
+    // orders, items, or shipments for orders placed before the sync start date.
+    // Guards every caller — REST polling and orders/* + fulfillments/* webhooks.
+    if (new Date(order.created_at) < config.shopify.syncStartDate) {
+      logger.info('Skipping historical order — created before the sync cutoff', {
+        orderName: order.name,
+        createdAt: order.created_at,
+        syncStartDate: config.shopify.syncStartDate.toISOString(),
+      });
+      return;
+    }
+
     const customer = order.customer;
     const address = order.shipping_address || customer?.default_address;
 
@@ -943,6 +957,22 @@ class ShopifyService {
     );
     const dispatchDelayed = ['NEW', 'DISPATCH_PENDING'].includes(status) && !hasActiveWaybill && Date.now() > expectedDispatchAt.getTime();
 
+    // dispatchedAt audit timestamp: initialize when the order carries an active
+    // fulfillment or an assigned waybill, and never overwrite a timestamp that a
+    // prior dispatch already recorded (read the stored value and preserve it).
+    const existingDispatch = await prisma.order.findUnique({
+      where: { shopifyOrderId: order.id.toString() },
+      select: { dispatchedAt: true },
+    });
+    const primaryActiveFulfillment = activeFulfillments[activeFulfillments.length - 1] || null;
+    const fulfillmentDispatchedAt = primaryActiveFulfillment?.created_at
+      ? new Date(primaryActiveFulfillment.created_at)
+      : null;
+    let dispatchedAt: Date | null = existingDispatch?.dispatchedAt ?? null;
+    if (!dispatchedAt && (activeFulfillments.length > 0 || hasActiveWaybill)) {
+      dispatchedAt = fulfillmentDispatchedAt || new Date();
+    }
+
     try {
       const dbOrder = await prisma.order.upsert({
         where: { shopifyOrderId: order.id.toString() },
@@ -985,6 +1015,7 @@ class ShopifyService {
           status,
           shopifyCreatedAt: new Date(order.created_at),
           shopifyUpdatedAt: order.updated_at ? new Date(order.updated_at) : null,
+          dispatchedAt,
           items: {
             create: await (async () => {
               const variantIds = order.line_items
@@ -1040,6 +1071,7 @@ class ShopifyService {
           salesChannel,
           status,
           shopifyUpdatedAt: order.updated_at ? new Date(order.updated_at) : null,
+          dispatchedAt,
         },
         include: { shipment: true },
       });

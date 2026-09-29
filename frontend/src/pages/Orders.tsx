@@ -17,6 +17,12 @@ import {
   downloadSingleLabelPdf,
   openPrintableOrderLabel,
   openPrintableOrderInvoice,
+  downloadBulkLabelsDirectFile,
+  downloadBulkLabelsAndInvoicesDirectFile,
+  openPrintableBulkLabelsAndInvoices,
+  downloadOrderLabelFile,
+  downloadSingleLabelAndInvoiceFile,
+  openPrintableOrderLabelAndInvoice,
 } from '../api'
 import { ORDER_TABS, tabForStatus, formatDate, formatMoney, labelize, type OrderTabKey } from '../lib'
 import { getOrderTabCounts } from '../api'
@@ -799,6 +805,54 @@ export function Orders() {
       toast.toast('error', err.message || 'Failed to generate bulk shipping labels')
     } finally {
       setIsBulkGeneratingLabels(false)
+    }
+  }
+
+  // Bulk Download Shipping Labels (Direct File Download - No new tab)
+  const [isBulkDownloadingLabelsDirect, setIsBulkDownloadingLabelsDirect] = useState(false)
+  const handleBulkDownloadLabelsDirect = async () => {
+    const ids = Array.from(selectedOrderIds)
+    if (!ids.length) return
+    setIsBulkDownloadingLabelsDirect(true)
+    try {
+      await downloadBulkLabelsDirectFile(ids)
+      toast.toast('success', `Downloaded consolidated shipping labels for ${ids.length} orders!`)
+    } catch (err: any) {
+      toast.toast('error', err.message || 'Failed to download bulk shipping labels')
+    } finally {
+      setIsBulkDownloadingLabelsDirect(false)
+    }
+  }
+
+  // Bulk Download Labels + Invoices (Direct File Download - Strictly alternating: Label then Invoice - No new tab)
+  const [isBulkDownloadingLabelsAndInvoicesDirect, setIsBulkDownloadingLabelsAndInvoicesDirect] = useState(false)
+  const handleBulkDownloadLabelsAndInvoicesDirect = async () => {
+    const ids = Array.from(selectedOrderIds)
+    if (!ids.length) return
+    setIsBulkDownloadingLabelsAndInvoicesDirect(true)
+    try {
+      await downloadBulkLabelsAndInvoicesDirectFile(ids)
+      toast.toast('success', `Downloaded combined Labels + Invoices for ${ids.length} orders (sequenced: Label then Invoice)!`)
+    } catch (err: any) {
+      toast.toast('error', err.message || 'Failed to download bulk labels and invoices')
+    } finally {
+      setIsBulkDownloadingLabelsAndInvoicesDirect(false)
+    }
+  }
+
+  // Bulk Print Labels + Invoices (Preview tab - Strictly alternating: Label then Invoice)
+  const [isBulkPrintingLabelsAndInvoices, setIsBulkPrintingLabelsAndInvoices] = useState(false)
+  const handleBulkPrintLabelsAndInvoices = async () => {
+    const ids = Array.from(selectedOrderIds)
+    if (!ids.length) return
+    setIsBulkPrintingLabelsAndInvoices(true)
+    try {
+      await openPrintableBulkLabelsAndInvoices(ids)
+      toast.toast('success', `Opened combined Labels + Invoices print preview for ${ids.length} orders!`)
+    } catch (err: any) {
+      toast.toast('error', err.message || 'Failed to open printable labels and invoices')
+    } finally {
+      setIsBulkPrintingLabelsAndInvoices(false)
     }
   }
 
@@ -1598,6 +1652,24 @@ export function Orders() {
                                   type="button"
                                   className="btn-row-action"
                                   style={{ color: '#0284c7', borderColor: 'rgba(2,132,199,0.3)', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
+                                  onClick={async (e) => {
+                                    e.stopPropagation()
+                                    try {
+                                      await downloadOrderLabelFile(order.id, order.shipment?.waybillNumber || order.shopifyOrderName)
+                                      toast.toast('success', `Downloaded label for ${order.shopifyOrderName}`)
+                                    } catch (err: any) {
+                                      toast.toast('error', err.message || 'Failed to download label')
+                                    }
+                                  }}
+                                  title="Directly download official Delhivery shipping label file (no new tab)"
+                                >
+                                  <Icon name="download" size={11} /> DL Label
+                                </button>
+
+                                <button
+                                  type="button"
+                                  className="btn-row-action"
+                                  style={{ color: '#0284c7', borderColor: 'rgba(2,132,199,0.3)', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
                                   onClick={(e) => {
                                     e.stopPropagation()
                                     openPrintableOrderLabel(order.id)
@@ -1605,6 +1677,37 @@ export function Orders() {
                                   title="Print Delhivery 4R Shipping Label"
                                 >
                                   🏷️ Label
+                                </button>
+
+                                <button
+                                  type="button"
+                                  className="btn-row-action"
+                                  style={{ color: '#7c3aed', borderColor: 'rgba(124,58,237,0.3)', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
+                                  onClick={async (e) => {
+                                    e.stopPropagation()
+                                    try {
+                                      await downloadSingleLabelAndInvoiceFile(order.id, order.shipment?.waybillNumber || order.shopifyOrderName)
+                                      toast.toast('success', `Downloaded Label + Invoice for ${order.shopifyOrderName}`)
+                                    } catch (err: any) {
+                                      toast.toast('error', err.message || 'Failed to download label and invoice')
+                                    }
+                                  }}
+                                  title="Directly download combined Label + Invoice as a single file (strictly sequenced: Label then Invoice)"
+                                >
+                                  <Icon name="download" size={11} /> Label+Inv
+                                </button>
+
+                                <button
+                                  type="button"
+                                  className="btn-row-action"
+                                  style={{ color: '#7c3aed', borderColor: 'rgba(124,58,237,0.3)', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    openPrintableOrderLabelAndInvoice(order.id)
+                                  }}
+                                  title="Print combined Label then Invoice (Order 1 Label, then Order 1 Invoice)"
+                                >
+                                  🏷️🧾 Print
                                 </button>
 
                                 <button
@@ -1826,16 +1929,58 @@ export function Orders() {
             <span className="bulk-btn-label">{isBulkDispatching ? 'Dispatching…' : 'Dispatch'}</span>
           </button>
 
+          {/* Direct File Download Labels (No new tab) */}
+          <button
+            type="button"
+            className="bulk-btn bulk-btn-secondary"
+            onClick={handleBulkDownloadLabelsDirect}
+            disabled={isBulkDownloadingLabelsDirect}
+            title="Directly download consolidated Delhivery 4R thermal shipping labels as a file without opening in a new tab"
+          >
+            <Icon name="download" size={15} />
+            <span className="bulk-btn-label">{isBulkDownloadingLabelsDirect ? 'Downloading…' : 'DL Labels'}</span>
+            <span className="bulk-btn-meta">File</span>
+          </button>
+
+          {/* Print Labels (New Tab) */}
           <button
             type="button"
             className="bulk-btn bulk-btn-secondary"
             onClick={handleBulkDownloadLabels}
             disabled={isBulkGeneratingLabels}
-            title="Download consolidated Delhivery 4R thermal shipping labels"
+            title="Open printable preview tab of Delhivery 4R thermal shipping labels"
           >
             <Icon name="tag" size={15} />
-            <span className="bulk-btn-label">{isBulkGeneratingLabels ? 'Generating…' : 'Labels'}</span>
+            <span className="bulk-btn-label">{isBulkGeneratingLabels ? 'Generating…' : 'Print Labels'}</span>
             <span className="bulk-btn-meta">4R</span>
+          </button>
+
+          {/* Direct File Download Combined Labels + Invoices (Strictly alternating: Label then Invoice - No new tab) */}
+          <button
+            type="button"
+            className="bulk-btn bulk-btn-secondary"
+            onClick={handleBulkDownloadLabelsAndInvoicesDirect}
+            disabled={isBulkDownloadingLabelsAndInvoicesDirect}
+            title="Directly download combined shipping labels and GST invoices (strictly sequenced: Order 1 Label -> Order 1 Invoice -> Order 2 Label -> Order 2 Invoice...) without opening a new tab"
+            style={{ background: 'rgba(124, 58, 237, 0.28)', borderColor: 'rgba(196, 181, 253, 0.4)' }}
+          >
+            <Icon name="download" size={15} />
+            <span className="bulk-btn-label">{isBulkDownloadingLabelsAndInvoicesDirect ? 'Downloading…' : 'DL Label+Inv'}</span>
+            <span className="bulk-btn-meta">Seq</span>
+          </button>
+
+          {/* Print Preview Combined Labels + Invoices (Strictly alternating: Label then Invoice) */}
+          <button
+            type="button"
+            className="bulk-btn bulk-btn-secondary"
+            onClick={handleBulkPrintLabelsAndInvoices}
+            disabled={isBulkPrintingLabelsAndInvoices}
+            title="Open printable tab of combined shipping labels and GST invoices (strictly sequenced: Order 1 Label -> Order 1 Invoice -> Order 2 Label -> Order 2 Invoice...)"
+            style={{ background: 'rgba(124, 58, 237, 0.28)', borderColor: 'rgba(196, 181, 253, 0.4)' }}
+          >
+            <Icon name="tag" size={15} />
+            <span className="bulk-btn-label">{isBulkPrintingLabelsAndInvoices ? 'Opening…' : 'Print Label+Inv'}</span>
+            <span className="bulk-btn-meta">Seq</span>
           </button>
 
           <button

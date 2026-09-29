@@ -369,7 +369,7 @@ export class InvoiceService {
 </html>`;
   }
 
-  private getInvoiceStyles(): string {
+  public getInvoiceStyles(): string {
     return `
       * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
       body { background: #f3f4f6; color: #1e293b; padding: 20px 0; display: flex; flex-direction: column; align-items: center; }

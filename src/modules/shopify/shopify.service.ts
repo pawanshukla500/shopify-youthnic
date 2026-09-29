@@ -1241,6 +1241,20 @@ class ShopifyService {
               },
             });
           }
+
+          // If this fulfillment is carried by Delhivery, immediately trigger live tracking
+          // from the Delhivery API in the background so tracking scans, ETA, and hub locations
+          // are immediately populated rather than waiting for the 30-min polling cron.
+          if (!isNonDelhivery && waybillNumber) {
+            import('../tracking/tracking.service')
+              .then(({ default: trackingService }) => trackingService.syncShipmentTracking(waybillNumber))
+              .catch((trackErr) => {
+                logger.warn('Immediate Delhivery tracking sync failed after external fulfillment ingest', {
+                  waybill: waybillNumber,
+                  error: trackErr?.message,
+                });
+              });
+          }
         }
       }
 

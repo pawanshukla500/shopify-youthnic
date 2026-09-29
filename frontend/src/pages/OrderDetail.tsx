@@ -16,6 +16,10 @@ import {
   downloadSingleLabelPdf,
   openPrintableOrderLabel,
   openPrintableOrderInvoice,
+  downloadOrderLabelFile,
+  downloadSingleLabelAndInvoiceFile,
+  openPrintableOrderLabelAndInvoice,
+  syncOrderTrackingLive,
 } from '../api'
 import { formatDate, formatMoney, labelize } from '../lib'
 import { Button, ButtonGroup, EmptyState, ErrorBox, FormField, Icon, LoadingState, PageIntro, Panel, PanelHeading, StatusBadge, useDocumentTitle, useToast } from '../components/UI'
@@ -43,6 +47,11 @@ export function OrderDetail() {
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [isConfirmingCod, setIsConfirmingCod] = useState(false)
+
+  // Live Delhivery Tracking Sync State
+  const [isSyncingTracking, setIsSyncingTracking] = useState(false)
+  const [isDownloadingLabel, setIsDownloadingLabel] = useState(false)
+  const [isDownloadingLabelAndInvoice, setIsDownloadingLabelAndInvoice] = useState(false)
 
   // NDR Resolution States
   const [showNdrModal, setShowNdrModal] = useState(false)
@@ -165,6 +174,13 @@ export function OrderDetail() {
   const isCodConf = Boolean(order.tags && /cod_confirmed|cod confirmed|cod-confirmed|confirmed/i.test(order.tags))
 
   const isDispatchNeeded = (isPrepaid || isCodConf) && ['NEW', 'DISPATCH_PENDING'].includes(order.status) && !order.shipment?.waybillNumber
+
+  const isNdrOrRtoShipment = Boolean(
+    order.hasNdrException ||
+    ['FAILED_DELIVERY', 'RTO_INITIATED', 'RTO_DELIVERED'].includes(order.status) ||
+    ['FAILED', 'RTO', 'RTO_DELIVERED'].includes(order.shipment?.status || '') ||
+    (order.shipment?.trackingStatus && /fail|attempt|undeliver|rto|return/i.test(order.shipment.trackingStatus))
+  )
 
   // Single order COD confirmation handler
   const handleConfirmCod = async () => {
@@ -289,6 +305,51 @@ export function OrderDetail() {
     }
   }
 
+  // Live Delhivery Tracking sync handler
+  const handleSyncTracking = async () => {
+    if (!order) return
+    setIsSyncingTracking(true)
+    try {
+      const res = await syncOrderTrackingLive(order.id)
+      const scanCount = res.shipment?.trackingLogs?.length || res.tracking?.scans?.length || 0
+      toast.toast('success', `Live tracking refreshed${scanCount ? ` · ${scanCount} scans recorded` : ''}!`)
+      await queryClient.invalidateQueries({ queryKey: ['order', id] })
+      await queryClient.invalidateQueries({ queryKey: ['orders'] })
+    } catch (err: any) {
+      toast.toast('error', apiError(err))
+    } finally {
+      setIsSyncingTracking(false)
+    }
+  }
+
+  // Direct Label download handler (saves file, does not open in new tab)
+  const handleDownloadLabel = async () => {
+    if (!order) return
+    setIsDownloadingLabel(true)
+    try {
+      await downloadOrderLabelFile(order.id, order.shipment?.waybillNumber || order.shopifyOrderName)
+      toast.toast('success', 'Delhivery shipping label downloaded directly.')
+    } catch (err: any) {
+      toast.toast('error', apiError(err))
+    } finally {
+      setIsDownloadingLabel(false)
+    }
+  }
+
+  // Direct Combined Label + Invoice download handler (strictly alternating: Label then Invoice, saves file)
+  const handleDownloadLabelAndInvoice = async () => {
+    if (!order) return
+    setIsDownloadingLabelAndInvoice(true)
+    try {
+      await downloadSingleLabelAndInvoiceFile(order.id, order.shipment?.waybillNumber || order.shopifyOrderName)
+      toast.toast('success', 'Combined Shipping Label + Invoice downloaded directly.')
+    } catch (err: any) {
+      toast.toast('error', apiError(err))
+    } finally {
+      setIsDownloadingLabelAndInvoice(false)
+    }
+  }
+
   return <>
     {/* ─── 21st.dev Style Modern Header Card ──────────────────── */}
     <div className="detail-header-card">
@@ -373,15 +434,17 @@ export function OrderDetail() {
           <span>WhatsApp Alert</span>
         </Button>
 
-        {/* GST Tax Invoice & Delhivery Label Quick Actions */}
+        {/* GST Tax Invoice, Shipping Label & Combined Actions */}
         <button
           type="button"
           className="button button-secondary"
-          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', height: '34px', padding: '0 12px', color: '#059669', borderColor: '#a7f3d0', background: '#ecfdf5', fontWeight: 650, cursor: 'pointer' }}
-          onClick={() => openPrintableOrderInvoice(order.id)}
-          title="View and print official GST Commercial Tax Invoice"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', height: '34px', padding: '0 12px', color: '#0284c7', borderColor: '#bae6fd', background: '#f0f9ff', fontWeight: 650, cursor: 'pointer' }}
+          onClick={handleDownloadLabel}
+          disabled={isDownloadingLabel}
+          title="Directly download official Delhivery shipping label file without opening a new tab"
         >
-          🧾 GST Tax Invoice
+          <Icon name="download" size={13} />
+          <span>{isDownloadingLabel ? 'Downloading…' : '📥 Download Label'}</span>
         </button>
 
         <button
@@ -391,7 +454,39 @@ export function OrderDetail() {
           onClick={() => openPrintableOrderLabel(order.id)}
           title="View and print 4R Delhivery Thermal Shipping Label"
         >
-          🏷️ Shipping Label
+          🏷️ Print Label
+        </button>
+
+        <button
+          type="button"
+          className="button button-secondary"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', height: '34px', padding: '0 12px', color: '#7c3aed', borderColor: '#ddd6fe', background: '#f5f3ff', fontWeight: 650, cursor: 'pointer' }}
+          onClick={handleDownloadLabelAndInvoice}
+          disabled={isDownloadingLabelAndInvoice}
+          title="Directly download combined Label + Invoice as a single file (strictly sequenced: Label then Invoice)"
+        >
+          <Icon name="download" size={13} />
+          <span>{isDownloadingLabelAndInvoice ? 'Downloading…' : '📥 Download Label + Inv'}</span>
+        </button>
+
+        <button
+          type="button"
+          className="button button-secondary"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', height: '34px', padding: '0 12px', color: '#7c3aed', borderColor: '#ddd6fe', background: '#f5f3ff', fontWeight: 650, cursor: 'pointer' }}
+          onClick={() => openPrintableOrderLabelAndInvoice(order.id)}
+          title="Print combined Label then Invoice (Order 1 Label, then Order 1 Invoice)"
+        >
+          🏷️🧾 Print Label + Inv
+        </button>
+
+        <button
+          type="button"
+          className="button button-secondary"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', height: '34px', padding: '0 12px', color: '#059669', borderColor: '#a7f3d0', background: '#ecfdf5', fontWeight: 650, cursor: 'pointer' }}
+          onClick={() => openPrintableOrderInvoice(order.id)}
+          title="View and print official GST Commercial Tax Invoice"
+        >
+          🧾 GST Tax Invoice
         </button>
 
         {/* Resend Email Notification Trigger */}
@@ -768,24 +863,114 @@ export function OrderDetail() {
           <ItemsTable items={order.items ?? []} currency={order.currency} order={order} />
         </Panel>
 
-        {/* ─── Carrier Shipment Details ───────────────────────── */}
+        {/* ─── Live Delhivery Tracking & Parcel Journey ───────────────────────── */}
         <Panel>
           <PanelHeading
-            eyebrow="Carrier Logistics"
+            eyebrow={order.shipment?.courier?.toLowerCase() === 'delhivery' ? 'Delhivery Express Network' : 'Carrier Logistics'}
             title={
               order.shipment?.courier?.toLowerCase() === 'delhivery' ? (
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
-                  <img src="/logos/delhivery.png" alt="Delhivery" style={{ height: '13px', objectFit: 'contain' }} />
-                  <span>Delhivery Shipment</span>
+                  <img src="/logos/delhivery.png" alt="Delhivery" style={{ height: '14px', objectFit: 'contain' }} />
+                  <span>Live Delhivery Tracking & Parcel Journey</span>
                 </span>
               ) : (
-                `${order.shipment?.courier || 'Carrier'} Shipment`
+                `${order.shipment?.courier || 'Carrier'} Shipment Tracking`
               )
             }
-            action={order.shipment?.status && <StatusBadge status={order.shipment.status} />}
+            action={
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                {order.shipment?.waybillNumber && (
+                  <Button
+                    className="button-secondary button-small"
+                    onClick={handleSyncTracking}
+                    disabled={isSyncingTracking}
+                    loading={isSyncingTracking}
+                    title="Poll Delhivery API in real-time for latest parcel tracking events"
+                    style={{ height: '28px', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                  >
+                    <Icon name="refresh" size={12} />
+                    <span>{isSyncingTracking ? 'Syncing Delhivery…' : '⚡ Refresh Live Tracking'}</span>
+                  </Button>
+                )}
+                {order.shipment?.status && <StatusBadge status={order.shipment.status} />}
+              </div>
+            }
           />
+
           {order.shipment ? (
             <>
+              {/* Visual 5-Stage Parcel Transit Stepper */}
+              <div className="order-stepper-card" style={{ marginBottom: '16px', background: '#f8fafc' }}>
+                <div className="order-stepper-header" style={{ marginBottom: '14px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '12px', fontWeight: 800, color: '#0f172a' }}>
+                      Package Transit Status
+                    </span>
+                    {isNdrOrRtoShipment && (
+                      <span className="ndr-badge" style={{ fontSize: '10px', padding: '1px 6px' }}>
+                        🚨 Delivery Exception / NDR
+                      </span>
+                    )}
+                  </div>
+                  <span style={{ fontSize: '11px', color: '#64748b' }}>
+                    AWB: <strong className="mono" style={{ color: '#1e3a8a' }}>{order.shipment.waybillNumber || 'Unassigned'}</strong>
+                    {order.shipment.trackingLocation ? ` · Location: ${order.shipment.trackingLocation}` : ''}
+                  </span>
+                </div>
+
+                {(() => {
+                  const s = (order.shipment.status || '').toUpperCase()
+                  const ts = (order.shipment.trackingStatus || '').toLowerCase()
+                  let stage = 1
+                  if (s === 'DELIVERED') stage = 5
+                  else if (s === 'OUT_FOR_DELIVERY' || ts.includes('out for delivery') || ts.includes('dispatched for delivery')) stage = 4
+                  else if (s === 'IN_TRANSIT' || ts.includes('in transit') || ts.includes('reached') || ts.includes('bag') || ts.includes('connection') || ts.includes('hub')) stage = 3
+                  else if (s === 'PICKED_UP' || ts.includes('picked') || ts.includes('pickup') || ts.includes('inward')) stage = 2
+
+                  const steps = [
+                    { num: 1, title: 'Manifested', subtitle: 'AWB Created', icon: 'package' as const },
+                    { num: 2, title: 'Picked Up', subtitle: 'Surat Hub', icon: 'truck' as const },
+                    { num: 3, title: 'In Transit', subtitle: order.shipment.trackingLocation || 'Linehaul Hubs', icon: 'route' as const },
+                    { num: 4, title: 'Out for Delivery', subtitle: order.customerCity || 'Courier Van', icon: 'truck' as const },
+                    { num: 5, title: 'Delivered', subtitle: stage === 5 ? 'Handed Over' : 'Pending', icon: 'check' as const },
+                  ]
+                  const fillPercent = ((stage - 1) / (steps.length - 1)) * 100
+
+                  return (
+                    <div className="order-stepper-progress">
+                      <div className="order-stepper-track-bg" />
+                      <div
+                        className="order-stepper-track-fill"
+                        style={{
+                          width: `calc(${fillPercent}% - 32px)`,
+                          background: isNdrOrRtoShipment ? 'linear-gradient(90deg, #f59e0b, #ef4444)' : 'linear-gradient(90deg, #2563eb, #10b981)',
+                        }}
+                      />
+                      {steps.map((st) => {
+                        const isCompleted = st.num < stage
+                        const isActive = st.num === stage
+                        return (
+                          <div
+                            key={st.num}
+                            className={`order-step-node ${isCompleted ? 'completed' : ''} ${isActive ? 'active' : ''}`}
+                          >
+                            <div
+                              className="order-step-circle"
+                              style={isActive && isNdrOrRtoShipment ? { background: '#ef4444', borderColor: '#ef4444', color: '#fff' } : undefined}
+                            >
+                              {isCompleted ? <Icon name="check" size={15} /> : <Icon name={st.icon} size={15} />}
+                            </div>
+                            <span className="order-step-title">{st.title}</span>
+                            <span className="order-step-subtitle">{st.subtitle}</span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )
+                })()}
+              </div>
+
+              {/* Summary Telemetry Metrics */}
               <div className="shipment-summary">
                 <div>
                   <span className="detail-label">{order.shipment.courier || 'Carrier'} Waybill</span>
@@ -811,8 +996,8 @@ export function OrderDetail() {
                   <strong style={{ color: '#0f172a' }}>{order.shipment.trackingStatus ?? 'Awaiting carrier scan'}</strong>
                 </div>
                 <div>
-                  <span className="detail-label">Last location</span>
-                  <strong>{order.shipment.trackingLocation ?? '—'}</strong>
+                  <span className="detail-label">Current Hub / Location</span>
+                  <strong>{order.shipment.trackingLocation ?? 'Origin Hub (Surat)'}</strong>
                 </div>
                 {order.shipment.paymentMode === 'COD' && (
                   <div style={{ gridColumn: '1 / -1', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '7px', padding: '10px 12px', marginTop: '6px' }}>
@@ -830,50 +1015,83 @@ export function OrderDetail() {
                 )}
               </div>
 
-              <div className="shipment-actions">
-                {order.shipment.courier?.toLowerCase() === 'delhivery' && (
-                  <>
-                    <Button
-                      className="button-secondary"
-                      disabled={!order.shipment.waybillNumber || action.isPending}
-                      loading={action.isPending && action.variables === 'label'}
-                      onClick={() => action.mutate('label')}
-                    >
-                      <Icon name="external" size={16} />
-                      Print Shipping Label
-                    </Button>
-
-                    {order.shipment.waybillNumber && (
-                      <a
-                        className="button button-secondary"
-                        href={`/api/delhivery/label/${order.shipment.waybillNumber}/download`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        download={`delhivery-label-${order.shipment.waybillNumber}.pdf`}
-                        title="Directly download official Delhivery PDF shipping label"
-                      >
-                        <Icon name="download" size={16} />
-                        Download PDF Label
-                      </a>
-                    )}
-                  </>
-                )}
-
+              {/* Quick Shipping & Document Actions */}
+              <div className="shipment-actions" style={{ marginTop: '14px', flexWrap: 'wrap', gap: '8px' }}>
                 {order.shipment.waybillNumber && (
-                  <a
-                    className="button button-secondary"
-                    href={
-                      order.shipment.labelUrl ||
-                      (order.shipment.courier?.toLowerCase() === 'ekart'
-                        ? `https://t.proship.in/${order.shipment.waybillNumber}`
-                        : `https://www.delhivery.com/track/package/${order.shipment.waybillNumber}`)
-                    }
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    <Icon name="route" size={16} />
-                    Track on {order.shipment.courier || 'Carrier'}
-                  </a>
+                  <>
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      onClick={handleDownloadLabel}
+                      disabled={isDownloadingLabel}
+                      title="Directly download official Delhivery shipping label file (no new tab)"
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                    >
+                      <Icon name="download" size={15} />
+                      <span>{isDownloadingLabel ? 'Downloading…' : '📥 Download Label (File)'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      onClick={() => openPrintableOrderLabel(order.id)}
+                      title="View & print Delhivery 4R Thermal Shipping Label"
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                    >
+                      <Icon name="external" size={15} />
+                      <span>🏷️ Print Label</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      onClick={handleDownloadLabelAndInvoice}
+                      disabled={isDownloadingLabelAndInvoice}
+                      title="Directly download combined Label + Invoice as file (sequenced: Label then Invoice, no new tab)"
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: '#7c3aed', borderColor: '#ddd6fe', background: '#f5f3ff' }}
+                    >
+                      <Icon name="download" size={15} />
+                      <span>{isDownloadingLabelAndInvoice ? 'Downloading…' : '📥 Download Label + Inv'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      onClick={() => openPrintableOrderLabelAndInvoice(order.id)}
+                      title="Print combined Label then Invoice (Order 1 Label, then Order 1 Invoice)"
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: '#7c3aed', borderColor: '#ddd6fe', background: '#f5f3ff' }}
+                    >
+                      <Icon name="external" size={15} />
+                      <span>🏷️🧾 Print Label + Inv</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      onClick={() => openPrintableOrderInvoice(order.id)}
+                      title="Print official GST Commercial Tax Invoice"
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: '#059669', borderColor: '#a7f3d0', background: '#ecfdf5' }}
+                    >
+                      <Icon name="external" size={15} />
+                      <span>🧾 GST Tax Invoice</span>
+                    </button>
+
+                    <a
+                      className="button button-secondary"
+                      href={
+                        order.shipment.labelUrl ||
+                        (order.shipment.courier?.toLowerCase() === 'ekart'
+                          ? `https://t.proship.in/${order.shipment.waybillNumber}`
+                          : `https://www.delhivery.com/track/package/${order.shipment.waybillNumber}`)
+                      }
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title={`Open tracking page on ${order.shipment.courier || 'Delhivery'}`}
+                    >
+                      <Icon name="route" size={15} />
+                      <span>Track on {order.shipment.courier || 'Delhivery'} ↗</span>
+                    </a>
+                  </>
                 )}
 
                 {order.shipment.courier?.toLowerCase() === 'delhivery' && (
@@ -887,8 +1105,8 @@ export function OrderDetail() {
                       }
                     }}
                   >
-                    <Icon name="close" size={16} />
-                    Cancel shipment
+                    <Icon name="close" size={15} />
+                    <span>Cancel shipment</span>
                   </Button>
                 )}
 
@@ -905,8 +1123,8 @@ export function OrderDetail() {
                       setShowEditDetails((v) => !v)
                     }}
                   >
-                    <Icon name="tool" size={16} />
-                    {showEditDetails ? 'Hide correction' : 'Correct phone / address'}
+                    <Icon name="tool" size={15} />
+                    <span>{showEditDetails ? 'Hide correction' : 'Correct phone / address'}</span>
                   </Button>
                 )}
               </div>
@@ -960,8 +1178,12 @@ export function OrderDetail() {
             </>
           ) : (
             <EmptyState
-              title="Shipment not created"
-              description="Click 'Dispatch with Delhivery' to generate waybill and assign shipment."
+              title={order.fulfillmentStatus === 'fulfilled' ? 'Fulfilled on Shopify' : 'Shipment not created'}
+              description={
+                order.fulfillmentStatus === 'fulfilled'
+                  ? 'This order has a fulfillment record on Shopify. Click "Sync Shopify" or dispatch with Delhivery to sync waybill tracking.'
+                  : 'Click "Dispatch with Delhivery" to generate waybill and assign shipment.'
+              }
               icon="route"
             />
           )}

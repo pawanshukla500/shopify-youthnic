@@ -177,6 +177,72 @@ router.post('/delhivery', async (req: Request, res: Response): Promise<void> => 
 });
 
 /**
+ * Delhivery EPOD Webhook Handler
+ * Endpoint: POST /webhooks/delhivery/epod
+ */
+router.post('/delhivery/epod', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { waybill, EPOD, orderID } = req.body || {};
+    logger.info('Received Delhivery EPOD webhook', { waybill, orderID, hasImage: Boolean(EPOD) });
+
+    if (waybill) {
+      const shipment = await prisma.shipment.findFirst({
+        where: { waybillNumber: String(waybill) },
+        include: { order: true },
+      });
+      if (shipment) {
+        await prisma.trackingLog.create({
+          data: {
+            shipmentId: shipment.id,
+            waybill: String(waybill),
+            status: 'EPOD_RECEIVED',
+            location: shipment.trackingLocation || 'Delivered Location',
+            remark: 'Electronic Proof of Delivery (EPOD) received from Delhivery',
+            scannedAt: new Date(),
+          },
+        });
+      }
+    }
+    res.status(200).json({ success: true, message: 'EPOD received successfully' });
+  } catch (err: any) {
+    logger.error('Error handling Delhivery EPOD webhook', { error: err.message });
+    res.status(200).json({ success: true, warning: 'Processed with warnings' });
+  }
+});
+
+/**
+ * Delhivery QC Image Webhook Handler
+ * Endpoint: POST /webhooks/delhivery/qc-image
+ */
+router.post('/delhivery/qc-image', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { waybillId, returnId, Image } = req.body || {};
+    logger.info('Received Delhivery QC Image webhook', { waybillId, returnId, hasImage: Boolean(Image) });
+
+    res.status(200).json({ success: true, message: 'QC Image received successfully' });
+  } catch (err: any) {
+    logger.error('Error handling Delhivery QC Image webhook', { error: err.message });
+    res.status(200).json({ success: true, warning: 'Processed with warnings' });
+  }
+});
+
+/**
+ * Delhivery Sorter Image Webhook Handler
+ * Endpoint: POST /webhooks/delhivery/sorter-image
+ */
+router.post('/delhivery/sorter-image', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { waybill, image, status } = req.body || {};
+    logger.info('Received Delhivery Sorter Image webhook', { waybill, status, hasImage: Boolean(image) });
+
+    res.status(200).json({ success: true, message: 'Sorter Image received successfully' });
+  } catch (err: any) {
+    logger.error('Error handling Delhivery Sorter Image webhook', { error: err.message });
+    res.status(200).json({ success: true, warning: 'Processed with warnings' });
+  }
+});
+
+/**
  * Normalize a Delhivery scan-push payload into a flat shape.
  *
  * Supports both the official nested schema:

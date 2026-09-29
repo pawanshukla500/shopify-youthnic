@@ -13,9 +13,35 @@
 export const DELHIVERY_COURIER_PATTERN = /delhivery/i;
 
 /**
- * True when the courier name is any Delhivery variant. Null/undefined/empty
- * courier names are treated as non-Delhivery.
+ * True when the courier name, tracking URL, or waybill number matches Delhivery.
+ * - Courier name contains "delhivery" (case-insensitive)
+ * - Tracking URL contains "delhivery" (e.g. delhivery.com/track)
+ * - Or waybill is a 12-15 digit numeric format and courier is not an explicit third-party
  */
-export function isDelhiveryCourier(courier?: string | null): boolean {
-  return DELHIVERY_COURIER_PATTERN.test(courier || '');
+export function isDelhiveryCourier(
+  courier?: string | null,
+  trackingUrl?: string | null,
+  waybillNumber?: string | null
+): boolean {
+  if (DELHIVERY_COURIER_PATTERN.test(courier || '')) return true;
+  if (DELHIVERY_COURIER_PATTERN.test(trackingUrl || '')) return true;
+
+  // Guard against known third-party couriers
+  if (
+    courier &&
+    /bluedart|blue dart|dtdc|ekart|e-kart|shadowfax|xpressbees|xpress bees|ecom express|india post|speed post/i.test(
+      courier
+    )
+  ) {
+    return false;
+  }
+
+  // If waybill is 12-15 digits and courier is generic or absent
+  if (waybillNumber && /^[0-9]{12,15}$/.test(waybillNumber.trim())) {
+    if (!courier || /^(other|surface|express|standard|delhivery|courier)$/i.test(courier.trim())) {
+      return true;
+    }
+  }
+
+  return false;
 }

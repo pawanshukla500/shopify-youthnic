@@ -1050,6 +1050,132 @@ export async function downloadBulkLabelsAndInvoicesDirectFile(orderIds: number[]
 }
 
 /**
+ * Directly download single order's GST Invoice as an HTML file without opening a new tab.
+ */
+export async function downloadSingleInvoiceFile(orderId: number, orderName?: string): Promise<void> {
+  const response = await api.get(`/api/orders/${orderId}/invoice/download`, {
+    responseType: 'blob',
+  })
+  const rawDisposition = response.headers?.['content-disposition']
+  const filename = filenameFromDisposition(
+    typeof rawDisposition === 'string' ? rawDisposition : undefined,
+    `Invoice-${orderName ? orderName.replace('#', '') : orderId}.html`
+  )
+  const blob = new Blob([response.data], { type: 'text/html;charset=utf-8' })
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.setAttribute('download', filename)
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.URL.revokeObjectURL(url)
+}
+
+/**
+ * Directly download consolidated multi-order GST Invoices as a single HTML file without opening a new tab.
+ */
+export async function downloadBulkInvoicesDirectFile(orderIds: number[]): Promise<void> {
+  const response = await api.post(
+    '/api/orders/bulk-invoices/download',
+    { orderIds },
+    { responseType: 'blob' }
+  )
+  const rawDisposition = response.headers?.['content-disposition']
+  const filename = filenameFromDisposition(
+    typeof rawDisposition === 'string' ? rawDisposition : undefined,
+    `Bulk-Invoices-${orderIds.length}-Orders.html`
+  )
+  const blob = new Blob([response.data], { type: 'text/html;charset=utf-8' })
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.setAttribute('download', filename)
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.URL.revokeObjectURL(url)
+}
+
+/**
+ * Open multi-order consolidated Picklist in preview / print window.
+ */
+export async function openPrintableBulkPicklist(orderIds: number[]): Promise<void> {
+  const response = await api.post(
+    '/api/orders/picklist',
+    { orderIds },
+    { responseType: 'text' }
+  )
+  const html = response.data
+  const printWindow = window.open('', '_blank')
+  if (printWindow) {
+    printWindow.document.write(html)
+    printWindow.document.close()
+  } else {
+    const blob = new Blob([html], { type: 'text/html' })
+    const url = URL.createObjectURL(blob)
+    window.open(url, '_blank')
+  }
+}
+
+/**
+ * Directly download multi-order consolidated Picklist as an HTML file without opening a new tab.
+ */
+export async function downloadBulkPicklist(orderIds: number[]): Promise<void> {
+  const response = await api.post(
+    '/api/orders/picklist/download',
+    { orderIds },
+    { responseType: 'blob' }
+  )
+  const rawDisposition = response.headers?.['content-disposition']
+  const filename = filenameFromDisposition(
+    typeof rawDisposition === 'string' ? rawDisposition : undefined,
+    `Picklist-${orderIds.length}-Orders.html`
+  )
+  const blob = new Blob([response.data], { type: 'text/html;charset=utf-8' })
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.setAttribute('download', filename)
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.URL.revokeObjectURL(url)
+}
+
+/**
+ * Directly download complete bulk pack as a ZIP archive containing:
+ * - Picklist (00_Picklist_Summary.html)
+ * - Collated Labels and Invoices (01_Labels_and_Invoices_Collated.html)
+ * - All Labels (02_All_Shipping_Labels_4R.html)
+ * - All Invoices (03_All_GST_Invoices.html)
+ * - Manifest CSV (04_Manifest_Summary.csv)
+ * - Individual Labels & Invoices folders
+ */
+export async function downloadBulkPackZip(orderIds: number[]): Promise<void> {
+  const response = await api.post(
+    '/api/orders/bulk-pack/download',
+    { orderIds },
+    { responseType: 'blob' }
+  )
+  const rawDisposition = response.headers?.['content-disposition']
+  const dateStr = new Date().toISOString().slice(0, 10)
+  const filename = filenameFromDisposition(
+    typeof rawDisposition === 'string' ? rawDisposition : undefined,
+    `Youthnic-Bulk-Pack-${orderIds.length}-Orders-${dateStr}.zip`
+  )
+  const blob = new Blob([response.data], { type: 'application/zip' })
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.setAttribute('download', filename)
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.URL.revokeObjectURL(url)
+}
+
+/**
  * Directly trigger live Delhivery tracking for an order and return fresh tracking & shipment data
  */
 export async function syncOrderTrackingLive(orderId: number): Promise<{

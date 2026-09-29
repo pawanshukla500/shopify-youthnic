@@ -58,6 +58,7 @@ router.post('/shopify', async (req: Request, res: Response): Promise<void> => {
 
       case 'orders/paid':
       case 'orders/updated':
+      case 'orders/fulfilled':
         await orderService.syncOrderFromWebhook(payload);
         break;
 

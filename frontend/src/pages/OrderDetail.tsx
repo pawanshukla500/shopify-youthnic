@@ -25,7 +25,7 @@ import {
   syncExternalOrderFulfillment,
 } from '../api'
 import { formatDate, formatMoney, labelize } from '../lib'
-import { Button, ButtonGroup, EmptyState, ErrorBox, FormField, Icon, LoadingState, PageIntro, Panel, PanelHeading, StatusBadge, useDocumentTitle, useToast } from '../components/UI'
+import { Button, ButtonGroup, CopyableBadge, EmptyState, ErrorBox, FormField, Icon, InfoCard, LoadingState, PageIntro, Panel, PanelHeading, StatCard, StatusBadge, useDocumentTitle, useToast } from '../components/UI'
 import type { Order, OrderItem } from '../types'
 
 export function OrderDetail() {
@@ -1074,48 +1074,52 @@ export function OrderDetail() {
                 })()}
               </div>
 
-              {/* Summary Telemetry Metrics */}
-              <div className="shipment-summary">
-                <div>
-                  <span className="detail-label">{order.shipment.courier || 'Carrier'} Waybill</span>
-                  {order.shipment.waybillNumber ? (
-                    <div
-                      className="waybill-chip"
-                      onClick={() => copyWaybill(order.shipment?.waybillNumber || '')}
-                      title="Click to copy waybill"
-                    >
-                      <span>{order.shipment.waybillNumber}</span>
-                      <Icon name="copy" size={12} />
-                    </div>
-                  ) : (
-                    <strong>Not assigned</strong>
-                  )}
-                </div>
-                <div>
-                  <span className="detail-label">Carrier</span>
-                  <strong style={{ color: '#0f172a' }}>{order.shipment.courier || 'Delhivery'}</strong>
-                </div>
-                <div>
-                  <span className="detail-label">Tracking status</span>
-                  <strong style={{ color: '#0f172a' }}>{order.shipment.trackingStatus ?? 'Awaiting carrier scan'}</strong>
-                </div>
-                <div>
-                  <span className="detail-label">Current Hub / Location</span>
-                  <strong>{order.shipment.trackingLocation ?? 'Origin Hub (Surat)'}</strong>
-                </div>
+              {/* 21st.dev Design Pro: Summary Telemetry Metric Cards */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '12px', marginTop: '12px', marginBottom: '14px' }}>
+                <StatCard
+                  title={`${order.shipment.courier || 'Carrier'} AWB`}
+                  value={
+                    order.shipment.waybillNumber ? (
+                      <CopyableBadge text={order.shipment.waybillNumber} monospace={true} />
+                    ) : (
+                      <span style={{ fontSize: '13px', color: '#94a3b8' }}>Not assigned</span>
+                    )
+                  }
+                  icon="tag"
+                  accentColor="#2563eb"
+                  subtext={order.shipment.courier || 'Delhivery Express'}
+                />
+
+                <StatCard
+                  title="Tracking Status"
+                  value={<span style={{ fontSize: '14px', fontWeight: 700, color: '#0f172a' }}>{order.shipment.trackingStatus ?? 'Awaiting carrier scan'}</span>}
+                  icon="truck"
+                  accentColor={isNdrOrRtoShipment ? '#dc2626' : '#059669'}
+                  subtext={order.shipment.status ? `Status: ${order.shipment.status}` : undefined}
+                />
+
+                <StatCard
+                  title="Current Location"
+                  value={<span style={{ fontSize: '14px', fontWeight: 700, color: '#0f172a' }}>{order.shipment.trackingLocation ?? 'Origin Hub (Surat)'}</span>}
+                  icon="pin"
+                  accentColor="#0284c7"
+                  subtext={order.customerCity ? `Destination: ${order.customerCity}` : 'In Transit'}
+                />
+
                 {order.shipment.paymentMode === 'COD' && (
-                  <div style={{ gridColumn: '1 / -1', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '7px', padding: '10px 12px', marginTop: '6px' }}>
-                    <span className="detail-label" style={{ color: '#92400e' }}>
-                      COD Collection · {formatMoney(order.shipment.codAmount, order.currency)}
-                    </span>
-                    <strong style={{ color: '#78350f', fontSize: '11.5px' }}>
-                      {order.shipment.codRemitted
+                  <StatCard
+                    title="COD Ledger"
+                    value={<span style={{ fontSize: '16px', fontWeight: 800, color: '#92400e' }}>{formatMoney(order.shipment.codAmount, order.currency)}</span>}
+                    icon="creditCard"
+                    accentColor="#d97706"
+                    subtext={
+                      order.shipment.codRemitted
                         ? `Remitted by ${order.shipment.courier || 'Carrier'}${order.shipment.codRemittanceRef ? ` · Ref: ${order.shipment.codRemittanceRef}` : ''}`
                         : order.shipment.codCollected
-                        ? 'Collected at delivery · Awaiting bank remittance'
-                        : 'Cash pending delivery collection'}
-                    </strong>
-                  </div>
+                        ? 'Collected · Pending remittance'
+                        : 'Cash pending delivery collection'
+                    }
+                  />
                 )}
               </div>
 

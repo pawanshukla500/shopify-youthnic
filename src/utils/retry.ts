@@ -27,15 +27,26 @@ export function getRetryAfterMs(error: any): number | null {
 
   if (!retryAfterHeader) return null;
 
-  const numeric = parseFloat(String(retryAfterHeader));
-  if (Number.isNaN(numeric) || numeric <= 0) return null;
-
   if (headers['retry-after-ms'] || headers['Retry-After-Ms']) {
-    return Math.round(numeric);
+    const ms = parseFloat(String(retryAfterHeader));
+    return Number.isFinite(ms) && ms > 0 ? Math.round(ms) : null;
   }
 
-  // Standard HTTP / Shopify Retry-After is in seconds
-  return Math.round(numeric * 1000);
+  const rawStr = String(retryAfterHeader).trim();
+  // 1. Check if it's purely a numeric seconds value (integer or float)
+  const numeric = parseFloat(rawStr);
+  if (!Number.isNaN(numeric) && /^\d+(\.\d+)?$/.test(rawStr)) {
+    return numeric > 0 ? Math.round(numeric * 1000) : null;
+  }
+
+  // 2. Check if it's an HTTP-Date
+  const parsedDate = Date.parse(rawStr);
+  if (!Number.isNaN(parsedDate)) {
+    const diff = parsedDate - Date.now();
+    return diff > 0 ? diff : 0;
+  }
+
+  return null;
 }
 
 export function isRetryableError(error: any): boolean {

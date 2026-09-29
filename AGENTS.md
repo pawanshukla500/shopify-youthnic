@@ -19,7 +19,7 @@
    - Avoid PowerShell pipeline redirection typos like `> $null` which creates a literal file named `$null`.
 
 3. **Verification Before Committing**:
-   - All unit and integration tests must pass: `cmd.exe /c "npm test"` (Vitest suite, 38 passing tests).
+   - All unit and integration tests must pass: `cmd.exe /c "npm test"` (Vitest suite, 88 passing tests across 15 test suites).
    - Backend TypeScript build must compile cleanly: `cmd.exe /c "npm run build"`.
    - Frontend Vite bundle must build cleanly: `cmd.exe /c "cd frontend && npm run build"`.
 
@@ -95,9 +95,22 @@
 - Before building the application in CI/CD or production containers, execute `npx prisma db push --accept-data-loss`.
 - This ensures additive schema changes (such as `dispatchedAt`, `qcStoragePath`, `labelStoragePath`) exist in PostgreSQL before the generated Prisma client executes queries.
 
+### H. Alternating Label + Invoice Sequence (PR #13)
+- When generating combined shipping and invoice documents (single or bulk), pages must strictly follow the alternating sequence:
+  $$\text{Order 1 Label} \longrightarrow \text{Order 1 Invoice} \longrightarrow \text{Order 2 Label} \longrightarrow \text{Order 2 Invoice} \dots$$
+- Never output all labels followed by all invoices.
+- Each label must be styled for thermal 4R (`100mm × 150mm`) and each invoice for A4 portrait, separated by explicit CSS page breaks (`page-break-after: always; break-after: page;`).
+
+### I. Direct Shipping Label Download (PR #13)
+- Direct label download endpoints (`GET /api/orders/:id/label/download` and `POST /api/orders/bulk-labels/download`) must return headers with `Content-Disposition: attachment; filename="delhivery-label-<waybill>.pdf"` (or `.html`) to trigger immediate browser file download without opening a new tab.
+
+### J. External Fulfillment Telemetry Sync (PR #13)
+- External fulfillments (from Shopify Admin, Delhivery One, or 3PL) ingested via `fulfillments/create` or `fulfillments/update` webhooks must immediately trigger live tracking from the Delhivery tracking API in the background (`trackingService.syncShipmentTracking`).
+- Live tracking telemetry is exposed in real-time via `POST /api/orders/:id/track` and `POST /api/tracking/:waybill/sync`.
+
 ---
 
-## 4. Summary of Recent Agent Developments (PR #1 to PR #12)
+## 4. Summary of Recent Agent Developments (PR #1 to PR #13)
 
 | PR / Commit | Component | Summary of Implementation |
 |---|---|---|
@@ -114,13 +127,14 @@
 | **PR #10** (`832bc2d`) | Email Migration | Completed email brand migration; standardized all template sender badges to lowercase; unified dynamic `fromEmail` config. |
 | **PR #11** (`048d2ec`) | Dispatch State Machine | Promoted orders and shipments out of `DISPATCH_PENDING` upon AWB generation; added `dispatchedAt` audit timestamp; updated tracking cron to poll pending shipments. |
 | **PR #12** (`4d74b4b`) | Label Resiliency | Added multi-shape PDF extraction for Delhivery label API responses and an HTML printable fallback for 404 resilience. |
+| **PR #13** (`cc00eb2`) | External Sync, Live Tracking & Alternating Labels | External fulfillment sync via Shopify webhooks, live Delhivery tracking transit stepper UI layout, direct label downloads without new tabs, alternating "Label then Invoice" bulk generator, and official Delhivery webhook specs. |
 
 ---
 
 ## 5. Development & Testing Commands
 
 ```bash
-# 1. Run all Vitest unit tests (38 tests)
+# 1. Run all Vitest unit tests (88 tests across 15 test files)
 cmd.exe /c "npm test"
 
 # 2. Typecheck and build backend

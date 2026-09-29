@@ -1,6 +1,6 @@
 # Shopify OMS — Automated Order Management System
 
-[![Vitest Tests](https://img.shields.io/badge/Vitest-38%20Passed-brightgreen)](tests/)
+[![Vitest Tests](https://img.shields.io/badge/Vitest-88%20Passed-brightgreen)](tests/)
 [![TaskFlow Project](https://img.shields.io/badge/TaskFlow-Shopify%20Youthnic%20OMS-6366F1)](https://task.youthnic.shop/my-tasks?task=164ba233-9b5f-4c14-bc34-066cef4300fc)
 [![Branch](https://img.shields.io/badge/Git-origin%2Fmain-blue)](https://github.com/pawanshukla500/shopify-youthnic)
 
@@ -84,6 +84,14 @@ Shopify Store (youthnic2024.myshopify.com)
 8. **Deployment & Database Migration Safeguard (3829719)**:
    - CI/CD workflow pushes Prisma schema changes (`npx prisma db push --accept-data-loss`) prior to application build, eliminating database drift on Hostinger VPS and Railway deployments.
 
+9. **External Fulfillment Sync, Live Delhivery Tracking Layout & Alternating Label+Invoice (PR #13)**:
+   - Ingests external fulfillments (Shopify Admin / 3PL) via `fulfillments/create` and `fulfillments/update` webhooks, stores AWBs, and immediately triggers background live tracking sync with Delhivery API.
+   - Added rich "Live Delhivery Tracking & Parcel Journey" UI panel in `OrderDetail.tsx` featuring a 5-stage transit progress stepper (`Manifested` → `Picked Up` → `In Transit` → `Out for Delivery` → `Delivered`), exception alert styling for NDR/RTO, live telemetry cards, "⚡ Refresh Live Tracking" action, and chronological scan event timeline.
+   - Direct file download for shipping labels without opening a new tab (`GET /api/orders/:id/label/download` and `POST /api/orders/bulk-labels/download`).
+   - Combined single & bulk documents strictly sequenced as: **Order 1 Label → Order 1 Invoice → Order 2 Label → Order 2 Invoice...** formatted with thermal 4R and A4 page breaks.
+   - Filled and validated all official Delhivery integration documents (`Scan Push`, `EPOD`, `QC Image`, `Sorter Image`) for profile `fa5d92-VBEXPORT-do` (V B EXPORT) in `C:\Users\Pawan Shukla\Desktop\Delhivery Docs\`.
+   - Complete technical specifications documented in [`docs/DELHIVERY_INTEGRATION_SPEC.md`](docs/DELHIVERY_INTEGRATION_SPEC.md).
+
 ---
 
 ## Automated Flow
@@ -162,7 +170,7 @@ Access the panel at <http://localhost:5173>.
 The project maintains comprehensive test coverage across critical business logic and integrations:
 
 ```bash
-# Run unit and integration tests (38 tests across 7 test suites)
+# Run unit and integration tests (88 tests across 15 test suites)
 cmd.exe /c "npm test"
 
 # Run backend TypeScript compilation
@@ -173,6 +181,9 @@ cmd.exe /c "cd frontend && npm run build"
 ```
 
 Test suites include:
+- `tests/external-tracking-and-label-invoice.spec.ts` — External fulfillment sync & alternating label/invoice sequence
+- `tests/courier-matching-and-tracking.spec.ts` — Courier detection & Delhivery live tracking routing
+- `tests/shopify-fulfillment-webhooks.spec.ts` — Ingestion of `fulfillments/create` and `fulfillments/update`
 - `tests/delhivery-label-size.spec.ts` — Thermal 4R label format pinning
 - `tests/delhivery-label-fetch.spec.ts` — Multi-shape API extraction & HTML fallback
 - `tests/delhivery-shipment-dimensions.spec.ts` — Dimension optimization logic
@@ -180,6 +191,8 @@ Test suites include:
 - `tests/email-brand-logo.spec.ts` — Lowercase sender badges & Firebase Storage logo
 - `tests/delhivery-document-fetcher.spec.ts` — POD/QC document mirroring
 - `tests/delhivery-webhook-payload.spec.ts` — Delhivery webhook ingestion & verification
+- `tests/api-resilience.spec.ts` — Public webhook exemptions and auth guardrails
+- `tests/order-tabs.spec.ts` — Status filters and tab partitions
 
 ---
 
@@ -191,11 +204,29 @@ Test suites include:
 - `POST /api/orders/:id/dispatch` — Manually dispatch an order to Delhivery (with payment gate)
 - `POST /api/orders/sync` — Trigger Shopify order sync (respecting `2026-09-25` floor)
 
-### Shipping Labels & Logistics
+### Shipping Labels & Combined Documents
+- `GET /api/orders/:id/label` — View/print single 4R thermal shipping label (HTML preview)
+- `GET /api/orders/:id/label/download` — Directly download 4R thermal label file (no new tab)
+- `POST /api/orders/bulk-labels` — Printable consolidated multi-order 4R shipping labels
+- `POST /api/orders/bulk-labels/download` — Directly download consolidated multi-order labels file
+- `GET /api/orders/:id/label-and-invoice` — Printable preview of Label then Invoice (Order 1)
+- `GET /api/orders/:id/label-and-invoice/download` — Directly download Label then Invoice as a file
+- `POST /api/orders/bulk-labels-and-invoices` — Printable preview of alternating labels and invoices
+- `POST /api/orders/bulk-labels-and-invoices/download` — Directly download bulk alternating labels and invoices file
+
+### Live Delhivery Tracking & Telemetry
+- `POST /api/orders/:id/track` — Trigger live carrier tracking sync from Delhivery API for an order
+- `POST /api/tracking/:waybill/sync` — Sync live carrier telemetry directly by waybill AWB
 - `GET /api/delhivery/label/:waybill` — Fetch official Delhivery PDF or HTML printable fallback
 - `GET /api/delhivery/serviceability/:pincode` — Check pincode delivery serviceability
 - `POST /api/delhivery/ndr` — Submit NDR actions (`RE-ATTEMPT` or `PICKUP_RESCHEDULE`)
 - `GET /api/delhivery/document/:waybill?type=EPOD` — Download EPOD, QC images, or signatures
+
+### Delhivery Webhooks (Real-Time Ingestion)
+- `POST /webhooks/delhivery` — Scan Push webhook (all lifecycle transit scans)
+- `POST /webhooks/delhivery/epod` — Electronic Proof of Delivery (EPOD) image ingestion
+- `POST /webhooks/delhivery/qc-image` — Quality Check (QC) inspection image push
+- `POST /webhooks/delhivery/sorter-image` — Sorter / Profiler conveyor belt image push
 
 ### Returns & QC
 - `GET /api/returns` — List returns and inspections

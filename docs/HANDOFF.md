@@ -1,6 +1,6 @@
 # Shopify OMS — System Handoff & Operational State
 
-> **Last Verified**: 2026-09-27  
+> **Last Verified**: 2026-09-29  
 > **Repository**: [pawanshukla500/shopify-youthnic](https://github.com/pawanshukla500/shopify-youthnic) (Branch: `main`)  
 > **TaskFlow Pro Project**: `Shopify Youthnic OMS` (`a7f820cb-4885-486d-92d2-c8e4a63054f4`)  
 
@@ -66,12 +66,13 @@ Automated Order Management System for **youthnic2024.myshopify.com** (Brand: You
 7. **End-to-End HTTPS & Security (PR #3)**:
    - Server-side and client-side 301 HTTPS redirects, `upgrade-insecure-requests` CSP header, and strict Firebase auth token verification.
 
-8. **External Fulfillment Sync, Live Delhivery Tracking & Direct Label/Invoice Downloads**:
-   - Ingests fulfillments executed externally (on Shopify admin, 3PL, etc.) and immediately triggers live tracking sync with Delhivery API.
-   - Added rich "Live Delhivery Tracking & Parcel Journey" UI panel with 5-stage transit stepper, live telemetry refresh, and scan events.
-   - Direct download shipping labels as files without opening a new tab.
-   - Combined single & bulk download/print sequenced strictly as: Order 1 Label -> Order 1 Invoice -> Order 2 Label -> Order 2 Invoice...
-   - Filled official Delhivery requirement documents (`Scan Push`, `EPOD`, `QC Image`, `Sorter Image`) for `fa5d92-VBEXPORT-do` (V B EXPORT).
+8. **External Fulfillment Sync, Live Delhivery Tracking & Direct Label/Invoice Downloads (PR #13)**:
+   - Ingests fulfillments executed externally (on Shopify admin, 3PL, etc.) and immediately triggers live tracking sync with Delhivery API in the background.
+   - Added rich "Live Delhivery Tracking & Parcel Journey" UI panel with 5-stage transit stepper (`Manifested` → `Picked Up` → `In Transit` → `Out for Delivery` → `Delivered`), live telemetry refresh button, NDR alerts, and scan events timeline.
+   - Added direct file download for shipping labels without opening in a new tab (`GET /api/orders/:id/label/download` & `POST /api/orders/bulk-labels/download`).
+   - Combined single & bulk download/print sequenced strictly as: **Order 1 Label → Order 1 Invoice → Order 2 Label → Order 2 Invoice...** formatted with thermal 4R and A4 page breaks.
+   - Completed all official Delhivery requirement documents (`Scan Push`, `EPOD`, `QC Image`, `Sorter Image`) for profile `fa5d92-VBEXPORT-do` (V B EXPORT) in `C:\Users\Pawan Shukla\Desktop\Delhivery Docs\`.
+   - Documented full integration specification in [`docs/DELHIVERY_INTEGRATION_SPEC.md`](DELHIVERY_INTEGRATION_SPEC.md).
 
 ---
 
@@ -81,6 +82,7 @@ Automated Order Management System for **youthnic2024.myshopify.com** (Brand: You
 |---|---|---|
 | `ORDER_SYNC_START_DATE` | `2026-09-25` | Orders prior to 2026-09-25 are strictly excluded from automated sync and dispatch. |
 | `DELHIVERY_LABEL_SIZE` | `4R` (4" x 6") | Standard thermal label size for warehouse label printers. |
+| `DELHIVERY_CLIENT_PROFILE` | `fa5d92-VBEXPORT-do` | Domestic Express profile (V B EXPORT) for all B2C surface shipments. |
 | `src/index.ts` import | `import './app';` | Must remain a side-effect import to prevent TypeScript compiler from eliding the server boot. |
 | `PRISMA_DB_PUSH` | Automated in CI/CD | Additive schema migrations execute automatically prior to building. |
 
@@ -89,7 +91,7 @@ Automated Order Management System for **youthnic2024.myshopify.com** (Brand: You
 ## 5. Verification Commands
 
 ```bash
-# Run full Vitest suite (38 tests)
+# Run full Vitest suite (88 tests across 15 test files)
 cmd.exe /c "npm test"
 
 # Build backend (TypeScript)
@@ -98,3 +100,4 @@ cmd.exe /c "npm run build"
 # Build frontend (Vite)
 cmd.exe /c "cd frontend && npm run build"
 ```
+

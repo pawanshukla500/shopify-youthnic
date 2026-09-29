@@ -23,6 +23,11 @@ import {
   downloadOrderLabelFile,
   downloadSingleLabelAndInvoiceFile,
   openPrintableOrderLabelAndInvoice,
+  downloadBulkPackZip,
+  downloadBulkPicklist,
+  openPrintableBulkPicklist,
+  downloadBulkInvoicesDirectFile,
+  downloadSingleInvoiceFile,
 } from '../api'
 import { ORDER_TABS, tabForStatus, formatDate, formatMoney, labelize, type OrderTabKey } from '../lib'
 import { getOrderTabCounts } from '../api'
@@ -886,6 +891,70 @@ export function Orders() {
     }
   }
 
+  // Bulk Download Complete Pack (ZIP: Picklist + Collated Labels & Invoices + Individual Docs + Manifest CSV)
+  const [isBulkDownloadingPackZip, setIsBulkDownloadingPackZip] = useState(false)
+  const handleBulkDownloadPackZip = async () => {
+    const ids = Array.from(selectedOrderIds)
+    if (!ids.length) return
+    setIsBulkDownloadingPackZip(true)
+    try {
+      await downloadBulkPackZip(ids)
+      toast.toast('success', `Downloaded complete bulk pack (ZIP) for ${ids.length} orders!`)
+    } catch (err: any) {
+      toast.toast('error', err.message || 'Failed to download bulk pack ZIP')
+    } finally {
+      setIsBulkDownloadingPackZip(false)
+    }
+  }
+
+  // Bulk Download Consolidated Picklist (Direct File Download)
+  const [isBulkDownloadingPicklist, setIsBulkDownloadingPicklist] = useState(false)
+  const handleBulkDownloadPicklist = async () => {
+    const ids = Array.from(selectedOrderIds)
+    if (!ids.length) return
+    setIsBulkDownloadingPicklist(true)
+    try {
+      await downloadBulkPicklist(ids)
+      toast.toast('success', `Downloaded consolidated SKU picklist for ${ids.length} orders!`)
+    } catch (err: any) {
+      toast.toast('error', err.message || 'Failed to download picklist')
+    } finally {
+      setIsBulkDownloadingPicklist(false)
+    }
+  }
+
+  // Bulk Print Picklist (Preview Tab)
+  const [isBulkPrintingPicklist, setIsBulkPrintingPicklist] = useState(false)
+  const handleBulkPrintPicklist = async () => {
+    const ids = Array.from(selectedOrderIds)
+    if (!ids.length) return
+    setIsBulkPrintingPicklist(true)
+    try {
+      await openPrintableBulkPicklist(ids)
+      toast.toast('success', `Opened consolidated SKU picklist print preview for ${ids.length} orders!`)
+    } catch (err: any) {
+      toast.toast('error', err.message || 'Failed to open picklist')
+    } finally {
+      setIsBulkPrintingPicklist(false)
+    }
+  }
+
+  // Bulk Download GST Invoices (Single Consolidated File - Direct Download)
+  const [isBulkDownloadingInvoicesDirect, setIsBulkDownloadingInvoicesDirect] = useState(false)
+  const handleBulkDownloadInvoicesDirect = async () => {
+    const ids = Array.from(selectedOrderIds)
+    if (!ids.length) return
+    setIsBulkDownloadingInvoicesDirect(true)
+    try {
+      await downloadBulkInvoicesDirectFile(ids)
+      toast.toast('success', `Downloaded consolidated GST invoices for ${ids.length} orders!`)
+    } catch (err: any) {
+      toast.toast('error', err.message || 'Failed to download consolidated invoices')
+    } finally {
+      setIsBulkDownloadingInvoicesDirect(false)
+    }
+  }
+
   // Submit Delhivery Pickup
   const handleSchedulePickup = async () => {
     setIsSubmittingPickup(true)
@@ -1714,6 +1783,24 @@ export function Orders() {
                                   type="button"
                                   className="btn-row-action"
                                   style={{ color: '#059669', borderColor: 'rgba(5,150,105,0.3)', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
+                                  onClick={async (e) => {
+                                    e.stopPropagation()
+                                    try {
+                                      await downloadSingleInvoiceFile(order.id, order.shopifyOrderName)
+                                      toast.toast('success', `Downloaded GST Invoice for ${order.shopifyOrderName}`)
+                                    } catch (err: any) {
+                                      toast.toast('error', err.message || 'Failed to download invoice')
+                                    }
+                                  }}
+                                  title="Directly download official GST tax invoice file without opening a new tab"
+                                >
+                                  <Icon name="download" size={11} /> DL Inv
+                                </button>
+
+                                <button
+                                  type="button"
+                                  className="btn-row-action"
+                                  style={{ color: '#059669', borderColor: 'rgba(5,150,105,0.3)', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
                                   onClick={(e) => {
                                     e.stopPropagation()
                                     openPrintableOrderInvoice(order.id)
@@ -1999,6 +2086,47 @@ export function Orders() {
                   : 'Invoices'}
             </span>
             <span className="bulk-btn-meta">GST</span>
+          </button>
+
+          {/* Direct Bulk Invoices Download (Single combined file, no new tab) */}
+          <button
+            type="button"
+            className="bulk-btn bulk-btn-secondary"
+            onClick={handleBulkDownloadInvoicesDirect}
+            disabled={isBulkDownloadingInvoicesDirect}
+            title="Directly download consolidated GST invoices for all selected orders into a single file without opening a new tab"
+          >
+            <Icon name="download" size={15} />
+            <span className="bulk-btn-label">{isBulkDownloadingInvoicesDirect ? 'Downloading…' : 'DL Invoices'}</span>
+            <span className="bulk-btn-meta">File</span>
+          </button>
+
+          {/* Consolidated Picklist (Direct File Download) */}
+          <button
+            type="button"
+            className="bulk-btn bulk-btn-secondary"
+            onClick={handleBulkDownloadPicklist}
+            disabled={isBulkDownloadingPicklist}
+            title="Download consolidated SKU picklist for warehouse fulfillment (groups quantities e.g. SKU1=2, SKU2=3)"
+            style={{ background: 'rgba(59, 130, 246, 0.25)', borderColor: 'rgba(147, 197, 253, 0.5)' }}
+          >
+            <Icon name="box" size={15} />
+            <span className="bulk-btn-label">{isBulkDownloadingPicklist ? 'Generating…' : 'Picklist'}</span>
+            <span className="bulk-btn-meta">SKUs</span>
+          </button>
+
+          {/* Complete Bulk Pack (ZIP Archive: Picklist + Collated Labels & Invoices + Individual Docs + Manifest CSV) */}
+          <button
+            type="button"
+            className="bulk-btn bulk-btn-secondary"
+            onClick={handleBulkDownloadPackZip}
+            disabled={isBulkDownloadingPackZip}
+            title="Download complete fulfillment package ZIP (Picklist + Collated Labels & Invoices + Individual folders + Manifest CSV)"
+            style={{ background: 'rgba(16, 185, 129, 0.28)', borderColor: 'rgba(110, 231, 183, 0.5)', fontWeight: 700 }}
+          >
+            <Icon name="package" size={15} />
+            <span className="bulk-btn-label">{isBulkDownloadingPackZip ? 'Zipping…' : '📦 Pack (ZIP)'}</span>
+            <span className="bulk-btn-meta">All-in-1</span>
           </button>
 
           <button

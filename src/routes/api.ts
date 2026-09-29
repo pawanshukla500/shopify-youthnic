@@ -21,6 +21,8 @@ import agentMemoryService from '../modules/ai/agent-memory.service';
 import conversationAgentService from '../modules/ai/conversation-agent.service';
 import shippingLabelService from '../modules/delhivery/shipping-label.service';
 import invoiceService from '../modules/invoice/invoice.service';
+import picklistService from '../modules/picklist/picklist.service';
+import bulkPackService from '../modules/bulk-pack/bulk-pack.service';
 
 const router = Router();
 
@@ -875,6 +877,32 @@ router.post('/orders/bulk-invoices', async (req: Request, res: Response): Promis
   }
 });
 
+// Bulk GST Tax Invoices Download (Direct file download as HTML attachment)
+router.post('/orders/bulk-invoices/download', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { orderIds } = req.body;
+    if (!Array.isArray(orderIds) || !orderIds.length) {
+      res.status(400).json({ error: 'orderIds array is required' });
+      return;
+    }
+    const orders = await prisma.order.findMany({
+      where: { id: { in: orderIds.map(Number) } },
+      include: { items: true, shipment: true },
+      orderBy: { id: 'asc' },
+    });
+    if (!orders.length) {
+      res.status(404).json({ error: 'No orders found for provided IDs' });
+      return;
+    }
+    const html = invoiceService.generateBulkPrintableInvoicesPage(orders as any);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="Bulk-Invoices-${orders.length}-Orders.html"`);
+    res.send(html);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Single Shipping Label (Thermal 4R / Official Delhivery)
 router.get('/orders/:id/label', async (req: Request, res: Response): Promise<void> => {
   try {
@@ -1167,6 +1195,93 @@ router.post('/orders/bulk-labels-and-invoices/download', async (req: Request, re
     res.send(html);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// Bulk Picklist (Consolidated SKU Picking Manifest Preview & Print)
+router.post('/orders/picklist', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { orderIds } = req.body;
+    if (!Array.isArray(orderIds) || !orderIds.length) {
+      res.status(400).send('<h1>orderIds array is required</h1>');
+      return;
+    }
+    const orders = await prisma.order.findMany({
+      where: { id: { in: orderIds.map(Number) } },
+      include: { items: true, shipment: true },
+      orderBy: { id: 'asc' },
+    });
+    if (!orders.length) {
+      res.status(404).send('<h1>No orders found</h1>');
+      return;
+    }
+    const html = picklistService.generatePicklistHtml(orders as any);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (error: any) {
+    res.status(500).send(`<h1>Error generating picklist: ${error.message}</h1>`);
+  }
+});
+
+// Bulk Picklist Download (Direct file download as HTML attachment)
+router.post('/orders/picklist/download', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { orderIds } = req.body;
+    if (!Array.isArray(orderIds) || !orderIds.length) {
+      res.status(400).json({ error: 'orderIds array is required' });
+      return;
+    }
+    const orders = await prisma.order.findMany({
+      where: { id: { in: orderIds.map(Number) } },
+      include: { items: true, shipment: true },
+      orderBy: { id: 'asc' },
+    });
+    if (!orders.length) {
+      res.status(404).json({ error: 'No orders found' });
+      return;
+    }
+    const html = picklistService.generatePicklistHtml(orders as any);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="Picklist-${orders.length}-Orders.html"`
+    );
+    res.send(html);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Bulk Pack Download (Complete ZIP containing Picklist, Collated Labels & Invoices, Individual Labels, Individual Invoices, and Manifest CSV)
+router.post('/orders/bulk-pack/download', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { orderIds } = req.body;
+    if (!Array.isArray(orderIds) || !orderIds.length) {
+      res.status(400).json({ error: 'orderIds array is required' });
+      return;
+    }
+    const orders = await prisma.order.findMany({
+      where: { id: { in: orderIds.map(Number) } },
+      include: { items: true, shipment: true },
+      orderBy: { id: 'asc' },
+    });
+    if (!orders.length) {
+      res.status(404).json({ error: 'No orders found' });
+      return;
+    }
+
+    const dateStamp = new Date().toISOString().slice(0, 10);
+    const filename = `Youthnic-Bulk-Pack-${orders.length}-Orders-${dateStamp}.zip`;
+
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+    await bulkPackService.streamBulkPackZip(orders as any, res);
+  } catch (error: any) {
+    logger.error('Bulk pack streaming error', { error: error.message });
+    if (!res.headersSent) {
+      res.status(500).json({ error: error.message });
+    }
   }
 });
 

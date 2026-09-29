@@ -177,6 +177,7 @@ class ShopifyService {
       'orders/paid',
       'orders/updated',
       'orders/cancelled',
+      'orders/fulfilled',
       'fulfillments/create',
       'fulfillments/update',
       'refunds/create',
@@ -1153,7 +1154,8 @@ class ShopifyService {
           // "Delhivery Express", "Delhivery Surface", "Delhivery B2C"). Detect any
           // variant case-insensitively (/delhivery/i) so it stays on the Delhivery
           // tracking/label/audit path; anything else is a third-party courier.
-          const isNonDelhivery = !isDelhiveryCourier(courier);
+          const isNonDelhivery = !isDelhiveryCourier(courier, trackingUrl, waybillNumber);
+          const effectiveCourier = !isNonDelhivery && (!courier || courier === 'Other') ? 'Delhivery' : courier;
 
           // On a third-party AWB the Delhivery weight/billing audit values are
           // meaningless, so hold them at safe defaults — otherwise Delhivery
@@ -1185,7 +1187,7 @@ class ShopifyService {
               where: { id: existingShipment.id },
               data: {
                 waybillNumber,
-                courier,
+                courier: effectiveCourier,
                 status: shipmentStatus as any,
                 trackingStatus: primaryFulfillment.shipment_status
                   ? `In Transit · ${primaryFulfillment.shipment_status}`
@@ -1229,7 +1231,7 @@ class ShopifyService {
               data: {
                 orderId: dbOrder.id,
                 waybillNumber,
-                courier,
+                courier: effectiveCourier,
                 paymentMode: paymentMethod === 'COD' ? 'COD' : 'Pre-paid',
                 codAmount: paymentMethod === 'COD' ? parseFloat(order.total_price) || 0 : 0,
                 status: shipmentStatus as any,

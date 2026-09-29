@@ -20,6 +20,8 @@ import {
   downloadSingleLabelAndInvoiceFile,
   openPrintableOrderLabelAndInvoice,
   syncOrderTrackingLive,
+  downloadSingleInvoiceFile,
+  downloadBulkPackZip,
 } from '../api'
 import { formatDate, formatMoney, labelize } from '../lib'
 import { Button, ButtonGroup, EmptyState, ErrorBox, FormField, Icon, LoadingState, PageIntro, Panel, PanelHeading, StatusBadge, useDocumentTitle, useToast } from '../components/UI'
@@ -52,6 +54,8 @@ export function OrderDetail() {
   const [isSyncingTracking, setIsSyncingTracking] = useState(false)
   const [isDownloadingLabel, setIsDownloadingLabel] = useState(false)
   const [isDownloadingLabelAndInvoice, setIsDownloadingLabelAndInvoice] = useState(false)
+  const [isDownloadingInvoice, setIsDownloadingInvoice] = useState(false)
+  const [isDownloadingPack, setIsDownloadingPack] = useState(false)
 
   // NDR Resolution States
   const [showNdrModal, setShowNdrModal] = useState(false)
@@ -350,6 +354,34 @@ export function OrderDetail() {
     }
   }
 
+  // Direct GST Tax Invoice download handler (saves file, does not open in new tab)
+  const handleDownloadInvoice = async () => {
+    if (!order) return
+    setIsDownloadingInvoice(true)
+    try {
+      await downloadSingleInvoiceFile(order.id, order.shopifyOrderName)
+      toast.toast('success', `Downloaded GST Invoice for ${order.shopifyOrderName}`)
+    } catch (err: any) {
+      toast.toast('error', apiError(err))
+    } finally {
+      setIsDownloadingInvoice(false)
+    }
+  }
+
+  // Direct Order Pack (ZIP) download handler (contains Picklist + Collated Label & Invoice + Folders + Manifest)
+  const handleDownloadOrderPack = async () => {
+    if (!order) return
+    setIsDownloadingPack(true)
+    try {
+      await downloadBulkPackZip([order.id])
+      toast.toast('success', `Downloaded complete order pack (ZIP) for ${order.shopifyOrderName}!`)
+    } catch (err: any) {
+      toast.toast('error', apiError(err))
+    } finally {
+      setIsDownloadingPack(false)
+    }
+  }
+
   return <>
     {/* ─── 21st.dev Style Modern Header Card ──────────────────── */}
     <div className="detail-header-card">
@@ -487,6 +519,30 @@ export function OrderDetail() {
           title="View and print official GST Commercial Tax Invoice"
         >
           🧾 GST Tax Invoice
+        </button>
+
+        <button
+          type="button"
+          className="button button-secondary"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', height: '34px', padding: '0 12px', color: '#059669', borderColor: '#a7f3d0', background: '#ecfdf5', fontWeight: 650, cursor: 'pointer' }}
+          onClick={handleDownloadInvoice}
+          disabled={isDownloadingInvoice}
+          title="Directly download official GST tax invoice file without opening a new tab"
+        >
+          <Icon name="download" size={13} />
+          <span>{isDownloadingInvoice ? 'Downloading…' : '📥 Download Invoice (File)'}</span>
+        </button>
+
+        <button
+          type="button"
+          className="button button-secondary"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', height: '34px', padding: '0 12px', color: '#047857', borderColor: '#6ee7b7', background: '#ecfdf5', fontWeight: 700, cursor: 'pointer' }}
+          onClick={handleDownloadOrderPack}
+          disabled={isDownloadingPack}
+          title="Download complete fulfillment package ZIP (Picklist + Collated Label & Invoice + Folders + Manifest CSV)"
+        >
+          <Icon name="package" size={13} />
+          <span>{isDownloadingPack ? 'Zipping…' : '📦 Order Pack (ZIP)'}</span>
         </button>
 
         {/* Resend Email Notification Trigger */}
@@ -1074,6 +1130,30 @@ export function OrderDetail() {
                     >
                       <Icon name="external" size={15} />
                       <span>🧾 GST Tax Invoice</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      onClick={handleDownloadInvoice}
+                      disabled={isDownloadingInvoice}
+                      title="Directly download official GST tax invoice file (no new tab)"
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: '#059669', borderColor: '#a7f3d0', background: '#ecfdf5' }}
+                    >
+                      <Icon name="download" size={15} />
+                      <span>{isDownloadingInvoice ? 'Downloading…' : '📥 Download Invoice (File)'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      onClick={handleDownloadOrderPack}
+                      disabled={isDownloadingPack}
+                      title="Download complete fulfillment pack ZIP for this order (Picklist + Collated Label & Invoice + Manifest CSV)"
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: '#047857', borderColor: '#6ee7b7', background: '#ecfdf5', fontWeight: 700 }}
+                    >
+                      <Icon name="package" size={15} />
+                      <span>{isDownloadingPack ? 'Zipping…' : '📦 Order Pack (ZIP)'}</span>
                     </button>
 
                     <a

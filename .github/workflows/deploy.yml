@@ -187,7 +187,8 @@ jobs:
           set -euo pipefail
 
           echo ">>> [1/7] Preparing directory structure in /opt/shopify/Shopify..."
-          mkdir -p /opt/shopify/Shopify
+          mkdir -p /opt/shopify/Shopify/logs
+          find /opt/shopify/Shopify -mindepth 1 -maxdepth 1 ! -name 'logs' -exec rm -rf {} +
           cd /opt/shopify
           tar -xzf shopify-source.tar.gz -C Shopify
           cd Shopify

@@ -7,6 +7,35 @@ import logger from '../utils/logger';
 
 const router = Router();
 
+// In-memory cache for webhook deduplication (TTL 15 minutes, max 10,000 entries)
+const processedWebhooks = new Map<string, number>();
+const WEBHOOK_TTL_MS = 15 * 60 * 1000;
+const MAX_WEBHOOK_CACHE_SIZE = 10000;
+
+export function isDuplicateWebhook(webhookId: string): boolean {
+  if (!webhookId) return false;
+  const now = Date.now();
+  if (processedWebhooks.size > MAX_WEBHOOK_CACHE_SIZE) {
+    for (const [id, timestamp] of processedWebhooks.entries()) {
+      if (now - timestamp > WEBHOOK_TTL_MS) {
+        processedWebhooks.delete(id);
+      }
+    }
+  }
+
+  const seenAt = processedWebhooks.get(webhookId);
+  if (seenAt && now - seenAt < WEBHOOK_TTL_MS) {
+    return true;
+  }
+
+  processedWebhooks.set(webhookId, now);
+  return false;
+}
+
+export function resetWebhookCache(): void {
+  processedWebhooks.clear();
+}
+
 /**
  * Shopify Webhook Handler
  * Receives webhooks for: orders/create, orders/paid, orders/updated,
@@ -29,9 +58,19 @@ router.post('/shopify', async (req: Request, res: Response): Promise<void> => {
     }
 
     const topic = (req.headers['x-shopify-topic'] as string) || '';
+    const webhookId = (req.headers['x-shopify-webhook-id'] as string) || '';
     const payload = req.body;
 
-    logger.info('Received Shopify webhook', { topic, orderId: payload?.id });
+    if (webhookId && isDuplicateWebhook(webhookId)) {
+      logger.info('Duplicate Shopify webhook received — skipping processing', {
+        webhookId,
+        topic,
+      });
+      res.status(200).json({ received: true, deduplicated: true });
+      return;
+    }
+
+    logger.info('Received Shopify webhook', { topic, orderId: payload?.id, webhookId });
 
     // Record webhook receipt
     await prisma.syncLog.create({
@@ -44,10 +83,15 @@ router.post('/shopify', async (req: Request, res: Response): Promise<void> => {
 
     switch (topic) {
       case 'orders/create': {
+        const shopifyOrderId = payload?.id ? payload.id.toString() : '';
+        const existingOrder = shopifyOrderId
+          ? await prisma.order.findUnique({ where: { shopifyOrderId } })
+          : null;
+
         const stored = await orderService.syncOrderFromWebhook(payload);
-        if (stored) {
+        if (stored && !existingOrder) {
           const newOrder = await prisma.order.findUnique({
-            where: { shopifyOrderId: payload.id.toString() },
+            where: { shopifyOrderId },
           });
           if (newOrder) {
             await notificationEngine.notifyOrderConfirmed(newOrder);

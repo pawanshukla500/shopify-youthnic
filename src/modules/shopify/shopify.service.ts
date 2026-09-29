@@ -3,6 +3,7 @@ import { config } from '../../config';
 import prisma from '../../database/prisma';
 import logger from '../../utils/logger';
 import { withRetry } from '../../utils/retry';
+import { isDelhiveryCourier } from '../../utils/courier';
 import { ShopifyOrderWebhook } from '../../types';
 import { OrderStatus } from '@prisma/client';
 import { shopifyTokenProvider } from './token.provider';
@@ -176,6 +177,8 @@ class ShopifyService {
       'orders/paid',
       'orders/updated',
       'orders/cancelled',
+      'fulfillments/create',
+      'fulfillments/update',
       'refunds/create',
     ];
 
@@ -802,6 +805,18 @@ class ShopifyService {
    * Sync (or upsert) a Shopify order into our database.
    */
   async syncOrderToDb(order: ShopifyOrderWebhook): Promise<void> {
+    // Strict historical cutoff (mission invariant): never create or modify
+    // orders, items, or shipments for orders placed before the sync start date.
+    // Guards every caller — REST polling and orders/* + fulfillments/* webhooks.
+    if (new Date(order.created_at) < config.shopify.syncStartDate) {
+      logger.info('Skipping historical order — created before the sync cutoff', {
+        orderName: order.name,
+        createdAt: order.created_at,
+        syncStartDate: config.shopify.syncStartDate.toISOString(),
+      });
+      return;
+    }
+
     const customer = order.customer;
     const address = order.shipping_address || customer?.default_address;
 
@@ -943,6 +958,22 @@ class ShopifyService {
     );
     const dispatchDelayed = ['NEW', 'DISPATCH_PENDING'].includes(status) && !hasActiveWaybill && Date.now() > expectedDispatchAt.getTime();
 
+    // dispatchedAt audit timestamp: initialize when the order carries an active
+    // fulfillment or an assigned waybill, and never overwrite a timestamp that a
+    // prior dispatch already recorded (read the stored value and preserve it).
+    const existingDispatch = await prisma.order.findUnique({
+      where: { shopifyOrderId: order.id.toString() },
+      select: { dispatchedAt: true },
+    });
+    const primaryActiveFulfillment = activeFulfillments[activeFulfillments.length - 1] || null;
+    const fulfillmentDispatchedAt = primaryActiveFulfillment?.created_at
+      ? new Date(primaryActiveFulfillment.created_at)
+      : null;
+    let dispatchedAt: Date | null = existingDispatch?.dispatchedAt ?? null;
+    if (!dispatchedAt && (activeFulfillments.length > 0 || hasActiveWaybill)) {
+      dispatchedAt = fulfillmentDispatchedAt || new Date();
+    }
+
     try {
       const dbOrder = await prisma.order.upsert({
         where: { shopifyOrderId: order.id.toString() },
@@ -985,6 +1016,7 @@ class ShopifyService {
           status,
           shopifyCreatedAt: new Date(order.created_at),
           shopifyUpdatedAt: order.updated_at ? new Date(order.updated_at) : null,
+          dispatchedAt,
           items: {
             create: await (async () => {
               const variantIds = order.line_items
@@ -1040,6 +1072,7 @@ class ShopifyService {
           salesChannel,
           status,
           shopifyUpdatedAt: order.updated_at ? new Date(order.updated_at) : null,
+          dispatchedAt,
         },
         include: { shipment: true },
       });
@@ -1116,12 +1149,38 @@ class ShopifyService {
         else if (primaryFulfillment.shipment_status === 'in_transit') shipmentStatus = 'IN_TRANSIT';
 
         if (waybillNumber) {
+          // Delhivery is fulfilled under several carrier labels ("Delhivery",
+          // "Delhivery Express", "Delhivery Surface", "Delhivery B2C"). Detect any
+          // variant case-insensitively (/delhivery/i) so it stays on the Delhivery
+          // tracking/label/audit path; anything else is a third-party courier.
+          const isNonDelhivery = !isDelhiveryCourier(courier);
+
+          // On a third-party AWB the Delhivery weight/billing audit values are
+          // meaningless, so hold them at safe defaults — otherwise Delhivery
+          // reconciliation raises false discrepancies against a courier it doesn't own.
+          const delhiveryAuditReset = {
+            weightMismatch: false,
+            mismatchDetails: null,
+            declaredWeightGrams: null,
+            billedWeightGrams: null,
+            chargedZone: null,
+            initialCost: 0,
+            reversalAmount: 0,
+            revisedCost: 0,
+            hasReversal: false,
+            reversalReason: null,
+            totalDebited: 0,
+            totalCredited: 0,
+            netBilledCost: 0,
+            billingStatus: null,
+            lastBilledAt: null,
+          };
+
           const existingShipment = await prisma.shipment.findFirst({
             where: { orderId: dbOrder.id },
           });
 
           if (existingShipment) {
-            const isNonDelhivery = courier.toLowerCase() !== 'delhivery';
             await prisma.shipment.update({
               where: { id: existingShipment.id },
               data: {
@@ -1135,21 +1194,7 @@ class ShopifyService {
                 // If courier is not Delhivery, clear any false Delhivery audit discrepancy fields
                 ...(isNonDelhivery
                   ? {
-                      weightMismatch: false,
-                      mismatchDetails: null,
-                      declaredWeightGrams: null,
-                      billedWeightGrams: null,
-                      chargedZone: null,
-                      initialCost: 0,
-                      reversalAmount: 0,
-                      revisedCost: 0,
-                      hasReversal: false,
-                      reversalReason: null,
-                      totalDebited: 0,
-                      totalCredited: 0,
-                      netBilledCost: 0,
-                      billingStatus: null,
-                      lastBilledAt: null,
+                      ...delhiveryAuditReset,
                       codRemitted: false,
                       codRemittedAt: null,
                       codCollected: false,
@@ -1192,8 +1237,23 @@ class ShopifyService {
                   ? `In Transit · ${primaryFulfillment.shipment_status}`
                   : 'In Transit',
                 labelUrl: trackingUrl,
+                ...(isNonDelhivery ? delhiveryAuditReset : {}),
               },
             });
+          }
+
+          // If this fulfillment is carried by Delhivery, immediately trigger live tracking
+          // from the Delhivery API in the background so tracking scans, ETA, and hub locations
+          // are immediately populated rather than waiting for the 30-min polling cron.
+          if (!isNonDelhivery && waybillNumber) {
+            import('../tracking/tracking.service')
+              .then(({ default: trackingService }) => trackingService.syncShipmentTracking(waybillNumber))
+              .catch((trackErr) => {
+                logger.warn('Immediate Delhivery tracking sync failed after external fulfillment ingest', {
+                  waybill: waybillNumber,
+                  error: trackErr?.message,
+                });
+              });
           }
         }
       }

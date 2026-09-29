@@ -3,6 +3,7 @@ import delhiveryService from '../delhivery/delhivery.service';
 import notificationEngine from '../notifications/notification.service';
 import logger from '../../utils/logger';
 import { config } from '../../config';
+import { isDelhiveryCourier } from '../../utils/courier';
 import { ShipmentStatus } from '@prisma/client';
 
 /**
@@ -40,6 +41,11 @@ class TrackingService {
           notIn: ['DELIVERED', 'CANCELLED', 'RTO_DELIVERED', 'ERROR'],
         },
         waybillNumber: { not: null },
+        // Only Delhivery shipments are tracked via the Delhivery API. Filtering
+        // here (ILIKE '%delhivery%') keeps third-party couriers (Blue Dart, DTDC,
+        // India Post, ...) out of the batch so their waybills never trigger the
+        // Delhivery 404/not-found poll loops the cron would otherwise generate.
+        courier: { contains: 'delhivery', mode: 'insensitive' },
         ...(force
           ? {}
           : {
@@ -58,6 +64,9 @@ class TrackingService {
     let updatedCount = 0;
     for (const shipment of activeShipments) {
       if (!shipment.waybillNumber) continue;
+      // Defense-in-depth alongside the query filter: never hand a third-party
+      // waybill to the Delhivery API, even if a legacy row slips through.
+      if (!isDelhiveryCourier(shipment.courier)) continue;
 
       try {
         const tracking = await delhiveryService.trackShipment(shipment.waybillNumber);
@@ -297,6 +306,112 @@ class TrackingService {
     const tracking = await delhiveryService.trackShipment(waybillNumber);
     return tracking;
   }
+
+  /**
+   * Sync tracking live from Delhivery for a single shipment (by shipment ID or waybill number),
+   * updating DB fields, recording tracking logs, and triggering status transitions/notifications.
+   */
+  async syncShipmentTracking(identifier: string | number): Promise<any> {
+    const isNumericId =
+      typeof identifier === 'number' || (/^\d+$/.test(String(identifier)) && String(identifier).length < 10);
+    const shipment = await prisma.shipment.findFirst({
+      where: isNumericId
+        ? { id: Number(identifier) }
+        : { waybillNumber: String(identifier) },
+      include: { order: true },
+    });
+
+    if (!shipment || !shipment.waybillNumber) {
+      logger.warn('Cannot sync tracking: shipment or waybill not found', { identifier });
+      return null;
+    }
+
+    if (!isDelhiveryCourier(shipment.courier)) {
+      logger.info('Skipping non-Delhivery shipment tracking', {
+        courier: shipment.courier,
+        waybill: shipment.waybillNumber,
+      });
+      return {
+        shipment,
+        tracking: {
+          status: shipment.status,
+          courier: shipment.courier,
+          waybill: shipment.waybillNumber,
+          isThirdParty: true,
+          history: [],
+        },
+      };
+    }
+
+    const tracking = await delhiveryService.trackShipment(shipment.waybillNumber);
+    const newShipmentStatus = delhiveryService.mapTrackingToShipmentStatus(
+      tracking.statusType,
+      tracking.status,
+      (tracking as any).pickupDone
+    ) as ShipmentStatus;
+
+    if (newShipmentStatus !== shipment.status) {
+      await this.handleStatusChange(
+        shipment,
+        shipment.status,
+        newShipmentStatus,
+        tracking.status,
+        tracking.location
+      );
+    }
+
+    if (tracking.history && tracking.history.length > 0) {
+      const existingLogs = await prisma.trackingLog.findMany({
+        where: { shipmentId: shipment.id },
+        select: { scannedAt: true, status: true },
+      });
+
+      for (const scan of tracking.history) {
+        const scanDate = new Date(scan.dateTime);
+        const exists = existingLogs.some(
+          (log) => log.status === scan.status && log.scannedAt.getTime() === scanDate.getTime()
+        );
+
+        if (!exists) {
+          try {
+            await prisma.trackingLog.create({
+              data: {
+                shipmentId: shipment.id,
+                status: scan.status,
+                location: scan.location || null,
+                remark: scan.remark || null,
+                scannedAt: scanDate,
+              },
+            });
+          } catch (logErr) {
+            // ignore unique/microsecond collision
+          }
+        }
+      }
+    }
+
+    const updatedShipment = await prisma.shipment.update({
+      where: { id: shipment.id },
+      data: {
+        trackingStatus: tracking.status,
+        trackingLocation: tracking.location || null,
+        trackingUpdatedAt: new Date(),
+        trackingHistory: tracking.history as any,
+      },
+      include: {
+        order: true,
+        trackingLogs: {
+          orderBy: { scannedAt: 'desc' },
+        },
+      },
+    });
+
+    return {
+      shipment: updatedShipment,
+      tracking,
+    };
+  }
 }
 
 export default new TrackingService();
+

@@ -910,3 +910,166 @@ export function openPrintableOrderLabel(orderId: number): void {
 export function openPrintableOrderInvoice(orderId: number): void {
   window.open(getAuthenticatedUrl(`/api/orders/${orderId}/invoice`), '_blank')
 }
+
+/**
+ * Directly download an order's shipping label as a file (PDF or HTML)
+ * WITHOUT opening in a new tab.
+ */
+export async function downloadOrderLabelFile(orderId: number, waybillNumber?: string): Promise<void> {
+  const response = await api.get(`/api/orders/${orderId}/label/download`, {
+    responseType: 'blob',
+  })
+  const rawContentType = response.headers?.['content-type']
+  const contentType = typeof rawContentType === 'string' ? rawContentType : 'application/octet-stream'
+  const isPdf = contentType.includes('pdf')
+  const ext = isPdf ? 'pdf' : 'html'
+  const fallbackFilename = waybillNumber
+    ? `delhivery-label-${waybillNumber}.${ext}`
+    : `delhivery-label-order-${orderId}.${ext}`
+  const rawDisposition = response.headers?.['content-disposition']
+  const filename = filenameFromDisposition(
+    typeof rawDisposition === 'string' ? rawDisposition : undefined,
+    fallbackFilename
+  )
+
+  const blob = new Blob([response.data], { type: contentType })
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.setAttribute('download', filename)
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.URL.revokeObjectURL(url)
+}
+
+/**
+ * Directly download bulk shipping labels as a single consolidated HTML file
+ * WITHOUT opening in a new tab.
+ */
+export async function downloadBulkLabelsDirectFile(orderIds: number[]): Promise<void> {
+  const response = await api.post(
+    '/api/orders/bulk-labels/download',
+    { orderIds },
+    { responseType: 'blob' }
+  )
+  const rawDisposition = response.headers?.['content-disposition']
+  const filename = filenameFromDisposition(
+    typeof rawDisposition === 'string' ? rawDisposition : undefined,
+    `Bulk-Labels-${orderIds.length}-Orders.html`
+  )
+  const blob = new Blob([response.data], { type: 'text/html;charset=utf-8' })
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.setAttribute('download', filename)
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.URL.revokeObjectURL(url)
+}
+
+/**
+ * Open single order's combined Label + Invoice in preview / print tab (label then invoice)
+ */
+export function openPrintableOrderLabelAndInvoice(orderId: number): void {
+  window.open(getAuthenticatedUrl(`/api/orders/${orderId}/label-and-invoice`), '_blank')
+}
+
+/**
+ * Directly download single order's combined Label + Invoice as a file (label then invoice)
+ * WITHOUT opening in a new tab.
+ */
+export async function downloadSingleLabelAndInvoiceFile(orderId: number, orderName?: string): Promise<void> {
+  const response = await api.get(`/api/orders/${orderId}/label-and-invoice/download`, {
+    responseType: 'blob',
+  })
+  const rawDisposition = response.headers?.['content-disposition']
+  const filename = filenameFromDisposition(
+    typeof rawDisposition === 'string' ? rawDisposition : undefined,
+    `Label-Invoice-${orderName ? orderName.replace('#', '') : orderId}.html`
+  )
+  const blob = new Blob([response.data], { type: 'text/html;charset=utf-8' })
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.setAttribute('download', filename)
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.URL.revokeObjectURL(url)
+}
+
+/**
+ * Open multi-order combined Labels + Invoices in preview / print tab
+ * (strictly alternating: Order 1 Label -> Order 1 Invoice -> Order 2 Label -> Order 2 Invoice...)
+ */
+export async function openPrintableBulkLabelsAndInvoices(orderIds: number[]): Promise<void> {
+  const response = await api.post(
+    '/api/orders/bulk-labels-and-invoices',
+    { orderIds },
+    { responseType: 'text' }
+  )
+  const html = response.data
+  const printWindow = window.open('', '_blank')
+  if (printWindow) {
+    printWindow.document.write(html)
+    printWindow.document.close()
+  } else {
+    const blob = new Blob([html], { type: 'text/html' })
+    const url = URL.createObjectURL(blob)
+    window.open(url, '_blank')
+  }
+}
+
+/**
+ * Directly download multi-order combined Labels + Invoices as a file
+ * (strictly alternating: Order 1 Label -> Order 1 Invoice -> Order 2 Label -> Order 2 Invoice...)
+ * WITHOUT opening in a new tab.
+ */
+export async function downloadBulkLabelsAndInvoicesDirectFile(orderIds: number[]): Promise<void> {
+  const response = await api.post(
+    '/api/orders/bulk-labels-and-invoices/download',
+    { orderIds },
+    { responseType: 'blob' }
+  )
+  const rawDisposition = response.headers?.['content-disposition']
+  const filename = filenameFromDisposition(
+    typeof rawDisposition === 'string' ? rawDisposition : undefined,
+    `Bulk-Labels-And-Invoices-${orderIds.length}-Orders.html`
+  )
+  const blob = new Blob([response.data], { type: 'text/html;charset=utf-8' })
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.setAttribute('download', filename)
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.URL.revokeObjectURL(url)
+}
+
+/**
+ * Directly trigger live Delhivery tracking for an order and return fresh tracking & shipment data
+ */
+export async function syncOrderTrackingLive(orderId: number): Promise<{
+  success: boolean
+  tracking: any
+  shipment: any
+}> {
+  const response = await api.post(`/api/orders/${orderId}/track`)
+  return response.data
+}
+
+/**
+ * Directly trigger live Delhivery tracking for a waybill number
+ */
+export async function syncWaybillTrackingLive(waybillNumber: string): Promise<{
+  success: boolean
+  tracking: any
+  shipment: any
+}> {
+  const response = await api.post(`/api/tracking/${encodeURIComponent(waybillNumber)}/sync`)
+  return response.data
+}
+

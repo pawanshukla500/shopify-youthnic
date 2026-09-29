@@ -1024,6 +1024,175 @@ router.post('/orders/bulk-labels', async (req: Request, res: Response): Promise<
   }
 });
 
+// Bulk Shipping Labels Download (Direct file download as HTML attachment without opening tab)
+router.post('/orders/bulk-labels/download', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { orderIds } = req.body;
+    if (!Array.isArray(orderIds) || !orderIds.length) {
+      res.status(400).json({ error: 'orderIds array is required' });
+      return;
+    }
+    const orders = await prisma.order.findMany({
+      where: { id: { in: orderIds.map(Number) } },
+      include: { items: true, shipment: true },
+      orderBy: { id: 'asc' },
+    });
+    if (!orders.length) {
+      res.status(404).json({ error: 'No orders found' });
+      return;
+    }
+
+    const orderList: Array<{ order: any; waybillNumber: string }> = [];
+    for (const order of orders) {
+      const waybill = order.shipment?.waybillNumber || `PENDING-${order.shopifyOrderName.replace('#', '')}`;
+      orderList.push({ order, waybillNumber: waybill });
+    }
+
+    const html = shippingLabelService.generateBulkPrintableLabelsPage(orderList);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="Bulk-Labels-${orders.length}-Orders.html"`
+    );
+    res.send(html);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Single Shipping Label + GST Tax Invoice (Label then Invoice sequence)
+router.get('/orders/:id/label-and-invoice', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const orderId = parseInt(req.params.id, 10);
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: { items: true, shipment: true },
+    });
+    if (!order) {
+      res.status(404).send('<h1>Order not found</h1>');
+      return;
+    }
+    const waybill = order.shipment?.waybillNumber || `PENDING-${order.shopifyOrderName.replace('#', '')}`;
+    const html = shippingLabelService.generateLabelAndInvoiceHtml(order as any, waybill);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (error: any) {
+    res.status(500).send(`<h1>Error generating label and invoice: ${error.message}</h1>`);
+  }
+});
+
+// Download Single Shipping Label + GST Tax Invoice (Direct attachment download)
+router.get('/orders/:id/label-and-invoice/download', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const orderId = parseInt(req.params.id, 10);
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: { items: true, shipment: true },
+    });
+    if (!order) {
+      res.status(404).json({ error: 'Order not found' });
+      return;
+    }
+    const waybill = order.shipment?.waybillNumber || `PENDING-${order.shopifyOrderName.replace('#', '')}`;
+    const html = shippingLabelService.generateLabelAndInvoiceHtml(order as any, waybill);
+    const filename = `Label-Invoice-${order.shopifyOrderName.replace('#', '')}.html`;
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(html);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Bulk Shipping Labels + Invoices (Alternating: Order 1 Label -> Order 1 Invoice -> Order 2 Label -> Order 2 Invoice...)
+router.post('/orders/bulk-labels-and-invoices', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { orderIds } = req.body;
+    if (!Array.isArray(orderIds) || !orderIds.length) {
+      res.status(400).send('<h1>orderIds array is required</h1>');
+      return;
+    }
+    const orders = await prisma.order.findMany({
+      where: { id: { in: orderIds.map(Number) } },
+      include: { items: true, shipment: true },
+      orderBy: { id: 'asc' },
+    });
+    if (!orders.length) {
+      res.status(404).send('<h1>No orders found</h1>');
+      return;
+    }
+
+    const orderList = orders.map((order) => ({
+      order: order as any,
+      waybillNumber: order.shipment?.waybillNumber || `PENDING-${order.shopifyOrderName.replace('#', '')}`,
+    }));
+
+    const html = shippingLabelService.generateBulkLabelsAndInvoicesHtml(orderList);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (error: any) {
+    res.status(500).send(`<h1>Error generating bulk labels and invoices: ${error.message}</h1>`);
+  }
+});
+
+// Download Bulk Shipping Labels + Invoices (Direct file download as HTML attachment)
+router.post('/orders/bulk-labels-and-invoices/download', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { orderIds } = req.body;
+    if (!Array.isArray(orderIds) || !orderIds.length) {
+      res.status(400).json({ error: 'orderIds array is required' });
+      return;
+    }
+    const orders = await prisma.order.findMany({
+      where: { id: { in: orderIds.map(Number) } },
+      include: { items: true, shipment: true },
+      orderBy: { id: 'asc' },
+    });
+    if (!orders.length) {
+      res.status(404).json({ error: 'No orders found' });
+      return;
+    }
+
+    const orderList = orders.map((order) => ({
+      order: order as any,
+      waybillNumber: order.shipment?.waybillNumber || `PENDING-${order.shopifyOrderName.replace('#', '')}`,
+    }));
+
+    const html = shippingLabelService.generateBulkLabelsAndInvoicesHtml(orderList);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="Bulk-Labels-And-Invoices-${orders.length}-Orders.html"`
+    );
+    res.send(html);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Trigger Live Delhivery Tracking for a Specific Order
+router.post('/orders/:id/track', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const orderId = parseInt(req.params.id, 10);
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: { shipment: true },
+    });
+    if (!order) {
+      res.status(404).json({ error: 'Order not found' });
+      return;
+    }
+    if (!order.shipment?.waybillNumber) {
+      res.status(400).json({ error: 'Order does not have an assigned waybill number yet' });
+      return;
+    }
+    const result = await trackingService.syncShipmentTracking(order.shipment.waybillNumber);
+    res.json({ success: true, tracking: result?.tracking, shipment: result?.shipment });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Delhivery Warehouse Courier Pickup Request
 router.post('/delhivery/pickup', async (req: Request, res: Response): Promise<void> => {
   try {
@@ -1637,6 +1806,21 @@ router.post('/tracking/sync', async (req: Request, res: Response): Promise<void>
     const force = req.query.force === 'true' || req.body?.force === true;
     const count = await trackingService.syncAllTracking(force);
     res.json({ success: true, updatedCount: count, forced: force });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Live sync tracking for a single waybill from Delhivery and update DB
+router.post('/tracking/:waybill/sync', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const waybill = req.params.waybill;
+    const result = await trackingService.syncShipmentTracking(waybill);
+    if (!result) {
+      res.status(404).json({ error: 'Shipment or tracking not found' });
+      return;
+    }
+    res.json({ success: true, tracking: result.tracking, shipment: result.shipment });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

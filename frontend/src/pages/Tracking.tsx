@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
-import { api, apiError, getOrders } from '../api'
+import { api, apiError, getOrders, syncWaybillTrackingLive } from '../api'
 import { formatDate } from '../lib'
 import { Button, EmptyState, ErrorBox, Icon, LoadingState, PageIntro, Panel, PanelHeading, useDocumentTitle, useToast } from '../components/UI'
 
@@ -35,6 +35,24 @@ export function Tracking() {
 
   const events = extractEvents(query.data)
   const detail = (query.data && typeof query.data === 'object' ? (query.data as Record<string, any>) : null)
+
+  const queryClient = useQueryClient()
+  const [isSyncingLive, setIsSyncingLive] = useState(false)
+
+  const handleSyncLive = async () => {
+    if (!waybill) return
+    setIsSyncingLive(true)
+    try {
+      const res = await syncWaybillTrackingLive(waybill)
+      toast.toast('success', res.tracking?.status ? `Live Delhivery tracking synced: ${res.tracking.status}` : 'Delhivery tracking refreshed and synced to database!')
+      await queryClient.invalidateQueries({ queryKey: ['tracking', waybill] })
+      await queryClient.invalidateQueries({ queryKey: ['recent-shipments-tracking'] })
+    } catch (err: any) {
+      toast.toast('error', apiError(err))
+    } finally {
+      setIsSyncingLive(false)
+    }
+  }
 
   const copyWaybill = async (awb: string) => {
     try {
@@ -123,15 +141,28 @@ export function Tracking() {
               </div>
             </div>
 
-            <a
-              className="button button-secondary button-small"
-              href={`https://www.delhivery.com/track/package/${waybill}`}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <Icon name="external" size={13} />
-              Open on Delhivery.com
-            </a>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Button
+                className="button-secondary button-small"
+                onClick={handleSyncLive}
+                disabled={isSyncingLive}
+                loading={isSyncingLive}
+                title="Fetch live tracking events from Delhivery API and save to database"
+              >
+                <Icon name="refresh" size={13} />
+                <span>{isSyncingLive ? 'Syncing Live…' : '⚡ Refresh Live Carrier Data'}</span>
+              </Button>
+
+              <a
+                className="button button-secondary button-small"
+                href={`https://www.delhivery.com/track/package/${waybill}`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <Icon name="external" size={13} />
+                Open on Delhivery.com
+              </a>
+            </div>
           </div>
         )}
       </Panel>

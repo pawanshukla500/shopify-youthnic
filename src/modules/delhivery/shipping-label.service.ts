@@ -2,6 +2,7 @@ import { Order, OrderItem } from '@prisma/client';
 import { generateCode128Svg } from './barcode';
 import { config } from '../../config';
 import { YOUTHNIC_LOGO_BASE64, DELHIVERY_LOGO_BASE64 } from './label-logos';
+import invoiceService from '../invoice/invoice.service';
 
 export interface OrderWithDetails extends Order {
   items: OrderItem[];
@@ -237,6 +238,160 @@ export class ShippingLabelService {
   ${labelsHtml}
 </body>
 </html>`;
+  }
+
+  /**
+   * Generates a printable page with Shipping Label, then Invoice (in that exact sequence)
+   */
+  public generateLabelAndInvoiceHtml(order: OrderWithDetails, waybillNumber: string): string {
+    const labelHtml = this.generateSingleLabelHtml(order, waybillNumber);
+    const invoiceHtml = invoiceService.generateInvoiceHtml(order);
+
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Shipping Label & Invoice - ${order.shopifyOrderName}</title>
+  <style>
+    ${this.getCombinedStyles()}
+  </style>
+</head>
+<body>
+  <div class="print-controls no-print">
+    <div class="controls-left">
+      <span class="controls-badge">Youthnic · Shipping Label + GST Tax Invoice</span>
+      <span class="controls-info">Order ${order.shopifyOrderName} · Label then Invoice</span>
+    </div>
+    <div class="controls-right">
+      <button class="btn btn-primary" onclick="window.print()">🖨️ Print (Label + Invoice)</button>
+      <button class="btn btn-secondary" onclick="window.close()">✕ Close</button>
+    </div>
+  </div>
+  <div class="label-page-wrapper">
+    ${labelHtml}
+  </div>
+  <div class="page-break"></div>
+  <div class="invoice-page-wrapper">
+    ${invoiceHtml}
+  </div>
+</body>
+</html>`;
+  }
+
+  /**
+   * Generates a combined multi-order printable document with alternating sequence:
+   * Order 1 Label -> Order 1 Invoice -> Order 2 Label -> Order 2 Invoice -> ...
+   * strictly "label then invoice label then invoice"
+   */
+  public generateBulkLabelsAndInvoicesHtml(orderList: Array<{ order: OrderWithDetails; waybillNumber: string }>): string {
+    const pagesHtml = orderList
+      .map(({ order, waybillNumber }, idx) => {
+        const labelHtml = this.generateSingleLabelHtml(order, waybillNumber);
+        const invoiceHtml = invoiceService.generateInvoiceHtml(order);
+        const isLast = idx === orderList.length - 1;
+        return `
+          <div class="order-pair-wrapper">
+            <div class="label-page-wrapper">
+              ${labelHtml}
+            </div>
+            <div class="page-break"></div>
+            <div class="invoice-page-wrapper">
+              ${invoiceHtml}
+            </div>
+          </div>${isLast ? '' : '<div class="page-break"></div>'}
+        `;
+      })
+      .join('');
+
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Bulk Shipping Labels & Invoices (${orderList.length} Orders)</title>
+  <style>
+    ${this.getCombinedStyles()}
+  </style>
+</head>
+<body>
+  <div class="print-controls no-print">
+    <div class="controls-left">
+      <span class="controls-badge">Youthnic · Bulk Labels & Invoices</span>
+      <span class="controls-info">${orderList.length} Orders · Alternating Label then Invoice (${orderList.length * 2} Pages)</span>
+    </div>
+    <div class="controls-right">
+      <button class="btn btn-primary" onclick="window.print()">🖨️ Print All (${orderList.length * 2} Pages)</button>
+      <button class="btn btn-secondary" onclick="window.close()">✕ Close</button>
+    </div>
+  </div>
+  ${pagesHtml}
+</body>
+</html>`;
+  }
+
+  public getCombinedStyles(): string {
+    return `
+      ${this.getLabelStyles()}
+      ${invoiceService.getInvoiceStyles()}
+
+      .label-page-wrapper {
+        display: flex;
+        justify-content: center;
+        width: 100%;
+      }
+
+      .invoice-page-wrapper {
+        display: flex;
+        justify-content: center;
+        width: 100%;
+        margin-top: 10px;
+      }
+
+      .order-pair-wrapper {
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+
+      .page-break {
+        page-break-after: always;
+        break-after: page;
+        height: 0;
+      }
+
+      @media print {
+        body { background: #fff !important; padding: 0 !important; margin: 0 !important; }
+        .no-print { display: none !important; }
+        .label-page-wrapper {
+          page-break-inside: avoid;
+          break-inside: avoid;
+          margin: 0 auto !important;
+        }
+        .label-wrapper {
+          box-shadow: none !important;
+          margin: 0 auto !important;
+          page-break-after: always !important;
+          break-after: page !important;
+        }
+        .invoice-page-wrapper {
+          page-break-inside: avoid;
+          break-inside: avoid;
+          margin: 0 auto !important;
+        }
+        .invoice-container {
+          box-shadow: none !important;
+          margin: 0 auto !important;
+          border: none !important;
+          page-break-after: always !important;
+          break-after: page !important;
+        }
+        .page-break {
+          page-break-after: always !important;
+          break-after: page !important;
+          height: 0 !important;
+        }
+      }
+    `;
   }
 
   private getLabelStyles(): string {

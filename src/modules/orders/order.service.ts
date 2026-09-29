@@ -271,13 +271,32 @@ class OrderService {
           { shipment: { waybillNumber: null } },
         ],
       },
-      select: { id: true, shopifyOrderName: true, totalAmount: true, paymentMethod: true },
-      take: 50,
+      select: {
+        id: true,
+        shopifyOrderId: true,
+        shopifyOrderName: true,
+        shopifyOrderNumber: true,
+        totalAmount: true,
+        paymentMethod: true,
+        fulfillmentStatus: true,
+        dispatchedAt: true,
+      },
+      take: 100,
     });
 
     if (!ordersPendingAwb.length) return 0;
 
-    const refIds = ordersPendingAwb.map((o) => o.shopifyOrderName.replace('#', ''));
+    const refIds = Array.from(
+      new Set(
+        ordersPendingAwb.flatMap((o) => [
+          o.shopifyOrderName,
+          o.shopifyOrderName.replace('#', ''),
+          o.shopifyOrderId,
+          String(o.shopifyOrderNumber),
+        ]).filter(Boolean)
+      )
+    );
+
     const packages = await delhiveryService.fetchPackagesByRefIds(refIds);
 
     let reconciledCount = 0;
@@ -285,9 +304,20 @@ class OrderService {
       const shipment = pkg.Shipment;
       if (!shipment?.AWB || !shipment?.ReferenceNo) continue;
 
-      const order = ordersPendingAwb.find(
-        (o) => o.shopifyOrderName.replace('#', '') === shipment.ReferenceNo
-      );
+      const ref = (shipment.ReferenceNo || '').trim();
+      const refClean = ref.replace('#', '').toLowerCase();
+      const order = ordersPendingAwb.find((o) => {
+        const nameClean = o.shopifyOrderName.replace('#', '').trim().toLowerCase();
+        const rawName = o.shopifyOrderName.trim().toLowerCase();
+        const orderId = (o.shopifyOrderId || '').trim().toLowerCase();
+        const orderNum = String(o.shopifyOrderNumber || '').trim().toLowerCase();
+        return (
+          refClean === nameClean ||
+          refClean === rawName ||
+          refClean === orderId ||
+          refClean === orderNum
+        );
+      });
       if (!order) continue;
 
       const awb = shipment.AWB;
@@ -340,12 +370,233 @@ class OrderService {
         where: { id: order.id },
         data: {
           status: newOrderStatus,
+          dispatchedAt: order.dispatchedAt || new Date(),
         },
       });
+
+      // Push fulfillment to Shopify if Shopify does not have it yet
+      if (!order.fulfillmentStatus || order.fulfillmentStatus !== 'fulfilled') {
+        try {
+          await shopifyService.fulfillOrderOnShopify(order.shopifyOrderId, awb, 'Delhivery');
+          logger.info('Synced Delhivery ONE fulfillment back to Shopify', {
+            orderId: order.id,
+            shopifyOrderId: order.shopifyOrderId,
+            awb,
+          });
+        } catch (shopErr: any) {
+          logger.warn('Failed to push Delhivery ONE fulfillment to Shopify during channel reconcile', {
+            error: shopErr.message,
+          });
+        }
+      }
+
+      // Trigger live tracking sync in background
+      import('../tracking/tracking.service')
+        .then(({ default: ts }) => ts.syncShipmentTracking(awb))
+        .catch((e) => logger.warn('Background tracking sync failed after channel reconcile', { error: e.message }));
 
       reconciledCount++;
     }
     return reconciledCount;
+  }
+
+  /**
+   * Fetch and reconcile fulfillment details for an order from external channels:
+   * 1. Checks Shopify live API (in case OMS Guru or another external app created a fulfillment in Shopify)
+   * 2. Checks Delhivery ONE Packages API by reference number (in case a user manifested directly in one.delhivery.com)
+   * 3. If found in Delhivery ONE but not yet in Shopify, synchronizes fulfillment to Shopify!
+   * 4. Updates OMS DB order and shipment records and triggers live tracking.
+   */
+  async fetchAndReconcileOrderFulfillment(orderId: number): Promise<{
+    found: boolean;
+    source?: 'shopify' | 'delhivery_one' | 'existing';
+    waybillNumber?: string;
+    courier?: string;
+    order?: any;
+    shipment?: any;
+    message?: string;
+  }> {
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: { shipment: true },
+    });
+
+    if (!order) {
+      throw new Error(`Order with ID ${orderId} not found`);
+    }
+
+    // Step 1: Check Shopify live API for fulfillments
+    try {
+      const shopifyOrder = await shopifyService.fetchOrder(order.shopifyOrderId);
+      const fulfillments = (shopifyOrder as any).fulfillments || [];
+      const activeFulfillments = fulfillments.filter((f: any) => f.status !== 'cancelled');
+
+      if (activeFulfillments.length > 0) {
+        const primary = activeFulfillments[activeFulfillments.length - 1];
+        const waybill =
+          primary.tracking_number ||
+          (primary.tracking_numbers && primary.tracking_numbers[0]) ||
+          null;
+
+        if (waybill) {
+          await shopifyService.syncOrderToDb(shopifyOrder);
+          const updated = await prisma.order.findUnique({
+            where: { id: orderId },
+            include: { shipment: true },
+          });
+          return {
+            found: true,
+            source: 'shopify',
+            waybillNumber: waybill,
+            courier: updated?.shipment?.courier || primary.tracking_company || 'Delhivery',
+            order: updated,
+            shipment: updated?.shipment,
+            message: `Fulfillment details retrieved from Shopify (${updated?.shipment?.courier || 'Courier'}: ${waybill})`,
+          };
+        }
+      }
+    } catch (err: any) {
+      logger.warn('Failed to check Shopify live fulfillments in fetchAndReconcileOrderFulfillment', {
+        orderId,
+        error: err.message,
+      });
+    }
+
+    // Step 2: Check Delhivery ONE packages API by reference numbers
+    try {
+      const refVariants = Array.from(
+        new Set([
+          order.shopifyOrderName,
+          order.shopifyOrderName.replace('#', ''),
+          order.shopifyOrderId,
+          String(order.shopifyOrderNumber),
+        ].filter(Boolean))
+      );
+
+      const packages = await delhiveryService.fetchPackagesByRefIds(refVariants);
+      for (const pkg of packages) {
+        const shipment = pkg.Shipment;
+        if (!shipment?.AWB) continue;
+
+        const ref = (shipment.ReferenceNo || '').trim();
+        const refClean = ref.replace('#', '').toLowerCase();
+        const matches = refVariants.some(
+          (v) => v.replace('#', '').toLowerCase() === refClean
+        );
+
+        if (matches) {
+          const awb = shipment.AWB;
+          const statusDesc = shipment.Status?.Status || 'Manifested';
+          const statusType = shipment.Status?.StatusType || 'UD';
+          const instructions = shipment.Status?.Instructions || '';
+          const isSellerCancelled = instructions.toLowerCase().includes('seller cancelled');
+          const isPickedUp = !!shipment.PickedUpDate || /in transit|dispatched|out for delivery/i.test(statusDesc);
+
+          const mappedStatus = isSellerCancelled
+            ? 'CANCELLED'
+            : isPickedUp
+            ? delhiveryService.mapTrackingToShipmentStatus(statusType, statusDesc)
+            : 'CREATED';
+
+          const dbShipment = await prisma.shipment.upsert({
+            where: { orderId: order.id },
+            create: {
+              orderId: order.id,
+              waybillNumber: awb,
+              courier: 'Delhivery',
+              paymentMode: order.paymentMethod === 'COD' ? 'COD' : 'Prepaid',
+              codAmount: order.paymentMethod === 'COD' ? order.totalAmount : 0,
+              declaredValue: order.totalAmount,
+              status: mappedStatus === 'DELIVERED' ? 'DELIVERED' : mappedStatus === 'CANCELLED' ? 'CANCELLED' : 'CREATED',
+              trackingStatus: isSellerCancelled ? 'Not Picked (Seller cancelled)' : statusDesc,
+              trackingLocation: shipment.Status?.StatusLocation || null,
+              trackingUpdatedAt: new Date(),
+            },
+            update: {
+              waybillNumber: awb,
+              courier: 'Delhivery',
+              status: mappedStatus === 'DELIVERED' ? 'DELIVERED' : mappedStatus === 'CANCELLED' ? 'CANCELLED' : 'CREATED',
+              trackingStatus: isSellerCancelled ? 'Not Picked (Seller cancelled)' : statusDesc,
+              trackingLocation: shipment.Status?.StatusLocation || null,
+              trackingUpdatedAt: new Date(),
+            },
+          });
+
+          let newOrderStatus: any = 'DISPATCH_PENDING';
+          if (mappedStatus === 'DELIVERED') {
+            newOrderStatus = 'DELIVERED';
+          } else if (isPickedUp) {
+            newOrderStatus = 'IN_TRANSIT';
+          }
+
+          const updatedOrder = await prisma.order.update({
+            where: { id: order.id },
+            data: {
+              status: newOrderStatus,
+              dispatchedAt: order.dispatchedAt || new Date(),
+            },
+            include: { shipment: true },
+          });
+
+          // Sync fulfillment back to Shopify if Shopify is unfulfilled
+          if (!order.fulfillmentStatus || order.fulfillmentStatus !== 'fulfilled') {
+            try {
+              await shopifyService.fulfillOrderOnShopify(order.shopifyOrderId, awb, 'Delhivery');
+              logger.info('Synced Delhivery ONE direct fulfillment to Shopify', {
+                orderId: order.id,
+                shopifyOrderId: order.shopifyOrderId,
+                awb,
+              });
+            } catch (shopErr: any) {
+              logger.warn('Failed to push Delhivery ONE fulfillment to Shopify', {
+                error: shopErr.message,
+              });
+            }
+          }
+
+          // Trigger live tracking poll
+          import('../tracking/tracking.service')
+            .then(({ default: ts }) => ts.syncShipmentTracking(awb))
+            .catch((e) =>
+              logger.warn('Background tracking sync failed after Delhivery ONE reconcile', { error: e.message })
+            );
+
+          return {
+            found: true,
+            source: 'delhivery_one',
+            waybillNumber: awb,
+            courier: 'Delhivery',
+            order: updatedOrder,
+            shipment: dbShipment,
+            message: `Found manifested shipment in Delhivery ONE (AWB: ${awb}). Linked and synced to Shopify!`,
+          };
+        }
+      }
+    } catch (err: any) {
+      logger.warn('Failed to check Delhivery ONE packages in fetchAndReconcileOrderFulfillment', {
+        orderId,
+        error: err.message,
+      });
+    }
+
+    // Step 3: If already has waybill in DB
+    if (order.shipment?.waybillNumber) {
+      return {
+        found: true,
+        source: 'existing',
+        waybillNumber: order.shipment.waybillNumber,
+        courier: order.shipment.courier || 'Delhivery',
+        order,
+        shipment: order.shipment,
+        message: `Order already has tracking ID: ${order.shipment.waybillNumber} (${order.shipment.courier || 'Delhivery'})`,
+      };
+    }
+
+    return {
+      found: false,
+      message: 'No external fulfillment found on Shopify or Delhivery ONE for this order.',
+      order,
+    };
   }
 
   /**

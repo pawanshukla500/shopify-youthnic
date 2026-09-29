@@ -77,6 +77,9 @@ router.post('/shopify', async (req: Request, res: Response): Promise<void> => {
           break;
         }
         const parentOrder = await shopifyService.fetchOrder(parentOrderId.toString());
+        if (!(parentOrder as any).fulfillments || (parentOrder as any).fulfillments.length === 0) {
+          (parentOrder as any).fulfillments = [payload];
+        }
         await shopifyService.syncOrderToDb(parentOrder);
         break;
       }

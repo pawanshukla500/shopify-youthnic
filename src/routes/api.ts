@@ -1289,7 +1289,7 @@ router.post('/orders/bulk-pack/download', async (req: Request, res: Response): P
 router.post('/orders/:id/track', async (req: Request, res: Response): Promise<void> => {
   try {
     const orderId = parseInt(req.params.id, 10);
-    const order = await prisma.order.findUnique({
+    let order = await prisma.order.findUnique({
       where: { id: orderId },
       include: { shipment: true },
     });
@@ -1297,12 +1297,76 @@ router.post('/orders/:id/track', async (req: Request, res: Response): Promise<vo
       res.status(404).json({ error: 'Order not found' });
       return;
     }
+
+    // If order does not have an assigned waybill yet, automatically attempt to fetch
+    // external fulfillment from Shopify (e.g. OMS Guru) or Delhivery ONE packages API
     if (!order.shipment?.waybillNumber) {
-      res.status(400).json({ error: 'Order does not have an assigned waybill number yet' });
+      const reconcileRes = await orderService.fetchAndReconcileOrderFulfillment(orderId);
+      if (reconcileRes.found && reconcileRes.waybillNumber) {
+        order = await prisma.order.findUnique({
+          where: { id: orderId },
+          include: { shipment: true },
+        });
+      }
+    }
+
+    if (!order?.shipment?.waybillNumber) {
+      res.status(400).json({
+        error: 'Order does not have an assigned waybill number yet, and no external fulfillment was found on Shopify or Delhivery ONE.',
+      });
       return;
     }
+
     const result = await trackingService.syncShipmentTracking(order.shipment.waybillNumber);
-    res.json({ success: true, tracking: result?.tracking, shipment: result?.shipment });
+    res.json({ success: true, tracking: result?.tracking, shipment: result?.shipment, order });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Check and fetch external fulfillment for a single order (Shopify OMS Guru / Delhivery ONE)
+router.post('/orders/:id/sync-external', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const orderId = parseInt(req.params.id, 10);
+    const result = await orderService.fetchAndReconcileOrderFulfillment(orderId);
+    res.json({
+      success: true,
+      ...result,
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Reconcile external fulfillments in bulk across all pending orders or selected order IDs
+router.post('/orders/sync-external', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { orderIds } = req.body;
+    let reconciledCount = 0;
+    const results: any[] = [];
+
+    if (Array.isArray(orderIds) && orderIds.length > 0) {
+      for (const id of orderIds) {
+        try {
+          const resObj = await orderService.fetchAndReconcileOrderFulfillment(Number(id));
+          if (resObj.found && resObj.source !== 'existing') {
+            reconciledCount++;
+          }
+          results.push({ orderId: id, ...resObj });
+        } catch (err: any) {
+          results.push({ orderId: id, found: false, error: err.message });
+        }
+      }
+    } else {
+      reconciledCount = await orderService.reconcilePendingChannelOrders();
+    }
+
+    res.json({
+      success: true,
+      reconciledCount,
+      results,
+      message: `Reconciled ${reconciledCount} external fulfillment(s)`,
+    });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

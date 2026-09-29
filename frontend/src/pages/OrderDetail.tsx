@@ -22,6 +22,7 @@ import {
   syncOrderTrackingLive,
   downloadSingleInvoiceFile,
   downloadBulkPackZip,
+  syncExternalOrderFulfillment,
 } from '../api'
 import { formatDate, formatMoney, labelize } from '../lib'
 import { Button, ButtonGroup, EmptyState, ErrorBox, FormField, Icon, LoadingState, PageIntro, Panel, PanelHeading, StatusBadge, useDocumentTitle, useToast } from '../components/UI'
@@ -56,6 +57,7 @@ export function OrderDetail() {
   const [isDownloadingLabelAndInvoice, setIsDownloadingLabelAndInvoice] = useState(false)
   const [isDownloadingInvoice, setIsDownloadingInvoice] = useState(false)
   const [isDownloadingPack, setIsDownloadingPack] = useState(false)
+  const [isFetchingExternalAwb, setIsFetchingExternalAwb] = useState(false)
 
   // NDR Resolution States
   const [showNdrModal, setShowNdrModal] = useState(false)
@@ -382,6 +384,26 @@ export function OrderDetail() {
     }
   }
 
+  // Fetch external fulfillment (Shopify OMS Guru / Delhivery ONE panel manifest)
+  const handleFetchExternalFulfillment = async () => {
+    if (!order) return
+    setIsFetchingExternalAwb(true)
+    try {
+      const res = await syncExternalOrderFulfillment(order.id)
+      if (res.found && res.waybillNumber) {
+        toast.toast('success', `Found tracking ID: ${res.waybillNumber} (${res.courier || 'Delhivery'})! Synced to Shopify.`)
+        await queryClient.invalidateQueries({ queryKey: ['order', id] })
+        await queryClient.invalidateQueries({ queryKey: ['orders'] })
+      } else {
+        toast.toast('error', res.message || 'No external fulfillment found for this order on Shopify or Delhivery ONE.')
+      }
+    } catch (err: any) {
+      toast.toast('error', apiError(err))
+    } finally {
+      setIsFetchingExternalAwb(false)
+    }
+  }
+
   return <>
     {/* ─── 21st.dev Style Modern Header Card ──────────────────── */}
     <div className="detail-header-card">
@@ -544,6 +566,20 @@ export function OrderDetail() {
           <Icon name="package" size={13} />
           <span>{isDownloadingPack ? 'Zipping…' : '📦 Order Pack (ZIP)'}</span>
         </button>
+
+        {!order.shipment?.waybillNumber && (
+          <button
+            type="button"
+            className="button button-secondary"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', height: '34px', padding: '0 12px', color: '#7c3aed', borderColor: '#ddd6fe', background: '#f5f3ff', fontWeight: 650, cursor: 'pointer' }}
+            onClick={handleFetchExternalFulfillment}
+            disabled={isFetchingExternalAwb}
+            title="Automatically fetch tracking ID and logistic name if manifested in Delhivery ONE panel or processed via OMS Guru"
+          >
+            <Icon name="zap" size={14} />
+            <span>{isFetchingExternalAwb ? 'Checking Channels…' : '⚡ Fetch External / Delhivery AWB'}</span>
+          </button>
+        )}
 
         {/* Resend Email Notification Trigger */}
         <Button
@@ -935,7 +971,7 @@ export function OrderDetail() {
             }
             action={
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
-                {order.shipment?.waybillNumber && (
+                {order.shipment?.waybillNumber ? (
                   <Button
                     className="button-secondary button-small"
                     onClick={handleSyncTracking}
@@ -946,6 +982,18 @@ export function OrderDetail() {
                   >
                     <Icon name="refresh" size={12} />
                     <span>{isSyncingTracking ? 'Syncing Delhivery…' : '⚡ Refresh Live Tracking'}</span>
+                  </Button>
+                ) : (
+                  <Button
+                    className="button-secondary button-small"
+                    onClick={handleFetchExternalFulfillment}
+                    disabled={isFetchingExternalAwb}
+                    loading={isFetchingExternalAwb}
+                    title="Check if order was manifested in Delhivery ONE panel or fulfilled in OMS Guru and retrieve AWB"
+                    style={{ height: '28px', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '5px', color: '#7c3aed', borderColor: '#c4b5fd' }}
+                  >
+                    <Icon name="zap" size={12} />
+                    <span>{isFetchingExternalAwb ? 'Checking…' : '⚡ Get External AWB'}</span>
                   </Button>
                 )}
                 {order.shipment?.status && <StatusBadge status={order.shipment.status} />}

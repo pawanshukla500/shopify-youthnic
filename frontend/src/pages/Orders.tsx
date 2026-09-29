@@ -28,6 +28,8 @@ import {
   openPrintableBulkPicklist,
   downloadBulkInvoicesDirectFile,
   downloadSingleInvoiceFile,
+  syncExternalOrderFulfillment,
+  syncBulkExternalFulfillments,
 } from '../api'
 import { ORDER_TABS, tabForStatus, formatDate, formatMoney, labelize, type OrderTabKey } from '../lib'
 import { getOrderTabCounts } from '../api'
@@ -421,6 +423,25 @@ export function Orders() {
       toast.toast('error', apiError(err))
     } finally {
       setIsSyncingChannel(false)
+    }
+  }
+
+  // External Fulfillment & Delhivery ONE Panel AWB Reconciliation action
+  const [isSyncingExternal, setIsSyncingExternal] = useState(false)
+  const handleSyncExternalFulfillments = async () => {
+    setIsSyncingExternal(true)
+    try {
+      const ids = selectedOrderIds.size ? Array.from(selectedOrderIds) : undefined
+      const res = await syncBulkExternalFulfillments(ids)
+      toast.toast(
+        'success',
+        `Reconciled ${res.reconciledCount} external fulfillment(s) from Delhivery ONE / OMS Guru!`
+      )
+      await queryClient.invalidateQueries({ queryKey: ['orders'] })
+    } catch (err: any) {
+      toast.toast('error', apiError(err))
+    } finally {
+      setIsSyncingExternal(false)
     }
   }
 
@@ -1394,6 +1415,19 @@ export function Orders() {
             <span>{isSyncingChannel ? 'Syncing Channel…' : '🛍️ Sync Delhivery Channel'}</span>
           </button>
 
+          {/* Fetch External Fulfillment / Delhivery ONE AWBs Button */}
+          <button
+            type="button"
+            className="btn-export"
+            style={{ background: '#7c3aed', color: '#ffffff', borderColor: '#6d28d9' }}
+            onClick={handleSyncExternalFulfillments}
+            disabled={isSyncingExternal}
+            title="Automatically check and fetch fulfillment tracking & carrier for orders manifested via OMS Guru, external apps, or directly in Delhivery ONE panel"
+          >
+            <Icon name="zap" size={15} />
+            <span>{isSyncingExternal ? 'Fetching AWBs…' : '⚡ Fetch External AWBs'}</span>
+          </button>
+
           {/* Download Report Button */}
           <button
             type="button"
@@ -1715,6 +1749,31 @@ export function Orders() {
                                       ✓ Restocked
                                     </span>
                                   )
+                                )}
+
+                                {!order.shipment?.waybillNumber && (
+                                  <button
+                                    type="button"
+                                    className="btn-row-action"
+                                    style={{ color: '#7c3aed', borderColor: 'rgba(124,58,237,0.3)', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
+                                    onClick={async (e) => {
+                                      e.stopPropagation()
+                                      try {
+                                        const res = await syncExternalOrderFulfillment(order.id)
+                                        if (res.found && res.waybillNumber) {
+                                          toast.toast('success', `Found AWB ${res.waybillNumber} (${res.courier || 'Delhivery'})!`)
+                                          await queryClient.invalidateQueries({ queryKey: ['orders'] })
+                                        } else {
+                                          toast.toast('error', res.message || 'No external fulfillment found yet.')
+                                        }
+                                      } catch (err: any) {
+                                        toast.toast('error', err.message || 'Failed to fetch external fulfillment')
+                                      }
+                                    }}
+                                    title="Check if order was manifested in Delhivery ONE panel or fulfilled via OMS Guru and get AWB automatically"
+                                  >
+                                    <Icon name="zap" size={11} /> Get AWB
+                                  </button>
                                 )}
 
                                 <button
@@ -2127,6 +2186,20 @@ export function Orders() {
             <Icon name="package" size={15} />
             <span className="bulk-btn-label">{isBulkDownloadingPackZip ? 'Zipping…' : '📦 Pack (ZIP)'}</span>
             <span className="bulk-btn-meta">All-in-1</span>
+          </button>
+
+          {/* Fetch External AWBs (Selected Orders) */}
+          <button
+            type="button"
+            className="bulk-btn bulk-btn-secondary"
+            onClick={handleSyncExternalFulfillments}
+            disabled={isSyncingExternal}
+            title="Automatically fetch tracking IDs & carrier names from OMS Guru / Shopify fulfillments or Delhivery ONE panel"
+            style={{ background: 'rgba(124, 58, 237, 0.25)', borderColor: 'rgba(196, 181, 253, 0.5)' }}
+          >
+            <Icon name="zap" size={15} />
+            <span className="bulk-btn-label">{isSyncingExternal ? 'Fetching…' : '⚡ Get AWBs'}</span>
+            <span className="bulk-btn-meta">Auto</span>
           </button>
 
           <button

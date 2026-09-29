@@ -1199,3 +1199,33 @@ export async function syncWaybillTrackingLive(waybillNumber: string): Promise<{
   return response.data
 }
 
+/**
+ * Automatically fetch and synchronize fulfillment details for an order
+ * from external sources (Shopify / OMS Guru or Delhivery ONE portal manifest).
+ */
+export async function syncExternalOrderFulfillment(orderId: number): Promise<{
+  success: boolean
+  found: boolean
+  source?: 'shopify' | 'delhivery_one' | 'existing'
+  waybillNumber?: string
+  courier?: string
+  order?: Order
+  shipment?: any
+  message?: string
+}> {
+  const response = await api.post(`/api/orders/${orderId}/sync-external`)
+  return response.data
+}
+
+/**
+ * Reconcile external fulfillments across all pending channel orders or selected order IDs.
+ */
+export async function syncBulkExternalFulfillments(orderIds?: number[]): Promise<{
+  success: boolean
+  reconciledCount: number
+  message?: string
+  results?: any[]
+}> {
+  const response = await api.post('/api/orders/sync-external', { orderIds })
+  return response.data
+}

@@ -16,7 +16,7 @@ export const DELHIVERY_COURIER_PATTERN = /delhivery/i;
  * True when the courier name, tracking URL, or waybill number matches Delhivery.
  * - Courier name contains "delhivery" (case-insensitive)
  * - Tracking URL contains "delhivery" (e.g. delhivery.com/track)
- * - Or waybill is a 12-15 digit numeric format and courier is not an explicit third-party
+ * - Or waybill is a 12-15 digit numeric format and courier is generic, blank, or an external OMS marker (e.g. OMS Guru)
  */
 export function isDelhiveryCourier(
   courier?: string | null,
@@ -29,19 +29,61 @@ export function isDelhiveryCourier(
   // Guard against known third-party couriers
   if (
     courier &&
-    /bluedart|blue dart|dtdc|ekart|e-kart|shadowfax|xpressbees|xpress bees|ecom express|india post|speed post/i.test(
+    /bluedart|blue dart|dtdc|ekart|e-kart|shadowfax|xpressbees|xpress bees|ecom express|india post|speed post|smartr|amazon/i.test(
       courier
     )
   ) {
     return false;
   }
 
-  // If waybill is 12-15 digits and courier is generic or absent
+  // If waybill is 12-15 digits and courier is generic, absent, or external OMS (e.g. OMS Guru)
   if (waybillNumber && /^[0-9]{12,15}$/.test(waybillNumber.trim())) {
-    if (!courier || /^(other|surface|express|standard|delhivery|courier)$/i.test(courier.trim())) {
+    if (
+      !courier ||
+      /^(other|surface|express|standard|delhivery|courier|oms\s*guru|omsguru|oms|custom|manual|api|shipway|unicommerce|logistics)$/i.test(
+        courier.trim()
+      )
+    ) {
       return true;
     }
   }
 
   return false;
+}
+
+/**
+ * Normalizes courier / logistics provider name into a clean, standard label.
+ * E.g., maps "omsguru" with Delhivery AWB to "Delhivery",
+ * "blue dart" to "Blue Dart", "ekart" to "Ekart", etc.
+ */
+export function normalizeCourierName(
+  courier?: string | null,
+  trackingUrl?: string | null,
+  waybillNumber?: string | null
+): string {
+  if (isDelhiveryCourier(courier, trackingUrl, waybillNumber)) {
+    if (courier && /delhivery\s+(surface|express|b2c)/i.test(courier.trim())) {
+      const match = courier.trim().match(/delhivery\s+(surface|express|b2c)/i);
+      const variant = match ? match[1].charAt(0).toUpperCase() + match[1].slice(1).toLowerCase() : '';
+      return variant ? `Delhivery ${variant}` : 'Delhivery';
+    }
+    return 'Delhivery';
+  }
+
+  const c = (courier || '').trim();
+  if (/bluedart|blue dart/i.test(c)) return 'Blue Dart';
+  if (/ekart|e-kart/i.test(c)) return 'Ekart';
+  if (/dtdc/i.test(c)) return 'DTDC';
+  if (/shadowfax/i.test(c)) return 'Shadowfax';
+  if (/xpressbees|xpress bees/i.test(c)) return 'Xpressbees';
+  if (/ecom express/i.test(c)) return 'Ecom Express';
+  if (/india post|speed post/i.test(c)) return 'India Post';
+  if (/smartr/i.test(c)) return 'Smartr';
+  if (/amazon/i.test(c)) return 'Amazon Shipping';
+
+  if (!c || /^(other|oms\s*guru|omsguru|oms|custom|manual|api)$/i.test(c)) {
+    return 'Other';
+  }
+
+  return c;
 }

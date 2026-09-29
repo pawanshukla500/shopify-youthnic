@@ -865,9 +865,12 @@ class DelhiveryService {
         const response = await this.client.get('/api/v1/packages/json/', {
           params: { ref_ids: chunk },
         });
-        const shipmentData = response.data?.ShipmentData || [];
+        const raw = response.data;
+        const shipmentData = raw?.ShipmentData || raw?.packages || raw?.shipments || raw?.data || [];
         if (Array.isArray(shipmentData)) {
           allData.push(...shipmentData);
+        } else if (shipmentData && typeof shipmentData === 'object') {
+          allData.push(shipmentData);
         }
       } catch (error: any) {
         logger.warn('Failed to fetch Delhivery packages by ref_ids', {

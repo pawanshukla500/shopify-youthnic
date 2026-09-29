@@ -3,7 +3,7 @@ import { config } from '../../config';
 import prisma from '../../database/prisma';
 import logger from '../../utils/logger';
 import { withRetry } from '../../utils/retry';
-import { isDelhiveryCourier } from '../../utils/courier';
+import { isDelhiveryCourier, normalizeCourierName } from '../../utils/courier';
 import { ShopifyOrderWebhook } from '../../types';
 import { OrderStatus } from '@prisma/client';
 import { shopifyTokenProvider } from './token.provider';
@@ -434,7 +434,9 @@ class ShopifyService {
    */
   async fulfillOrderOnShopify(
     shopifyOrderId: string,
-    waybillNumber: string
+    waybillNumber: string,
+    courier: string = 'Delhivery',
+    trackingUrl?: string
   ): Promise<{ success: boolean; fulfillmentId?: string }> {
     try {
       // 1. Fetch fulfillment orders for this order
@@ -448,15 +450,24 @@ class ShopifyService {
 
       let fulfillmentId: string | undefined;
 
+      const effectiveCourier = normalizeCourierName(courier, trackingUrl, waybillNumber);
+      const effectiveUrl =
+        trackingUrl ||
+        (effectiveCourier.toLowerCase().includes('delhivery')
+          ? `https://www.delhivery.com/track/package/${waybillNumber}`
+          : effectiveCourier.toLowerCase().includes('ekart')
+          ? `https://t.proship.in/${waybillNumber}`
+          : undefined);
+
       if (openFo) {
-        const payload = {
+        const payload: any = {
           fulfillment: {
-            message: 'Dispatched via Delhivery Express',
+            message: `Dispatched via ${effectiveCourier}`,
             notify_customer: true,
             tracking_info: {
               number: waybillNumber,
-              url: `https://www.delhivery.com/track/package/${waybillNumber}`,
-              company: 'Delhivery',
+              company: effectiveCourier,
+              ...(effectiveUrl ? { url: effectiveUrl } : {}),
             },
             line_items_by_fulfillment_order: [
               {
@@ -471,16 +482,17 @@ class ShopifyService {
         logger.info('Created fulfillment on Shopify', {
           shopifyOrderId,
           waybillNumber,
+          courier: effectiveCourier,
           fulfillmentId,
         });
       }
 
-      // 2. Append Delhivery AWB tags to the Shopify order
+      // 2. Append AWB tags to the Shopify order
       try {
         const orderData = await this.fetchOrder(shopifyOrderId);
         const existingTags = orderData.tags ? orderData.tags.split(',').map((t: string) => t.trim()) : [];
         const newTags = Array.from(
-          new Set([...existingTags, 'Dispatched', `Delhivery-AWB:${waybillNumber}`])
+          new Set([...existingTags, 'Dispatched', `${effectiveCourier}-AWB:${waybillNumber}`])
         );
 
         await this.client.put(`/orders/${shopifyOrderId}.json`, {
@@ -490,7 +502,7 @@ class ShopifyService {
           },
         });
       } catch (tagErr: any) {
-        logger.warn('Could not append Delhivery AWB tag to Shopify order', {
+        logger.warn('Could not append AWB tag to Shopify order', {
           error: tagErr.message,
         });
       }
@@ -500,6 +512,7 @@ class ShopifyService {
       logger.error('Failed to create fulfillment on Shopify', {
         shopifyOrderId,
         waybillNumber,
+        courier,
         error: error.response?.data || error.message,
       });
       return { success: false };
@@ -1155,7 +1168,7 @@ class ShopifyService {
           // variant case-insensitively (/delhivery/i) so it stays on the Delhivery
           // tracking/label/audit path; anything else is a third-party courier.
           const isNonDelhivery = !isDelhiveryCourier(courier, trackingUrl, waybillNumber);
-          const effectiveCourier = !isNonDelhivery && (!courier || courier === 'Other') ? 'Delhivery' : courier;
+          const effectiveCourier = normalizeCourierName(courier, trackingUrl, waybillNumber);
 
           // On a third-party AWB the Delhivery weight/billing audit values are
           // meaningless, so hold them at safe defaults — otherwise Delhivery

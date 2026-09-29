@@ -186,10 +186,65 @@ class DelhiveryDocumentFetcher {
   }
 
   // ────────────────────────────────────────────────────────────
-  // Internals
+  // Artifact Fetchers & Upstream Helpers
   // ────────────────────────────────────────────────────────────
 
-  private async tryFetchArtifact(
+  /**
+   * Save a known buffer, URL, or base64 as an EPOD artifact directly into Firebase Storage
+   * and update the shipment in the database.
+   */
+  public async saveEpodArtifact(
+    orderId: number,
+    waybill: string,
+    urlOrBase64: string,
+    receivedBy?: string,
+    receivedAt?: Date
+  ): Promise<{ uploaded: boolean; path?: string; url?: string; reason?: string }> {
+    try {
+      const buffer = await this.resolveToBuffer(urlOrBase64);
+      if (buffer.length === 0) return { uploaded: false, reason: 'empty_buffer' };
+
+      const uploaded = await firebaseService.uploadOrderArtifact(
+        orderId,
+        'epod',
+        buffer,
+        ARTIFACT_MIME.epod,
+        ARTIFACT_EXT.epod,
+        true
+      );
+
+      const updateData: any = {
+        epodStoragePath: uploaded.path,
+        epodReceivedAt: receivedAt || new Date(),
+      };
+      if (receivedBy) {
+        updateData.epodReceivedBy = receivedBy;
+      }
+
+      await prisma.shipment.updateMany({
+        where: { waybillNumber: waybill, orderId },
+        data: updateData,
+      });
+
+      logger.info('Saved EPOD artifact to Firebase Storage from webhook', {
+        orderId,
+        waybill,
+        path: uploaded.path,
+        receivedBy,
+      });
+
+      return { uploaded: true, path: uploaded.path, url: uploaded.url };
+    } catch (err: any) {
+      logger.warn('Failed to save EPOD artifact to Firebase Storage', {
+        orderId,
+        waybill,
+        error: err.message,
+      });
+      return { uploaded: false, reason: err.message };
+    }
+  }
+
+  public async tryFetchArtifact(
     orderId: number,
     waybill: string,
     kind: ArtifactKind
@@ -235,7 +290,7 @@ class DelhiveryDocumentFetcher {
     return { uploaded: true, path: uploaded.path };
   }
 
-  private async resolveToBuffer(input: string): Promise<Buffer> {
+  public async resolveToBuffer(input: string): Promise<Buffer> {
     const trimmed = input.trim();
     // Detect base64 payload (data URI or raw base64 > 256 chars with no http prefix)
     if (trimmed.startsWith('data:')) {

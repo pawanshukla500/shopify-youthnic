@@ -87,6 +87,11 @@ export interface Shipment {
   trackingUpdatedAt: string | null
   trackingHistory: unknown
   labelUrl: string | null
+  labelStoragePath?: string | null
+  epodStoragePath?: string | null
+  epodReceivedBy?: string | null
+  epodReceivedAt?: string | null
+  signatureStoragePath?: string | null
   declaredWeightGrams?: number | null
   billedWeightGrams?: number | null
   chargedZone?: string | null

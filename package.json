@@ -20,7 +20,8 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "shopify:docs": "node .agents/skills/shopify-admin/scripts/search_docs.js",
-    "shopify:validate": "node .agents/skills/shopify-admin/scripts/validate.js"
+    "shopify:validate": "node .agents/skills/shopify-admin/scripts/validate.js",
+    "webhook:test:delhivery": "tsx scripts/test-delhivery-webhooks.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

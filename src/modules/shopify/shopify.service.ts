@@ -54,6 +54,45 @@ class ShopifyService {
   }
 
   /**
+   * Execute an Admin GraphQL query or mutation with error checking,
+   * THROTTLED detection, and automatic retry.
+   */
+  async graphql<T = any>(
+    query: string,
+    variables?: Record<string, any>
+  ): Promise<T> {
+    return withRetry(
+      async () => {
+        const response = await this.client.post('/graphql.json', {
+          query,
+          variables,
+        });
+
+        const data = response.data;
+        if (data?.errors && data.errors.length > 0) {
+          const firstError = data.errors[0];
+          const isThrottled =
+            firstError?.extensions?.code === 'THROTTLED' ||
+            firstError?.message?.toLowerCase().includes('throttled');
+
+          const error: any = new Error(
+            `Shopify GraphQL Error: ${firstError?.message || 'Unknown error'}`
+          );
+          error.graphQLErrors = data.errors;
+          error.extensions = firstError?.extensions;
+          if (isThrottled) {
+            error.code = 'THROTTLED';
+          }
+          throw error;
+        }
+
+        return data?.data as T;
+      },
+      { attempts: 3, baseDelayMs: 600 }
+    );
+  }
+
+  /**
    * Fetch orders created/updated since a given timestamp.
    * Returns raw Shopify order objects.
    */
@@ -432,6 +471,182 @@ class ShopifyService {
    * 1. Creates fulfillment on Shopify with Delhivery tracking info
    * 2. Appends Dispatched tag and Delhivery-AWB tag to the Shopify order
    */
+  /**
+   * Update tracking information on an existing Shopify fulfillment.
+   * Uses GraphQL fulfillmentTrackingInfoUpdate with fallback to REST update_tracking.json.
+   */
+  async updateFulfillmentTracking(
+    fulfillmentId: string,
+    trackingInfo: {
+      number: string;
+      company: string;
+      url?: string;
+    },
+    notifyCustomer: boolean = true
+  ): Promise<{ success: boolean; fulfillment?: any }> {
+    const gid = fulfillmentId.startsWith('gid://')
+      ? fulfillmentId
+      : `gid://shopify/Fulfillment/${fulfillmentId}`;
+
+    try {
+      const mutation = `mutation FulfillmentTrackingInfoUpdate(
+        $fulfillmentId: ID!
+        $trackingInfoInput: FulfillmentTrackingInput!
+        $notifyCustomer: Boolean
+      ) {
+        fulfillmentTrackingInfoUpdate(
+          fulfillmentId: $fulfillmentId
+          trackingInfoInput: $trackingInfoInput
+          notifyCustomer: $notifyCustomer
+        ) {
+          fulfillment {
+            id
+            status
+            trackingInfo { company number url }
+          }
+          userErrors { field message }
+        }
+      }`;
+
+      const variables = {
+        fulfillmentId: gid,
+        trackingInfoInput: {
+          company: trackingInfo.company,
+          number: trackingInfo.number,
+          ...(trackingInfo.url ? { url: trackingInfo.url } : {}),
+        },
+        notifyCustomer,
+      };
+
+      const res = await this.graphql<{
+        fulfillmentTrackingInfoUpdate: {
+          fulfillment: any;
+          userErrors: any[];
+        };
+      }>(mutation, variables);
+
+      if (res?.fulfillmentTrackingInfoUpdate?.userErrors?.length > 0) {
+        logger.warn('Shopify fulfillmentTrackingInfoUpdate userErrors', {
+          fulfillmentId,
+          errors: res.fulfillmentTrackingInfoUpdate.userErrors,
+        });
+      } else if (res?.fulfillmentTrackingInfoUpdate?.fulfillment) {
+        logger.info('Updated fulfillment tracking via GraphQL', {
+          fulfillmentId,
+          trackingInfo,
+        });
+        return { success: true, fulfillment: res.fulfillmentTrackingInfoUpdate.fulfillment };
+      }
+    } catch (gqlErr: any) {
+      logger.warn('GraphQL fulfillmentTrackingInfoUpdate failed, falling back to REST', {
+        fulfillmentId,
+        error: gqlErr.message,
+      });
+    }
+
+    // REST fallback: POST /admin/api/{version}/fulfillments/{id}/update_tracking.json
+    try {
+      const numericId = fulfillmentId.replace(/\D/g, '');
+      const payload = {
+        fulfillment: {
+          notify_customer: notifyCustomer,
+          tracking_info: {
+            number: trackingInfo.number,
+            company: trackingInfo.company,
+            ...(trackingInfo.url ? { url: trackingInfo.url } : {}),
+          },
+        },
+      };
+      const response = await this.client.post(
+        `/fulfillments/${numericId}/update_tracking.json`,
+        payload
+      );
+      return { success: true, fulfillment: response.data?.fulfillment };
+    } catch (restErr: any) {
+      logger.error('Failed to update fulfillment tracking via REST fallback', {
+        fulfillmentId,
+        error: restErr.response?.data || restErr.message,
+      });
+      return { success: false };
+    }
+  }
+
+  /**
+   * Set metafields on a Shopify resource (e.g. Order) using GraphQL metafieldsSet.
+   */
+  async setOrderMetafields(
+    shopifyOrderId: string,
+    metafields: Array<{
+      key: string;
+      value: string;
+      type?: string;
+      namespace?: string;
+    }>
+  ): Promise<{ success: boolean; metafields?: any[] }> {
+    const ownerId = shopifyOrderId.startsWith('gid://')
+      ? shopifyOrderId
+      : `gid://shopify/Order/${shopifyOrderId}`;
+
+    const mutation = `mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
+      metafieldsSet(metafields: $metafields) {
+        metafields {
+          id
+          namespace
+          key
+          value
+        }
+        userErrors {
+          field
+          message
+        }
+      }
+    }`;
+
+    try {
+      const formatted = metafields.map((m) => ({
+        ownerId,
+        namespace: m.namespace || 'youthnic',
+        key: m.key,
+        value: m.value,
+        type: m.type || 'single_line_text_field',
+      }));
+
+      const res = await this.graphql<{
+        metafieldsSet: {
+          metafields: any[];
+          userErrors: any[];
+        };
+      }>(mutation, { metafields: formatted });
+
+      if (res?.metafieldsSet?.userErrors?.length > 0) {
+        logger.warn('Shopify metafieldsSet userErrors', {
+          shopifyOrderId,
+          errors: res.metafieldsSet.userErrors,
+        });
+        return { success: false };
+      }
+
+      logger.info('Saved metafields to Shopify Order', {
+        shopifyOrderId,
+        keys: metafields.map((m) => m.key),
+      });
+      return { success: true, metafields: res?.metafieldsSet?.metafields };
+    } catch (err: any) {
+      logger.warn('Failed to set metafields on Shopify order', {
+        shopifyOrderId,
+        error: err.message,
+      });
+      return { success: false };
+    }
+  }
+
+  /**
+   * Register fulfillment on Shopify with Delhivery tracking:
+   * 1. Creates fulfillment on Shopify with Delhivery tracking info if open fulfillment order exists
+   * 2. Or updates tracking on existing fulfillment if order is already fulfilled
+   * 3. Appends Dispatched tag and Delhivery-AWB tag to the Shopify order
+   * 4. Syncs Order Metafields for native visibility
+   */
   async fulfillOrderOnShopify(
     shopifyOrderId: string,
     waybillNumber: string,
@@ -485,31 +700,60 @@ class ShopifyService {
           courier: effectiveCourier,
           fulfillmentId,
         });
+      } else {
+        // No open fulfillment order. Check if fulfillments already exist on this order
+        // (e.g. fulfilled via external OMS or Shopify Admin) and update their tracking.
+        try {
+          const fListResponse = await this.client.get(`/orders/${shopifyOrderId}/fulfillments.json`);
+          const existingFulfillments = fListResponse.data?.fulfillments || [];
+          const activeFulfillment = existingFulfillments.find((f: any) => f.status !== 'cancelled');
+          if (activeFulfillment) {
+            fulfillmentId = activeFulfillment.id?.toString();
+            await this.updateFulfillmentTracking(
+              fulfillmentId!,
+              {
+                number: waybillNumber,
+                company: effectiveCourier,
+                url: effectiveUrl,
+              },
+              true
+            );
+            logger.info('Updated tracking on existing Shopify fulfillment', {
+              shopifyOrderId,
+              fulfillmentId,
+              waybillNumber,
+              courier: effectiveCourier,
+            });
+          }
+        } catch (findErr: any) {
+          logger.warn('Could not inspect existing fulfillments for tracking update', {
+            shopifyOrderId,
+            error: findErr.message,
+          });
+        }
       }
 
-      // 2. Append AWB tags to the Shopify order
-      try {
-        const orderData = await this.fetchOrder(shopifyOrderId);
-        const existingTags = orderData.tags ? orderData.tags.split(',').map((t: string) => t.trim()) : [];
-        const newTags = Array.from(
-          new Set([...existingTags, 'Dispatched', `${effectiveCourier}-AWB:${waybillNumber}`])
-        );
+      // 2. Append AWB tags to the Shopify order via atomic addOrderTags
+      await this.addOrderTags(shopifyOrderId, [
+        'Dispatched',
+        `${effectiveCourier}-AWB:${waybillNumber}`,
+      ]);
 
-        await this.client.put(`/orders/${shopifyOrderId}.json`, {
-          order: {
-            id: shopifyOrderId,
-            tags: newTags.join(', '),
-          },
+      // 3. Write Order Metafields for native visibility in Shopify Admin & Liquid templates
+      this.setOrderMetafields(shopifyOrderId, [
+        { key: 'waybill_number', value: waybillNumber },
+        { key: 'courier_name', value: effectiveCourier },
+        ...(effectiveUrl ? [{ key: 'tracking_url', value: effectiveUrl }] : []),
+      ]).catch((mfErr) => {
+        logger.debug('Metafield update completed non-fatally', {
+          shopifyOrderId,
+          error: mfErr.message,
         });
-      } catch (tagErr: any) {
-        logger.warn('Could not append AWB tag to Shopify order', {
-          error: tagErr.message,
-        });
-      }
+      });
 
       return { success: true, fulfillmentId };
     } catch (error: any) {
-      logger.error('Failed to create fulfillment on Shopify', {
+      logger.error('Failed to create or update fulfillment on Shopify', {
         shopifyOrderId,
         waybillNumber,
         courier,
@@ -520,29 +764,82 @@ class ShopifyService {
   }
 
   /**
+   * Atomically add tags to a Shopify Order using GraphQL tagsAdd.
+   * Falls back to REST PUT if GraphQL encounters an issue.
+   */
+  async addOrderTags(
+    shopifyOrderId: string,
+    tagsToAdd: string[]
+  ): Promise<{ success: boolean; tags: string[] }> {
+    const cleanTags = Array.from(new Set(tagsToAdd.map((t) => t.trim()).filter(Boolean)));
+    if (!cleanTags.length) return { success: true, tags: [] };
+
+    const gid = shopifyOrderId.startsWith('gid://')
+      ? shopifyOrderId
+      : `gid://shopify/Order/${shopifyOrderId}`;
+
+    try {
+      const mutation = `mutation tagsAdd($id: ID!, $tags: [String!]!) {
+        tagsAdd(id: $id, tags: $tags) {
+          node { id }
+          userErrors { field message }
+        }
+      }`;
+
+      const res = await this.graphql<{
+        tagsAdd: {
+          node: any;
+          userErrors: any[];
+        };
+      }>(mutation, { id: gid, tags: cleanTags });
+
+      if (res?.tagsAdd?.userErrors && res.tagsAdd.userErrors.length > 0) {
+        logger.warn('Shopify tagsAdd userErrors', {
+          shopifyOrderId,
+          errors: res.tagsAdd.userErrors,
+        });
+      } else {
+        logger.info('Added tags to Shopify order via GraphQL', {
+          shopifyOrderId,
+          tags: cleanTags,
+        });
+        return { success: true, tags: cleanTags };
+      }
+    } catch (gqlErr: any) {
+      logger.warn('GraphQL tagsAdd failed, falling back to REST', {
+        shopifyOrderId,
+        error: gqlErr.message,
+      });
+    }
+
+    // Fallback to REST update
+    try {
+      const orderData = await this.fetchOrder(shopifyOrderId);
+      const existingTags = orderData.tags
+        ? orderData.tags.split(',').map((t: string) => t.trim()).filter(Boolean)
+        : [];
+      const merged = Array.from(new Set([...existingTags, ...cleanTags]));
+      await this.client.put(`/orders/${shopifyOrderId}.json`, {
+        order: { id: shopifyOrderId, tags: merged.join(', ') },
+      });
+      return { success: true, tags: merged };
+    } catch (restErr: any) {
+      logger.error('Failed to add tags to Shopify order via REST fallback', {
+        shopifyOrderId,
+        error: restErr.response?.data || restErr.message,
+      });
+      return { success: false, tags: [] };
+    }
+  }
+
+  /**
    * Update tags on a Shopify order.
    */
   async updateOrderTags(
     shopifyOrderId: string,
     tags: string[]
   ): Promise<{ success: boolean; tags: string[] }> {
-    try {
-      const uniqueTags = Array.from(new Set(tags.map((t) => t.trim()).filter(Boolean)));
-      await this.client.put(`/orders/${shopifyOrderId}.json`, {
-        order: {
-          id: shopifyOrderId,
-          tags: uniqueTags.join(', '),
-        },
-      });
-      logger.info('Updated tags on Shopify order', { shopifyOrderId, tags: uniqueTags });
-      return { success: true, tags: uniqueTags };
-    } catch (error: any) {
-      logger.error('Failed to update tags on Shopify order', {
-        shopifyOrderId,
-        error: error.response?.data || error.message,
-      });
-      throw error;
-    }
+    return this.addOrderTags(shopifyOrderId, tags);
   }
 
   /**
@@ -567,18 +864,61 @@ class ShopifyService {
   }
 
   /**
-   * Remove specified tags from a Shopify order.
+   * Atomically remove tags from a Shopify order using GraphQL tagsRemove.
+   * Falls back to REST PUT if GraphQL encounters an issue.
    */
   async removeOrderTags(
     shopifyOrderId: string,
     tagsToRemove: string[]
   ): Promise<{ success: boolean; tags: string[] }> {
+    const cleanRemove = Array.from(new Set(tagsToRemove.map((t) => t.trim()).filter(Boolean)));
+    if (!cleanRemove.length) return { success: true, tags: [] };
+
+    const gid = shopifyOrderId.startsWith('gid://')
+      ? shopifyOrderId
+      : `gid://shopify/Order/${shopifyOrderId}`;
+
+    try {
+      const mutation = `mutation tagsRemove($id: ID!, $tags: [String!]!) {
+        tagsRemove(id: $id, tags: $tags) {
+          node { id }
+          userErrors { field message }
+        }
+      }`;
+
+      const res = await this.graphql<{
+        tagsRemove: {
+          node: any;
+          userErrors: any[];
+        };
+      }>(mutation, { id: gid, tags: cleanRemove });
+
+      if (res?.tagsRemove?.userErrors && res.tagsRemove.userErrors.length > 0) {
+        logger.warn('Shopify tagsRemove userErrors', {
+          shopifyOrderId,
+          errors: res.tagsRemove.userErrors,
+        });
+      } else {
+        logger.info('Removed tags from Shopify order via GraphQL', {
+          shopifyOrderId,
+          tags: cleanRemove,
+        });
+        return { success: true, tags: cleanRemove };
+      }
+    } catch (gqlErr: any) {
+      logger.warn('GraphQL tagsRemove failed, falling back to REST', {
+        shopifyOrderId,
+        error: gqlErr.message,
+      });
+    }
+
+    // Fallback to REST
     try {
       const orderData = await this.fetchOrder(shopifyOrderId);
       const existingTags = orderData.tags
         ? orderData.tags.split(',').map((t: string) => t.trim()).filter(Boolean)
         : [];
-      const lowerRemove = new Set(tagsToRemove.map((t) => t.toLowerCase()));
+      const lowerRemove = new Set(cleanRemove.map((t) => t.toLowerCase()));
       const updatedTags = existingTags.filter((t) => !lowerRemove.has(t.toLowerCase()));
 
       await this.client.put(`/orders/${shopifyOrderId}.json`, {

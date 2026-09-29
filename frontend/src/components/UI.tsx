@@ -165,3 +165,190 @@ export function PageIntro({ eyebrow, title, description, action, children }: { e
 export function useDocumentTitle(title: string) {
   useEffect(() => { document.title = `${title} · Youthnic OMS` }, [title])
 }
+
+// ─── 21st.dev Inspired UI/UX Design Pro Primitives ──────────────────────────
+
+export function InfoCard({
+  children,
+  className = '',
+  style,
+  hoverable = false,
+}: {
+  children: ReactNode;
+  className?: string;
+  style?: React.CSSProperties;
+  hoverable?: boolean;
+}) {
+  return (
+    <div
+      className={`info-card-pro ${hoverable ? 'hoverable' : ''} ${className}`}
+      style={style}
+    >
+      {children}
+    </div>
+  );
+}
+
+export function StatCard({
+  title,
+  value,
+  subtext,
+  icon,
+  trend,
+  accentColor = '#2563eb',
+  className = '',
+  onClick,
+}: {
+  title: string;
+  value: ReactNode;
+  subtext?: string;
+  icon?: IconName;
+  trend?: { value: string; isPositive: boolean };
+  accentColor?: string;
+  className?: string;
+  onClick?: () => void;
+}) {
+  return (
+    <div
+      className={`stat-card-pro ${onClick ? 'clickable' : ''} ${className}`}
+      onClick={onClick}
+      style={{ '--stat-accent': accentColor } as React.CSSProperties}
+    >
+      <div className="stat-card-top">
+        <span className="stat-card-title">{title}</span>
+        {icon && (
+          <div className="stat-card-icon-wrap" style={{ color: accentColor, background: `${accentColor}14` }}>
+            <Icon name={icon} size={15} />
+          </div>
+        )}
+      </div>
+      <div className="stat-card-value">{value}</div>
+      {(subtext || trend) && (
+        <div className="stat-card-footer">
+          {trend && (
+            <span className={`stat-card-trend ${trend.isPositive ? 'trend-up' : 'trend-down'}`}>
+              <Icon name={trend.isPositive ? 'trending' : 'arrow'} size={12} />
+              {trend.value}
+            </span>
+          )}
+          {subtext && <span className="stat-card-subtext">{subtext}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function CopyableBadge({
+  text,
+  label,
+  monospace = true,
+  className = '',
+}: {
+  text: string;
+  label?: string;
+  monospace?: boolean;
+  className?: string;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <button
+      type="button"
+      className={`copyable-badge-pro ${copied ? 'copied' : ''} ${className}`}
+      onClick={handleCopy}
+      title="Click to copy to clipboard"
+    >
+      {label && <span className="copyable-badge-label">{label}:</span>}
+      <span className={`copyable-badge-text ${monospace ? 'mono' : ''}`}>{text}</span>
+      <span className="copyable-badge-icon">
+        <Icon name={copied ? 'check' : 'copy'} size={12} />
+      </span>
+      {copied && <span className="copyable-badge-tooltip">Copied!</span>}
+    </button>
+  );
+}
+
+export interface StepperStep {
+  id: string;
+  title: string;
+  description?: string;
+  timestamp?: string;
+}
+
+export function ProgressStepperPro({
+  steps,
+  currentStepIndex,
+  isError = false,
+  errorReason,
+  className = '',
+}: {
+  steps: StepperStep[];
+  currentStepIndex: number;
+  isError?: boolean;
+  errorReason?: string;
+  className?: string;
+}) {
+  const progressPercent = Math.max(0, Math.min(100, (currentStepIndex / Math.max(1, steps.length - 1)) * 100));
+
+  return (
+    <div className={`progress-stepper-pro ${className}`}>
+      <div className="stepper-track-wrap">
+        <div className="stepper-track-bg" />
+        <div
+          className={`stepper-track-fill ${isError ? 'track-error' : ''}`}
+          style={{ width: `${progressPercent}%` }}
+        />
+        <div className="stepper-steps-row">
+          {steps.map((step, idx) => {
+            const isCompleted = idx < currentStepIndex;
+            const isCurrent = idx === currentStepIndex;
+
+            return (
+              <div
+                key={step.id}
+                className={`stepper-step-node ${
+                  isCompleted
+                    ? 'completed'
+                    : isCurrent
+                    ? isError
+                      ? 'error'
+                      : 'active'
+                    : 'pending'
+                }`}
+              >
+                <div className="stepper-node-circle">
+                  {isCompleted ? (
+                    <Icon name="check" size={12} />
+                  ) : isCurrent ? (
+                    <span className="stepper-node-pulse" />
+                  ) : (
+                    <span>{idx + 1}</span>
+                  )}
+                </div>
+                <div className="stepper-node-info">
+                  <span className="stepper-node-title">{step.title}</span>
+                  {step.description && <span className="stepper-node-desc">{step.description}</span>}
+                  {step.timestamp && <span className="stepper-node-time">{step.timestamp}</span>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      {isError && errorReason && (
+        <div className="stepper-error-banner">
+          <Icon name="alert" size={14} />
+          <span>{errorReason}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+

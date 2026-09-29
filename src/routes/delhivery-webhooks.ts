@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../database/prisma';
 import delhiveryService from '../modules/delhivery/delhivery.service';
+import delhiveryDocumentFetcher from '../modules/delhivery/delhivery-document-fetcher.service';
 import notificationEngine from '../modules/notifications/notification.service';
 import { config } from '../config';
 import logger from '../utils/logger';
@@ -8,53 +9,50 @@ import logger from '../utils/logger';
 const router = Router();
 
 /**
- * Delhivery Webhook Handler
+ * Verify optional shared-secret gate.
+ * When DELHIVERY_WEBHOOK_SECRET is configured, accepts ?secret=,
+ * x-delhivery-secret, x-delhivery-token, or Authorization headers.
+ * When unset, allows requests through for backwards compatibility.
+ */
+function verifyDelhiveryWebhookSecret(req: Request): boolean {
+  const expected = config.delhivery.webhookSecret;
+  if (!expected) return true;
+
+  const querySecret = req.query.secret as string | undefined;
+  const headerSecret = (req.headers['x-delhivery-secret'] || req.headers['x-delhivery-token']) as string | undefined;
+  const authHeader = req.headers['authorization'] as string | undefined;
+  const bearerToken = authHeader ? authHeader.replace(/^(Bearer|Token)\s+/i, '').trim() : undefined;
+
+  return querySecret === expected || headerSecret === expected || bearerToken === expected;
+}
+
+/**
+ * Delhivery Webhook Handler - Scan Push (Status Updates)
  *
  * Delhivery pushes real-time shipment status updates via webhook.
- * This replaces polling the tracking API for status updates.
+ * Replaces continuous polling for tracking events.
  *
- * To enable: Share your endpoint URL with Delhivery's integration team
- * (lastmile-integration@delhivery.com). They will configure the webhook.
+ * Enabled by Delhivery Last Mile Integration team (lastmile-integration@delhivery.com).
  *
- * Status Types pushed by Delhivery:
- *   Forward: UD (Manifested, Not Picked, In Transit, Pending, Dispatched), DL (Delivered)
- *   Return:  RT (In Transit, Pending, Dispatched), DL (RTO)
- *   Reverse: PP (Open, Scheduled, Dispatched), PU (In Transit, Pending, Dispatched), DL (DTO), CN (Canceled, Closed)
- *
- * Note: Scan Push and Document Push are separate webhooks.
- * This handler is for Scan Push (status updates).
- *
- * Payload schema (official, from one.delhivery.com):
+ * Payload schema supports official nested shape:
  *   { Shipment: { AWB, ReferenceNo, Sortcode, NSLCode, PickUpDate,
  *                Status: { Status, StatusDateTime, StatusType, StatusLocation, Instructions } } }
- *
- * Some accounts still send a flat shape (legacy). We accept both.
+ * and legacy flat shapes from various Delhivery systems.
  */
-router.post('/delhivery', async (req: Request, res: Response): Promise<void> => {
+export async function handleScanPush(req: Request, res: Response): Promise<void> {
   try {
-    // Optional shared-secret gate. When DELHIVERY_WEBHOOK_SECRET is set, reject
-    // calls without a matching ?secret= or x-delhivery-secret header.
-    // When unset (default), stay open for backward compatibility.
-    const expected = config.delhivery.webhookSecret;
-    if (expected) {
-      const provided =
-        (req.query.secret as string | undefined) ||
-        (req.headers['x-delhivery-secret'] as string | undefined);
-      if (provided !== expected) {
-        logger.warn('Delhivery webhook rejected: bad secret');
-        res.status(401).json({ received: false, error: 'invalid_secret' });
-        return;
-      }
+    if (!verifyDelhiveryWebhookSecret(req)) {
+      logger.warn('Delhivery webhook rejected: bad secret');
+      res.status(401).json({ received: false, error: 'invalid_secret' });
+      return;
     }
 
     const payload = req.body;
-
-    // Normalize to array of normalized scan objects (cap to prevent DoS).
     const updates = Array.isArray(payload) ? payload.slice(0, 500) : [payload];
     const normalized = updates.map(normalizeScanPushPayload).filter(Boolean) as NormalizedScan[];
 
     if (normalized.length === 0) {
-      logger.warn('Delhivery webhook received without recognizable payload', {
+      logger.warn('Delhivery scan webhook received without recognizable payload', {
         keys: Object.keys(payload || {}),
       });
       res.status(200).json({ received: true, ignored: true });
@@ -62,7 +60,6 @@ router.post('/delhivery', async (req: Request, res: Response): Promise<void> => 
     }
 
     for (const scan of normalized) {
-      // Don't log raw payload to avoid PII leak (round-2 finding G9)
       logger.info('Processing Delhivery status update', {
         waybill: scan.waybill,
         status: scan.status,
@@ -70,7 +67,7 @@ router.post('/delhivery', async (req: Request, res: Response): Promise<void> => 
         location: scan.location,
       });
 
-      // Find the shipment in our DB
+      // Find shipment in database
       const shipment = await prisma.shipment.findFirst({
         where: { waybillNumber: scan.waybill },
         include: { order: true },
@@ -81,8 +78,7 @@ router.post('/delhivery', async (req: Request, res: Response): Promise<void> => 
         continue;
       }
 
-      // Save tracking log — use upsert keyed on (waybill, status, scannedAt) so webhook
-      // retries don't double-log (round-2 finding G8)
+      // Save tracking log — idempotent upsert on (waybill, status, scannedAt)
       const scannedAt = new Date(scan.scanDateTime);
       try {
         await prisma.trackingLog.upsert({
@@ -109,20 +105,16 @@ router.post('/delhivery', async (req: Request, res: Response): Promise<void> => 
             referenceNo: scan.referenceNo || null,
             receivedBy: scan.receivedBy || null,
           },
-          update: {
-            // No-op for retries — preserves original createdAt and any side-effect writes
-          },
+          update: {},
         });
       } catch (upsertErr: any) {
-        // If unique constraint fails because of a microsecond difference, fall back to plain create
-        // and let the @unique produce a no-op duplicate.
         logger.warn('Tracking log upsert failed (likely microsecond dup)', {
           error: upsertErr.message,
           waybill: scan.waybill,
         });
       }
 
-      // Map to our internal status (pickup hint from scan text for PICKED_UP detection)
+      // Map to internal status
       const scanText = scan.rawStatus || scan.status || '';
       const newShipmentStatus = delhiveryService.mapTrackingToShipmentStatus(
         scan.statusType || '',
@@ -142,10 +134,9 @@ router.post('/delhivery', async (req: Request, res: Response): Promise<void> => 
           },
         });
 
-        // Handle order status + notifications
+        // Trigger order status transition + notifications
         await handleStatusTransition(shipment.order, newShipmentStatus, scan.rawStatus || scan.status, scan.location);
       } else {
-        // Just update tracking info
         await prisma.shipment.update({
           where: { id: shipment.id },
           data: {
@@ -153,6 +144,16 @@ router.post('/delhivery', async (req: Request, res: Response): Promise<void> => 
             trackingLocation: scan.location || null,
             trackingUpdatedAt: new Date(),
           },
+        });
+      }
+
+      // If package is delivered and EPOD is missing, trigger background document fetch
+      if (newShipmentStatus === 'DELIVERED' && !shipment.epodStoragePath) {
+        delhiveryDocumentFetcher.tryFetchArtifact(shipment.orderId, scan.waybill, 'epod').catch((docErr) => {
+          logger.debug('Background EPOD fetch on DELIVERED scan failed (will retry on cron)', {
+            waybill: scan.waybill,
+            error: docErr.message,
+          });
         });
       }
 
@@ -167,71 +168,226 @@ router.post('/delhivery', async (req: Request, res: Response): Promise<void> => 
       });
     }
 
-    // Always return 200 quickly so Delhivery doesn't retry (round-2 G10: only swallow AFTER persist)
     res.status(200).json({ received: true, processed: normalized.length });
   } catch (error: any) {
     logger.error('Delhivery webhook processing error', { error: error.message });
-    // Still return 200 to prevent retries — we'll catch up on polling
     res.status(200).json({ received: true, error: 'processing_error' });
   }
-});
+}
 
 /**
  * Delhivery EPOD Webhook Handler
- * Endpoint: POST /webhooks/delhivery/epod
+ * Endpoint: POST /webhooks/delhivery/epod (and alias /webhooks/delhivery/pod)
+ *
+ * Processes Electronic Proof of Delivery (EPOD) pushed by Delhivery upon parcel delivery.
+ * Stores EPOD image/PDF into Firebase Storage, updates Shipment with epodStoragePath,
+ * transitions Order and Shipment to DELIVERED, and records tracking events.
  */
-router.post('/delhivery/epod', async (req: Request, res: Response): Promise<void> => {
+export async function handleEpodPush(req: Request, res: Response): Promise<void> {
   try {
-    const { waybill, EPOD, orderID } = req.body || {};
-    logger.info('Received Delhivery EPOD webhook', { waybill, orderID, hasImage: Boolean(EPOD) });
+    if (!verifyDelhiveryWebhookSecret(req)) {
+      logger.warn('Delhivery EPOD webhook rejected: bad secret');
+      res.status(401).json({ success: false, error: 'invalid_secret' });
+      return;
+    }
 
-    if (waybill) {
-      const shipment = await prisma.shipment.findFirst({
-        where: { waybillNumber: String(waybill) },
+    const payload = req.body;
+    const rawItems = Array.isArray(payload) ? payload.slice(0, 500) : [payload];
+    const normalized = rawItems.map(normalizeEpodPayload).filter(Boolean) as NormalizedEpod[];
+
+    if (normalized.length === 0) {
+      logger.warn('Delhivery EPOD webhook received with empty or invalid payload', {
+        keys: Object.keys(payload || {}),
+      });
+      res.status(200).json({ success: true, processed: 0, message: 'No valid EPOD records found' });
+      return;
+    }
+
+    let processedCount = 0;
+
+    for (const epod of normalized) {
+      logger.info('Received Delhivery EPOD webhook record', {
+        waybill: epod.waybill,
+        orderId: epod.orderId,
+        receivedBy: epod.receivedBy,
+        hasEpodData: Boolean(epod.epodData),
+      });
+
+      // Find shipment by waybill
+      let shipment = await prisma.shipment.findFirst({
+        where: { waybillNumber: epod.waybill },
         include: { order: true },
       });
-      if (shipment) {
-        await prisma.trackingLog.create({
+
+      // If not found by waybill, attempt fallback by reference order id
+      if (!shipment && epod.orderId) {
+        const order = await prisma.order.findFirst({
+          where: {
+            OR: [
+              ...(Number.isInteger(Number(epod.orderId)) ? [{ id: Number(epod.orderId) }] : []),
+              { shopifyOrderId: String(epod.orderId) },
+              { shopifyOrderName: String(epod.orderId).startsWith('#') ? String(epod.orderId) : `#${epod.orderId}` },
+            ],
+          },
+          include: { shipment: true },
+        });
+        if (order?.shipment) {
+          shipment = { ...order.shipment, order } as any;
+        }
+      }
+
+      if (!shipment) {
+        logger.warn('Shipment not found for EPOD webhook waybill', {
+          waybill: epod.waybill,
+          orderId: epod.orderId,
+        });
+        continue;
+      }
+
+      // If EPOD image or URL is provided, save artifact to Firebase Storage
+      let artifactSaved = false;
+      if (epod.epodData) {
+        const saveRes = await delhiveryDocumentFetcher.saveEpodArtifact(
+          shipment.orderId,
+          epod.waybill,
+          epod.epodData,
+          epod.receivedBy,
+          epod.receivedAt
+        );
+        artifactSaved = saveRes.uploaded;
+      }
+
+      // If payload had no image data or saving failed, fall back to REST download
+      if (!artifactSaved && !shipment.epodStoragePath) {
+        delhiveryDocumentFetcher.tryFetchArtifact(shipment.orderId, epod.waybill, 'epod').catch((err) => {
+          logger.debug('Fallback REST EPOD download scheduled', {
+            waybill: epod.waybill,
+            error: err.message,
+          });
+        });
+      }
+
+      // EPOD receipt is conclusive proof of delivery — transition to DELIVERED
+      if (shipment.status !== 'DELIVERED') {
+        await prisma.shipment.update({
+          where: { id: shipment.id },
           data: {
-            shipmentId: shipment.id,
-            waybill: String(waybill),
-            status: 'EPOD_RECEIVED',
-            location: shipment.trackingLocation || 'Delivered Location',
-            remark: 'Electronic Proof of Delivery (EPOD) received from Delhivery',
-            scannedAt: new Date(),
+            status: 'DELIVERED',
+            trackingStatus: 'Delivered (EPOD Verified)',
+            trackingUpdatedAt: new Date(),
+            ...(epod.receivedBy ? { epodReceivedBy: epod.receivedBy } : {}),
+            epodReceivedAt: epod.receivedAt || new Date(),
+          },
+        });
+
+        if (shipment.order && shipment.order.status !== 'DELIVERED') {
+          await handleStatusTransition(
+            shipment.order,
+            'DELIVERED',
+            'Delivered (EPOD Verified)',
+            shipment.trackingLocation || undefined
+          );
+        }
+      } else if (epod.receivedBy && !shipment.epodReceivedBy) {
+        // Update consignee name if not present
+        await prisma.shipment.update({
+          where: { id: shipment.id },
+          data: {
+            epodReceivedBy: epod.receivedBy,
+            epodReceivedAt: epod.receivedAt || shipment.epodReceivedAt || new Date(),
           },
         });
       }
+
+      // Log tracking history
+      await prisma.trackingLog.create({
+        data: {
+          shipmentId: shipment.id,
+          waybill: epod.waybill,
+          status: 'EPOD_RECEIVED',
+          location: shipment.trackingLocation || 'Delivered Location',
+          remark: `Electronic Proof of Delivery (EPOD) confirmed from Delhivery${
+            epod.receivedBy ? `. Received by: ${epod.receivedBy}` : ''
+          }`,
+          scannedAt: epod.receivedAt || new Date(),
+          receivedBy: epod.receivedBy || null,
+        },
+      });
+
+      // Record SyncLog
+      await prisma.syncLog.create({
+        data: {
+          orderId: shipment.orderId,
+          syncType: 'TRACKING_UPDATE',
+          status: 'SUCCESS',
+          message: `Delhivery EPOD received for AWB ${epod.waybill}${
+            epod.receivedBy ? ` (Received by: ${epod.receivedBy})` : ''
+          }`,
+        },
+      });
+
+      processedCount++;
     }
-    res.status(200).json({ success: true, message: 'EPOD received successfully' });
+
+    res.status(200).json({
+      success: true,
+      message: 'EPOD processed successfully',
+      processed: processedCount,
+    });
   } catch (err: any) {
     logger.error('Error handling Delhivery EPOD webhook', { error: err.message });
-    res.status(200).json({ success: true, warning: 'Processed with warnings' });
+    res.status(200).json({ success: true, warning: 'Processed with warnings', error: err.message });
   }
-});
+}
 
 /**
  * Delhivery QC Image Webhook Handler
  * Endpoint: POST /webhooks/delhivery/qc-image
  */
-router.post('/delhivery/qc-image', async (req: Request, res: Response): Promise<void> => {
+export async function handleQcImagePush(req: Request, res: Response): Promise<void> {
   try {
-    const { waybillId, returnId, Image } = req.body || {};
-    logger.info('Received Delhivery QC Image webhook', { waybillId, returnId, hasImage: Boolean(Image) });
+    if (!verifyDelhiveryWebhookSecret(req)) {
+      res.status(401).json({ success: false, error: 'invalid_secret' });
+      return;
+    }
+
+    const { waybillId, returnId, Image, image, waybill } = req.body || {};
+    const effectiveWaybill = waybillId || waybill || returnId;
+    const effectiveImage = Image || image;
+
+    logger.info('Received Delhivery QC Image webhook', {
+      waybill: effectiveWaybill,
+      hasImage: Boolean(effectiveImage),
+    });
+
+    if (effectiveWaybill) {
+      const returnRecord = await prisma.return.findFirst({
+        where: { returnWaybillNumber: String(effectiveWaybill) },
+      });
+
+      if (returnRecord && effectiveImage) {
+        delhiveryDocumentFetcher.tryFetchArtifact(returnRecord.orderId, String(effectiveWaybill), 'qc').catch(() => {});
+      }
+    }
 
     res.status(200).json({ success: true, message: 'QC Image received successfully' });
   } catch (err: any) {
     logger.error('Error handling Delhivery QC Image webhook', { error: err.message });
     res.status(200).json({ success: true, warning: 'Processed with warnings' });
   }
-});
+}
 
 /**
  * Delhivery Sorter Image Webhook Handler
  * Endpoint: POST /webhooks/delhivery/sorter-image
  */
-router.post('/delhivery/sorter-image', async (req: Request, res: Response): Promise<void> => {
+export async function handleSorterImagePush(req: Request, res: Response): Promise<void> {
   try {
+    if (!verifyDelhiveryWebhookSecret(req)) {
+      res.status(401).json({ success: false, error: 'invalid_secret' });
+      return;
+    }
+
     const { waybill, image, status } = req.body || {};
     logger.info('Received Delhivery Sorter Image webhook', { waybill, status, hasImage: Boolean(image) });
 
@@ -240,26 +396,18 @@ router.post('/delhivery/sorter-image', async (req: Request, res: Response): Prom
     logger.error('Error handling Delhivery Sorter Image webhook', { error: err.message });
     res.status(200).json({ success: true, warning: 'Processed with warnings' });
   }
-});
+}
 
 /**
  * Normalize a Delhivery scan-push payload into a flat shape.
- *
- * Supports both the official nested schema:
- *   { Shipment: { AWB, ReferenceNo, Sortcode, NSLCode, PickUpDate,
- *                 Status: { Status, StatusDateTime, StatusType, StatusLocation, Instructions } } }
- * and the legacy flat schema:
- *   { waybill, status, status_type, location, scan_datetime, remarks, received_by }
- *
- * Returns null if waybill can't be determined.
  */
-interface NormalizedScan {
+export interface NormalizedScan {
   waybill: string;
-  status: string;        // Composite key "STATUSTYPE:RawStatus" e.g. "DL:Delivered"
+  status: string; // Composite key "STATUSTYPE:RawStatus" e.g. "DL:Delivered"
   statusType?: string;
   rawStatus?: string;
   location?: string;
-  scanDateTime: string;  // ISO string
+  scanDateTime: string; // ISO string
   remarks?: string;
   instructions?: string;
   pickupDate?: string;
@@ -269,20 +417,20 @@ interface NormalizedScan {
   receivedBy?: string;
 }
 
-function normalizeScanPushPayload(input: any): NormalizedScan | null {
+export function normalizeScanPushPayload(input: any): NormalizedScan | null {
   if (!input || typeof input !== 'object') return null;
 
   // Official nested schema
   if (input.Shipment && typeof input.Shipment === 'object') {
     const s = input.Shipment;
     const st = s.Status || {};
-    const waybill = s.AWB || s.awb;
+    const waybill = s.AWB || s.awb || s.waybill || s.Waybill || s.waybill_number || s.waybillNumber || s.waybillId;
     if (!waybill) return null;
     const statusType = st.StatusType || s.statusType || s.status_type;
     const rawStatus = st.Status || s.status;
     const scanDateTime = st.StatusDateTime || s.scan_datetime || new Date().toISOString();
     return {
-      waybill: String(waybill),
+      waybill: String(waybill).trim(),
       status: `${statusType || ''}:${rawStatus || ''}`,
       statusType,
       rawStatus,
@@ -298,35 +446,134 @@ function normalizeScanPushPayload(input: any): NormalizedScan | null {
     };
   }
 
-  // Legacy flat schema (older Delhivery accounts / partner integrations)
-  const waybill = input.waybill || input.awb;
+  // Legacy flat schema
+  const waybill =
+    input.waybill ||
+    input.awb ||
+    input.AWB ||
+    input.Waybill ||
+    input.waybill_number ||
+    input.waybillNumber ||
+    input.waybillId;
   if (!waybill) return null;
-  const statusType = input.status_type || input.statusType;
-  const rawStatus = input.status;
+
+  const statusType = input.status_type || input.statusType || input.StatusType;
+  const rawStatus = input.status || input.Status || input.rawStatus;
   return {
-    waybill: String(waybill),
+    waybill: String(waybill).trim(),
     status: `${statusType || ''}:${rawStatus || ''}`,
     statusType,
     rawStatus,
-    location: input.location || input.scan_location,
-    scanDateTime: input.scan_datetime || input.scanDateTime || new Date().toISOString(),
-    remarks: input.remarks || input.remark,
+    location: input.location || input.scan_location || input.StatusLocation,
+    scanDateTime: input.scan_datetime || input.scanDateTime || input.StatusDateTime || new Date().toISOString(),
+    remarks: input.remarks || input.remark || input.Instructions,
     instructions: undefined,
-    pickupDate: undefined,
-    nslCode: undefined,
-    sortCode: undefined,
-    referenceNo: undefined,
-    receivedBy: input.received_by || input.receivedBy,
+    pickupDate: input.pickup_date || input.PickUpDate || undefined,
+    nslCode: input.nsl_code || input.NSLCode || undefined,
+    sortCode: input.sort_code || input.Sortcode || undefined,
+    referenceNo: input.reference_no || input.ReferenceNo || undefined,
+    receivedBy: input.received_by || input.receivedBy || input.ReceivedBy,
   };
 }
 
-// Exported for unit tests so the webhook payload contract stays pinned in CI.
-// Not used in production code paths.
-export const __test__ = { normalizeScanPushPayload };
+/**
+ * Normalized EPOD payload shape
+ */
+export interface NormalizedEpod {
+  waybill: string;
+  orderId?: string | number;
+  epodData?: string; // URL or Base64 string
+  receivedBy?: string;
+  receivedAt?: Date;
+  referenceNo?: string;
+}
+
+export function normalizeEpodPayload(input: any): NormalizedEpod | null {
+  if (!input || typeof input !== 'object') return null;
+
+  // Nested Shipment shape
+  if (input.Shipment && typeof input.Shipment === 'object') {
+    const s = input.Shipment;
+    const waybill = s.AWB || s.awb || s.waybill || s.Waybill || s.waybill_number;
+    if (!waybill) return null;
+    const epodData = s.EPOD || s.epod || s.pod || s.POD || s.image || s.document || s.url;
+    const receivedBy = s.receivedBy || s.received_by || s.ReceivedBy || s.consignee || s.delivered_to;
+    const rawTime = s.StatusDateTime || s.timestamp || s.deliveryDate || s.delivered_at;
+    const receivedAt = rawTime ? new Date(rawTime) : undefined;
+    return {
+      waybill: String(waybill).trim(),
+      orderId: s.ReferenceNo || s.orderID || s.orderId,
+      epodData: epodData ? String(epodData).trim() : undefined,
+      receivedBy: receivedBy ? String(receivedBy).trim() : undefined,
+      receivedAt: receivedAt && !Number.isNaN(receivedAt.getTime()) ? receivedAt : undefined,
+      referenceNo: s.ReferenceNo ? String(s.ReferenceNo) : undefined,
+    };
+  }
+
+  // Flat shape
+  const waybill =
+    input.waybill ||
+    input.awb ||
+    input.AWB ||
+    input.Waybill ||
+    input.waybill_number ||
+    input.waybillNumber ||
+    input.waybillId;
+  if (!waybill) return null;
+
+  const epodData =
+    input.EPOD ||
+    input.epod ||
+    input.pod ||
+    input.POD ||
+    input.image ||
+    input.document ||
+    input.url ||
+    input.doc_url ||
+    input.signed_url ||
+    input.data?.EPOD ||
+    input.data?.url ||
+    input.data?.epod;
+
+  const receivedBy =
+    input.receivedBy ||
+    input.received_by ||
+    input.ReceivedBy ||
+    input.consignee ||
+    input.delivered_to ||
+    input.signed_by;
+
+  const rawTime =
+    input.timestamp ||
+    input.scannedAt ||
+    input.scanDateTime ||
+    input.delivered_at ||
+    input.deliveryDate ||
+    input.StatusDateTime;
+  const receivedAt = rawTime ? new Date(rawTime) : undefined;
+
+  const orderId =
+    input.orderID ||
+    input.orderId ||
+    input.order_id ||
+    input.ref_num ||
+    input.ReferenceNo;
+
+  return {
+    waybill: String(waybill).trim(),
+    orderId,
+    epodData: epodData ? String(epodData).trim() : undefined,
+    receivedBy: receivedBy ? String(receivedBy).trim() : undefined,
+    receivedAt: receivedAt && !Number.isNaN(receivedAt.getTime()) ? receivedAt : undefined,
+    referenceNo: input.ReferenceNo ? String(input.ReferenceNo) : undefined,
+  };
+}
+
+// Exported for unit tests so webhook contracts stay pinned in CI
+export const __test__ = { normalizeScanPushPayload, normalizeEpodPayload };
 
 /**
  * Handle order status transition + WhatsApp notifications.
- * Same logic as the tracking service polling, but triggered by webhook.
  */
 async function handleStatusTransition(
   order: any,
@@ -334,10 +581,10 @@ async function handleStatusTransition(
   delhiveryStatusText: string,
   location?: string
 ): Promise<void> {
+  if (!order) return;
+
   switch (newShipmentStatus) {
     case 'CREATED':
-      // Manifested / Not Picked — label generated, courier hasn't picked up yet.
-      // Keep/correct order in DISPATCHED so Ready-to-ship shows "awaiting pickup".
       if (['DISPATCH_PENDING', 'SHIPPED', 'IN_TRANSIT'].includes(order.status)) {
         await prisma.order.update({
           where: { id: order.id },
@@ -419,5 +666,26 @@ async function handleStatusTransition(
       break;
   }
 }
+
+// ────────────────────────────────────────────────────────────
+// Route Registration with Comprehensive Aliases
+// ────────────────────────────────────────────────────────────
+
+// 1. Scan Push (Status Tracking)
+router.post('/delhivery', handleScanPush);
+router.post('/delhivery/scan', handleScanPush);
+router.post('/delhivery/tracking', handleScanPush);
+
+// 2. EPOD / POD Push (Electronic Proof of Delivery)
+router.post('/delhivery/epod', handleEpodPush);
+router.post('/delhivery/pod', handleEpodPush);
+
+// 3. QC Image Push (Reverse Logistics QC)
+router.post('/delhivery/qc-image', handleQcImagePush);
+router.post('/delhivery/qc', handleQcImagePush);
+
+// 4. Sorter Image Push
+router.post('/delhivery/sorter-image', handleSorterImagePush);
+router.post('/delhivery/sorter', handleSorterImagePush);
 
 export default router;

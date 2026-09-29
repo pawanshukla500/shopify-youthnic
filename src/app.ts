@@ -93,6 +93,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // Routes
 app.use('/webhooks', webhookRoutes);
 app.use('/webhooks', delhiveryWebhookRoutes);
+app.use('/', delhiveryWebhookRoutes);
 app.use('/api', requireAuth, apiRoutes);
 
 // Static frontend build for production
@@ -100,7 +101,12 @@ const clientDist = process.env.CLIENT_DIST_PATH || path.join(__dirname, '../fron
 if (fs.existsSync(clientDist)) {
   app.use(express.static(clientDist));
   app.get('*', (req, res, next) => {
-    if (req.path.startsWith('/api') || req.path.startsWith('/webhooks') || req.path.startsWith('/logos')) {
+    if (
+      req.path.startsWith('/api') ||
+      req.path.startsWith('/webhooks') ||
+      req.path.startsWith('/delhivery') ||
+      req.path.startsWith('/logos')
+    ) {
       return next();
     }
     res.sendFile(path.join(clientDist, 'index.html'));

@@ -41,7 +41,8 @@ async function main(): Promise<void> {
 
   console.log('\n── Expected webhook URLs (give these to providers) ──');
   console.log(`Shopify (auto via POST /api/setup/webhooks): ${appBase}/webhooks/shopify`);
-  console.log(`Delhivery scan-push (manual email to lastmile-integration@delhivery.com): ${appBase}/webhooks/delhivery${webhookSecret ? '?secret=****' : ''}`);
+  console.log(`Delhivery scan-push (email to lastmile-integration@delhivery.com): ${appBase}/webhooks/delhivery${webhookSecret ? '?secret=****' : ''}`);
+  console.log(`Delhivery EPOD push (email to lastmile-integration@delhivery.com): ${appBase}/webhooks/delhivery/epod${webhookSecret ? '?secret=****' : ''}`);
   console.log(`WhatsApp inbound (public, GET+POST): ${appBase}/api/webhooks/whatsapp`);
 
   if (!token) {

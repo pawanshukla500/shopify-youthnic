@@ -2724,6 +2724,90 @@ router.get('/delhivery/document/:waybill', async (req: Request, res: Response): 
   }
 });
 
+// Get EPOD details and viewing URL for an order
+router.get('/orders/:id/epod', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const orderId = parseInt(req.params.id, 10);
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: { shipment: true },
+    });
+
+    if (!order) {
+      res.status(404).json({ error: 'Order not found' });
+      return;
+    }
+
+    const shipment = order.shipment;
+    if (!shipment || !shipment.waybillNumber) {
+      res.status(400).json({ error: 'Order has no active shipment or waybill' });
+      return;
+    }
+    const waybill = shipment.waybillNumber;
+
+    // 1. If already uploaded to Firebase Cloud Storage, return the artifact URL directly
+    if (shipment.epodStoragePath) {
+      const bucketName = config.firebase.storageBucket || 'shopify-134b9.firebasestorage.app';
+      const cleanPath = shipment.epodStoragePath.replace(/^gs:\/\/[^/]+\//, '');
+      const epodUrl = `https://storage.googleapis.com/${bucketName}/${cleanPath}`;
+      res.json({
+        success: true,
+        waybill,
+        epodUrl,
+        storagePath: shipment.epodStoragePath,
+        receivedBy: shipment.epodReceivedBy,
+        receivedAt: shipment.epodReceivedAt,
+        status: shipment.status,
+        source: 'firebase_storage',
+      });
+      return;
+    }
+
+    // 2. If not stored yet, attempt live fetch via Delhivery Document API
+    try {
+      const docFetcher = (await import('../modules/delhivery/delhivery-document-fetcher.service')).default;
+      const fetchResult = await docFetcher.tryFetchArtifact(order.id, waybill, 'epod');
+      if (fetchResult.uploaded && fetchResult.path) {
+        const bucketName = config.firebase.storageBucket || 'shopify-134b9.firebasestorage.app';
+        const cleanPath = fetchResult.path.replace(/^gs:\/\/[^/]+\//, '');
+        const epodUrl = `https://storage.googleapis.com/${bucketName}/${cleanPath}`;
+        res.json({
+          success: true,
+          waybill,
+          epodUrl,
+          storagePath: fetchResult.path,
+          receivedBy: shipment.epodReceivedBy,
+          receivedAt: shipment.epodReceivedAt || new Date(),
+          status: shipment.status,
+          source: 'delhivery_api_live',
+        });
+        return;
+      }
+    } catch (fetchErr: any) {
+      logger.warn('Live EPOD fetch failed', { waybill, error: fetchErr.message });
+    }
+
+    // 3. Fallback: query Delhivery raw document endpoint directly
+    try {
+      const doc = await delhiveryService.downloadDocument(waybill, 'EPOD');
+      res.json({
+        success: Boolean(doc),
+        waybill,
+        document: doc,
+        source: 'delhivery_raw',
+        message: 'EPOD retrieved from Delhivery (not yet archived to Firebase)',
+      });
+    } catch (docErr: any) {
+      res.status(404).json({
+        success: false,
+        error: 'EPOD document not yet generated or available from Delhivery',
+      });
+    }
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Take NDR action: RE-ATTEMPT | PICKUP_RESCHEDULE | DEFER_DLV (+deferredDate YYYY-MM-DD, ≤6d) | EDIT_DETAILS (+name/phone/address).
 // Async — returns UPL id; check via GET /api/delhivery/ndr/:uplId. StatusCode gating (EOD-*/ST-108) readable from tracking.
 router.post('/delhivery/ndr', async (req: Request, res: Response): Promise<void> => {

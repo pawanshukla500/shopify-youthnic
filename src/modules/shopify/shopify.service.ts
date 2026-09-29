@@ -982,8 +982,8 @@ class ShopifyService {
     for (let i = 0; i < gids.length; i += chunkSize) {
       const chunk = gids.slice(i, i + chunkSize);
       try {
-        const query = `{
-          nodes(ids: ${JSON.stringify(chunk)}) {
+        const query = `query getVariantImages($ids: [ID!]!) {
+          nodes(ids: $ids) {
             ... on ProductVariant {
               id
               image { url }
@@ -992,8 +992,8 @@ class ShopifyService {
           }
         }`;
 
-        const response = await this.client.post('/graphql.json', { query });
-        const nodes = response.data?.data?.nodes || [];
+        const data = await this.graphql<{ nodes: any[] }>(query, { ids: chunk });
+        const nodes = data?.nodes || [];
         for (const node of nodes) {
           if (!node) continue;
           const rawId = node.id.replace('gid://shopify/ProductVariant/', '');
@@ -1085,10 +1085,16 @@ class ShopifyService {
     }
 
     try {
-      const response = await this.client.post('/graphql.json', {
-        query: `{ order(id: "gid://shopify/Order/${order.id}") { app { name } } }`,
-      });
-      const appName: string | undefined = response.data?.data?.order?.app?.name;
+      const query = `query getOrderApp($id: ID!) {
+        order(id: $id) {
+          app {
+            name
+          }
+        }
+      }`;
+      const gid = String(order.id).startsWith('gid://') ? String(order.id) : `gid://shopify/Order/${order.id}`;
+      const data = await this.graphql<{ order?: { app?: { name?: string } } }>(query, { id: gid });
+      const appName = data?.order?.app?.name;
       if (appName) {
         this.salesChannelCache.set(sourceName, appName);
         logger.info('Resolved Shopify sales channel', { sourceName, salesChannel: appName });

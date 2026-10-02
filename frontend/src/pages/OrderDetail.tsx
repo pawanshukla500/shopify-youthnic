@@ -24,7 +24,7 @@ import {
   downloadBulkPackZip,
   syncExternalOrderFulfillment,
 } from '../api'
-import { formatDate, formatMoney, labelize } from '../lib'
+import { carrierTrackingUrl, formatDate, formatMoney, labelize } from '../lib'
 import { Button, ButtonGroup, CopyableBadge, EmptyState, ErrorBox, FormField, Icon, InfoCard, LoadingState, PageIntro, Panel, PanelHeading, StatCard, StatusBadge, useDocumentTitle, useToast } from '../components/UI'
 import type { Order, OrderItem } from '../types'
 
@@ -91,8 +91,8 @@ export function OrderDetail() {
     },
     onSuccess: async (data, kind) => {
       if (kind === 'label') {
-        if (data.labelUrl) window.open(data.labelUrl, '_blank', 'noopener,noreferrer')
-        toast.toast('success', 'Label ready. Opening in a new tab.')
+        if (order?.id) openPrintableOrderLabel(order.id)
+        toast.toast('success', 'Printable label opened. Packing-slip links expire, so this stays inside Youthnic.')
       } else if (kind === 'verify') {
         toast.toast(data.verified ? 'success' : 'error', data.reason ?? (data.verified ? 'Payment verified.' : 'Payment could not be verified.'))
       } else if (kind === 'dispatch') {
@@ -651,15 +651,10 @@ export function OrderDetail() {
             )}
             <a
               className="button button-secondary"
-              href={
-                order.shipment.labelUrl ||
-                (order.shipment.courier?.toLowerCase() === 'ekart'
-                  ? `https://t.proship.in/${order.shipment.waybillNumber}`
-                  : `https://www.delhivery.com/track/package/${order.shipment.waybillNumber}`)
-              }
+              href={carrierTrackingUrl(order.shipment.courier, order.shipment.waybillNumber)}
               target="_blank"
               rel="noopener noreferrer"
-              title={`Track directly on ${order.shipment.courier || 'Carrier'}`}
+              title={`Track directly on ${order.shipment.courier || 'Delhivery'}`}
             >
               <Icon name="route" size={14} />
               Track ({order.shipment.courier || 'Carrier'})
@@ -1210,12 +1205,7 @@ export function OrderDetail() {
 
                     <a
                       className="button button-secondary"
-                      href={
-                        order.shipment.labelUrl ||
-                        (order.shipment.courier?.toLowerCase() === 'ekart'
-                          ? `https://t.proship.in/${order.shipment.waybillNumber}`
-                          : `https://www.delhivery.com/track/package/${order.shipment.waybillNumber}`)
-                      }
+                      href={carrierTrackingUrl(order.shipment.courier, order.shipment.waybillNumber)}
                       target="_blank"
                       rel="noopener noreferrer"
                       title={`Open tracking page on ${order.shipment.courier || 'Delhivery'}`}

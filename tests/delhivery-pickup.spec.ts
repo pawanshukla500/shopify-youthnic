@@ -15,7 +15,13 @@ describe('Delhivery pickup mapping (Ready-to-ship)', () => {
   it('Picked-up scans promote to PICKED_UP', () => {
     expect(delhiveryService.mapTrackingToShipmentStatus('UD', 'Picked Up')).toBe('PICKED_UP');
     expect(delhiveryService.mapTrackingToShipmentStatus('UD', 'Received at Surat hub')).toBe('PICKED_UP');
-    expect(delhiveryService.mapTrackingToShipmentStatus('UD', 'In Transit', true)).toBe('PICKED_UP');
+    expect(delhiveryService.mapTrackingToShipmentStatus('UD', 'Manifested', true)).toBe('PICKED_UP');
+  });
+
+  it('linehaul and out-for-delivery stay ahead of pickup signals', () => {
+    expect(delhiveryService.mapTrackingToShipmentStatus('UD', 'In Transit', true)).toBe('IN_TRANSIT');
+    expect(delhiveryService.mapTrackingToShipmentStatus('UD', 'Dispatched', true)).toBe('OUT_FOR_DELIVERY');
+    expect(delhiveryService.mapTrackingToShipmentStatus('UD', 'Pending', false, 'Consignee unavailable')).toBe('FAILED');
   });
 
   it('delivery / RTO / cancel mapping unchanged', () => {

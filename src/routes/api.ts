@@ -23,8 +23,56 @@ import shippingLabelService from '../modules/delhivery/shipping-label.service';
 import invoiceService from '../modules/invoice/invoice.service';
 import picklistService from '../modules/picklist/picklist.service';
 import bulkPackService from '../modules/bulk-pack/bulk-pack.service';
+import { isExpiredSignedUrl, isUsableHttpUrl } from '../utils/signed-url';
 
 const router = Router();
+
+async function downloadLabelBytes(url: string): Promise<Buffer> {
+  if (isExpiredSignedUrl(url) || !url.startsWith('http')) {
+    throw new Error('signed_url_expired');
+  }
+  const response = await axios.get<ArrayBuffer>(url, {
+    responseType: 'arraybuffer',
+    timeout: 20000,
+    maxContentLength: 8 * 1024 * 1024,
+    validateStatus: (status) => status >= 200 && status < 300,
+  });
+  const buffer = Buffer.from(response.data);
+  const head = buffer.subarray(0, 240).toString('utf8');
+  if (/<Error>|AccessDenied|Request has expired/i.test(head)) {
+    throw new Error('signed_url_expired');
+  }
+  return buffer;
+}
+
+async function loadFreshLabelPdf(
+  waybill: string,
+  currentUrl?: string | null,
+  shipmentId?: number
+): Promise<Buffer | null> {
+  const candidates: string[] = [];
+  if (isUsableHttpUrl(currentUrl)) candidates.push(currentUrl);
+  try {
+    const fresh = await delhiveryService.generateLabel(waybill);
+    if (isUsableHttpUrl(fresh) && !candidates.includes(fresh)) candidates.unshift(fresh);
+    if (isUsableHttpUrl(fresh) && shipmentId) {
+      await prisma.shipment
+        .update({ where: { id: shipmentId }, data: { labelUrl: fresh } })
+        .catch(() => undefined);
+    }
+  } catch (err: any) {
+    logger.warn('Could not refresh Delhivery packing slip', { waybill, error: err.message });
+  }
+
+  for (const url of candidates) {
+    try {
+      return await downloadLabelBytes(url);
+    } catch (err: any) {
+      logger.warn('Packing slip download failed', { waybill, error: err.message });
+    }
+  }
+  return null;
+}
 
 // ─── Health ──────────────────────────────────────────────
 router.get('/health', (_req: Request, res: Response) => {
@@ -936,26 +984,28 @@ router.get('/orders/:id/label', async (req: Request, res: Response): Promise<voi
       return;
     }
 
-    // Attempt to retrieve official Delhivery S3 PDF if not already saved
-    if (!order.shipment?.labelUrl) {
+    // Refresh the packing-slip URL when it is missing or the S3 signature has
+    // expired. A stale link renders AccessDenied XML instead of a label.
+    const storedLabel = order.shipment?.labelUrl;
+    if (!isUsableHttpUrl(storedLabel)) {
       try {
         const officialUrl = await delhiveryService.generateLabel(waybillNumber);
-        if (officialUrl && officialUrl.startsWith('http')) {
-          if (order.shipment) {
-            order.shipment.labelUrl = officialUrl;
-          }
+        if (isUsableHttpUrl(officialUrl)) {
+          if (order.shipment) order.shipment.labelUrl = officialUrl;
           await prisma.shipment.update({
             where: { orderId: order.id },
             data: { labelUrl: officialUrl },
           });
+        } else if (order.shipment) {
+          order.shipment.labelUrl = null;
         }
       } catch {
-        // Fallback to thermal HTML
+        if (order.shipment) order.shipment.labelUrl = null;
       }
     }
 
-    if (req.query.pdf === 'true' && order.shipment?.labelUrl && order.shipment.labelUrl.startsWith('http')) {
-      res.redirect(order.shipment.labelUrl);
+    if (req.query.pdf === 'true' && isUsableHttpUrl(order.shipment?.labelUrl)) {
+      res.redirect(order.shipment!.labelUrl!);
       return;
     }
 
@@ -980,11 +1030,11 @@ router.get('/orders/:id/label/download', async (req: Request, res: Response): Pr
       return;
     }
     const waybill = order.shipment?.waybillNumber || `PENDING-${order.shopifyOrderName.replace('#', '')}`;
-    if (order.shipment?.labelUrl && order.shipment.labelUrl.startsWith('http')) {
-      const pdfRes = await axios.get(order.shipment.labelUrl, { responseType: 'stream', timeout: 20000 });
+    const pdf = await loadFreshLabelPdf(waybill, order.shipment?.labelUrl, order.shipment?.id);
+    if (pdf) {
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="delhivery-label-${waybill}.pdf"`);
-      pdfRes.data.pipe(res);
+      res.send(pdf);
       return;
     }
     const html = shippingLabelService.generatePrintableLabelPage(order as any, waybill);
@@ -1665,7 +1715,7 @@ router.post('/orders/:id/returns', async (req: Request, res: Response): Promise<
       triggerShopify: triggerShopify !== false,
     });
 
-    // Auto-send Return Initiated Email to customer from Youthnic Returns <return@youthnic.com>
+    // Auto-send Return Initiated Email to customer from Youthnic Returns <returns@youthnic.com>
     // Triggered because this return was created from our side
     let emailDispatched = false;
     let emailResult: any = null;
@@ -1682,8 +1732,8 @@ router.post('/orders/:id/returns', async (req: Request, res: Response): Promise<
         emailResult = await resendService.sendEmail({
           to: order.customerEmail,
           templateType: 'RETURN_INITIATED',
-          fromEmail: 'Youthnic Returns <return@youthnic.com>',
-          replyTo: 'return@youthnic.com',
+          fromEmail: 'Youthnic Returns <returns@youthnic.com>',
+          replyTo: 'returns@youthnic.com',
           orderId: order.id,
           data: {
             orderName: order.shopifyOrderName,
@@ -1713,7 +1763,7 @@ router.post('/orders/:id/returns', async (req: Request, res: Response): Promise<
           title: `Return Pickup Scheduled: Order ${order.shopifyOrderName}`,
           description: `Reverse pickup waybill ${result.returnWaybill} scheduled via Delhivery.`,
           timestamp: new Date().toISOString(),
-          sender: 'Youthnic Returns <return@youthnic.com>',
+          sender: 'Youthnic Returns <returns@youthnic.com>',
           recipient: order.customerEmail,
           orderId: order.id,
           shopifyOrderName: order.shopifyOrderName,
@@ -1738,7 +1788,7 @@ router.post('/orders/:id/refund', async (req: Request, res: Response): Promise<v
     const { amount, reason } = req.body;
     const result = await returnService.refundOrder(orderId, amount ? parseFloat(amount) : undefined, reason);
 
-    // Send Refund Processed Email from Youthnic Refunds <refund@youthnic.com>
+    // Send Refund Processed Email from Youthnic Refunds <refunds@youthnic.com>
     let emailDispatched = false;
     let emailResult: any = null;
     try {
@@ -1750,8 +1800,8 @@ router.post('/orders/:id/refund', async (req: Request, res: Response): Promise<v
         emailResult = await resendService.sendEmail({
           to: order.customerEmail,
           templateType: 'RETURN_REFUND',
-          fromEmail: 'Youthnic Refunds <refund@youthnic.com>',
-          replyTo: 'refund@youthnic.com',
+          fromEmail: 'Youthnic Refunds <refunds@youthnic.com>',
+          replyTo: 'refunds@youthnic.com',
           orderId: order.id,
           data: {
             orderName: order.shopifyOrderName,
@@ -1779,7 +1829,7 @@ router.post('/orders/:id/refund', async (req: Request, res: Response): Promise<v
           title: `Refund Processed: ₹${result.refundAmount} for Order ${order.shopifyOrderName}`,
           description: `Refund ID: ${result.refundId}. Funds credited to original payment source.`,
           timestamp: new Date().toISOString(),
-          sender: 'Youthnic Refunds <refund@youthnic.com>',
+          sender: 'Youthnic Refunds <refunds@youthnic.com>',
           recipient: order.customerEmail,
           orderId: order.id,
           shopifyOrderName: order.shopifyOrderName,
@@ -1803,7 +1853,7 @@ router.post('/orders/:id/refund', async (req: Request, res: Response): Promise<v
  *   1. Marks the return as received
  *   2. Runs QC
  *   3. Auto-processes refund on Shopify if QC passes (no issue)
- *   4. Automatically notifies consumer from refund@youthnic.com with Refund ID
+ *   4. Automatically notifies consumer from refunds@youthnic.com with Refund ID
  *
  * Body: { waybillNumber, qcStatus: 'APPROVED'|'REJECTED'|'PARTIAL', qcRemark? }
  */
@@ -1822,7 +1872,7 @@ router.post('/returns/scan', async (req: Request, res: Response): Promise<void> 
       qcRemark
     );
 
-    // If refund was processed (item received, no issue, QC approved) -> dispatch email from refund@youthnic.com with refund ID
+    // If refund was processed (item received, no issue, QC approved) -> dispatch email from refunds@youthnic.com with refund ID
     let emailDispatched = false;
     let emailResult: any = null;
     if (result.refundProcessed) {
@@ -1838,8 +1888,8 @@ router.post('/returns/scan', async (req: Request, res: Response): Promise<void> 
           emailResult = await resendService.sendEmail({
             to: returnRec.order.customerEmail,
             templateType: 'RETURN_REFUND',
-            fromEmail: 'Youthnic Refunds <refund@youthnic.com>',
-            replyTo: 'refund@youthnic.com',
+            fromEmail: 'Youthnic Refunds <refunds@youthnic.com>',
+            replyTo: 'refunds@youthnic.com',
             orderId: returnRec.order.id,
             data: {
               orderName: returnRec.order.shopifyOrderName,
@@ -1869,7 +1919,7 @@ router.post('/returns/scan', async (req: Request, res: Response): Promise<void> 
             title: `Refund Processed: ₹${finalRefundAmount} for Order ${returnRec.order.shopifyOrderName}`,
             description: `Return verified with 0 issues. Refund ID: ${finalRefundId}.`,
             timestamp: new Date().toISOString(),
-            sender: 'Youthnic Refunds <refund@youthnic.com>',
+            sender: 'Youthnic Refunds <refunds@youthnic.com>',
             recipient: returnRec.order.customerEmail,
             orderId: returnRec.order.id,
             shopifyOrderName: returnRec.order.shopifyOrderName,
@@ -1887,7 +1937,7 @@ router.post('/returns/scan', async (req: Request, res: Response): Promise<void> 
       emailDispatched,
       emailResult,
       message: result.refundProcessed
-        ? 'Return received, QC passed (no issue), refund processed and details emailed to consumer from refund@youthnic.com'
+        ? 'Return received, QC passed (no issue), refund processed and details emailed to consumer from refunds@youthnic.com'
         : 'Return received but refund not processed (QC pending or rejected)',
     });
   } catch (error: any) {
@@ -1902,7 +1952,7 @@ router.post('/returns/:id/refund', async (req: Request, res: Response): Promise<
     const { partial } = req.body;
     const result = await returnService.processRefund(returnId, partial);
 
-    // Send Refund Processed Email from Youthnic Refunds <refund@youthnic.com>
+    // Send Refund Processed Email from Youthnic Refunds <refunds@youthnic.com>
     let emailDispatched = false;
     let emailResult: any = null;
     if (result.success) {
@@ -1918,8 +1968,8 @@ router.post('/returns/:id/refund', async (req: Request, res: Response): Promise<
           emailResult = await resendService.sendEmail({
             to: returnRec.order.customerEmail,
             templateType: 'RETURN_REFUND',
-            fromEmail: 'Youthnic Refunds <refund@youthnic.com>',
-            replyTo: 'refund@youthnic.com',
+            fromEmail: 'Youthnic Refunds <refunds@youthnic.com>',
+            replyTo: 'refunds@youthnic.com',
             orderId: returnRec.order.id,
             data: {
               orderName: returnRec.order.shopifyOrderName,
@@ -1947,7 +1997,7 @@ router.post('/returns/:id/refund', async (req: Request, res: Response): Promise<
             title: `Refund Processed: ₹${finalRefundAmount} for Order ${returnRec.order.shopifyOrderName}`,
             description: `Refund ID: ${finalRefundId}. Credited to customer account.`,
             timestamp: new Date().toISOString(),
-            sender: 'Youthnic Refunds <refund@youthnic.com>',
+            sender: 'Youthnic Refunds <refunds@youthnic.com>',
             recipient: returnRec.order.customerEmail,
             orderId: returnRec.order.id,
             shopifyOrderName: returnRec.order.shopifyOrderName,
@@ -2570,11 +2620,32 @@ router.get('/delhivery/label/:waybill/download', async (req: Request, res: Respo
       res.send(html);
       return;
     }
-    const pdfResponse = await axios.get<ArrayBuffer>(labelUrl, {
-      responseType: 'arraybuffer',
-      timeout: 20000,
-      maxContentLength: 8 * 1024 * 1024, // 8 MiB safety cap
-    });
+    let pdfBuffer: Buffer;
+    try {
+      pdfBuffer = await downloadLabelBytes(labelUrl);
+    } catch (downloadErr: any) {
+      logger.warn('Official label URL failed, falling back to printable HTML', {
+        waybill,
+        error: downloadErr.message,
+      });
+      const shipment = await prisma.shipment.findFirst({
+        where: { waybillNumber: waybill },
+        include: { order: { include: { items: true } } },
+      });
+      if (!shipment?.order) {
+        res.status(404).json({
+          error: 'Shipping label PDF expired and no order was found to render an HTML fallback.',
+          waybill,
+        });
+        return;
+      }
+      const html = shippingLabelService.generatePrintableLabelPage(shipment.order as any, waybill);
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.setHeader('Content-Disposition', `inline; filename="delhivery-label-${waybill}.html"`);
+      res.send(html);
+      return;
+    }
+    const pdfResponse = { data: pdfBuffer };
 
     // Mirror into Firebase Storage so the URL is durable (delhivery signed URLs expire).
     // Best-effort — never block the operator download on a storage failure.
@@ -4172,11 +4243,11 @@ router.post('/settings/resend/test', async (req: Request, res: Response): Promis
       data: {
         orderName: '#26YOU5752',
         customerName: 'Test Recipient',
-        waybillNumber: 'PROP0000031386',
+        waybillNumber: '30100810010054',
         courier: 'Delhivery Express',
-        currentLocation: 'Bhiwandi Sorting Hub',
-        delayReason: 'Logistics routing transit check & high regional volume',
-        newEstimatedDelivery: 'Friday, 27-Sep-2026',
+        currentLocation: 'Delhivery transit hub',
+        delayReason: 'Logistics routing transit check and high regional volume',
+        newEstimatedDelivery: 'Within 2 business days',
         items: [
           {
             title: 'Navy Blue Floral Print Kurti with Farshi Salwar Set',
@@ -4258,7 +4329,7 @@ router.get('/support/diagnostics', async (_req: Request, res: Response): Promise
       },
       resend: {
         ...resendStatus,
-        senderDefault: 'return@youthnic.com',
+        senderDefault: 'delivery@youthnic.com',
       },
       metaLlm: {
         ...metaLlmStatus,
@@ -4490,7 +4561,7 @@ router.get('/support/emails/:id', async (req: Request, res: Response): Promise<v
   }
 });
 
-// POST /api/support/emails/:id/reply — Send response from Youthnic Support <contact@youthnic.com> (or return@youthnic.com)
+// POST /api/support/emails/:id/reply — Send response from Youthnic Support <support@youthnic.com> (or returns@youthnic.com)
 router.post('/support/emails/:id/reply', async (req: Request, res: Response): Promise<void> => {
   try {
     const id = parseInt(req.params.id, 10);
@@ -4511,15 +4582,15 @@ router.post('/support/emails/:id/reply', async (req: Request, res: Response): Pr
       return;
     }
 
-    // Determine sender address: default to Youthnic Support <contact@youthnic.com>,
-    // or Youthnic Returns <return@youthnic.com> if return category or requested
-    const isReturnTicket = ticket.category === 'RETURN' || ticket.subject?.toLowerCase().includes('return') || fromEmail?.includes('return@youthnic.com');
+    // Determine sender address: default to Youthnic Support <support@youthnic.com>,
+    // or Youthnic Returns <returns@youthnic.com> if return category or requested
+    const isReturnTicket = ticket.category === 'RETURN' || ticket.subject?.toLowerCase().includes('return') || fromEmail?.includes('returns@youthnic.com');
     const effectiveSender = fromEmail
       ? fromEmail
       : isReturnTicket
-      ? 'Youthnic Returns <return@youthnic.com>'
-      : 'Youthnic Support <contact@youthnic.com>';
-    const effectiveReplyTo = isReturnTicket ? 'return@youthnic.com' : 'contact@youthnic.com';
+      ? 'Youthnic Returns <returns@youthnic.com>'
+      : 'Youthnic Support <support@youthnic.com>';
+    const effectiveReplyTo = isReturnTicket ? 'returns@youthnic.com' : 'support@youthnic.com';
 
     // 1. Dispatch email via Resend
     const subject = customSubject || `Re: ${ticket.subject}`;

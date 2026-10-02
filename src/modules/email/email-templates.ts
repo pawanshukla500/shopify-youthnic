@@ -47,9 +47,9 @@ export interface EmailTemplateData {
 const BRAND_NAME = 'Youthnic';
 const BRAND_TAGLINE = config.brand.tagline;
 const SUPPORT_PHONE = '+91 79849 84563';
-const CONTACT_EMAIL = 'contact@youthnic.com';
-const RETURN_EMAIL = 'return@youthnic.com';
-const REFUND_EMAIL = 'refund@youthnic.com';
+const CONTACT_EMAIL = 'support@youthnic.com';
+const RETURN_EMAIL = 'returns@youthnic.com';
+const REFUND_EMAIL = 'refunds@youthnic.com';
 const DELIVERY_EMAIL = 'delivery@youthnic.com';
 
 // Public HTTPS URL to the Youthnic wordmark logo hosted on Firebase Storage.
@@ -247,10 +247,10 @@ export function renderTransitDelayEmail(data: EmailTemplateData): { subject: str
         <strong>AWB:</strong> <span style="font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace; font-size: 12.5px;">${data.waybillNumber}</span>
       </div>` : ''}
       <div style="margin-bottom: 8px; font-size: 13px; color: #1e293b;">
-        <strong>Current Hub:</strong> <span>${data.currentLocation || 'Bhiwandi Sorting Center Hub'}</span>
+        <strong>Current Hub:</strong> <span>${data.currentLocation || 'Delhivery transit hub'}</span>
       </div>
       <div style="font-size: 13px; color: #1e293b;">
-        <strong>Revised Expected Delivery:</strong> <span>${data.newEstimatedDelivery || 'Saturday, 28-Sep-2026'}</span>
+        <strong>Revised Expected Delivery:</strong> <span>${data.newEstimatedDelivery || 'We will confirm a revised date shortly'}</span>
       </div>
     </div>
 
@@ -279,7 +279,7 @@ export function renderTransitDelayEmail(data: EmailTemplateData): { subject: str
 }
 
 /**
- * 2. RETURN INITIATED EMAIL TEMPLATE (From: return@youthnic.com)
+ * 2. RETURN INITIATED EMAIL TEMPLATE (From: returns@youthnic.com)
  * Sent ONLY when a return is created by our side.
  */
 export function renderReturnInitiatedEmail(data: EmailTemplateData): { subject: string; html: string } {
@@ -359,7 +359,7 @@ export function renderReturnInitiatedEmail(data: EmailTemplateData): { subject: 
         </tr>
         <tr>
           <td width="24" valign="top" style="font-weight: 700;">3.</td>
-          <td style="padding-bottom: 8px;"><strong>Direct Refund:</strong> Once the parcel reaches our Surat warehouse and clears inspection, your 100% refund is initiated immediately via <strong>refund@youthnic.com</strong>.</td>
+          <td style="padding-bottom: 8px;"><strong>Direct Refund:</strong> Once the parcel reaches our Surat warehouse and clears inspection, your 100% refund is initiated immediately via <strong>refunds@youthnic.com</strong>.</td>
         </tr>
       </table>
     </div>
@@ -391,7 +391,7 @@ export function renderReturnInitiatedEmail(data: EmailTemplateData): { subject: 
 }
 
 /**
- * 3. RETURN REFUND EMAIL TEMPLATE (From: refund@youthnic.com)
+ * 3. RETURN REFUND EMAIL TEMPLATE (From: refunds@youthnic.com)
  * Sent AFTER the return is received, quality check passes with no issue, and refund is completed.
  */
 export function renderReturnRefundEmail(data: EmailTemplateData): { subject: string; html: string } {
@@ -474,7 +474,7 @@ export function renderReturnRefundEmail(data: EmailTemplateData): { subject: str
 
     <!-- Assurance Callout -->
     <div style="background: #f0fdf4; border-left: 4px solid #059669; border-radius: 6px; padding: 14px 18px; margin-bottom: 24px; font-size: 12.5px; color: #166534; line-height: 1.6;">
-      <strong>Settlement Note:</strong> Depending on your banking institution, credits usually appear immediately for UPI or within 2 to 4 business days for credit/debit card statements. If you do not see the credit after 4 business days, please reply directly to this email at <strong>refund@youthnic.com</strong> quoting your <strong>Refund ID: ${data.refundId || 'RF-' + data.orderName}</strong>.
+      <strong>Settlement Note:</strong> Depending on your banking institution, credits usually appear immediately for UPI or within 2 to 4 business days for credit/debit card statements. If you do not see the credit after 4 business days, please reply directly to this email at <strong>refunds@youthnic.com</strong> quoting your <strong>Refund ID: ${data.refundId || 'RF-' + data.orderName}</strong>.
     </div>
 
     <p style="margin: 0 0 20px 0; font-size: 13.5px; color: #64748b; line-height: 1.6;">
@@ -496,7 +496,7 @@ export function renderReturnRefundEmail(data: EmailTemplateData): { subject: str
 }
 
 /**
- * 4. CUSTOMER SUPPORT REPLY TEMPLATE (From: contact@youthnic.com)
+ * 4. CUSTOMER SUPPORT REPLY TEMPLATE (From: support@youthnic.com)
  * Sent for support inquiries, customer care responses, and general helpdesk tickets.
  */
 export function renderSupportReplyEmail(data: EmailTemplateData): { subject: string; html: string } {
@@ -571,7 +571,7 @@ ${data.customMessage || 'Thank you for contacting Youthnic. Our customer care de
 }
 
 /**
- * 5. RETURN RECEIVED EMAIL TEMPLATE (From: return@youthnic.com)
+ * 5. RETURN RECEIVED EMAIL TEMPLATE (From: returns@youthnic.com)
  */
 export function renderReturnReceivedEmail(data: EmailTemplateData): { subject: string; html: string } {
   const subject = `Return Package Received at Surat Hub: Order ${data.orderName}`;
@@ -600,7 +600,7 @@ export function renderReturnReceivedEmail(data: EmailTemplateData): { subject: s
     </p>
 
     <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px; margin-bottom: 20px; font-size: 13px; color: #334155; line-height: 1.6;">
-      Our quality control team will inspect the item within the next 24 hours. Once verified free of issues, your 100% refund will be disbursed immediately to your original payment mode via <strong>refund@youthnic.com</strong>.
+      Our quality control team will inspect the item within the next 24 hours. Once verified free of issues, your 100% refund will be disbursed immediately to your original payment mode via <strong>refunds@youthnic.com</strong>.
     </div>
 
     ${renderItemsSummary(data.items, data.totalAmount)}

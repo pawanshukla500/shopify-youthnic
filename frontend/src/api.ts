@@ -892,11 +892,15 @@ export async function downloadSingleLabelPdf(waybillNumber: string): Promise<voi
   const response = await api.get(`/api/delhivery/label/${waybillNumber}/download`, {
     responseType: 'blob',
   })
-  const blob = new Blob([response.data], { type: 'application/pdf' })
+  const rawContentType = response.headers?.['content-type']
+  const contentType = typeof rawContentType === 'string' ? rawContentType : 'application/pdf'
+  const isPdf = contentType.includes('pdf')
+  const ext = isPdf ? 'pdf' : 'html'
+  const blob = new Blob([response.data], { type: contentType })
   const url = window.URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.setAttribute('download', `delhivery-label-${waybillNumber}.pdf`)
+  link.setAttribute('download', `delhivery-label-${waybillNumber}.${ext}`)
   document.body.appendChild(link)
   link.click()
   link.remove()

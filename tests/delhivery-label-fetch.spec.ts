@@ -112,6 +112,18 @@ describe('Delhivery generateLabel response-shape fallbacks', () => {
     expect(url).toBe('https://s3.example/label5.pdf');
   });
 
+  it('skips an expired SigV4 packing-slip URL and keeps the next live link', async () => {
+    const expired =
+      'https://express-hq-prod.s3.ap-south-1.amazonaws.com/packing_slip/30100810010205.pdf?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20260928T044600Z&X-Amz-Expires=86400';
+    mockGet.mockResolvedValueOnce({
+      data: {
+        packages: [{ pdf_download_link: expired, pdf_url: 'https://s3.example/fresh-label.pdf' }],
+      },
+    });
+    const url = await generateLabel('30100810010205');
+    expect(url).toBe('https://s3.example/fresh-label.pdf');
+  });
+
   it('returns "" when both primary and fallback APIs return no usable URL', async () => {
     mockGet
       .mockResolvedValueOnce({ data: { packages: [] } })

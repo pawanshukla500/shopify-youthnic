@@ -284,44 +284,11 @@ class ResendService {
       };
     }
 
-    // Resolve dynamic official Youthnic sender address based on domain & context
-    let effectiveFrom: string;
-    let defaultReplyTo: string | undefined;
-
-    if (options.fromEmail) {
-      effectiveFrom = options.fromEmail;
-    } else {
-      switch (templateType) {
-        case 'RETURN_INITIATED':
-        case 'RETURN_RECEIVED':
-          effectiveFrom = 'Youthnic Returns <return@youthnic.com>';
-          defaultReplyTo = 'return@youthnic.com';
-          break;
-        case 'RETURN_REFUND':
-          effectiveFrom = 'Youthnic Refunds <refund@youthnic.com>';
-          defaultReplyTo = 'refund@youthnic.com';
-          break;
-        case 'TRANSIT_DELAY':
-        case 'DISPATCH_DELAY':
-        case 'IN_TRANSIT':
-        case 'OUT_FOR_DELIVERY':
-        case 'NDR_ALERT':
-          effectiveFrom = 'Youthnic Logistics <delivery@youthnic.com>';
-          defaultReplyTo = 'delivery@youthnic.com';
-          break;
-        case 'SUPPORT_REPLY':
-          effectiveFrom = 'Youthnic Support <contact@youthnic.com>';
-          defaultReplyTo = 'contact@youthnic.com';
-          break;
-        case 'ORDER_CONFIRMED':
-        case 'DELIVERED':
-        case 'CUSTOM':
-        default:
-          effectiveFrom = 'Youthnic Orders <orders@youthnic.com>';
-          defaultReplyTo = 'contact@youthnic.com';
-          break;
-      }
-    }
+    // Sender must match the lowercase desk printed on the template badge.
+    // Resend verifies the youthnic.com domain, so these local-parts deliver.
+    const sender = senderForTemplate(templateType);
+    let effectiveFrom = options.fromEmail || sender.from;
+    let defaultReplyTo: string | undefined = options.fromEmail ? undefined : sender.replyTo;
 
     // Customer replies must reach the monitored Google Workspace mailbox,
     // even when a delivery, returns, or refunds desk sent the original email.
@@ -397,6 +364,32 @@ class ResendService {
       fromEmail: this.fromEmail,
       apiUrl: this.apiUrl,
     };
+  }
+}
+
+/**
+ * Official Youthnic desk addresses. The From header and the badge in the
+ * HTML template must name the same mailbox.
+ */
+export function senderForTemplate(templateType: EmailTemplateType): { from: string; replyTo: string } {
+  switch (templateType) {
+    case 'RETURN_INITIATED':
+    case 'RETURN_RECEIVED':
+      return { from: 'Youthnic Returns <returns@youthnic.com>', replyTo: 'returns@youthnic.com' };
+    case 'RETURN_REFUND':
+      return { from: 'Youthnic Refunds <refunds@youthnic.com>', replyTo: 'refunds@youthnic.com' };
+    case 'SUPPORT_REPLY':
+    case 'ORDER_CONFIRMED':
+      return { from: 'Youthnic Support <support@youthnic.com>', replyTo: 'support@youthnic.com' };
+    case 'TRANSIT_DELAY':
+    case 'DISPATCH_DELAY':
+    case 'IN_TRANSIT':
+    case 'OUT_FOR_DELIVERY':
+    case 'NDR_ALERT':
+    case 'DELIVERED':
+    case 'CUSTOM':
+    default:
+      return { from: 'Youthnic Logistics <delivery@youthnic.com>', replyTo: 'delivery@youthnic.com' };
   }
 }
 

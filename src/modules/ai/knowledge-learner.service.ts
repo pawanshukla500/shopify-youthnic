@@ -42,7 +42,7 @@ Once the pickup is confirmed by Delhivery, we will process your 100% full refund
 
 Warm regards,
 Youthnic Returns Team
-return@youthnic.com`,
+returns@youthnic.com`,
             confidence: 0.98,
             usageCount: 1,
             isLearned: false,
@@ -63,7 +63,7 @@ If you prefer an exchange, please reply with your preferred size. Alternatively,
 
 Warm regards,
 Youthnic Returns Team
-return@youthnic.com`,
+returns@youthnic.com`,
             confidence: 0.95,
             usageCount: 1,
             isLearned: false,
@@ -86,7 +86,7 @@ Our Surat dispatch desk has escalated this shipment to ensure priority transit. 
 
 Warm regards,
 Youthnic Support Team
-orders@youthnic.com`,
+support@youthnic.com`,
             confidence: 0.96,
             usageCount: 1,
             isLearned: false,
@@ -128,7 +128,7 @@ You will receive an automated SMS and email notification with your bank UTR numb
 
 Warm regards,
 Youthnic Accounts & Settlement Desk
-return@youthnic.com`,
+returns@youthnic.com`,
             confidence: 0.94,
             usageCount: 1,
             isLearned: false,

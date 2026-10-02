@@ -40,10 +40,12 @@ vi.mock('../src/modules/orders/order.service', () => ({
 }));
 
 let normalize: (input: any) => any;
+let expand: (input: any) => any[];
 
 beforeAll(async () => {
   const mod = await import('../src/routes/delhivery-webhooks');
   normalize = mod.__test__.normalizeScanPushPayload;
+  expand = mod.__test__.expandScanPushBodies;
 });
 
 describe('Delhivery scan-push payload normalizer — official schema', () => {
@@ -133,6 +135,26 @@ describe('Delhivery scan-push payload normalizer — edge cases', () => {
     expect(normalize(undefined)).toBeNull();
     expect(normalize('hello')).toBeNull();
     expect(normalize(42)).toBeNull();
+  });
+
+  it('unwraps the tracking-API ShipmentData envelope and text/plain JSON', () => {
+    const nested = {
+      ShipmentData: [
+        {
+          Shipment: {
+            AWB: '30100810010205',
+            Status: { Status: 'In Transit', StatusType: 'UD', StatusLocation: 'Surat_Hub' },
+          },
+        },
+      ],
+    };
+    const expanded = expand(nested);
+    expect(expanded).toHaveLength(1);
+    expect(normalize(expanded[0]).waybill).toBe('30100810010205');
+    expect(normalize(expanded[0]).rawStatus).toBe('In Transit');
+
+    const fromText = expand(JSON.stringify(nested));
+    expect(normalize(fromText[0]).waybill).toBe('30100810010205');
   });
 
   it('falls back to current time when scanDateTime is missing', () => {

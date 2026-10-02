@@ -3,6 +3,7 @@ import prisma from '../database/prisma';
 import delhiveryService from '../modules/delhivery/delhivery.service';
 import delhiveryDocumentFetcher from '../modules/delhivery/delhivery-document-fetcher.service';
 import notificationEngine from '../modules/notifications/notification.service';
+import trackingService from '../modules/tracking/tracking.service';
 import { config } from '../config';
 import logger from '../utils/logger';
 
@@ -171,6 +172,17 @@ export async function handleScanPush(req: Request, res: Response): Promise<void>
           },
         });
       }
+
+      // Scan pushes arrive before the next tracking cron run. Evaluate the
+      // remark now so a Delhivery delay/exception reaches the customer
+      // immediately; the shared cooldown prevents a duplicate cron email.
+      await trackingService.evaluateConsumerDelay(shipment, {
+        status: scan.rawStatus || scan.status,
+        statusType: scan.statusType,
+        location: scan.location,
+        remarks: scan.remarks || scan.instructions,
+        history: [{ status: scan.status, remark: scan.remarks || scan.instructions }],
+      });
 
       // If package is delivered and EPOD is missing, trigger background document fetch
       if (newShipmentStatus === 'DELIVERED' && !shipment.epodStoragePath) {

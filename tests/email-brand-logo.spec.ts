@@ -101,6 +101,13 @@ describe('Youthnic email brand identity', () => {
     expect(html).toMatch(/Track on Delhivery/);
   });
 
+  it('uses the current WhatsApp helpline in the shared customer-care footer', () => {
+    const { html } = renderTransitDelay(baseData);
+    expect(html).toContain('+91 79849 84563');
+    expect(html).toContain('https://wa.me/917984984563');
+    expect(html).not.toContain('88661 54721');
+  });
+
   it('return initiated: brand invariants hold', () => {
     const { html } = renderReturnInitiated(baseData);
     assertBrandInvariants(html, 'return-initiated');

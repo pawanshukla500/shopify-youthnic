@@ -3967,10 +3967,20 @@ router.get('/communications/delayed-in-transit', async (req: Request, res: Respo
         shipment: { isNot: null },
       },
       include: {
-        shipment: true,
+        shipment: {
+          include: {
+            trackingLogs: {
+              orderBy: { scannedAt: 'desc' },
+              take: 1,
+            },
+          },
+        },
         items: true,
         emailLogs: {
-          where: { templateType: 'TRANSIT_DELAY' },
+          where: {
+            templateType: 'TRANSIT_DELAY',
+            status: { in: ['PENDING', 'SENT', 'DELIVERED', 'SIMULATED'] },
+          },
           orderBy: { createdAt: 'desc' },
           take: 1,
         },
@@ -3982,19 +3992,25 @@ router.get('/communications/delayed-in-transit', async (req: Request, res: Respo
     const delayedList = candidateOrders
       .map((order) => {
         const shipment = order.shipment!;
-        const dispatchedDate = shipment.createdAt || order.createdAt;
+        const dispatchedDate = order.dispatchedAt || shipment.createdAt || order.createdAt;
         const daysInTransit = Math.max(
           1,
           Math.floor((now.getTime() - new Date(dispatchedDate).getTime()) / (1000 * 60 * 60 * 24))
         );
 
-        const history: any = shipment.trackingHistory;
-        const eddRaw = history?.expected_date || history?.edd || history?.ExpectedDeliveryDate;
-        const expectedDeliveryDate: string | null = eddRaw ? new Date(eddRaw).toISOString() : null;
+        const latestTrackingLog = shipment.trackingLogs[0] || null;
+        const expectedDeliveryDate: string | null = shipment.expectedDeliveryDate
+          ? shipment.expectedDeliveryDate.toISOString()
+          : null;
         const isPastExpectedDate = expectedDeliveryDate ? new Date(expectedDeliveryDate) < now : false;
         const isLongTransit = daysInTransit >= daysThreshold;
+        const latestRemark = latestTrackingLog?.remark || shipment.trackingStatus || null;
+        const isCourierReportedDelay =
+          /\b(delay(?:ed)?|exception|hold|held|misrout(?:e|ed|ing)|network|weather|operational|undelivered|failed|not delivered|customer unavailable|address issue)\b/i.test(
+            `${shipment.trackingStatus || ''} ${latestRemark || ''}`
+          );
 
-        if (!isPastExpectedDate && !isLongTransit) {
+        if (!isPastExpectedDate && !isLongTransit && !isCourierReportedDelay) {
           return null;
         }
 
@@ -4017,6 +4033,14 @@ router.get('/communications/delayed-in-transit', async (req: Request, res: Respo
           courier: shipment.courier || 'Delhivery Express',
           currentLocation: shipment.trackingLocation || 'In Transit Regional Hub',
           status: shipment.status,
+          latestRemark,
+          latestScanStatus: latestTrackingLog?.status || shipment.trackingStatus || null,
+          latestScanAt: latestTrackingLog?.scannedAt?.toISOString() || shipment.trackingUpdatedAt?.toISOString() || null,
+          flaggedReason: isPastExpectedDate
+            ? 'Past expected delivery date'
+            : isCourierReportedDelay
+            ? 'Delhivery reported a route delay or exception'
+            : `In transit for ${daysInTransit} days`,
           expectedDeliveryDate,
           dispatchedAt: dispatchedDate,
           daysInTransit,
@@ -4033,7 +4057,7 @@ router.get('/communications/delayed-in-transit', async (req: Request, res: Respo
     res.json({
       success: true,
       totalDelayed: delayedList.length,
-      unnotifiedCount: delayedList.filter((d) => !d.alreadyNotified).length,
+      unnotifiedCount: delayedList.filter((d) => !d.alreadyNotified && Boolean(d.customerEmail)).length,
       thresholdDays: daysThreshold,
       shipments: delayedList,
     });
@@ -4078,7 +4102,7 @@ router.post('/communications/notify-delayed-transit', async (req: Request, res: 
       }
 
       const shipment = order.shipment;
-      const dispatchedDate = shipment?.createdAt || order.createdAt;
+      const dispatchedDate = order.dispatchedAt || shipment?.createdAt || order.createdAt;
       const daysInTransit = Math.max(
         1,
         Math.floor((Date.now() - new Date(dispatchedDate).getTime()) / (1000 * 60 * 60 * 24))
@@ -4403,7 +4427,7 @@ router.get('/support/emails', async (req: Request, res: Response): Promise<void>
 // POST /api/support/inbound — Ingest customer email, analyze with Muse Spark 1.3, flag order, sync to Firebase RTDB
 router.post('/support/inbound', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { fromEmail, fromName, subject, bodyText, toEmail = 'returns@youthnic.com', orderNumber } = req.body;
+    const { fromEmail, fromName, subject, bodyText, toEmail = 'contact@youthnic.com', orderNumber } = req.body;
     if (!fromEmail || !subject || !bodyText) {
       res.status(400).json({ success: false, error: 'fromEmail, subject, and bodyText are required.' });
       return;

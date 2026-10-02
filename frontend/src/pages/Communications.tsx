@@ -263,6 +263,13 @@ export function Communications() {
 
   // Filtered logs
   const logs = logsQuery.data?.logs ?? []
+  const sendableUnnotifiedCount = useMemo(
+    () =>
+      (delayedShipmentsQuery.data?.shipments || []).filter(
+        (shipment: DelayedInTransitShipment) => !shipment.alreadyNotified && Boolean(shipment.customerEmail)
+      ).length,
+    [delayedShipmentsQuery.data?.shipments]
+  )
 
   return (
     <div className="communications-page">
@@ -531,7 +538,7 @@ export function Communications() {
           </div>
 
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            {delayedShipmentsQuery.data && (delayedShipmentsQuery.data.unnotifiedCount > 0) && (
+            {delayedShipmentsQuery.data && sendableUnnotifiedCount > 0 && (
               <button
                 type="button"
                 className="button button-primary"
@@ -546,7 +553,7 @@ export function Communications() {
                   }
                 }}
               >
-                {notifyDelayedMutation.isPending ? 'Sending Notices…' : `Notify All Unnotified (${delayedShipmentsQuery.data.unnotifiedCount})`}
+                {notifyDelayedMutation.isPending ? 'Sending Notices…' : `Notify All Unnotified (${sendableUnnotifiedCount})`}
               </button>
             )}
           </div>
@@ -573,6 +580,7 @@ export function Communications() {
                   <th>Customer Recipient</th>
                   <th>AWB & Courier</th>
                   <th>Current Hub</th>
+                  <th>Latest Delhivery Remark</th>
                   <th>Transit Duration</th>
                   <th>Notice Status</th>
                   <th style={{ textAlign: 'right' }}>Action</th>
@@ -618,6 +626,19 @@ export function Communications() {
                       <span style={{ fontSize: '12px', fontWeight: 600, color: '#0f172a' }}>
                         {shipment.currentLocation}
                       </span>
+                    </td>
+                    <td style={{ maxWidth: '250px' }}>
+                      <strong style={{ fontSize: '11.5px', color: '#92400e', display: 'block' }}>
+                        {shipment.flaggedReason}
+                      </strong>
+                      <span style={{ fontSize: '11px', color: '#475569', display: 'block', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={shipment.latestRemark || undefined}>
+                        {shipment.latestRemark || 'No courier remark received yet'}
+                      </span>
+                      {shipment.latestScanAt && (
+                        <span style={{ fontSize: '10px', color: '#94a3b8' }}>
+                          {new Date(shipment.latestScanAt).toLocaleString('en-IN')}
+                        </span>
+                      )}
                     </td>
                     <td>
                       <span style={{ fontSize: '12px', fontWeight: 700, color: shipment.daysInTransit >= 5 ? '#dc2626' : '#d97706' }}>
@@ -1278,7 +1299,7 @@ function getSampleHtmlForPreview(type: EmailTemplateType): string {
         <div style="background: #ffffff; border: 1.5px solid #cbd5e1; border-radius: 8px; padding: 16px; margin: 16px 0; font-size: 13.5px; line-height: 1.6;">
           ${data.customMessage}
         </div>
-        <p style="font-size: 12px; color: #64748b;">Simply reply directly to this email at contact@youthnic.com or reach WhatsApp +91 88661 54721.</p>
+        <p style="font-size: 12px; color: #64748b;">Simply reply directly to this email at contact@youthnic.com or reach WhatsApp +91 79849 84563.</p>
       `
           : `
         <div class="alert-amber">

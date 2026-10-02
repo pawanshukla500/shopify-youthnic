@@ -1,6 +1,7 @@
 import prisma from '../../database/prisma';
 import delhiveryService from '../delhivery/delhivery.service';
 import notificationEngine from '../notifications/notification.service';
+import resendService from '../email/resend.service';
 import logger from '../../utils/logger';
 import { config } from '../../config';
 import { isDelhiveryCourier } from '../../utils/courier';
@@ -52,7 +53,7 @@ class TrackingService {
               OR: [{ trackingUpdatedAt: null }, { trackingUpdatedAt: { lt: staleBefore } }],
             }),
       },
-      include: { order: true },
+      include: { order: { include: { items: true } } },
       orderBy: { trackingUpdatedAt: 'asc' },
       take: batchLimit,
     });
@@ -129,9 +130,11 @@ class TrackingService {
             trackingStatus: tracking.status,
             trackingLocation: tracking.location || null,
             trackingUpdatedAt: new Date(),
+            expectedDeliveryDate: this.parseExpectedDeliveryDate(tracking.expectedDeliveryDate),
             trackingHistory: tracking.history as any,
           },
         });
+        await this.evaluateConsumerDelay(shipment, tracking);
       } catch (error: any) {
         logger.error('Failed to sync tracking for shipment', {
           shipmentId: shipment.id,
@@ -411,7 +414,7 @@ class TrackingService {
       where: isNumericId
         ? { id: Number(identifier) }
         : { waybillNumber: String(identifier) },
-      include: { order: true },
+      include: { order: { include: { items: true } } },
     });
 
     if (!shipment || !shipment.waybillNumber) {
@@ -490,6 +493,7 @@ class TrackingService {
         trackingStatus: tracking.status,
         trackingLocation: tracking.location || null,
         trackingUpdatedAt: new Date(),
+        expectedDeliveryDate: this.parseExpectedDeliveryDate(tracking.expectedDeliveryDate),
         trackingHistory: tracking.history as any,
       },
       include: {
@@ -499,11 +503,108 @@ class TrackingService {
         },
       },
     });
+    await this.evaluateConsumerDelay(shipment, tracking);
 
     return {
       shipment: updatedShipment,
       tracking,
     };
+  }
+
+  /**
+   * Send a consumer email for a courier-reported delay or an overdue expected
+   * delivery date. A 24-hour per-order cooldown avoids duplicate emails during
+   * the frequent tracking polling cycle while still allowing a later update.
+   */
+  /**
+   * Evaluate a Delhivery update and immediately notify the consumer when it
+   * reports a route delay or missed ETA. Used by both polling and webhooks.
+   */
+  async evaluateConsumerDelay(shipment: any, tracking: any): Promise<void> {
+    const order = shipment.order;
+    if (!order?.customerEmail) return;
+
+    const expectedDelivery = tracking.expectedDeliveryDate
+      ? new Date(tracking.expectedDeliveryDate)
+      : null;
+    const overdueExpectedDelivery = Boolean(
+      expectedDelivery && !Number.isNaN(expectedDelivery.getTime()) && expectedDelivery < new Date()
+    );
+    const courierUpdate = [
+      tracking.status,
+      tracking.remarks,
+      ...((tracking.history || []).slice(-3).flatMap((scan: any) => [scan.status, scan.remark])),
+    ]
+      .filter(Boolean)
+      .join(' ');
+    const courierReportedDelay =
+      /\b(delay(?:ed)?|exception|hold|held|misrout(?:e|ed|ing)|network|weather|operational|undelivered|failed|not delivered|customer unavailable|address issue)\b/i.test(
+        courierUpdate
+      );
+
+    if (!courierReportedDelay && !overdueExpectedDelivery) return;
+
+    try {
+      const cooldownStart = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const recentNotice = await prisma.emailLog.findFirst({
+        where: {
+          orderId: order.id,
+          templateType: 'TRANSIT_DELAY',
+          status: { in: ['PENDING', 'SENT', 'SIMULATED'] },
+          createdAt: { gte: cooldownStart },
+        },
+        select: { id: true },
+      });
+      if (recentNotice) return;
+
+      const delayReason = courierReportedDelay
+        ? tracking.remarks || tracking.status || 'A Delhivery transit exception was reported.'
+        : 'The courier has not delivered by the expected delivery date.';
+      await resendService.sendEmail({
+        to: order.customerEmail,
+        templateType: 'TRANSIT_DELAY',
+        orderId: order.id,
+        data: {
+          orderName: order.shopifyOrderName,
+          customerName: order.customerName,
+          recipientEmail: order.customerEmail,
+          waybillNumber: shipment.waybillNumber,
+          courier: shipment.courier || 'Delhivery Express',
+          currentLocation: tracking.location || shipment.trackingLocation || 'Delhivery transit network',
+          delayReason,
+          newEstimatedDelivery: expectedDelivery
+            ? expectedDelivery.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+            : 'Expected in 2-3 business days',
+          items: order.items?.map((item: any) => ({
+            title: item.title,
+            variantTitle: item.variantTitle,
+            quantity: item.quantity,
+            price: item.price,
+            imageUrl: item.imageUrl,
+          })),
+          totalAmount: order.totalAmount,
+          paymentMethod: order.paymentMethod,
+        },
+      });
+      logger.info('Sent consumer transit-delay notice', {
+        orderId: order.id,
+        waybill: shipment.waybillNumber,
+        overdueExpectedDelivery,
+      });
+    } catch (error: any) {
+      // Customer communications must never prevent tracking persistence.
+      logger.error('Failed to send consumer transit-delay notice', {
+        orderId: order.id,
+        waybill: shipment.waybillNumber,
+        error: error.message,
+      });
+    }
+  }
+
+  private parseExpectedDeliveryDate(value: unknown): Date | null {
+    if (!value) return null;
+    const expectedDeliveryDate = new Date(String(value));
+    return Number.isNaN(expectedDeliveryDate.getTime()) ? null : expectedDeliveryDate;
   }
 }
 

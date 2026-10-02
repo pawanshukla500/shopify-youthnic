@@ -210,8 +210,11 @@ export class ShippingLabelService {
    */
   public generateBulkPrintableLabelsPage(orderList: Array<{ order: OrderWithDetails; waybillNumber: string }>): string {
     const labelsHtml = orderList
-      .map(({ order, waybillNumber }) => this.generateSingleLabelHtml(order, waybillNumber))
-      .join('<div class="page-break"></div>');
+      .map(
+        ({ order, waybillNumber }) =>
+          `<div class="label-print-page">${this.generateSingleLabelHtml(order, waybillNumber)}</div>`
+      )
+      .join('');
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -268,7 +271,6 @@ export class ShippingLabelService {
   <div class="label-page-wrapper">
     ${labelHtml}
   </div>
-  <div class="page-break"></div>
   <div class="invoice-page-wrapper">
     ${invoiceHtml}
   </div>
@@ -283,20 +285,18 @@ export class ShippingLabelService {
    */
   public generateBulkLabelsAndInvoicesHtml(orderList: Array<{ order: OrderWithDetails; waybillNumber: string }>): string {
     const pagesHtml = orderList
-      .map(({ order, waybillNumber }, idx) => {
+      .map(({ order, waybillNumber }) => {
         const labelHtml = this.generateSingleLabelHtml(order, waybillNumber);
         const invoiceHtml = invoiceService.generateInvoiceHtml(order);
-        const isLast = idx === orderList.length - 1;
         return `
           <div class="order-pair-wrapper">
             <div class="label-page-wrapper">
               ${labelHtml}
             </div>
-            <div class="page-break"></div>
             <div class="invoice-page-wrapper">
               ${invoiceHtml}
             </div>
-          </div>${isLast ? '' : '<div class="page-break"></div>'}
+          </div>
         `;
       })
       .join('');
@@ -364,29 +364,28 @@ export class ShippingLabelService {
           page-break-inside: avoid;
           break-inside: avoid;
           margin: 0 auto !important;
+          page-break-after: always !important;
+          break-after: page !important;
         }
         .label-wrapper {
           box-shadow: none !important;
           margin: 0 auto !important;
-          page-break-after: always !important;
-          break-after: page !important;
         }
         .invoice-page-wrapper {
           page-break-inside: avoid;
           break-inside: avoid;
           margin: 0 auto !important;
+          page-break-after: always !important;
+          break-after: page !important;
+        }
+        .order-pair-wrapper:last-child .invoice-page-wrapper {
+          page-break-after: auto !important;
+          break-after: auto !important;
         }
         .invoice-container {
           box-shadow: none !important;
           margin: 0 auto !important;
           border: none !important;
-          page-break-after: always !important;
-          break-after: page !important;
-        }
-        .page-break {
-          page-break-after: always !important;
-          break-after: page !important;
-          height: 0 !important;
         }
       }
     `;
@@ -718,6 +717,12 @@ export class ShippingLabelService {
         .label-wrapper {
           box-shadow: none;
           margin: 0;
+        }
+        .label-print-page {
+          page-break-inside: avoid;
+          break-inside: avoid;
+        }
+        .label-print-page:not(:last-child) {
           page-break-after: always;
           break-after: page;
         }

@@ -122,4 +122,16 @@ describe('Combined Label and Invoice Generator (Alternating Sequence)', () => {
     expect(invoiceMatches[0]).toBeLessThan(labelMatches[1]);
     expect(labelMatches[1]).toBeLessThan(invoiceMatches[1]);
   });
+
+  it('puts each bulk 4R label on exactly one page without separate break elements', () => {
+    const html = shippingLabelService.generateBulkPrintableLabelsPage([
+      { order: dummyOrder1, waybillNumber: '123456789012' },
+      { order: dummyOrder2, waybillNumber: '123456789013' },
+    ]);
+
+    expect(html).toContain('.label-print-page:not(:last-child)');
+    expect(html).toContain('page-break-after: always');
+    expect(html).not.toContain('<div class="page-break"></div>');
+    expect((html.match(/class="label-print-page"/g) || []).length).toBe(2);
+  });
 });

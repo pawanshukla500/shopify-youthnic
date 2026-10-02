@@ -2,6 +2,7 @@ import axios, { AxiosInstance } from 'axios';
 import { config } from '../../config';
 import prisma from '../../database/prisma';
 import logger from '../../utils/logger';
+import { isUsableHttpUrl } from '../../utils/signed-url';
 import { withRetry } from '../../utils/retry';
 import { Order } from '@prisma/client';
 
@@ -737,6 +738,7 @@ class DelhiveryService {
       statusType: string;
       location: string;
       dateTime: string;
+      date?: string;
       remark?: string;
     }>;
     pickupDone?: boolean;
@@ -781,6 +783,7 @@ class DelhiveryService {
         statusType: scan.ScanType || '',
         location: scan.ScanLocation || scan.ScannedLocation || '',
         dateTime: scan.ScanDateTime || scan.StatusDateTime,
+        date: scan.ScanDateTime || scan.StatusDateTime,
         remark: scan.Instructions,
       }));
 
@@ -1279,9 +1282,7 @@ class DelhiveryService {
       }
     }
 
-    const labelUrl = candidateUrls.find(
-      (u): u is string => typeof u === 'string' && u.startsWith('http')
-    );
+    const labelUrl = candidateUrls.find((u): u is string => isUsableHttpUrl(u));
 
     if (!labelUrl) {
       logger.error('generateLabel: no usable PDF URL found for waybill', {
@@ -1659,15 +1660,18 @@ class DelhiveryService {
   mapTrackingToShipmentStatus(
     statusType: string,
     status: string,
-    pickupDone?: boolean
+    pickupDone?: boolean,
+    remarks?: string
   ): 'PICKED_UP' | 'IN_TRANSIT' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'FAILED' | 'RTO' | 'RTO_DELIVERED' | 'CANCELLED' | 'CREATED' {
     const st = (statusType || '').toUpperCase();
     const s = (status || '').toUpperCase();
+    const hint = `${s} ${(remarks || '').toUpperCase()}`;
 
-    // Delivered
-    if (st === 'DL' && s === 'DELIVERED') return 'DELIVERED';
-    if (st === 'DL' && s === 'RTO') return 'RTO_DELIVERED';
-    if (st === 'DL' && s === 'DTO') return 'DELIVERED'; // Reverse delivered to origin
+    // Delivered — match the status token, not the remarks, so "Delivered to consignee"
+    // instructions cannot hide a real DL/Delivered scan.
+    if (st === 'DL' && (s === 'DELIVERED' || s.startsWith('DELIVERED'))) return 'DELIVERED';
+    if (st === 'DL' && (s === 'RTO' || s.startsWith('RTO'))) return 'RTO_DELIVERED';
+    if (st === 'DL' && (s === 'DTO' || s.startsWith('DTO'))) return 'DELIVERED';
 
     // Return to origin
     if (st === 'RT') return 'RTO';
@@ -1675,25 +1679,45 @@ class DelhiveryService {
     // Canceled
     if (st === 'CN') return 'CANCELLED';
 
-    // Forward pickup confirmed — Delhivery sets PickedupDate / DispatchCount>0 and
-    // scans like "Picked Up", "Received at origin", "Reached Surat hub".
+    // NDR / failed attempt. Delhivery often leaves Status="Pending" and puts the
+    // reason in Instructions ("Consignee unavailable"). Those must not stay In Transit.
+    if (
+      st !== 'DL' &&
+      /CONSIGNEE|UNDELIVER|DELIVERY FAILED|NOT DELIVERED|CUSTOMER NOT AVAILABLE|ADDRESS INCOMPLETE|DELIVERY ATTEMPT FAILED|REFUSED/.test(
+        hint
+      )
+    ) {
+      return 'FAILED';
+    }
+
+    // Out for delivery and linehaul must win over pickup signals. Live tracking
+    // sets pickupDone=true as soon as any scan mentions "in transit", which used
+    // to collapse every later scan back to PICKED_UP and fight the scan webhook.
+    if (s === 'DISPATCHED' || s.includes('OUT FOR DELIVERY')) return 'OUT_FOR_DELIVERY';
+    if (s === 'IN TRANSIT' || s.includes('IN TRANSIT')) return 'IN_TRANSIT';
+
     if (
       s.includes('PICKED UP') ||
       s.includes('PICKUP DONE') ||
       s.includes('PICKEDUP') ||
-      s.includes('RECEIVED AT') ||
-      s.includes('REACHED AT') ||
-      s.includes('REACHED ') ||
-      (pickupDone === true && (s.includes('IN TRANSIT') || s.includes('DISPATCHED')))
+      s.includes('RECEIVED AT')
     ) {
       return 'PICKED_UP';
     }
 
-    // Dispatched = Out for delivery
-    if (s === 'DISPATCHED') return 'OUT_FOR_DELIVERY';
+    // Hub arrival after pickup is linehaul, not "still at the warehouse".
+    if (s.includes('REACHED')) return 'IN_TRANSIT';
 
-    // In transit
-    if (s === 'IN TRANSIT') return 'IN_TRANSIT';
+    // pickupDone only promotes a still-manifested parcel once Delhivery confirms
+    // the courier actually collected it (PickedupDate / DispatchCount).
+    const awaitingPickup =
+      !s ||
+      s === 'MANIFESTED' ||
+      s.includes('MANIFEST') ||
+      s.includes('NOT PICK') ||
+      s === 'OPEN' ||
+      s === 'SCHEDULED';
+    if (pickupDone === true && awaitingPickup) return 'PICKED_UP';
 
     // Picked up (PU = reverse pickup in transit)
     if (st === 'PU') return 'IN_TRANSIT';
@@ -1709,7 +1733,7 @@ class DelhiveryService {
     // Ready-to-ship orders into exception state.)
     if (s.includes('NOT PICK')) return 'CREATED';
 
-    // Pending = at destination hub, waiting for dispatch
+    // Pending = at destination hub, waiting for dispatch (NDR reasons already returned FAILED)
     if (s === 'PENDING') return 'IN_TRANSIT';
 
     // Default

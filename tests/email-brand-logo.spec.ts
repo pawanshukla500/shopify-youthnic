@@ -47,9 +47,11 @@ describe('Youthnic email brand identity', () => {
   let renderReturnRefund: any;
   let renderSupportReply: any;
   let renderNdrEmail: any;
+  let senderForTemplate: any;
 
   beforeAll(async () => {
     templates = await import('../src/modules/email/email-templates');
+    senderForTemplate = (await import('../src/modules/email/resend.service')).senderForTemplate;
     renderTransitDelay = templates.renderTransitDelayEmail;
     renderReturnInitiated = templates.renderReturnInitiatedEmail;
     renderReturnRefund = templates.renderReturnRefundEmail;
@@ -83,6 +85,8 @@ describe('Youthnic email brand identity', () => {
     expect(html, `${ctx}: no RETURN@YOUTHNIC.COM`).not.toMatch(/RETURN@YOUTHNIC\.COM/);
     expect(html, `${ctx}: no REFUND@YOUTHNIC.COM`).not.toMatch(/REFUND@YOUTHNIC\.COM/);
     expect(html, `${ctx}: no CONTACT@YOUTHNIC.COM`).not.toMatch(/CONTACT@YOUTHNIC\.COM/);
+    expect(html, `${ctx}: no singular return@ desk`).not.toContain('return@youthnic.com');
+    expect(html, `${ctx}: no singular refund@ desk`).not.toContain('refund@youthnic.com');
   }
 
   it('transit delay: brand invariants hold', () => {
@@ -132,6 +136,17 @@ describe('Youthnic email brand identity', () => {
       const html = (fn as any)(baseData, ...(name === 'transit-delay' ? ['Dear Test,', 'Body.'] : []));
       expect(html.html, `${name}: no fake AWB`).not.toContain('PROP0000031386');
     }
+  });
+
+  it('Resend From header matches the desk printed on the template', () => {
+    expect(senderForTemplate('RETURN_INITIATED').from).toContain('returns@youthnic.com');
+    expect(senderForTemplate('RETURN_REFUND').replyTo).toBe('refunds@youthnic.com');
+    expect(senderForTemplate('IN_TRANSIT').from).toContain('delivery@youthnic.com');
+    expect(senderForTemplate('OUT_FOR_DELIVERY').replyTo).toBe('delivery@youthnic.com');
+    expect(senderForTemplate('NDR_ALERT').from).toContain('delivery@youthnic.com');
+    expect(senderForTemplate('ORDER_CONFIRMED').from).toContain('support@youthnic.com');
+    expect(senderForTemplate('SUPPORT_REPLY').replyTo).toBe('support@youthnic.com');
+    expect(senderForTemplate('DELIVERED').from).toContain('delivery@youthnic.com');
   });
 
   it('delhivery tracking link uses the official Delhivery URL', () => {

@@ -20,7 +20,7 @@ export interface ConversationAnalysisPayload {
     params?: Record<string, any>;
   }>;
   draftReply: string;
-  senderDesk: 'return@youthnic.com' | 'refund@youthnic.com' | 'contact@youthnic.com' | 'delivery@youthnic.com';
+  senderDesk: 'returns@youthnic.com' | 'refunds@youthnic.com' | 'support@youthnic.com' | 'delivery@youthnic.com';
   confidence: number;
   modelUsed: string;
 }
@@ -196,17 +196,17 @@ You analyze inbound customer conversations across Email and WhatsApp, detect int
 OPERATIONAL POLICIES & DESK ROUTING:
 1. RETURNS:
    - Only sent if return is created from our side.
-   - Handled by: Youthnic Returns <return@youthnic.com>
+   - Handled by: Youthnic Returns <returns@youthnic.com>
    - Delhivery Surface Reverse pickup window is 24-48 hours. Items must have tags attached in original polybag.
 2. REFUNDS:
-   - Handled strictly by: Youthnic Refunds <refund@youthnic.com>
+   - Handled strictly by: Youthnic Refunds <refunds@youthnic.com>
    - Only processed after the parcel reaches Surat warehouse and passes 100% Quality Inspection (0 defects).
    - Refund rails: PhonePe / Easebuzz / UPI (Instant to 2 hours), NetBanking/Cards (2-4 business days).
 3. IN-TRANSIT DELAYS:
    - Handled by: Youthnic Logistics <delivery@youthnic.com>
    - Explain active tracking, transit hub location, and reassure customer that shipment is 100% insured.
 4. GENERAL INQUIRIES & SIZE EXCHANGES:
-   - Handled by: Youthnic Support <contact@youthnic.com>
+   - Handled by: Youthnic Support <support@youthnic.com>
    - Offer hassle-free size exchange at zero extra cost.
 
 REQUIRED OUTPUT FORMAT:
@@ -225,7 +225,7 @@ You MUST respond with a single valid, well-formed JSON object with NO surroundin
       "params": {}
     }
   ],
-  "senderDesk": "return@youthnic.com" | "refund@youthnic.com" | "contact@youthnic.com" | "delivery@youthnic.com",
+  "senderDesk": "returns@youthnic.com" | "refunds@youthnic.com" | "support@youthnic.com" | "delivery@youthnic.com",
   "draftReply": "Complete professional, empathetic reply body adhering to Youthnic standards and desk routing.",
   "confidence": 0.95
 }`;
@@ -328,7 +328,7 @@ Please analyze this inbound conversation and return the structured JSON decision
     let intent: any = 'GENERAL_INQUIRY';
     let urgency: any = 'NORMAL';
     let sentiment: any = 'NEUTRAL';
-    let senderDesk: any = 'contact@youthnic.com';
+    let senderDesk: any = 'support@youthnic.com';
     let summary = 'General customer inquiry received';
     const learnedFacts: string[] = [];
     const recommendedActions: any[] = [];
@@ -370,32 +370,32 @@ Please analyze this inbound conversation and return the structured JSON decision
     if (text.includes('damage') || text.includes('torn') || text.includes('stain') || text.includes('defective')) {
       intent = 'DAMAGED_ITEM';
       urgency = 'URGENT';
-      senderDesk = 'return@youthnic.com';
+      senderDesk = 'returns@youthnic.com';
       summary = 'Customer reported garment defect or transit damage';
       learnedFacts.push('Reported defect/damaged product on order');
       recommendedActions.push({
         actionType: 'PREPARE_RETURN',
         reason: 'Defective item approved for zero-cost reverse pickup',
       });
-      draftReply = `Dear ${customerName},\n\nWe sincerely apologize for the quality issue regarding ${orderName}. At Youthnic Surat FC, our master craftsmen inspect every piece, and we take this report very seriously.\n\nWe have approved a priority reverse pickup with Delhivery. Please keep the kurti set packed with brand tags intact. Once collected, we will immediately initiate your replacement or 100% full refund.\n\nWarm regards,\nYouthnic Returns Team\nreturn@youthnic.com`;
+      draftReply = `Dear ${customerName},\n\nWe sincerely apologize for the quality issue regarding ${orderName}. At Youthnic Surat FC, our master craftsmen inspect every piece, and we take this report very seriously.\n\nWe have approved a priority reverse pickup with Delhivery. Please keep the kurti set packed with brand tags intact. Once collected, we will immediately initiate your replacement or 100% full refund.\n\nWarm regards,\nYouthnic Returns Team\nreturns@youthnic.com`;
     } else if (text.includes('return') || text.includes('send back') || text.includes('pickup')) {
       intent = 'RETURN_REQUEST';
       urgency = urgency === 'URGENT' ? 'URGENT' : 'HIGH';
-      senderDesk = 'return@youthnic.com';
+      senderDesk = 'returns@youthnic.com';
       summary = 'Customer requested return of items';
       learnedFacts.push('Customer initiated return request');
       recommendedActions.push({
         actionType: 'PREPARE_RETURN',
         reason: 'Return request requires Delhivery reverse booking confirmation',
       });
-      draftReply = `Dear ${customerName},\n\nThank you for reaching out to Youthnic regarding your return for ${orderName}.\n\nWe are pleased to assist you. A Delhivery reverse pickup will be scheduled at your doorstep within 24-48 business hours. As soon as your parcel is checked in at our Surat center and passes quality inspection, your refund will be completed.\n\nWarm regards,\nYouthnic Returns Team\nreturn@youthnic.com`;
+      draftReply = `Dear ${customerName},\n\nThank you for reaching out to Youthnic regarding your return for ${orderName}.\n\nWe are pleased to assist you. A Delhivery reverse pickup will be scheduled at your doorstep within 24-48 business hours. As soon as your parcel is checked in at our Surat center and passes quality inspection, your refund will be completed.\n\nWarm regards,\nYouthnic Returns Team\nreturns@youthnic.com`;
     } else if (text.includes('refund') || text.includes('money back') || text.includes('payment credited')) {
       intent = 'REFUND_STATUS';
       urgency = 'HIGH';
-      senderDesk = 'refund@youthnic.com';
+      senderDesk = 'refunds@youthnic.com';
       summary = 'Customer inquiring about refund credit timeline';
       learnedFacts.push('Customer inquired about refund status');
-      draftReply = `Dear ${customerName},\n\nThank you for checking on your refund status for ${orderName}.\n\nOnce returned parcels pass our quality inspection at our Surat fulfillment center, refunds are settled to your original payment account (PhonePe / Easebuzz / UPI) within 24-48 business hours.\n\nYou will receive an official notification from refund@youthnic.com with your UTR transfer receipt as soon as the credit is completed.\n\nWarm regards,\nYouthnic Refunds Desk\nrefund@youthnic.com`;
+      draftReply = `Dear ${customerName},\n\nThank you for checking on your refund status for ${orderName}.\n\nOnce returned parcels pass our quality inspection at our Surat fulfillment center, refunds are settled to your original payment account (PhonePe / Easebuzz / UPI) within 24-48 business hours.\n\nYou will receive an official notification from refunds@youthnic.com with your UTR transfer receipt as soon as the credit is completed.\n\nWarm regards,\nYouthnic Refunds Desk\nrefunds@youthnic.com`;
     } else if (text.includes('delay') || text.includes('where is') || text.includes('not delivered') || text.includes('late')) {
       intent = 'TRANSIT_DELAY';
       urgency = urgency === 'URGENT' ? 'URGENT' : 'NORMAL';
@@ -411,14 +411,14 @@ Please analyze this inbound conversation and return the structured JSON decision
     } else if (text.includes('exchange') || text.includes('size') || text.includes('fitting')) {
       intent = 'SIZE_EXCHANGE';
       urgency = 'HIGH';
-      senderDesk = 'contact@youthnic.com';
+      senderDesk = 'support@youthnic.com';
       summary = 'Customer requested size or fitting exchange';
       learnedFacts.push('Customer requested size adjustment exchange');
-      draftReply = `Dear ${customerName},\n\nThank you for contacting Youthnic. We would love to arrange a hassle-free size exchange for ${orderName} at zero additional shipping fee!\n\nPlease let us know your preferred size, and our dispatch desk will reserve your replacement set immediately.\n\nWarm regards,\nYouthnic Customer Experience Desk\ncontact@youthnic.com`;
+      draftReply = `Dear ${customerName},\n\nThank you for contacting Youthnic. We would love to arrange a hassle-free size exchange for ${orderName} at zero additional shipping fee!\n\nPlease let us know your preferred size, and our dispatch desk will reserve your replacement set immediately.\n\nWarm regards,\nYouthnic Customer Experience Desk\nsupport@youthnic.com`;
     } else {
       intent = 'GENERAL_INQUIRY';
-      senderDesk = 'contact@youthnic.com';
-      draftReply = `Dear ${customerName},\n\nThank you for contacting Youthnic Support regarding ${orderName}.\n\nWe have received your message and our team is reviewing your query. We will update you shortly.\n\nWarm regards,\nYouthnic Support Team\ncontact@youthnic.com`;
+      senderDesk = 'support@youthnic.com';
+      draftReply = `Dear ${customerName},\n\nThank you for contacting Youthnic Support regarding ${orderName}.\n\nWe have received your message and our team is reviewing your query. We will update you shortly.\n\nWarm regards,\nYouthnic Support Team\nsupport@youthnic.com`;
     }
 
     recommendedActions.push({

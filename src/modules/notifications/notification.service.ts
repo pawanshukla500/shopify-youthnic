@@ -1,9 +1,11 @@
 import prisma from '../../database/prisma';
 import kwikenageService from '../whatsapp/whatsapp.service';
 import kapsoService from '../whatsapp/kapso.service';
+import resendService, { EmailTemplateType } from '../email/resend.service';
 import logger from '../../utils/logger';
 import { Order, Return } from '@prisma/client';
 import { NotificationPayload } from '../../types';
+import { EmailTemplateData } from '../email/email-templates';
 
 /**
  * Notification Engine
@@ -11,6 +13,51 @@ import { NotificationPayload } from '../../types';
  * powered by Kapso AI WhatsApp Cloud REST API.
  */
 class NotificationEngine {
+  /**
+   * Best-effort Resend email for a lifecycle event. Never throws — a mail
+   * failure must not roll back a tracking or webhook status change.
+   */
+  private async sendLifecycleEmail(
+    order: Order,
+    templateType: EmailTemplateType,
+    extra: Partial<EmailTemplateData> = {}
+  ): Promise<void> {
+    const to = order.customerEmail?.trim();
+    if (!to) return;
+    try {
+      const result = await resendService.sendEmail({
+        to,
+        templateType,
+        orderId: order.id,
+        data: {
+          orderName: order.shopifyOrderName,
+          customerName: order.customerName,
+          recipientEmail: to,
+          customerAddress: [order.customerAddress, order.customerCity, order.customerPincode]
+            .filter(Boolean)
+            .join(', '),
+          totalAmount: order.totalAmount,
+          paymentMethod: order.paymentMethod || undefined,
+          courier: 'Delhivery Express',
+          ...extra,
+        },
+      });
+      if (!result.success) {
+        logger.warn('Lifecycle email was not accepted', {
+          templateType,
+          orderId: order.id,
+          error: 'error' in result ? result.error : undefined,
+        });
+      }
+    } catch (err: any) {
+      logger.warn('Lifecycle email failed', {
+        templateType,
+        orderId: order.id,
+        error: err?.message,
+      });
+    }
+  }
+
   /**
    * Best-effort KwiKenage fallback when Kapso is down/misconfigured.
    * Never throws — CRM notifications must not break order state transitions.
@@ -97,13 +144,28 @@ class NotificationEngine {
   /**
    * Out for delivery — sent when tracking shows OFD status.
    */
-  async notifyOutForDelivery(order: Order, waybillNumber?: string): Promise<void> {
+  async notifyOutForDelivery(order: Order, waybillNumber?: string, location?: string): Promise<void> {
     try {
       await kapsoService.sendCriticalTrigger('OUT_FOR_DELIVERY', order, { waybillNumber });
     } catch (err) {
       logger.warn('Kapso send failed for OUT_FOR_DELIVERY, attempting fallback', { err });
       await this.fallbackToKwiKenage(order, 'OUT_FOR_DELIVERY', { trackingNumber: waybillNumber });
     }
+    await this.sendLifecycleEmail(order, 'OUT_FOR_DELIVERY', {
+      waybillNumber,
+      currentLocation: location,
+    });
+  }
+
+  /**
+   * In transit — email the customer once the parcel leaves the origin hub.
+   * WhatsApp uses the shipped template at dispatch; this is the Resend update.
+   */
+  async notifyInTransit(order: Order, waybillNumber?: string, location?: string): Promise<void> {
+    await this.sendLifecycleEmail(order, 'IN_TRANSIT', {
+      waybillNumber,
+      currentLocation: location,
+    });
   }
 
   /**
@@ -116,6 +178,7 @@ class NotificationEngine {
       logger.warn('Kapso send failed for DELIVERED, attempting fallback', { err });
       await this.fallbackToKwiKenage(order, 'DELIVERED', { trackingNumber: waybillNumber });
     }
+    await this.sendLifecycleEmail(order, 'DELIVERED', { waybillNumber });
   }
 
   /**
@@ -131,6 +194,10 @@ class NotificationEngine {
       logger.warn('Kapso send failed for NDR_ALERT, attempting fallback', { err });
       await this.fallbackToKwiKenage(order, 'NDR_ALERT', { trackingNumber: waybillNumber } as any);
     }
+    await this.sendLifecycleEmail(order, 'NDR_ALERT', {
+      waybillNumber,
+      delayReason: remark,
+    });
   }
 
   /**

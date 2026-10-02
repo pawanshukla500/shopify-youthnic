@@ -89,6 +89,11 @@ app.use(
 // JSON and urlencoded parser for all other routes
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+// Delhivery sometimes posts scan-push bodies as text/plain JSON.
+app.use(
+  ['/webhooks/delhivery', '/delhivery'],
+  express.text({ type: ['text/plain', 'text/json', 'application/octet-stream'], limit: '10mb' })
+);
 
 // Routes
 app.use('/webhooks', webhookRoutes);

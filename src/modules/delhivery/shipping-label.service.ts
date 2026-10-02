@@ -179,7 +179,6 @@ export class ShippingLabelService {
    */
   public generatePrintableLabelPage(order: OrderWithDetails, waybillNumber: string): string {
     const labelHtml = this.generateSingleLabelHtml(order, waybillNumber);
-    const officialPdfUrl = order.shipment?.labelUrl && order.shipment.labelUrl.startsWith('http') ? order.shipment.labelUrl : '';
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -197,7 +196,6 @@ export class ShippingLabelService {
       <span class="controls-info">Order: ${order.shopifyOrderName} · AWB: ${waybillNumber}</span>
     </div>
     <div class="controls-right">
-      ${officialPdfUrl ? `<a href="${officialPdfUrl}" target="_blank" class="btn btn-delhivery">📄 Download Official Delhivery PDF</a>` : ''}
       <button class="btn btn-primary" onclick="window.print()">🖨️ Print Label</button>
       <button class="btn btn-secondary" onclick="window.close()">✕ Close</button>
     </div>

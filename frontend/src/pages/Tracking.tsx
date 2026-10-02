@@ -5,13 +5,61 @@ import { api, apiError, getOrders, syncWaybillTrackingLive } from '../api'
 import { formatDate } from '../lib'
 import { Button, EmptyState, ErrorBox, Icon, LoadingState, PageIntro, Panel, PanelHeading, useDocumentTitle, useToast } from '../components/UI'
 
-function extractEvents(value: unknown): Array<{ status: string; location?: string; remark?: string; date?: string }> {
-  if (Array.isArray(value)) return value.map((event) => event as { status: string; location?: string; remark?: string; date?: string })
-  if (value && typeof value === 'object') {
-    const record = value as Record<string, unknown>
-    for (const key of ['events', 'history', 'Scans', 'scans', 'tracking']) if (Array.isArray(record[key])) return extractEvents(record[key])
+type ScanEvent = {
+  status: string
+  location?: string
+  remark?: string
+  date?: string
+  statusType?: string
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null
+}
+
+function eventDate(event: Record<string, unknown>): string | undefined {
+  for (const key of ['date', 'dateTime', 'ScanDateTime', 'scannedAt', 'StatusDateTime']) {
+    const value = event[key]
+    if (typeof value === 'string' && value.trim()) return value
+  }
+  return undefined
+}
+
+function normalizeEvent(value: unknown): ScanEvent | null {
+  const event = asRecord(value)
+  if (!event) return null
+  const status = event.status || event.Scan || event.Status || event.rawStatus
+  if (typeof status !== 'string' || !status.trim()) return null
+  const location = event.location || event.ScanLocation || event.StatusLocation
+  const remark = event.remark || event.Instructions || event.instructions
+  const statusType = event.statusType || event.ScanType || event.StatusType
+  return {
+    status,
+    location: typeof location === 'string' ? location : undefined,
+    remark: typeof remark === 'string' ? remark : undefined,
+    date: eventDate(event),
+    statusType: typeof statusType === 'string' ? statusType : undefined,
+  }
+}
+
+function extractEvents(value: unknown): ScanEvent[] {
+  if (Array.isArray(value)) {
+    return value.map(normalizeEvent).filter((event): event is ScanEvent => Boolean(event))
+  }
+  const record = asRecord(value)
+  if (!record) return []
+  for (const key of ['events', 'history', 'Scans', 'scans', 'tracking']) {
+    if (Array.isArray(record[key])) return extractEvents(record[key])
   }
   return []
+}
+
+function sortNewest(events: ScanEvent[]): ScanEvent[] {
+  return [...events].sort((a, b) => {
+    const left = a.date ? new Date(a.date).getTime() : 0
+    const right = b.date ? new Date(b.date).getTime() : 0
+    return (Number.isNaN(right) ? 0 : right) - (Number.isNaN(left) ? 0 : left)
+  })
 }
 
 export function Tracking() {
@@ -22,7 +70,6 @@ export function Tracking() {
   const [viewMode, setViewMode] = useState<'timeline' | 'raw'>('timeline')
   const waybill = params.get('waybill') ?? ''
 
-  // Recent shipments query for 1-click test pills — capped server-side to avoid fetching all orders.
   const ordersQuery = useQuery({ queryKey: ['recent-shipments-tracking'], queryFn: () => getOrders({ limit: 20 } as any), retry: false })
 
   const waybillValid = /^[0-9]{10,16}$/.test(waybill.trim())
@@ -33,8 +80,8 @@ export function Tracking() {
     retry: false,
   })
 
-  const events = extractEvents(query.data)
-  const detail = (query.data && typeof query.data === 'object' ? (query.data as Record<string, any>) : null)
+  const events = sortNewest(extractEvents(query.data))
+  const detail = asRecord(query.data)
 
   const queryClient = useQueryClient()
   const [isSyncingLive, setIsSyncingLive] = useState(false)
@@ -44,7 +91,7 @@ export function Tracking() {
     setIsSyncingLive(true)
     try {
       const res = await syncWaybillTrackingLive(waybill)
-      toast.toast('success', res.tracking?.status ? `Live Delhivery tracking synced: ${res.tracking.status}` : 'Delhivery tracking refreshed and synced to database!')
+      toast.toast('success', res.tracking?.status ? `Live Delhivery tracking synced: ${res.tracking.status}` : 'Delhivery tracking refreshed and synced to database.')
       await queryClient.invalidateQueries({ queryKey: ['tracking', waybill] })
       await queryClient.invalidateQueries({ queryKey: ['recent-shipments-tracking'] })
     } catch (err: any) {
@@ -57,7 +104,7 @@ export function Tracking() {
   const copyWaybill = async (awb: string) => {
     try {
       await navigator.clipboard.writeText(awb)
-      toast.toast('success', `Waybill ${awb} copied!`)
+      toast.toast('success', `Waybill ${awb} copied`)
     } catch {
       window.prompt('Copy waybill:', awb)
     }
@@ -68,12 +115,16 @@ export function Tracking() {
     .filter((w): w is { orderName: string; waybill: string } => Boolean(w.waybill))
     .slice(0, 6)
 
+  const statusText = typeof detail?.status === 'string' ? detail.status : ''
+  const source = detail?.source === 'stored' ? 'Saved scans' : 'Live Delhivery'
+  const pickupDone = detail?.pickupDone === true
+
   return (
-    <>
+    <div className="tracking-page">
       <PageIntro
         eyebrow="Carrier Visibility"
         title="Delhivery Tracking Lookup"
-        description="Live tracking status, scan timeline, and carrier hub history for any Delhivery shipment."
+        description="Live scan status, hub history, and the dates Delhivery reports for any Youthnic shipment."
       />
 
       <Panel className="lookup-panel">
@@ -86,7 +137,7 @@ export function Tracking() {
               onKeyDown={(event) => {
                 if (event.key === 'Enter' && input.trim()) setParams({ waybill: input.trim() })
               }}
-              placeholder="Enter 12-14 digit Delhivery waybill number…"
+              placeholder="Enter a 10–16 digit Delhivery waybill"
             />
           </label>
           <Button
@@ -99,26 +150,17 @@ export function Tracking() {
           </Button>
         </div>
 
-        {/* Quick Recent Waybills */}
         {recentWaybills.length > 0 && (
-          <div style={{ marginTop: '12px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: '10.5px', color: '#64748b', fontWeight: 600 }}>Recent Waybills:</span>
+          <div className="recent-waybills">
+            <span>Recent waybills</span>
             {recentWaybills.map((w) => (
               <button
                 key={w.waybill}
+                type="button"
+                className={waybill === w.waybill ? 'is-active' : ''}
                 onClick={() => {
                   setInput(w.waybill)
                   setParams({ waybill: w.waybill })
-                }}
-                style={{
-                  background: waybill === w.waybill ? '#dbeafe' : '#f1f5f9',
-                  border: waybill === w.waybill ? '1px solid #3b82f6' : '1px solid #e2e8f0',
-                  borderRadius: '5px',
-                  padding: '3px 8px',
-                  fontSize: '10px',
-                  fontFamily: 'ui-monospace, monospace',
-                  color: waybill === w.waybill ? '#1e3a8a' : '#334155',
-                  cursor: 'pointer',
                 }}
               >
                 {w.orderName}: {w.waybill}
@@ -128,39 +170,34 @@ export function Tracking() {
         )}
 
         {waybill && (
-          <div style={{ marginTop: '14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '11px', color: '#64748b' }}>Active Tracking:</span>
-              <div
-                className="waybill-chip"
-                onClick={() => copyWaybill(waybill)}
-                title="Click to copy waybill"
-              >
+          <div className="tracking-active-row">
+            <div className="tracking-active-id">
+              <span>Active tracking</span>
+              <button type="button" className="waybill-chip" onClick={() => copyWaybill(waybill)} title="Copy waybill">
                 <span>{waybill}</span>
                 <Icon name="copy" size={12} />
-              </div>
+              </button>
+              {detail && <span className="tracking-source">{source}</span>}
             </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div className="tracking-active-actions">
               <Button
                 className="button-secondary button-small"
                 onClick={handleSyncLive}
                 disabled={isSyncingLive}
                 loading={isSyncingLive}
-                title="Fetch live tracking events from Delhivery API and save to database"
+                title="Fetch live tracking events from Delhivery and save them"
               >
                 <Icon name="refresh" size={13} />
-                <span>{isSyncingLive ? 'Syncing Live…' : '⚡ Refresh Live Carrier Data'}</span>
+                <span>{isSyncingLive ? 'Syncing…' : 'Refresh live data'}</span>
               </Button>
-
               <a
                 className="button button-secondary button-small"
-                href={`https://www.delhivery.com/track/package/${waybill}`}
+                href={`https://www.delhivery.com/track/package/${encodeURIComponent(waybill)}`}
                 target="_blank"
                 rel="noopener noreferrer"
               >
                 <Icon name="external" size={13} />
-                Open on Delhivery.com
+                Open on Delhivery
               </a>
             </div>
           </div>
@@ -168,127 +205,133 @@ export function Tracking() {
       </Panel>
 
       {waybill && !waybillValid && (
-        <ErrorBox message="Enter a valid 10–16 digit Delhivery waybill number — no API call made." />
+        <ErrorBox message="Enter a valid 10–16 digit Delhivery waybill. No request was sent." />
       )}
       {query.isError && <ErrorBox message={apiError(query.error)} />}
       {query.isLoading && (
         <Panel>
-          <LoadingState label="Fetching live carrier telemetry from Delhivery API…" />
+          <LoadingState label="Fetching carrier scans from Delhivery…" />
         </Panel>
       )}
 
-      {query.data !== undefined && !query.isLoading && (
-        <div>
-          {detail && (
-            <Panel>
-              <PanelHeading eyebrow="Delivery intelligence" title="Pickup & Promise Dates" />
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px', fontSize: '12px' }}>
-                <div><span style={{ color: '#64748b' }}>Latest status: </span><strong>{detail.status || '—'}</strong>{detail.statusType ? ` (${detail.statusType})` : ''}</div>
-                <div><span style={{ color: '#64748b' }}>Status code: </span><strong style={{ fontFamily: 'monospace' }}>{detail.statusCode || '—'}</strong></div>
-                <div><span style={{ color: '#64748b' }}>Expected delivery: </span><strong>{detail.expectedDeliveryDate ? formatDate(detail.expectedDeliveryDate) : '—'}</strong></div>
-                <div><span style={{ color: '#64748b' }}>Pickup: </span><strong>{detail.pickupDone ? `✓ Done${detail.pickedupDate ? ` · ${formatDate(detail.pickedupDate)}` : ''}` : '⏳ Not picked yet'}</strong></div>
-                <div><span style={{ color: '#64748b' }}>Manifested: </span><strong>{detail.pickUpDate ? formatDate(detail.pickUpDate) : '—'}</strong></div>
-                <div><span style={{ color: '#64748b' }}>Dispatch count: </span><strong>{detail.dispatchCount ?? '—'}</strong></div>
-                {detail.referenceNo && <div><span style={{ color: '#64748b' }}>Reference: </span><strong style={{ fontFamily: 'monospace' }}>{detail.referenceNo}</strong></div>}
-                {detail.remarks && <div style={{ gridColumn: '1 / -1' }}><span style={{ color: '#64748b' }}>Instructions: </span><strong>{detail.remarks}</strong></div>}
-              </div>
-            </Panel>
-          )}
-          {/* View toggle tabs */}
-          <div style={{ display: 'flex', gap: '8px', marginBottom: '14px' }}>
-            <button
-              onClick={() => setViewMode('timeline')}
-              style={{
-                background: viewMode === 'timeline' ? '#2f6df6' : '#fff',
-                color: viewMode === 'timeline' ? '#fff' : '#64748b',
-                border: '1px solid',
-                borderColor: viewMode === 'timeline' ? '#2f6df6' : '#cbd5e1',
-                borderRadius: '6px',
-                padding: '6px 14px',
-                fontSize: '11px',
-                fontWeight: 700,
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '6px',
-              }}
-            >
-              <Icon name="clock" size={14} />
-              Visual Timeline ({events.length} scans)
-            </button>
+      {query.data !== undefined && !query.isLoading && detail && (
+        <>
+          <section className="tracking-hero">
+            <div>
+              <p>Latest status</p>
+              <h2>{statusText || 'Waiting for the first scan'}</h2>
+              <p className="tracking-hero-meta">
+                {typeof detail.location === 'string' && detail.location ? detail.location : 'Location not reported yet'}
+                {typeof detail.statusType === 'string' && detail.statusType ? ` · ${detail.statusType}` : ''}
+              </p>
+            </div>
+            <div className={`tracking-pickup ${pickupDone ? 'is-done' : ''}`}>
+              <strong>{pickupDone ? 'Pickup confirmed' : 'Awaiting pickup'}</strong>
+              <span>
+                {typeof detail.pickedupDate === 'string' && detail.pickedupDate
+                  ? formatDate(detail.pickedupDate)
+                  : pickupDone
+                    ? 'Courier has the parcel'
+                    : 'Still at the Surat warehouse'}
+              </span>
+            </div>
+          </section>
 
-            <button
-              onClick={() => setViewMode('raw')}
-              style={{
-                background: viewMode === 'raw' ? '#2f6df6' : '#fff',
-                color: viewMode === 'raw' ? '#fff' : '#64748b',
-                border: '1px solid',
-                borderColor: viewMode === 'raw' ? '#2f6df6' : '#cbd5e1',
-                borderRadius: '6px',
-                padding: '6px 14px',
-                fontSize: '11px',
-                fontWeight: 700,
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '6px',
-              }}
-            >
+          <Panel>
+            <PanelHeading eyebrow="Delivery intelligence" title="Promise and reference" />
+            <div className="tracking-facts">
+              <div>
+                <span>Status code</span>
+                <strong>{typeof detail.statusCode === 'string' && detail.statusCode ? detail.statusCode : '—'}</strong>
+              </div>
+              <div>
+                <span>Expected delivery</span>
+                <strong>{typeof detail.expectedDeliveryDate === 'string' ? formatDate(detail.expectedDeliveryDate) : '—'}</strong>
+              </div>
+              <div>
+                <span>Manifested</span>
+                <strong>{typeof detail.pickUpDate === 'string' ? formatDate(detail.pickUpDate) : '—'}</strong>
+              </div>
+              <div>
+                <span>Dispatch count</span>
+                <strong>{detail.dispatchCount === 0 || detail.dispatchCount ? String(detail.dispatchCount) : '—'}</strong>
+              </div>
+              {typeof detail.referenceNo === 'string' && detail.referenceNo && (
+                <div>
+                  <span>Reference</span>
+                  <strong className="mono">{detail.referenceNo}</strong>
+                </div>
+              )}
+              {typeof detail.remarks === 'string' && detail.remarks && (
+                <div className="tracking-facts-wide">
+                  <span>Instructions</span>
+                  <strong>{detail.remarks}</strong>
+                </div>
+              )}
+              {typeof detail.liveError === 'string' && detail.liveError && (
+                <div className="tracking-facts-wide">
+                  <span>Live API</span>
+                  <strong>Showing saved scans. Delhivery did not answer: {detail.liveError}</strong>
+                </div>
+              )}
+            </div>
+          </Panel>
+
+          <div className="tracking-view-toggle" role="tablist">
+            <button type="button" className={viewMode === 'timeline' ? 'is-active' : ''} onClick={() => setViewMode('timeline')}>
+              <Icon name="clock" size={14} />
+              Timeline ({events.length})
+            </button>
+            <button type="button" className={viewMode === 'raw' ? 'is-active' : ''} onClick={() => setViewMode('raw')}>
               <Icon name="tool" size={14} />
-              Raw JSON Response
+              Raw response
             </button>
           </div>
 
           {viewMode === 'timeline' ? (
             <Panel>
-              <PanelHeading eyebrow="Live Scan Events" title="Shipment Journey" />
+              <PanelHeading eyebrow="Scan events" title="Shipment journey" />
               {events.length ? (
                 <div className="timeline tracking-timeline">
                   {events.map((event, index) => (
-                    <div className="timeline-item" key={`${event.status}-${index}`}>
+                    <div className="timeline-item" key={`${event.status}-${event.date || index}`}>
                       <div className={`timeline-marker ${index === 0 ? 'current' : ''}`}>
                         <Icon name={index === 0 ? 'pin' : 'check'} size={13} />
                       </div>
                       <div className="timeline-copy">
-                        <strong style={{ fontSize: '12px', color: index === 0 ? '#1e3a8a' : '#1e293b' }}>
-                          {event.status || 'Carrier update'}
-                        </strong>
-                        <span style={{ fontSize: '11px', color: '#475569' }}>
-                          {[event.location, event.remark].filter(Boolean).join(' · ') || 'Hub scan completed'}
-                        </span>
-                        <time style={{ fontSize: '10px', color: '#94a3b8' }}>
-                          {event.date ? formatDate(event.date) : 'Time not reported'}
-                        </time>
+                        <strong>{event.status}</strong>
+                        <span>{[event.location, event.remark].filter(Boolean).join(' · ') || 'Hub scan recorded'}</span>
+                        <time>{event.date ? formatDate(event.date) : 'Time not reported'}</time>
                       </div>
                     </div>
                   ))}
                 </div>
               ) : (
                 <EmptyState
-                  title="No timeline format found"
-                  description="The carrier returned data, but not a recognized scan list. Switch to Raw Response tab to inspect the payload."
+                  title="No scans in this response"
+                  description="Delhivery returned a status without a scan list. Open Raw response, or refresh live data after the next hub scan."
                   icon="route"
                 />
               )}
             </Panel>
           ) : (
             <Panel>
-              <PanelHeading eyebrow="Debug view" title="Raw Carrier JSON" />
+              <PanelHeading eyebrow="Debug view" title="Raw carrier JSON" />
               <pre className="json-view">{JSON.stringify(query.data, null, 2)}</pre>
             </Panel>
           )}
-        </div>
+        </>
       )}
 
       {!waybill && (
         <Panel>
           <EmptyState
-            title="Enter a waybill or select one above"
-            description="The latest carrier scans, delivery checkpoints, and transit telemetry will appear here."
+            title="Enter a waybill or choose a recent one"
+            description="The latest carrier scans, delivery checkpoints, and hub times will appear here."
             icon="route"
           />
         </Panel>
       )}
-    </>
+    </div>
   )
 }

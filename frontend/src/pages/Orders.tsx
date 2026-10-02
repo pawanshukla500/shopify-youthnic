@@ -31,7 +31,7 @@ import {
   syncExternalOrderFulfillment,
   syncBulkExternalFulfillments,
 } from '../api'
-import { ORDER_TABS, tabForStatus, formatDate, formatMoney, labelize, type OrderTabKey } from '../lib'
+import { ORDER_TABS, carrierTrackingUrl, tabForStatus, formatDate, formatMoney, labelize, type OrderTabKey } from '../lib'
 import { getOrderTabCounts } from '../api'
 import { Button, EmptyState, ErrorBox, FormField, Icon, LoadingState, PageIntro, Panel, StatusBadge, useDocumentTitle, useToast } from '../components/UI'
 import type { Order, OrderStatus } from '../types'
@@ -1673,17 +1673,12 @@ export function Orders() {
                             <>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                                 <a
-                                  href={
-                                    order.shipment.labelUrl ||
-                                    (order.shipment.courier?.toLowerCase() === 'ekart'
-                                      ? `https://t.proship.in/${order.shipment.waybillNumber}`
-                                      : `https://www.delhivery.com/track/package/${order.shipment.waybillNumber}`)
-                                  }
+                                  href={carrierTrackingUrl(order.shipment.courier, order.shipment.waybillNumber)}
                                   target="_blank"
                                   rel="noreferrer"
                                   onClick={(e) => e.stopPropagation()}
-                                  style={{ color: '#2563eb', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px' }}
-                                  title={`Track on ${order.shipment.courier || 'Carrier'}`}
+                                  className="waybill-track-link"
+                                  title={`Track on ${order.shipment.courier || 'Delhivery'}`}
                                 >
                                   {order.shipment.courier?.toLowerCase() === 'delhivery' ? (
                                     <span style={{ display: 'inline-flex', alignItems: 'center', background: '#f8fafc', border: '1px solid #e2e8f0', padding: '1px 5px', borderRadius: '4px' }}>

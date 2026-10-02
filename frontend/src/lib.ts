@@ -90,6 +90,13 @@ export function formatMoney(amount: number | null | undefined, currency = 'INR')
   }
 }
 
+/** Public carrier tracking page. Never use a packing-slip URL here — those S3 links expire. */
+export function carrierTrackingUrl(courier: string | null | undefined, waybill: string): string {
+  const name = (courier || '').toLowerCase()
+  if (name.includes('ekart') || name.includes('proship')) return `https://t.proship.in/${encodeURIComponent(waybill)}`
+  return `https://www.delhivery.com/track/package/${encodeURIComponent(waybill)}`
+}
+
 export function formatDate(value: string | null | undefined): string {
   if (!value) return '—'
   const date = new Date(value)

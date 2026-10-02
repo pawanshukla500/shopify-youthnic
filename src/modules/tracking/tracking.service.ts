@@ -76,7 +76,8 @@ class TrackingService {
         const newShipmentStatus = delhiveryService.mapTrackingToShipmentStatus(
           tracking.statusType,
           tracking.status,
-          (tracking as any).pickupDone
+          (tracking as any).pickupDone,
+          tracking.remarks
         ) as ShipmentStatus;
 
         // Check if status actually changed
@@ -217,6 +218,11 @@ class TrackingService {
           where: { id: order.id },
           data: { status: 'IN_TRANSIT' },
         });
+        await notificationEngine.notifyInTransit?.(
+          order,
+          shipment.waybillNumber || undefined,
+          location
+        );
         break;
 
       case 'OUT_FOR_DELIVERY':
@@ -303,8 +309,95 @@ class TrackingService {
    * Track a single shipment by waybill number (manual lookup).
    */
   async trackShipment(waybillNumber: string): Promise<any> {
-    const tracking = await delhiveryService.trackShipment(waybillNumber);
-    return tracking;
+    let live: any = null;
+    let liveError: string | null = null;
+    try {
+      live = await delhiveryService.trackShipment(waybillNumber);
+    } catch (error: any) {
+      liveError = error.message || 'Delhivery tracking request failed';
+      logger.warn('Live Delhivery tracking failed, trying stored scans', {
+        waybillNumber,
+        error: liveError,
+      });
+    }
+
+    const stored = await this.loadStoredTracking(waybillNumber);
+    const liveUsable =
+      live &&
+      ((Array.isArray(live.history) && live.history.length > 0) ||
+        (live.status && live.status !== 'UNKNOWN'));
+
+    if (liveUsable) {
+      const liveHistory = Array.isArray(live.history) ? live.history : [];
+      const storedHistory = stored?.history || [];
+      const history = liveHistory.length > 0 ? liveHistory : storedHistory;
+      return {
+        ...live,
+        history,
+        source: 'delhivery',
+        storedScanCount: storedHistory.length,
+      };
+    }
+
+    if (stored) {
+      return {
+        ...stored,
+        liveError,
+        source: 'stored',
+      };
+    }
+
+    if (live) return { ...live, source: 'delhivery', liveError };
+    throw new Error(liveError || `No tracking found for ${waybillNumber}`);
+  }
+
+  /**
+   * Scans already saved by the scan-push webhook or a previous poll.
+   * Used when the live Delhivery API is down or returns an empty payload.
+   */
+  private async loadStoredTracking(waybillNumber: string): Promise<any | null> {
+    const shipment = await prisma.shipment.findFirst({
+      where: { waybillNumber },
+      include: {
+        trackingLogs: { orderBy: { scannedAt: 'desc' }, take: 80 },
+        order: { select: { shopifyOrderName: true, status: true, customerName: true } },
+      },
+    });
+    if (!shipment) return null;
+
+    const fromLogs = (shipment.trackingLogs || []).map((log) => ({
+      status: log.rawStatus || log.status,
+      statusType: log.statusType || '',
+      location: log.location || '',
+      dateTime: log.scannedAt.toISOString(),
+      date: log.scannedAt.toISOString(),
+      remark: log.remark || log.instructions || undefined,
+    }));
+
+    const fromJson = Array.isArray(shipment.trackingHistory)
+      ? (shipment.trackingHistory as any[]).map((scan) => ({
+          status: scan.status || scan.Scan || 'SCAN',
+          statusType: scan.statusType || scan.ScanType || '',
+          location: scan.location || scan.ScanLocation || '',
+          dateTime: scan.dateTime || scan.date || scan.ScanDateTime || null,
+          date: scan.date || scan.dateTime || scan.ScanDateTime || null,
+          remark: scan.remark || scan.Instructions || undefined,
+        }))
+      : [];
+
+    const history = fromLogs.length > 0 ? fromLogs : fromJson;
+    if (!shipment.trackingStatus && history.length === 0 && !shipment.status) return null;
+
+    return {
+      status: shipment.trackingStatus || shipment.status,
+      statusType: history[0]?.statusType || '',
+      location: shipment.trackingLocation || history[0]?.location || '',
+      remarks: history[0]?.remark,
+      history,
+      waybill: waybillNumber,
+      referenceNo: shipment.order?.shopifyOrderName,
+      orderStatus: shipment.order?.status,
+    };
   }
 
   /**
@@ -347,7 +440,8 @@ class TrackingService {
     const newShipmentStatus = delhiveryService.mapTrackingToShipmentStatus(
       tracking.statusType,
       tracking.status,
-      (tracking as any).pickupDone
+      (tracking as any).pickupDone,
+      tracking.remarks
     ) as ShipmentStatus;
 
     if (newShipmentStatus !== shipment.status) {

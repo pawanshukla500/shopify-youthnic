@@ -47,13 +47,13 @@ export async function handleScanPush(req: Request, res: Response): Promise<void>
       return;
     }
 
-    const payload = req.body;
-    const updates = Array.isArray(payload) ? payload.slice(0, 500) : [payload];
+    const updates = expandScanPushBodies(req.body).slice(0, 500);
     const normalized = updates.map(normalizeScanPushPayload).filter(Boolean) as NormalizedScan[];
 
     if (normalized.length === 0) {
+      const payload = req.body;
       logger.warn('Delhivery scan webhook received without recognizable payload', {
-        keys: Object.keys(payload || {}),
+        keys: payload && typeof payload === 'object' ? Object.keys(payload) : [],
       });
       res.status(200).json({ received: true, ignored: true });
       return;
@@ -79,7 +79,7 @@ export async function handleScanPush(req: Request, res: Response): Promise<void>
       }
 
       // Save tracking log — idempotent upsert on (waybill, status, scannedAt)
-      const scannedAt = new Date(scan.scanDateTime);
+      const scannedAt = parseScanDate(scan.scanDateTime);
       try {
         await prisma.trackingLog.upsert({
           where: {
@@ -114,13 +114,30 @@ export async function handleScanPush(req: Request, res: Response): Promise<void>
         });
       }
 
-      // Map to internal status
+      // Map to internal status. Remarks/instructions carry NDR reasons that
+      // the status token alone ("Pending") does not.
       const scanText = scan.rawStatus || scan.status || '';
       const newShipmentStatus = delhiveryService.mapTrackingToShipmentStatus(
         scan.statusType || '',
         scanText,
-        /pick.*up|pickedup|received at|reached/i.test(scanText)
+        /pick.*up|pickedup|received at origin/i.test(`${scanText} ${scan.remarks || ''}`),
+        [scan.instructions, scan.remarks].filter(Boolean).join(' ')
       );
+      const historyEntry = {
+        status: scan.rawStatus || scan.status,
+        statusType: scan.statusType || '',
+        location: scan.location || '',
+        dateTime: scannedAt.toISOString(),
+        date: scannedAt.toISOString(),
+        remark: scan.remarks || scan.instructions || undefined,
+      };
+      const previousHistory = Array.isArray(shipment.trackingHistory) ? (shipment.trackingHistory as any[]) : [];
+      const trackingHistory = [
+        ...previousHistory.filter(
+          (row) => !(row?.status === historyEntry.status && row?.dateTime === historyEntry.dateTime)
+        ),
+        historyEntry,
+      ].slice(-80);
 
       // Check if status changed
       if (newShipmentStatus !== shipment.status) {
@@ -131,11 +148,18 @@ export async function handleScanPush(req: Request, res: Response): Promise<void>
             trackingStatus: scan.rawStatus || scan.status,
             trackingLocation: scan.location || null,
             trackingUpdatedAt: new Date(),
+            trackingHistory: trackingHistory as any,
           },
         });
 
         // Trigger order status transition + notifications
-        await handleStatusTransition(shipment.order, newShipmentStatus, scan.rawStatus || scan.status, scan.location);
+        await handleStatusTransition(
+          shipment.order,
+          newShipmentStatus,
+          scan.rawStatus || scan.status,
+          scan.location,
+          scan.waybill
+        );
       } else {
         await prisma.shipment.update({
           where: { id: shipment.id },
@@ -143,6 +167,7 @@ export async function handleScanPush(req: Request, res: Response): Promise<void>
             trackingStatus: scan.rawStatus || scan.status,
             trackingLocation: scan.location || null,
             trackingUpdatedAt: new Date(),
+            trackingHistory: trackingHistory as any,
           },
         });
       }
@@ -417,6 +442,60 @@ export interface NormalizedScan {
   receivedBy?: string;
 }
 
+/**
+ * Delhivery posts several envelopes: a raw scan, an array of scans, the
+ * tracking-API ShipmentData wrapper, or a JSON string inside text/plain.
+ * Flatten those into objects normalizeScanPushPayload can read.
+ */
+export function expandScanPushBodies(payload: any): any[] {
+  if (payload == null) return [];
+  if (typeof payload === 'string') {
+    const trimmed = payload.trim();
+    if (!trimmed) return [];
+    try {
+      return expandScanPushBodies(JSON.parse(trimmed));
+    } catch {
+      return [];
+    }
+  }
+  if (Array.isArray(payload)) return payload.flatMap(expandScanPushBodies);
+  if (typeof payload !== 'object') return [];
+
+  if (typeof payload.payload === 'string' || typeof payload.data === 'string') {
+    const inner = typeof payload.payload === 'string' ? payload.payload : payload.data;
+    const parsed = expandScanPushBodies(inner);
+    if (parsed.length) return parsed;
+  }
+
+  if (Array.isArray(payload.ShipmentData)) {
+    return payload.ShipmentData.flatMap((row: any) =>
+      expandScanPushBodies(row?.Shipment ? { Shipment: row.Shipment } : row)
+    );
+  }
+
+  if (payload.Shipment || payload.waybill || payload.AWB || payload.Waybill || payload.awb || payload.waybill_number) {
+    return [payload];
+  }
+
+  for (const key of ['payload', 'data', 'body', 'scan', 'event']) {
+    if (payload[key] && typeof payload[key] === 'object') {
+      const nested = expandScanPushBodies(payload[key]);
+      if (nested.length) return nested;
+    }
+  }
+
+  return [payload];
+}
+
+export function parseScanDate(raw: string | undefined | null): Date {
+  if (!raw) return new Date();
+  const direct = new Date(raw);
+  if (!Number.isNaN(direct.getTime())) return direct;
+  const normalized = new Date(String(raw).trim().replace(' ', 'T'));
+  if (!Number.isNaN(normalized.getTime())) return normalized;
+  return new Date();
+}
+
 export function normalizeScanPushPayload(input: any): NormalizedScan | null {
   if (!input || typeof input !== 'object') return null;
 
@@ -570,7 +649,7 @@ export function normalizeEpodPayload(input: any): NormalizedEpod | null {
 }
 
 // Exported for unit tests so webhook contracts stay pinned in CI
-export const __test__ = { normalizeScanPushPayload, normalizeEpodPayload };
+export const __test__ = { normalizeScanPushPayload, normalizeEpodPayload, expandScanPushBodies, parseScanDate };
 
 /**
  * Handle order status transition + WhatsApp notifications.
@@ -579,7 +658,8 @@ async function handleStatusTransition(
   order: any,
   newShipmentStatus: string,
   delhiveryStatusText: string,
-  location?: string
+  location?: string,
+  waybill?: string
 ): Promise<void> {
   if (!order) return;
 
@@ -605,6 +685,7 @@ async function handleStatusTransition(
         where: { id: order.id },
         data: { status: 'IN_TRANSIT' },
       });
+      await notificationEngine.notifyInTransit?.(order, waybill, location);
       break;
 
     case 'OUT_FOR_DELIVERY':
@@ -612,7 +693,7 @@ async function handleStatusTransition(
         where: { id: order.id },
         data: { status: 'OUT_FOR_DELIVERY' },
       });
-      await notificationEngine.notifyOutForDelivery(order);
+      await notificationEngine.notifyOutForDelivery(order, waybill, location);
       break;
 
     case 'DELIVERED':

@@ -88,6 +88,26 @@ class EmailLogService {
   }
 
   /**
+   * Finds a successful/simulated notification for an order and template.
+   * A cutoff can be used for repeatable notices such as transit delays.
+   */
+  async findDeliveredNotification(
+    orderId: number,
+    templateType: string,
+    createdAfter?: Date
+  ) {
+    return prisma.emailLog.findFirst({
+      where: {
+        orderId,
+        templateType,
+        status: { in: ['PENDING', 'SENT', 'DELIVERED', 'SIMULATED'] },
+        ...(createdAfter ? { createdAt: { gte: createdAfter } } : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  /**
    * Record customer conversion / response
    */
   async recordConversion(

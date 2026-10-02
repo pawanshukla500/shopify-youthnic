@@ -52,6 +52,9 @@ export interface ResendStatus {
   message?: string;
 }
 
+const NEVER_REPEAT_TEMPLATES = new Set<EmailTemplateType>(['RETURN_REFUND']);
+const DELAY_NOTIFICATION_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+
 class ResendService {
   private apiKey: string;
   private fromEmail: string;
@@ -203,6 +206,33 @@ class ResendService {
   async sendEmail(options: SendEmailOptions) {
     const { to, templateType, orderId, data, subject: customSubject, replyTo } = options;
 
+    // A completed refund is a terminal event and must never be emailed twice
+    // for the same order. Transit notices may be resent only after 24 hours.
+    if (orderId && (NEVER_REPEAT_TEMPLATES.has(templateType) || templateType === 'TRANSIT_DELAY')) {
+      const existingNotification = await emailLogService.findDeliveredNotification(
+        orderId,
+        templateType,
+        templateType === 'TRANSIT_DELAY'
+          ? new Date(Date.now() - DELAY_NOTIFICATION_COOLDOWN_MS)
+          : undefined
+      );
+      if (existingNotification) {
+        logger.info('Skipped duplicate customer email', {
+          orderId,
+          templateType,
+          existingLogId: existingNotification.id,
+        });
+        return {
+          success: true,
+          mode: 'SKIPPED',
+          logId: existingNotification.id,
+          recipient: to,
+          subject: existingNotification.subject,
+          message: `A ${templateType} email was already sent for this order.`,
+        };
+      }
+    }
+
     // Render template
     const rendered = this.renderTemplate(templateType, data);
     const finalSubject = customSubject || rendered.subject;
@@ -293,7 +323,11 @@ class ResendService {
       }
     }
 
-    const effectiveReplyTo = replyTo || defaultReplyTo;
+    // Customer replies must reach the monitored Google Workspace mailbox,
+    // even when a delivery, returns, or refunds desk sent the original email.
+    // This keeps every conversation in contact@youthnic.com rather than
+    // relying on separate receiving mailboxes for each sender identity.
+    const effectiveReplyTo = config.resend.replyToEmail || replyTo || defaultReplyTo;
 
     try {
       const payload: any = {

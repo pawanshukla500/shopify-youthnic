@@ -1299,7 +1299,7 @@ function getSampleHtmlForPreview(type: EmailTemplateType): string {
         <div style="background: #ffffff; border: 1.5px solid #cbd5e1; border-radius: 8px; padding: 16px; margin: 16px 0; font-size: 13.5px; line-height: 1.6;">
           ${data.customMessage}
         </div>
-        <p style="font-size: 12px; color: #64748b;">Simply reply directly to this email at contact@youthnic.com or reach WhatsApp +91 88661 54721.</p>
+        <p style="font-size: 12px; color: #64748b;">Simply reply directly to this email at contact@youthnic.com or reach WhatsApp +91 79849 84563.</p>
       `
           : `
         <div class="alert-amber">

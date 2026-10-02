@@ -4356,7 +4356,7 @@ router.get('/support/emails', async (req: Request, res: Response): Promise<void>
 // POST /api/support/inbound — Ingest customer email, analyze with Muse Spark 1.3, flag order, sync to Firebase RTDB
 router.post('/support/inbound', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { fromEmail, fromName, subject, bodyText, toEmail = 'return@youthnic.com', orderNumber } = req.body;
+    const { fromEmail, fromName, subject, bodyText, toEmail = 'contact@youthnic.com', orderNumber } = req.body;
     if (!fromEmail || !subject || !bodyText) {
       res.status(400).json({ success: false, error: 'fromEmail, subject, and bodyText are required.' });
       return;

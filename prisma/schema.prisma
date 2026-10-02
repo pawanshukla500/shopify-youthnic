@@ -148,6 +148,7 @@ model Shipment {
   trackingStatus    String? // Latest status from Delhivery
   trackingLocation  String?
   trackingUpdatedAt DateTime?
+  expectedDeliveryDate DateTime? // Delhivery ExpectedDeliveryDate / PromisedDeliveryDate
   trackingHistory   Json? // Full tracking timeline
 
   // Label

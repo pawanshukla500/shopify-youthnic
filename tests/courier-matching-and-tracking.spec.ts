@@ -43,6 +43,11 @@ const { delhiveryStub } = vi.hoisted(() => ({
 }));
 vi.mock('../src/modules/delhivery/delhivery.service', () => ({ default: delhiveryStub }));
 
+const { resendStub } = vi.hoisted(() => ({
+  resendStub: { sendEmail: vi.fn() },
+}));
+vi.mock('../src/modules/email/resend.service', () => ({ default: resendStub }));
+
 vi.mock('../src/modules/notifications/notification.service', () => ({
   default: {
     notifyOutForDelivery: vi.fn(async () => undefined),
@@ -59,6 +64,7 @@ const { prismaStub } = vi.hoisted(() => ({
     shipment: { findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn(), update: vi.fn() },
     trackingLog: { findMany: vi.fn(), create: vi.fn() },
     syncLog: { create: vi.fn() },
+    emailLog: { findFirst: vi.fn() },
   },
 }));
 vi.mock('../src/database/prisma', () => ({ default: prismaStub }));
@@ -317,6 +323,8 @@ describe('trackingService.syncAllTracking — Delhivery-only polling', () => {
     prismaStub.trackingLog.create.mockReset().mockResolvedValue({});
     prismaStub.order.update.mockReset().mockResolvedValue({});
     prismaStub.syncLog.create.mockReset().mockResolvedValue({});
+    prismaStub.emailLog.findFirst.mockReset().mockResolvedValue(null);
+    resendStub.sendEmail.mockReset().mockResolvedValue({ success: true });
     delhiveryStub.trackShipment
       .mockReset()
       .mockResolvedValue({ status: 'In Transit', statusType: 'UD', location: 'Hub', history: [] });
@@ -348,5 +356,46 @@ describe('trackingService.syncAllTracking — Delhivery-only polling', () => {
     expect(polled).not.toContain('AWB-BD-1');
     expect(polled).not.toContain('AWB-NULL');
     expect(delhiveryStub.trackShipment).toHaveBeenCalledTimes(2);
+  });
+
+  it('emails the consumer for a Delhivery-reported transit delay and respects the daily cooldown', async () => {
+    prismaStub.shipment.findMany.mockResolvedValue([
+      shipmentRow({
+        order: {
+          id: 1,
+          status: 'IN_TRANSIT',
+          customerName: 'Test Buyer',
+          customerEmail: 'cust@example.com',
+          shopifyOrderName: '#YOUTH-6001',
+          items: [{ title: 'Cotton Kurta', quantity: 1, price: 1499 }],
+        },
+      }),
+    ]);
+    delhiveryStub.trackShipment.mockResolvedValue({
+      status: 'In Transit',
+      statusType: 'UD',
+      location: 'Mumbai Hub',
+      remarks: 'Delayed due to network congestion',
+      history: [],
+    });
+
+    await trackingService.syncAllTracking(true);
+
+    expect(resendStub.sendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: 'cust@example.com',
+        templateType: 'TRANSIT_DELAY',
+        orderId: 1,
+        data: expect.objectContaining({
+          waybillNumber: 'AWB',
+          currentLocation: 'Mumbai Hub',
+        }),
+      })
+    );
+
+    prismaStub.emailLog.findFirst.mockResolvedValue({ id: 11 });
+    resendStub.sendEmail.mockClear();
+    await trackingService.syncAllTracking(true);
+    expect(resendStub.sendEmail).not.toHaveBeenCalled();
   });
 });

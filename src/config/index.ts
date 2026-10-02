@@ -205,6 +205,9 @@ export const config = {
     // to delivery@youthnic.com mailbox. Override via RESEND_FROM_EMAIL in .env
     // once the youthnic.com domain is verified in Resend.
     fromEmail: optional('RESEND_FROM_EMAIL', 'Youthnic <delivery@youthnic.com>'),
+    // Every outbound Resend email directs customer replies to the monitored
+    // Google Workspace support inbox, irrespective of its sender desk.
+    replyToEmail: optional('RESEND_REPLY_TO_EMAIL', 'contact@youthnic.com'),
     apiUrl: optional('RESEND_API_URL', 'https://api.resend.com'),
   },
 

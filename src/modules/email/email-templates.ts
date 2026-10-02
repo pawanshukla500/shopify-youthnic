@@ -46,7 +46,7 @@ export interface EmailTemplateData {
 
 const BRAND_NAME = 'Youthnic';
 const BRAND_TAGLINE = config.brand.tagline;
-const SUPPORT_PHONE = '+91 88661 54721';
+const SUPPORT_PHONE = '+91 79849 84563';
 const CONTACT_EMAIL = 'contact@youthnic.com';
 const RETURN_EMAIL = 'return@youthnic.com';
 const REFUND_EMAIL = 'refund@youthnic.com';
@@ -178,7 +178,7 @@ function baseEmailLayout(content: string, preheader: string = '', options: BaseL
                       • Returns Desk: <a href="mailto:${RETURN_EMAIL}" style="color: #7c3aed; text-decoration: none; font-weight: 600;">${RETURN_EMAIL}</a><br>
                       • Refunds Desk: <a href="mailto:${REFUND_EMAIL}" style="color: #059669; text-decoration: none; font-weight: 600;">${REFUND_EMAIL}</a><br>
                       • Dispatch Desk: <a href="mailto:${DELIVERY_EMAIL}" style="color: #d97706; text-decoration: none; font-weight: 600;">${DELIVERY_EMAIL}</a><br>
-                      • WhatsApp Helpline: <a href="https://wa.me/918866154721" style="color: #059669; text-decoration: none; font-weight: 700;">${SUPPORT_PHONE}</a> (Mon-Sat, 10 AM - 7 PM IST)
+                      • WhatsApp Helpline: <a href="https://wa.me/917984984563" style="color: #059669; text-decoration: none; font-weight: 700;">${SUPPORT_PHONE}</a> (Mon-Sat, 10 AM - 7 PM IST)
                     </div>
                     <div style="margin-top: 8px; font-size: 11px; color: #94a3b8; border-top: 1px dashed #e2e8f0; padding-top: 8px;">
                       Surat Fulfillment Center: 7004, Hi-tech Textile Centre, Anjana Farm, Near Raghukul Market, Surat, Gujarat 395002
@@ -857,7 +857,7 @@ export function renderDeliveredEmail(data: EmailTemplateData): { subject: string
         Garment too loose or tight? Our Surat team offers instant size swaps.
       </div>
       <div style="margin-top: 12px;">
-        <a href="https://wa.me/918866154721?text=Hi%20Youthnic,%20I%20would%20like%20to%20request%20a%20size%20exchange%20for%20order%20${data.orderName}" target="_blank" style="display: inline-block; background-color: #059669; color: #ffffff; font-size: 12px; font-weight: 700; text-decoration: none; padding: 8px 18px; border-radius: 6px;">
+        <a href="https://wa.me/917984984563?text=Hi%20Youthnic,%20I%20would%20like%20to%20request%20a%20size%20exchange%20for%20order%20${data.orderName}" target="_blank" style="display: inline-block; background-color: #059669; color: #ffffff; font-size: 12px; font-weight: 700; text-decoration: none; padding: 8px 18px; border-radius: 6px;">
           Request Exchange on WhatsApp →
         </a>
       </div>

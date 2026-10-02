@@ -827,6 +827,10 @@ export interface DelayedInTransitShipment {
   courier: string
   currentLocation: string
   status: string
+  latestRemark: string | null
+  latestScanStatus: string | null
+  latestScanAt: string | null
+  flaggedReason: string
   expectedDeliveryDate: string | null
   dispatchedAt: string
   daysInTransit: number

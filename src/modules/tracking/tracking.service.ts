@@ -53,7 +53,7 @@ class TrackingService {
               OR: [{ trackingUpdatedAt: null }, { trackingUpdatedAt: { lt: staleBefore } }],
             }),
       },
-      include: { order: true },
+      include: { order: { include: { items: true } } },
       orderBy: { trackingUpdatedAt: 'asc' },
       take: batchLimit,
     });
@@ -129,10 +129,11 @@ class TrackingService {
             trackingStatus: tracking.status,
             trackingLocation: tracking.location || null,
             trackingUpdatedAt: new Date(),
+            expectedDeliveryDate: this.parseExpectedDeliveryDate(tracking.expectedDeliveryDate),
             trackingHistory: tracking.history as any,
           },
         });
-        await this.notifyConsumerAboutDelay(shipment, tracking);
+        await this.evaluateConsumerDelay(shipment, tracking);
       } catch (error: any) {
         logger.error('Failed to sync tracking for shipment', {
           shipmentId: shipment.id,
@@ -320,7 +321,7 @@ class TrackingService {
       where: isNumericId
         ? { id: Number(identifier) }
         : { waybillNumber: String(identifier) },
-      include: { order: true },
+      include: { order: { include: { items: true } } },
     });
 
     if (!shipment || !shipment.waybillNumber) {
@@ -398,6 +399,7 @@ class TrackingService {
         trackingStatus: tracking.status,
         trackingLocation: tracking.location || null,
         trackingUpdatedAt: new Date(),
+        expectedDeliveryDate: this.parseExpectedDeliveryDate(tracking.expectedDeliveryDate),
         trackingHistory: tracking.history as any,
       },
       include: {
@@ -407,7 +409,7 @@ class TrackingService {
         },
       },
     });
-    await this.notifyConsumerAboutDelay(shipment, tracking);
+    await this.evaluateConsumerDelay(shipment, tracking);
 
     return {
       shipment: updatedShipment,
@@ -420,7 +422,11 @@ class TrackingService {
    * delivery date. A 24-hour per-order cooldown avoids duplicate emails during
    * the frequent tracking polling cycle while still allowing a later update.
    */
-  private async notifyConsumerAboutDelay(shipment: any, tracking: any): Promise<void> {
+  /**
+   * Evaluate a Delhivery update and immediately notify the consumer when it
+   * reports a route delay or missed ETA. Used by both polling and webhooks.
+   */
+  async evaluateConsumerDelay(shipment: any, tracking: any): Promise<void> {
     const order = shipment.order;
     if (!order?.customerEmail) return;
 
@@ -499,6 +505,12 @@ class TrackingService {
         error: error.message,
       });
     }
+  }
+
+  private parseExpectedDeliveryDate(value: unknown): Date | null {
+    if (!value) return null;
+    const expectedDeliveryDate = new Date(String(value));
+    return Number.isNaN(expectedDeliveryDate.getTime()) ? null : expectedDeliveryDate;
   }
 }
 

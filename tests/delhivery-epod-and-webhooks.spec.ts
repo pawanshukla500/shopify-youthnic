@@ -42,6 +42,11 @@ vi.mock('../src/modules/notifications/notification.service', () => ({
   },
 }));
 
+const { trackingStub } = vi.hoisted(() => ({
+  trackingStub: { evaluateConsumerDelay: vi.fn() },
+}));
+vi.mock('../src/modules/tracking/tracking.service', () => ({ default: trackingStub }));
+
 const { prismaStub } = vi.hoisted(() => ({
   prismaStub: {
     shipment: {
@@ -326,6 +331,45 @@ describe('Delhivery EPOD & Scan Webhook Processing', () => {
 
       // Background document fetch was triggered
       expect(mockTryFetchArtifact).toHaveBeenCalledWith(200, 'DELHI-SCAN-DLV', 'epod');
+    });
+
+    it('immediately evaluates a delay scan for customer notification', async () => {
+      const mockShipment = {
+        id: 21,
+        orderId: 201,
+        waybillNumber: 'DELHI-SCAN-DELAY',
+        status: 'IN_TRANSIT',
+        epodStoragePath: null,
+        order: { id: 201, status: 'IN_TRANSIT', customerEmail: 'customer@example.com' },
+      };
+      prismaStub.shipment.findFirst.mockResolvedValueOnce(mockShipment);
+
+      const { req, res } = createMockReqRes({
+        body: {
+          Shipment: {
+            AWB: 'DELHI-SCAN-DELAY',
+            Status: {
+              Status: 'In Transit',
+              StatusType: 'UD',
+              StatusLocation: 'Bhiwandi Hub',
+              Instructions: 'Delayed due to route congestion',
+              StatusDateTime: '2026-10-02T14:00:00Z',
+            },
+          },
+        },
+      });
+
+      await handleScanPush(req, res);
+
+      expect(res.statusCode).toBe(200);
+      expect(trackingStub.evaluateConsumerDelay).toHaveBeenCalledWith(
+        mockShipment,
+        expect.objectContaining({
+          status: 'In Transit',
+          location: 'Bhiwandi Hub',
+          remarks: 'Delayed due to route congestion',
+        })
+      );
     });
   });
 });

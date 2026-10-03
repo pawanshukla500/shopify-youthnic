@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
@@ -75,6 +75,10 @@ export function OrderDetail() {
   const [isRefundingRto, setIsRefundingRto] = useState(false)
 
   // Kapso WhatsApp Modal State
+  const [moreOpen, setMoreOpen] = useState(false)
+  const [morePos, setMorePos] = useState<{ top: number; left: number } | null>(null)
+  const moreRef = useRef<HTMLDivElement>(null)
+  const moreButtonRef = useRef<HTMLButtonElement>(null)
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false)
   const [whatsAppTrigger, setWhatsAppTrigger] = useState('COD_CONFIRMATION')
   const [whatsAppCustomText, setWhatsAppCustomText] = useState('')
@@ -160,6 +164,23 @@ export function OrderDetail() {
     if (!orderQuery.data || window.location.hash !== '#return-panel') return
     document.getElementById('return-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }, [orderQuery.data])
+
+  useEffect(() => {
+    if (!moreOpen) return
+    const close = (event: MouseEvent) => {
+      const target = event.target as Node
+      if (!moreRef.current?.contains(target) && !moreButtonRef.current?.contains(target)) setMoreOpen(false)
+    }
+    const dismiss = () => setMoreOpen(false)
+    document.addEventListener('mousedown', close)
+    window.addEventListener('scroll', dismiss, true)
+    window.addEventListener('resize', dismiss)
+    return () => {
+      document.removeEventListener('mousedown', close)
+      window.removeEventListener('scroll', dismiss, true)
+      window.removeEventListener('resize', dismiss)
+    }
+  }, [moreOpen])
 
   const canDispatch = order && ['NEW', 'DISPATCH_PENDING'].includes(order.status)
   if (orderQuery.isLoading) return <LoadingState label="Loading order detail…" />
@@ -414,289 +435,140 @@ export function OrderDetail() {
     }
   }
 
+  const paid =
+    order.financialStatus === 'paid' ||
+    order.financialStatus === 'partially_paid' ||
+    isPrepaid ||
+    Boolean(order.paymentVerified)
+  const paymentPill =
+    order.financialStatus === 'refunded'
+      ? { label: 'Refunded', tone: 'shopify-pill-neutral' }
+      : order.financialStatus === 'partially_refunded'
+        ? { label: 'Partially refunded', tone: 'shopify-pill-pending' }
+        : paid
+          ? { label: 'Paid', tone: 'shopify-pill-paid' }
+          : { label: order.paymentMethod === 'COD' ? 'Payment pending' : 'Unpaid', tone: 'shopify-pill-pending' }
+  const hasWaybill = Boolean(order.shipment?.waybillNumber)
+  const fulfillmentPill = (() => {
+    if (order.status === 'CANCELLED') return { label: 'Cancelled', tone: 'shopify-pill-alert' }
+    if (order.status === 'DELIVERED') return { label: 'Delivered', tone: 'shopify-pill-paid' }
+    if (order.status.startsWith('RETURN') || order.status === 'REFUNDED') return { label: labelize(order.status), tone: 'shopify-pill-progress' }
+    if (order.status.startsWith('RTO') || order.status === 'FAILED_DELIVERY') return { label: labelize(order.status), tone: 'shopify-pill-alert' }
+    if (hasWaybill || order.fulfillmentStatus === 'fulfilled' || ['DISPATCHED', 'SHIPPED', 'IN_TRANSIT', 'OUT_FOR_DELIVERY'].includes(order.status)) {
+      return { label: 'Fulfilled', tone: 'shopify-pill-progress' }
+    }
+    return { label: 'Unfulfilled', tone: 'shopify-pill-pending' }
+  })()
+  const canRefund = order.financialStatus !== 'refunded' && order.status !== 'CANCELLED'
+  const openMore = () => {
+    if (moreOpen) {
+      setMoreOpen(false)
+      return
+    }
+    const rect = moreButtonRef.current?.getBoundingClientRect()
+    if (!rect) return
+    setMorePos({ top: rect.bottom + 6, left: Math.max(8, rect.right - 248) })
+    setMoreOpen(true)
+  }
+  const closeMore = () => setMoreOpen(false)
+
   return <>
-    {/* ─── 21st.dev Style Modern Header Card ──────────────────── */}
-    <div className="detail-header-card">
-      <div className="detail-header-left">
-        <button
-          type="button"
-          className="detail-back-btn"
-          onClick={() => navigate('/orders')}
-          title="Back to Orders table"
-        >
-          <Icon name="arrow" size={13} />
-          <span>Orders</span>
-        </button>
-
-        <div>
-          <h1 className="order-number-title">
-            <span>{order.shopifyOrderName}</span>
-            <button
-              type="button"
-              className="order-copy-chip"
-              onClick={() => {
-                navigator.clipboard.writeText(order.shopifyOrderName)
-                toast.toast('success', `Order name ${order.shopifyOrderName} copied!`)
-              }}
-              title="Copy order name"
-            >
-              <Icon name="copy" size={14} />
-            </button>
-            <span className="shopify-channel-pill">
-              <Icon name="tag" size={11} />
-              {order.salesChannel || 'Shopify Store'}
-            </span>
-          </h1>
-
-          <div className="detail-header-sub">
-            <span>Customer: <strong>{order.customerName}</strong></span>
-            <span>·</span>
-            <span>Placed: <strong>{formatDate(order.shopifyCreatedAt || order.createdAt)}</strong></span>
-            <span>·</span>
-            <span>Destination: <strong>{order.customerCity}, {order.customerState}</strong></span>
-          </div>
+    <div className="shopify-order-top">
+      <button type="button" className="shopify-back" onClick={() => navigate('/orders')}>
+        <Icon name="arrow" size={16} />
+        Orders
+      </button>
+      <div className="shopify-order-actions">
+        {canRefund && (
+          <button
+            type="button"
+            className="shopify-btn"
+            disabled={refundMutation.isPending}
+            onClick={() => refundMutation.mutate()}
+          >
+            {refundMutation.isPending ? 'Refunding…' : 'Refund'}
+          </button>
+        )}
+        <div className="shopify-more" ref={moreRef}>
+          <button type="button" className="shopify-btn" ref={moreButtonRef} aria-expanded={moreOpen} onClick={openMore}>
+            More actions
+            <Icon name="chevron" size={14} />
+          </button>
+          {moreOpen && morePos && (
+            <div className="shopify-more-menu" role="menu" style={{ top: morePos.top, left: morePos.left }}>
+              <div className="shopify-more-label">Documents</div>
+              <button type="button" role="menuitem" disabled={isDownloadingLabel} onClick={() => { closeMore(); handleDownloadLabel() }}>Download label</button>
+              <button type="button" role="menuitem" onClick={() => { closeMore(); openPrintableOrderLabel(order.id) }}>Print label</button>
+              <button type="button" role="menuitem" disabled={isDownloadingLabelAndInvoice} onClick={() => { closeMore(); handleDownloadLabelAndInvoice() }}>Download label + invoice</button>
+              <button type="button" role="menuitem" onClick={() => { closeMore(); openPrintableOrderLabelAndInvoice(order.id) }}>Print label + invoice</button>
+              <button type="button" role="menuitem" onClick={() => { closeMore(); openPrintableOrderInvoice(order.id) }}>GST tax invoice</button>
+              <button type="button" role="menuitem" disabled={isDownloadingInvoice} onClick={() => { closeMore(); handleDownloadInvoice() }}>Download invoice</button>
+              <button type="button" role="menuitem" disabled={isDownloadingPack} onClick={() => { closeMore(); handleDownloadOrderPack() }}>Order pack (ZIP)</button>
+              {hasWaybill && order.shipment?.courier?.toLowerCase() === 'delhivery' && (
+                <button type="button" role="menuitem" onClick={() => { closeMore(); action.mutate('label') }}>Delhivery packing slip</button>
+              )}
+              <div className="shopify-more-label">Customer</div>
+              <button type="button" role="menuitem" onClick={() => { closeMore(); setShowWhatsAppModal(true) }}>WhatsApp alert</button>
+              <button type="button" role="menuitem" onClick={() => { closeMore(); navigate(`/communications?orderId=${order.id}`) }}>Email customer</button>
+              {hasWaybill && (
+                <a role="menuitem" href={carrierTrackingUrl(order.shipment?.courier, order.shipment!.waybillNumber!)} target="_blank" rel="noreferrer" onClick={closeMore}>Track shipment</a>
+              )}
+              <div className="shopify-more-label">Order</div>
+              {!hasWaybill && (
+                <button type="button" role="menuitem" disabled={isFetchingExternalAwb} onClick={() => { closeMore(); handleFetchExternalFulfillment() }}>Fetch Delhivery AWB</button>
+              )}
+              {hasWaybill && (
+                <button type="button" role="menuitem" onClick={() => { closeMore(); setShowEditDetails(true); document.getElementById('shipment-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}>Edit phone / address</button>
+              )}
+              {order.status === 'DELIVERED' && (
+                <button type="button" role="menuitem" onClick={() => { closeMore(); document.getElementById('return-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}>Create reverse pickup</button>
+              )}
+              {(order.hasNdrException || ['FAILED_DELIVERY', 'RTO_INITIATED'].includes(order.status)) && (
+                <button type="button" role="menuitem" onClick={() => { closeMore(); setShowNdrModal(true) }}>Resolve NDR</button>
+              )}
+              {order.status === 'RTO_DELIVERED' && order.paymentMethod !== 'COD' && order.financialStatus !== 'refunded' && (
+                <button type="button" role="menuitem" disabled={isRefundingRto} onClick={() => { closeMore(); handleProcessRtoRefund() }}>Process RTO refund</button>
+              )}
+              {order.hasUrgentSupport && (
+                <button type="button" role="menuitem" onClick={() => { closeMore(); navigate(`/support?search=${order.shopifyOrderName}`) }}>Open support ticket</button>
+              )}
+              {order.status !== 'CANCELLED' ? (
+                <button type="button" role="menuitem" className="is-danger" onClick={() => { closeMore(); setShowCancelModal(true) }}>Cancel order</button>
+              ) : (
+                <button type="button" role="menuitem" className="is-danger" onClick={() => { closeMore(); setShowDeleteModal(true) }}>Delete order</button>
+              )}
+            </div>
+          )}
         </div>
-      </div>
-
-      <div className="detail-header-right">
-        <StatusBadge status={order.status} />
-
-        {order.hasUrgentSupport && (
-          <span
-            className="prepaid-dispatch-flag"
-            style={{ background: '#fee2e2', color: '#b91c1c', borderColor: '#fca5a5', cursor: 'pointer' }}
-            onClick={() => navigate(`/support?search=${order.shopifyOrderName}`)}
-            title={`Urgent support ticket pending: ${order.supportFlag || 'Action required'}. Click to open Support Desk.`}
-          >
-            <span className="pulsing-red-dot" />
-            🚨 Support: {order.supportFlag || 'Urgent Inquiry'}
-          </span>
-        )}
-
-        {isDispatchNeeded && (
-          isPrepaid ? (
-            <span className="prepaid-dispatch-flag">
-              <span className="pulsing-red-dot" />
-              ⚡ Prepaid Dispatch
-            </span>
-          ) : (
-            <span className="cod-confirmed-dispatch-flag">
-              <span className="pulsing-red-dot" />
-              ✓ COD Confirmed
-            </span>
-          )
-        )}
-
-        {/* Kapso WhatsApp Notification Trigger */}
-        <Button
-          className="button-secondary"
-          onClick={() => setShowWhatsAppModal(true)}
-          title="Send WhatsApp trigger via Kapso"
-          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', height: '34px', padding: '0 12px' }}
-        >
-          <Icon name="message" size={14} />
-          <span>WhatsApp Alert</span>
-        </Button>
-
-        {/* GST Tax Invoice, Shipping Label & Combined Actions */}
-        <button
-          type="button"
-          className="button button-secondary"
-          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', height: '34px', padding: '0 12px', color: '#0284c7', borderColor: '#bae6fd', background: '#f0f9ff', fontWeight: 650, cursor: 'pointer' }}
-          onClick={handleDownloadLabel}
-          disabled={isDownloadingLabel}
-          title="Directly download official Delhivery shipping label file without opening a new tab"
-        >
-          <Icon name="download" size={13} />
-          <span>{isDownloadingLabel ? 'Downloading…' : '📥 Download Label'}</span>
-        </button>
-
-        <button
-          type="button"
-          className="button button-secondary"
-          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', height: '34px', padding: '0 12px', color: '#0284c7', borderColor: '#bae6fd', background: '#f0f9ff', fontWeight: 650, cursor: 'pointer' }}
-          onClick={() => openPrintableOrderLabel(order.id)}
-          title="View and print 4R Delhivery Thermal Shipping Label"
-        >
-          🏷️ Print Label
-        </button>
-
-        <button
-          type="button"
-          className="button button-secondary"
-          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', height: '34px', padding: '0 12px', color: '#7c3aed', borderColor: '#ddd6fe', background: '#f5f3ff', fontWeight: 650, cursor: 'pointer' }}
-          onClick={handleDownloadLabelAndInvoice}
-          disabled={isDownloadingLabelAndInvoice}
-          title="Directly download combined Label + Invoice as a single file (strictly sequenced: Label then Invoice)"
-        >
-          <Icon name="download" size={13} />
-          <span>{isDownloadingLabelAndInvoice ? 'Downloading…' : '📥 Download Label + Inv'}</span>
-        </button>
-
-        <button
-          type="button"
-          className="button button-secondary"
-          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', height: '34px', padding: '0 12px', color: '#7c3aed', borderColor: '#ddd6fe', background: '#f5f3ff', fontWeight: 650, cursor: 'pointer' }}
-          onClick={() => openPrintableOrderLabelAndInvoice(order.id)}
-          title="Print combined Label then Invoice (Order 1 Label, then Order 1 Invoice)"
-        >
-          🏷️🧾 Print Label + Inv
-        </button>
-
-        <button
-          type="button"
-          className="button button-secondary"
-          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', height: '34px', padding: '0 12px', color: '#059669', borderColor: '#a7f3d0', background: '#ecfdf5', fontWeight: 650, cursor: 'pointer' }}
-          onClick={() => openPrintableOrderInvoice(order.id)}
-          title="View and print official GST Commercial Tax Invoice"
-        >
-          🧾 GST Tax Invoice
-        </button>
-
-        <button
-          type="button"
-          className="button button-secondary"
-          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', height: '34px', padding: '0 12px', color: '#059669', borderColor: '#a7f3d0', background: '#ecfdf5', fontWeight: 650, cursor: 'pointer' }}
-          onClick={handleDownloadInvoice}
-          disabled={isDownloadingInvoice}
-          title="Directly download official GST tax invoice file without opening a new tab"
-        >
-          <Icon name="download" size={13} />
-          <span>{isDownloadingInvoice ? 'Downloading…' : '📥 Download Invoice (File)'}</span>
-        </button>
-
-        <button
-          type="button"
-          className="button button-secondary"
-          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', height: '34px', padding: '0 12px', color: '#047857', borderColor: '#6ee7b7', background: '#ecfdf5', fontWeight: 700, cursor: 'pointer' }}
-          onClick={handleDownloadOrderPack}
-          disabled={isDownloadingPack}
-          title="Download complete fulfillment package ZIP (Picklist + Collated Label & Invoice + Folders + Manifest CSV)"
-        >
-          <Icon name="package" size={13} />
-          <span>{isDownloadingPack ? 'Zipping…' : '📦 Order Pack (ZIP)'}</span>
-        </button>
-
-        {!order.shipment?.waybillNumber && (
-          <button
-            type="button"
-            className="button button-secondary"
-            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', height: '34px', padding: '0 12px', color: '#7c3aed', borderColor: '#ddd6fe', background: '#f5f3ff', fontWeight: 650, cursor: 'pointer' }}
-            onClick={handleFetchExternalFulfillment}
-            disabled={isFetchingExternalAwb}
-            title="Automatically fetch tracking ID and logistic name if manifested in Delhivery ONE panel or processed via OMS Guru"
-          >
-            <Icon name="zap" size={14} />
-            <span>{isFetchingExternalAwb ? 'Checking Channels…' : '⚡ Fetch External / Delhivery AWB'}</span>
-          </button>
-        )}
-
-        {/* Resend Email Notification Trigger */}
-        <Button
-          className="button-secondary"
-          onClick={() => navigate(`/communications?orderId=${order.id}`)}
-          title="Send transit delay, dispatch update, or NDR alert email to customer"
-          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', height: '34px', padding: '0 12px', color: '#6366f1', borderColor: 'rgba(99,102,241,0.3)' }}
-        >
-          <Icon name="mail" size={14} />
-          <span>Email Customer</span>
-        </Button>
-
-        {/* 21st.dev Segmented Button Group */}
-        {canDispatch && isDispatchNeeded ? (
-          <Button
-            className="button-primary"
-            style={{
-              background: isPrepaid ? 'linear-gradient(135deg, #2563eb, #1d4ed8)' : 'linear-gradient(135deg, #059669, #047857)',
-              borderColor: isPrepaid ? '#1d4ed8' : '#047857',
-            }}
-            disabled={action.isPending}
-            loading={action.isPending && action.variables === 'dispatch'}
-            onClick={() => action.mutate('dispatch')}
-          >
-            <Icon name="package" size={15} />
-            {isPrepaid ? '⚡ Priority Delhivery Dispatch' : '⚡ Dispatch Confirmed COD'}
-          </Button>
-        ) : canDispatch && !isCodConf && (order.paymentMethod === 'COD' || order.shipment?.paymentMode === 'COD') ? (
-          <Button
-            className="btn-confirm-cod-sm"
-            style={{ height: '34px', padding: '0 14px' }}
-            disabled={isConfirmingCod}
-            loading={isConfirmingCod}
-            onClick={handleConfirmCod}
-          >
-            <Icon name="check" size={15} />
-            Confirm COD Order
-          </Button>
-        ) : order.shipment?.waybillNumber ? (
-          <ButtonGroup>
-            {order.shipment.courier?.toLowerCase() === 'delhivery' && (
-              <>
-                <Button
-                  className="button-secondary"
-                  disabled={action.isPending}
-                  loading={action.isPending && action.variables === 'label'}
-                  onClick={() => action.mutate('label')}
-                  title="Print Delhivery thermal shipping label"
-                >
-                  <Icon name="external" size={14} />
-                  Print Label
-                </Button>
-                <Button
-                  className="button-secondary"
-                  onClick={async () => {
-                    try {
-                      await downloadSingleLabelPdf(order.shipment!.waybillNumber!)
-                      toast.toast('success', `Downloaded label for ${order.shipment!.waybillNumber}`)
-                    } catch (err: any) {
-                      toast.toast('error', err.message || 'Failed to download label')
-                    }
-                  }}
-                  title="Download official PDF label"
-                >
-                  <Icon name="download" size={14} />
-                  PDF Label
-                </Button>
-              </>
-            )}
-            <a
-              className="button button-secondary"
-              href={carrierTrackingUrl(order.shipment.courier, order.shipment.waybillNumber)}
-              target="_blank"
-              rel="noopener noreferrer"
-              title={`Track directly on ${order.shipment.courier || 'Delhivery'}`}
-            >
-              <Icon name="route" size={14} />
-              Track ({order.shipment.courier || 'Carrier'})
-            </a>
-          </ButtonGroup>
-        ) : null}
-
-        {/* Cancellation or Deletion Trigger */}
-        {order.status !== 'CANCELLED' ? (
-          <button
-            type="button"
-            className="btn-row-action danger"
-            style={{ height: '34px', padding: '0 12px', fontSize: '11.5px' }}
-            onClick={() => setShowCancelModal(true)}
-            title="Cancel order and trigger Delhivery cancellation"
-          >
-            ✕ Cancel Order
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="btn-row-action danger"
-            style={{ height: '34px', padding: '0 12px', fontSize: '11.5px' }}
-            onClick={() => setShowDeleteModal(true)}
-            title="Permanently delete cancelled order"
-          >
-            🗑️ Delete Order
-          </button>
-        )}
       </div>
     </div>
 
+    <div className="shopify-order-title">
+      <h1>{order.shopifyOrderName}</h1>
+      <button
+        type="button"
+        className="order-copy-chip"
+        title="Copy order name"
+        onClick={() => {
+          navigator.clipboard.writeText(order.shopifyOrderName)
+          toast.toast('success', `Order name ${order.shopifyOrderName} copied!`)
+        }}
+      >
+        <Icon name="copy" size={14} />
+      </button>
+      <span className={`shopify-pill ${paymentPill.tone}`}>{paymentPill.label}</span>
+      <span className={`shopify-pill ${fulfillmentPill.tone}`}>{fulfillmentPill.label}</span>
+      <StatusBadge status={order.status} />
+      {order.hasUrgentSupport && (
+        <button type="button" className="shopify-pill shopify-pill-alert" onClick={() => navigate(`/support?search=${order.shopifyOrderName}`)}>
+          Support
+        </button>
+      )}
+    </div>
+    <p className="shopify-order-meta">
+      {formatDate(order.shopifyCreatedAt || order.createdAt)} from {order.salesChannel || 'Online Store'}
+      {order.customerCity ? ` · ${order.customerCity}, ${order.customerState}` : ''}
+    </p>
     {/* ─── UI UX Max Pro: Urgent Dispatch Alert Banner ─────── */}
     {isDispatchNeeded && (
       <div className="prepaid-alert-banner">
@@ -881,87 +753,48 @@ export function OrderDetail() {
       </div>
     )}
 
-    {/* ─── UI UX Max Pro: Order Lifecycle Stepper ─────────────────── */}
-    <OrderLifecycleStepper order={order} />
-
     <div className="detail-grid">
       <div className="detail-main">
-        {/* ─── Customer Details & Quick Communication Actions ─── */}
-        <Panel>
-          <PanelHeading eyebrow="Customer & Destination" title="Delivery details" />
-          <div className="customer-detail">
-            <div className="customer-avatar">
-              {order.customerName.split(' ').map((part) => part[0]).slice(0, 2).join('').toUpperCase()}
-            </div>
-            <div>
-              <strong style={{ fontSize: '14px', color: '#0f172a' }}>{order.customerName}</strong>
-              <span style={{ fontSize: '11px', color: '#475569' }}>{order.customerPhone || 'No phone'}</span>
-              <span style={{ fontSize: '11px', color: '#64748b' }}>{order.customerEmail ?? 'No email provided'}</span>
-            </div>
-          </div>
-
-          <div className="address-card">
-            <Icon name="pin" size={20} />
-            <div style={{ flex: 1 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <strong style={{ fontSize: '12px', color: '#1e293b' }}>{order.customerAddress}</strong>
-                <span className="state-badge">{order.customerState}</span>
-              </div>
-              <span style={{ fontSize: '11px', color: '#475569', marginTop: '2px', display: 'block' }}>
-                {order.customerCity}, {order.customerState} — <strong className="mono" style={{ color: '#0f172a' }}>{order.customerPincode}</strong>
-              </span>
-              <span style={{ fontSize: '10px', color: '#94a3b8' }}>{order.customerCountry}</span>
-            </div>
-          </div>
-
-          {/* Quick Contact & Action Buttons */}
-          <div className="customer-quick-actions">
-            {cleanPhone ? (
-              <a
-                className="quick-action-btn quick-action-wa"
-                href={`https://wa.me/91${cleanPhone}?text=${encodeURIComponent(`Hi ${order.customerName}, this is regarding your order ${order.shopifyOrderName} from our store.`)}`}
-                target="_blank"
-                rel="noopener noreferrer"
+        <Panel className="shopify-card" style={{ padding: 0 }}>
+          <div className="shopify-card-head">
+            <span className={`shopify-pill ${fulfillmentPill.tone}`}>{fulfillmentPill.label}</span>
+            {canDispatch && isDispatchNeeded ? (
+              <button
+                type="button"
+                className="shopify-btn shopify-btn-primary"
+                disabled={action.isPending}
+                onClick={() => action.mutate('dispatch')}
               >
-                <Icon name="message" size={14} />
-                WhatsApp Chat
-              </a>
-            ) : (
-              <button className="quick-action-btn quick-action-wa" disabled>
-                <Icon name="message" size={14} /> No WhatsApp
+                {action.isPending && action.variables === 'dispatch' ? 'Dispatching…' : 'Dispatch'}
               </button>
-            )}
-
-            {cleanPhone ? (
-              <a className="quick-action-btn quick-action-call" href={`tel:${cleanPhone}`}>
-                <Icon name="phone" size={14} />
-                Call Customer
-              </a>
-            ) : (
-              <button className="quick-action-btn quick-action-call" disabled>
-                <Icon name="phone" size={14} /> No Phone
+            ) : canDispatch && !isCodConf && (order.paymentMethod === 'COD' || order.shipment?.paymentMode === 'COD') ? (
+              <button type="button" className="shopify-btn shopify-btn-primary" disabled={isConfirmingCod} onClick={handleConfirmCod}>
+                {isConfirmingCod ? 'Confirming…' : 'Confirm COD'}
               </button>
-            )}
-
-            <button className="quick-action-btn quick-action-copy" onClick={copyAddress}>
-              <Icon name="copy" size={14} />
-              Copy Address
-            </button>
+            ) : hasWaybill ? (
+              <button type="button" className="shopify-btn shopify-btn-primary" onClick={() => openPrintableOrderLabel(order.id)}>
+                Print label
+              </button>
+            ) : null}
           </div>
+          <div className="shopify-ship-line">
+            {order.shipment?.courier || 'Standard shipping'}
+            {hasWaybill ? ` · AWB ${order.shipment?.waybillNumber}` : ' · Not yet fulfilled'}
+          </div>
+          <ItemsTable items={order.items ?? []} currency={order.currency} order={order} section="lines" />
         </Panel>
 
-        {/* ─── UI UX Max Pro: Order Contents Table ─────────────── */}
-        <Panel style={{ paddingBottom: 0 }}>
-          <PanelHeading
-            eyebrow={`${order.items?.length ?? 0} line items`}
-            title="Order contents"
-            action={<span style={{ fontSize: '11px', color: '#64748b' }}>Currency: <strong>{order.currency}</strong></span>}
-          />
-          <ItemsTable items={order.items ?? []} currency={order.currency} order={order} />
+        <Panel className="shopify-card" style={{ padding: 0 }}>
+          <div className="shopify-card-head">
+            <span className={`shopify-pill ${paymentPill.tone}`}>{paymentPill.label}</span>
+          </div>
+          <ItemsTable items={order.items ?? []} currency={order.currency} order={order} section="summary" />
         </Panel>
+
+        <OrderLifecycleStepper order={order} />
 
         {/* ─── Live Delhivery Tracking & Parcel Journey ───────────────────────── */}
-        <Panel>
+        <Panel id="shipment-panel">
           <PanelHeading
             eyebrow={order.shipment?.courier?.toLowerCase() === 'delhivery' ? 'Delhivery Express Network' : 'Carrier Logistics'}
             title={
@@ -1486,6 +1319,44 @@ export function OrderDetail() {
       </div>
 
       <div className="detail-side">
+        <Panel>
+          <PanelHeading eyebrow="Customer" title={order.customerName} />
+          <div className="customer-detail">
+            <div className="customer-avatar">
+              {order.customerName.split(' ').map((part) => part[0]).slice(0, 2).join('').toUpperCase()}
+            </div>
+            <div>
+              <strong style={{ fontSize: '14px', color: 'var(--ink)' }}>{order.customerName}</strong>
+              <span style={{ fontSize: '11px', color: 'var(--ink-secondary)' }}>{order.customerPhone || 'No phone'}</span>
+              <span style={{ fontSize: '11px', color: 'var(--muted)' }}>{order.customerEmail ?? 'No email provided'}</span>
+            </div>
+          </div>
+          <div className="address-card">
+            <Icon name="pin" size={20} />
+            <div style={{ flex: 1 }}>
+              <strong style={{ fontSize: '12px', color: 'var(--ink)' }}>{order.customerAddress}</strong>
+              <span style={{ fontSize: '11px', color: 'var(--ink-secondary)', marginTop: '2px', display: 'block' }}>
+                {order.customerCity}, {order.customerState} — <strong className="mono">{order.customerPincode}</strong>
+              </span>
+              <span style={{ fontSize: '10px', color: 'var(--muted)' }}>{order.customerCountry}</span>
+            </div>
+          </div>
+          <div className="customer-quick-actions">
+            {cleanPhone ? (
+              <a className="quick-action-btn quick-action-wa" href={`https://wa.me/91${cleanPhone}?text=${encodeURIComponent(`Hi ${order.customerName}, this is regarding your order ${order.shopifyOrderName} from our store.`)}`} target="_blank" rel="noopener noreferrer">
+                <Icon name="message" size={14} /> WhatsApp Chat
+              </a>
+            ) : (
+              <button className="quick-action-btn quick-action-wa" disabled><Icon name="message" size={14} /> No WhatsApp</button>
+            )}
+            {cleanPhone ? (
+              <a className="quick-action-btn quick-action-call" href={`tel:${cleanPhone}`}><Icon name="phone" size={14} /> Call Customer</a>
+            ) : (
+              <button className="quick-action-btn quick-action-call" disabled><Icon name="phone" size={14} /> No Phone</button>
+            )}
+            <button className="quick-action-btn quick-action-copy" onClick={copyAddress}><Icon name="copy" size={14} /> Copy Address</button>
+          </div>
+        </Panel>
         {/* ─── GoKwik Buyer Intelligence & RTO Risk Assessment ─── */}
         <Panel>
           <PanelHeading
@@ -2376,7 +2247,7 @@ function OrderLifecycleStepper({ order }: { order: Order }) {
 }
 
 /* ─── UI UX Max Pro: Order Contents Table & Financial Breakdown ─ */
-function ItemsTable({ items, currency, order }: { items: OrderItem[]; currency: string; order: Order }) {
+function ItemsTable({ items, currency, order, section = 'both' }: { items: OrderItem[]; currency: string; order: Order; section?: 'lines' | 'summary' | 'both' }) {
   const toast = useToast()
 
   const copySku = (sku: string) => {
@@ -2384,7 +2255,7 @@ function ItemsTable({ items, currency, order }: { items: OrderItem[]; currency: 
     toast.toast('success', `SKU ${sku} copied!`)
   }
 
-  if (!items.length) {
+  if (!items.length && section === 'lines') {
     return <EmptyState title="No line items" description="This order has no item records." icon="box" />
   }
 
@@ -2393,102 +2264,57 @@ function ItemsTable({ items, currency, order }: { items: OrderItem[]; currency: 
   const grandTotal = Number(order.totalAmount) || (subtotal + shippingFee)
   const discount = Math.max(0, (subtotal + shippingFee) - grandTotal)
   const estimatedTax = Math.round((grandTotal * 0.18 / 1.18) * 100) / 100
+  const itemCount = items.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0)
+  const collected = order.financialStatus === 'refunded'
+    ? 0
+    : order.financialStatus === 'paid' || order.financialStatus === 'partially_paid' || (order.paymentMethod !== 'COD' && order.paymentMethod !== null)
+      ? grandTotal
+      : 0
 
-  return (
-    <div>
-      <div className="table-wrap" style={{ borderBottom: '1px solid #e2e8f0' }}>
-        <table className="order-items-table">
-          <thead>
-            <tr>
-              <th style={{ width: '42%' }}>Product & Variant</th>
-              <th style={{ width: '22%' }}>SKU</th>
-              <th className="text-center" style={{ width: '10%' }}>Qty</th>
-              <th className="text-right" style={{ width: '13%' }}>Unit Price</th>
-              <th className="text-right" style={{ width: '13%' }}>Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((item) => (
-              <tr key={item.id}>
-                <td>
-                  <div className="item-product-cell">
-                    {item.imageUrl ? (
-                      <img src={item.imageUrl} alt={item.title} className="item-product-thumb" />
-                    ) : (
-                      <div className="product-thumb-fallback">
-                        <Icon name="box" size={16} />
-                      </div>
-                    )}
-                    <div>
-                      <div className="item-title">{item.title}</div>
-                      {item.variantTitle && (
-                        <span className="item-variant">Variant: {item.variantTitle}</span>
-                      )}
-                    </div>
-                  </div>
-                </td>
-                <td>
-                  {item.sku ? (
-                    <button
-                      className="sku-copy-pill"
-                      onClick={() => copySku(item.sku || '')}
-                      title="Click to copy SKU"
-                    >
-                      <span>{item.sku}</span>
-                      <Icon name="copy" size={11} />
-                    </button>
-                  ) : (
-                    <span style={{ fontSize: '10px', color: '#94a3b8' }}>No SKU</span>
-                  )}
-                </td>
-                <td className="text-center">
-                  <span className="order-qty-pill">x{item.quantity}</span>
-                </td>
-                <td className="text-right" style={{ color: '#475569' }}>
-                  {formatMoney(item.price, currency)}
-                </td>
-                <td className="text-right">
-                  <strong style={{ color: '#0f172a', fontSize: '12px' }}>
-                    {formatMoney(item.price * item.quantity, currency)}
-                  </strong>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Financial Breakdown Summary */}
-      <div className="financial-summary-wrap">
-        <div className="summary-grid">
-          <div className="summary-row">
-            <span>Items Subtotal ({items.length} items)</span>
-            <strong>{formatMoney(subtotal, currency)}</strong>
-          </div>
-          <div className="summary-row">
-            <span>Shipping & Handling</span>
-            <strong style={{ color: shippingFee === 0 ? '#16a34a' : '#0f172a' }}>
-              {shippingFee === 0 ? 'FREE' : formatMoney(shippingFee, currency)}
-            </strong>
-          </div>
-          {discount > 0 && (
-            <div className="summary-row discount-row">
-              <span>Discounts / Coupon Applied</span>
-              <strong>-{formatMoney(discount, currency)}</strong>
-            </div>
+  const lines = (
+    <div className="shopify-lines">
+      {items.map((item) => (
+        <div className="shopify-line" key={item.id}>
+          {item.imageUrl ? (
+            <img src={item.imageUrl} alt="" />
+          ) : (
+            <div className="product-thumb-fallback"><Icon name="box" size={16} /></div>
           )}
-          <div className="summary-row" style={{ fontSize: '10px', color: '#94a3b8' }}>
-            <span>Taxes (Estimated IGST 18% Incl.)</span>
-            <span>{formatMoney(estimatedTax, currency)}</span>
+          <div>
+            <div className="shopify-line-title">{item.title}</div>
+            {item.variantTitle ? <span className="shopify-line-sku">{item.variantTitle}</span> : null}
+            {item.sku ? (
+              <button type="button" className="shopify-line-sku" onClick={() => copySku(item.sku || '')} title="Copy SKU">
+                {item.sku}
+              </button>
+            ) : null}
           </div>
-          <div className="summary-row total-row">
-            <span>Grand Total</span>
-            <span className="total-amount">{formatMoney(grandTotal, currency)}</span>
+          <span className="shopify-line-qty">{item.quantity}</span>
+          <div className="shopify-line-money">
+            <strong>{formatMoney(item.price * item.quantity, currency)}</strong>
+            {item.quantity > 1 ? <small>{formatMoney(item.price, currency)} each</small> : null}
           </div>
         </div>
-      </div>
+      ))}
     </div>
   )
+
+  const summary = (
+    <div className="shopify-paid">
+      <div className="shopify-paid-row"><span>Subtotal</span><span>{itemCount || items.length} item{(itemCount || items.length) === 1 ? '' : 's'}</span><strong>{formatMoney(subtotal, currency)}</strong></div>
+      <div className="shopify-paid-row"><span>Shipping</span><span>{order.shipment?.courier || 'Standard'}</span><strong>{shippingFee === 0 ? 'Free' : formatMoney(shippingFee, currency)}</strong></div>
+      {discount > 0 && (
+        <div className="shopify-paid-row"><span>Discount</span><span /><strong>-{formatMoney(discount, currency)}</strong></div>
+      )}
+      <div className="shopify-paid-row"><span>Tax included</span><span>GST</span><strong>{formatMoney(estimatedTax, currency)}</strong></div>
+      <div className="shopify-paid-row is-total"><span>Total</span><span /><strong>{formatMoney(grandTotal, currency)}</strong></div>
+      <div className="shopify-paid-row"><span>Paid</span><span>{order.financialStatus === 'refunded' ? 'Refunded' : order.paymentMethod === 'COD' && collected === 0 ? 'Due on delivery' : ''}</span><strong>{formatMoney(collected, currency)}</strong></div>
+    </div>
+  )
+
+  if (section === 'lines') return lines
+  if (section === 'summary') return summary
+  return <>{lines}{summary}</>
 }
 
 function DetailRow({

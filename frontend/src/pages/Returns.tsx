@@ -239,6 +239,15 @@ export function Returns() {
                       ) : (
                         <span className="cell-muted">Waybill pending</span>
                       )}
+                      {item.pickupAutomatic ? (
+                        <span className="cell-muted">Customer pickup automatic</span>
+                      ) : null}
+                      {item.trackingStatus ? (
+                        <span className="cell-muted">{item.trackingStatus}{item.trackingLocation ? ` · ${item.trackingLocation}` : ''}</span>
+                      ) : null}
+                      {item.forwardWaybill ? (
+                        <span className="cell-muted">Forward {item.forwardWaybill}</span>
+                      ) : null}
                     </td>
                     <td>
                       <span className="reason-cell" style={{ fontWeight: 600, color: 'var(--ink)' }}>

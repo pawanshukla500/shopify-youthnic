@@ -1,8 +1,10 @@
 import prisma from '../../database/prisma';
+import { config } from '../../config';
 import delhiveryService from '../delhivery/delhivery.service';
 import shopifyService from '../shopify/shopify.service';
 import notificationEngine from '../notifications/notification.service';
 import logger from '../../utils/logger';
+import { applyReturnCarrierScan } from './return-tracking';
 
 /**
  * Returns Service
@@ -32,7 +34,13 @@ class ReturnService {
       carrier?: string;
       triggerShopify?: boolean;
     }
-  ): Promise<{ returnId: number; returnWaybill: string; shopifyTriggered: boolean }> {
+  ): Promise<{
+    returnId: number;
+    returnWaybill: string;
+    shopifyTriggered: boolean;
+    pickupAutomatic: boolean;
+    forwardWaybill: string | null;
+  }> {
     const order = await prisma.order.findUnique({
       where: { id: orderId },
       include: { items: true, returns: true, shipment: true },
@@ -42,42 +50,92 @@ class ReturnService {
       throw new Error(`Order not found: ${orderId}`);
     }
 
-    // Check if there's already an active return
     const activeReturn = order.returns.find(
       (r) => !['REFUNDED', 'CANCELLED'].includes(r.returnStatus)
     );
     if (activeReturn) {
-      throw new Error(`Order ${order.shopifyOrderName} already has an active return`);
+      throw new Error(`Order ${order.shopifyOrderName} already has an active return (${activeReturn.returnWaybillNumber || activeReturn.returnStatus}).`);
     }
 
-    // Forward shipment's waybill number to link reverse pickup against forward order
-    const forwardWaybill = order.shipment?.waybillNumber || undefined;
-    let finalReturnWaybill = options?.returnWaybillNumber?.trim() || '';
+    if (!items.length) {
+      throw new Error('Select at least one item to return.');
+    }
 
-    // If no manual return waybill provided, try creating reverse pickup via Delhivery
-    if (!finalReturnWaybill) {
-      try {
-        const delhiveryResult = await delhiveryService.createReturnShipment(
-          order,
-          returnReason,
-          forwardWaybill
-        );
-        finalReturnWaybill = delhiveryResult.waybillNumber;
-      } catch (err: any) {
-        logger.warn('Delhivery reverse pickup creation failed or offline, generating reverse tracking code', {
-          error: err.message,
-        });
-        finalReturnWaybill = `REV-DEL-${order.shopifyOrderNumber}-${Date.now().toString().slice(-4)}`;
+    if (['RTO_INITIATED', 'RTO_DELIVERED', 'CANCELLED', 'REFUNDED'].includes(order.status)) {
+      throw new Error(`Order ${order.shopifyOrderName} is ${order.status.replaceAll('_', ' ').toLowerCase()}. A customer reverse pickup is not created for that state.`);
+    }
+
+    for (const item of items) {
+      const line = order.items.find((row) => row.id === item.orderItemId);
+      if (!line) throw new Error('One of the return items does not belong to this order.');
+      if (!Number.isFinite(item.quantity) || item.quantity < 1 || item.quantity > line.quantity) {
+        throw new Error(`Return quantity for ${line.title} must be between 1 and ${line.quantity}.`);
       }
     }
 
-    // Create return record in DB
+    const carrierName = (options?.carrier || 'Delhivery').trim() || 'Delhivery';
+    const isDelhivery = /delhivery/i.test(carrierName);
+    const typedWaybill = (options?.returnWaybillNumber || '').trim();
+    if (/^REV-DEL-/i.test(typedWaybill)) {
+      throw new Error('Placeholder return codes are not accepted. Leave the AWB blank so Delhivery can assign a real reverse waybill.');
+    }
+
+    const forwardWaybill = order.shipment?.waybillNumber || null;
+    const forwardDelivered =
+      order.status === 'DELIVERED' ||
+      Boolean(order.deliveredAt) ||
+      order.shipment?.status === 'DELIVERED' ||
+      (/delivered/i.test(order.shipment?.trackingStatus || '') && !/undeliver/i.test(order.shipment?.trackingStatus || ''));
+
+    let finalReturnWaybill = typedWaybill;
+    let pickupAutomatic = false;
+
+    if (isDelhivery && !finalReturnWaybill) {
+      if (!forwardDelivered) {
+        throw new Error(
+          `Reverse pickup is created after the forward shipment is delivered, the same way Delhivery ONE "Initiate Return" works. ${order.shopifyOrderName} is still ${order.status}.`
+        );
+      }
+      const selectedLines = items.map((item) => {
+        const line = order.items.find((row) => row.id === item.orderItemId)!;
+        return { title: line.title, sku: line.sku, quantity: item.quantity };
+      });
+      const created = await delhiveryService.createReturnShipment(
+        order,
+        returnReason,
+        forwardWaybill || undefined,
+        selectedLines
+      );
+      finalReturnWaybill = created.waybillNumber;
+      pickupAutomatic = true;
+    } else if (!finalReturnWaybill) {
+      throw new Error(`Enter the ${carrierName} return waybill. Automatic reverse pickup is available for Delhivery.`);
+    } else if (isDelhivery && !/^\d{8,}$/.test(finalReturnWaybill)) {
+      throw new Error('A Delhivery return AWB is the numeric waybill from Delhivery. Leave the field blank to create one automatically.');
+    }
+
+    let labelUrl: string | null = null;
+    if (isDelhivery && pickupAutomatic) {
+      try {
+        const generated = await delhiveryService.generateLabel(finalReturnWaybill);
+        labelUrl = generated || null;
+      } catch {
+        labelUrl = null;
+      }
+    }
+
     const returnRecord = await prisma.return.create({
       data: {
         orderId: order.id,
         returnReason,
         returnStatus: 'PICKUP_SCHEDULED',
         returnWaybillNumber: finalReturnWaybill,
+        returnShipmentStatus: pickupAutomatic ? 'Pickup scheduled' : 'Linked',
+        forwardWaybill,
+        carrier: carrierName,
+        pickupAutomatic,
+        trackingStatus: pickupAutomatic ? 'Pickup scheduled' : 'Linked AWB',
+        labelUrl,
         refundStatus: 'NONE',
         items: {
           create: items.map((item) => ({
@@ -114,7 +172,9 @@ class ReturnService {
         orderId: order.id,
         syncType: 'RETURN_CREATE',
         status: 'SUCCESS',
-        message: `Return created with waybill ${finalReturnWaybill}${shopifyTriggered ? ' · Synced to Shopify' : ''}`,
+        message: pickupAutomatic
+          ? `Reverse AWB ${finalReturnWaybill} manifested against forward ${forwardWaybill || 'order'}. Delhivery schedules the customer pickup automatically.`
+          : `Return linked with waybill ${finalReturnWaybill}${shopifyTriggered ? ' · Synced to Shopify' : ''}`,
       },
     });
 
@@ -129,7 +189,53 @@ class ReturnService {
       returnId: returnRecord.id,
       returnWaybill: finalReturnWaybill,
       shopifyTriggered,
+      pickupAutomatic,
+      forwardWaybill,
     };
+  }
+
+  /**
+   * Poll Delhivery for open reverse AWBs and advance return + order status.
+   * Called from the tracking cron. No manual status marking.
+   */
+  async syncActiveReturns(force = false): Promise<number> {
+    const minIntervalMs = (config.tracking.minIntervalMinutes || 10) * 60 * 1000;
+    const staleBefore = new Date(Date.now() - minIntervalMs);
+    const rows = await prisma.return.findMany({
+      where: {
+        returnWaybillNumber: { not: null },
+        returnStatus: { in: ['INITIATED', 'PICKUP_SCHEDULED', 'PICKED_UP', 'IN_TRANSIT'] },
+        ...(force
+          ? {}
+          : { OR: [{ trackingUpdatedAt: null }, { trackingUpdatedAt: { lt: staleBefore } }] }),
+      },
+      orderBy: { trackingUpdatedAt: 'asc' },
+      take: 100,
+    });
+
+    let updated = 0;
+    for (const row of rows) {
+      if (!row.returnWaybillNumber) continue;
+      try {
+        const tracking = await delhiveryService.trackShipment(row.returnWaybillNumber);
+        const handled = await applyReturnCarrierScan(row.returnWaybillNumber, {
+          statusType: tracking.statusType,
+          status: tracking.status,
+          location: tracking.location,
+          remarks: tracking.remarks,
+          scannedAt: tracking.scanDateTime ? new Date(tracking.scanDateTime) : new Date(),
+          history: tracking.history,
+        });
+        if (handled === 'updated') updated += 1;
+      } catch (err: any) {
+        logger.warn('Reverse tracking poll failed', {
+          returnId: row.id,
+          waybill: row.returnWaybillNumber,
+          error: err.message,
+        });
+      }
+    }
+    return updated;
   }
 
   /**

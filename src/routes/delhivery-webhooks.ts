@@ -4,6 +4,7 @@ import delhiveryService from '../modules/delhivery/delhivery.service';
 import delhiveryDocumentFetcher from '../modules/delhivery/delhivery-document-fetcher.service';
 import notificationEngine from '../modules/notifications/notification.service';
 import trackingService from '../modules/tracking/tracking.service';
+import { applyReturnCarrierScan } from '../modules/returns/return-tracking';
 import { config } from '../config';
 import logger from '../utils/logger';
 
@@ -75,7 +76,17 @@ export async function handleScanPush(req: Request, res: Response): Promise<void>
       });
 
       if (!shipment) {
-        logger.warn('Shipment not found for Delhivery webhook waybill', { waybill: scan.waybill });
+        const scannedAt = parseScanDate(scan.scanDateTime);
+        const handled = await applyReturnCarrierScan(scan.waybill, {
+          statusType: scan.statusType,
+          status: scan.rawStatus || scan.status,
+          location: scan.location,
+          remarks: scan.remarks || scan.instructions,
+          scannedAt,
+        });
+        if (handled === 'missing') {
+          logger.warn('Shipment not found for Delhivery webhook waybill', { waybill: scan.waybill });
+        }
         continue;
       }
 

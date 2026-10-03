@@ -14,26 +14,19 @@ import {
   getDelhiveryChannelStatus,
   downloadBulkLabels,
   downloadBulkInvoices,
-  downloadSingleLabelPdf,
-  openPrintableOrderLabel,
-  openPrintableOrderInvoice,
   downloadBulkLabelsDirectFile,
   downloadBulkLabelsAndInvoicesDirectFile,
   openPrintableBulkLabelsAndInvoices,
-  downloadOrderLabelFile,
-  downloadSingleLabelAndInvoiceFile,
-  openPrintableOrderLabelAndInvoice,
   downloadBulkPackZip,
   downloadBulkPicklist,
   openPrintableBulkPicklist,
   downloadBulkInvoicesDirectFile,
-  downloadSingleInvoiceFile,
-  syncExternalOrderFulfillment,
   syncBulkExternalFulfillments,
 } from '../api'
 import { ORDER_TABS, carrierTrackingUrl, tabForStatus, formatDate, formatMoney, labelize, type OrderTabKey } from '../lib'
 import { getOrderTabCounts } from '../api'
 import { Button, EmptyState, ErrorBox, FormField, Icon, LoadingState, PageIntro, Panel, StatusBadge, useDocumentTitle, useToast } from '../components/UI'
+import { OrderLogisticsActions } from '../components/OrderLogisticsActions'
 import type { Order, OrderStatus } from '../types'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
@@ -1618,7 +1611,7 @@ export function Orders() {
                       </td>
 
                       {/* 3. Customer & Destination (Merged clean 2-line layout) */}
-                      <td>
+                      <td className="customer-cell">
                         <strong>{order.customerName}</strong>
                         <span className="cell-muted" style={{ fontSize: '11px', display: 'block' }}>{order.customerPhone || 'No phone'}</span>
                         <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', marginTop: '3px', fontSize: '11px', color: '#475569' }}>
@@ -1666,366 +1659,25 @@ export function Orders() {
                         )}
                       </td>
 
-                      {/* 7. Logistics & Interactive Actions */}
-                      <td className="mono">
-                        <div className="actions-cell-stack">
-                          {order.shipment?.waybillNumber ? (
-                            <>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                                <a
-                                  href={carrierTrackingUrl(order.shipment.courier, order.shipment.waybillNumber)}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  onClick={(e) => e.stopPropagation()}
-                                  className="waybill-track-link"
-                                  title={`Track on ${order.shipment.courier || 'Delhivery'}`}
-                                >
-                                  {order.shipment.courier?.toLowerCase() === 'delhivery' ? (
-                                    <span style={{ display: 'inline-flex', alignItems: 'center', background: '#f8fafc', border: '1px solid #e2e8f0', padding: '1px 5px', borderRadius: '4px' }}>
-                                      <img src="/logos/delhivery.png" alt="Delhivery" style={{ height: '9.5px', maxWidth: '45px', objectFit: 'contain' }} />
-                                    </span>
-                                  ) : (
-                                    <span style={{ fontSize: '9.5px', background: '#f1f5f9', padding: '1px 5px', borderRadius: '4px', color: '#475569', fontWeight: 600 }}>
-                                      {order.shipment.courier || 'Delhivery'}
-                                    </span>
-                                  )}
-                                  {order.shipment.waybillNumber} ↗
-                                </a>
-                                {order.shipment.courier?.toLowerCase() === 'delhivery' && (
-                                  <button
-                                    type="button"
-                                    className="btn-label-sm"
-                                    onClick={async (e) => {
-                                      e.stopPropagation()
-                                      try {
-                                        await downloadSingleLabelPdf(order.shipment!.waybillNumber!)
-                                        toast.toast('success', `Downloaded label for ${order.shipment!.waybillNumber}`)
-                                      } catch (err: any) {
-                                        toast.toast('error', err.message || 'Failed to download label')
-                                      }
-                                    }}
-                                    title="Download Delhivery label PDF"
-                                  >
-                                    <Icon name="download" size={11} /> Label
-                                  </button>
-                                )}
-                              </div>
-                              <div className="actions-cell-row">
-                                {(order.hasNdrException || ['FAILED_DELIVERY', 'RTO_INITIATED'].includes(order.status)) && (
-                                  <button
-                                    type="button"
-                                    className="btn-ndr-action"
-                                    onClick={(e) => {
-                                      e.stopPropagation()
-                                      setOrderForNdr(order)
-                                    }}
-                                    title="Resolve Delivery Failure / NDR with courier"
-                                  >
-                                    🚨 Resolve NDR
-                                  </button>
-                                )}
-
-                                {order.status === 'RTO_DELIVERED' && (
-                                  order.paymentMethod !== 'COD' && order.financialStatus !== 'refunded' ? (
-                                    <button
-                                      type="button"
-                                      className="btn-rto-refund"
-                                      disabled={refundingOrderId === order.id}
-                                      onClick={(e) => {
-                                        e.stopPropagation()
-                                        handleProcessRtoRefund(order)
-                                      }}
-                                      title="Auto-refund prepaid order via Easebuzz / PhonePe"
-                                    >
-                                      {refundingOrderId === order.id ? 'Refunding…' : '💸 Auto-Refund'}
-                                    </button>
-                                  ) : (
-                                    <span style={{ fontSize: '10px', background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>
-                                      ✓ Restocked
-                                    </span>
-                                  )
-                                )}
-
-                                {!order.shipment?.waybillNumber && (
-                                  <button
-                                    type="button"
-                                    className="btn-row-action"
-                                    style={{ color: '#7c3aed', borderColor: 'rgba(124,58,237,0.3)', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
-                                    onClick={async (e) => {
-                                      e.stopPropagation()
-                                      try {
-                                        const res = await syncExternalOrderFulfillment(order.id)
-                                        if (res.found && res.waybillNumber) {
-                                          toast.toast('success', `Found AWB ${res.waybillNumber} (${res.courier || 'Delhivery'})!`)
-                                          await queryClient.invalidateQueries({ queryKey: ['orders'] })
-                                        } else {
-                                          toast.toast('error', res.message || 'No external fulfillment found yet.')
-                                        }
-                                      } catch (err: any) {
-                                        toast.toast('error', err.message || 'Failed to fetch external fulfillment')
-                                      }
-                                    }}
-                                    title="Check if order was manifested in Delhivery ONE panel or fulfilled via OMS Guru and get AWB automatically"
-                                  >
-                                    <Icon name="zap" size={11} /> Get AWB
-                                  </button>
-                                )}
-
-                                <button
-                                  type="button"
-                                  className="btn-row-action"
-                                  style={{ color: '#0284c7', borderColor: 'rgba(2,132,199,0.3)', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
-                                  onClick={async (e) => {
-                                    e.stopPropagation()
-                                    try {
-                                      await downloadOrderLabelFile(order.id, order.shipment?.waybillNumber || order.shopifyOrderName)
-                                      toast.toast('success', `Downloaded label for ${order.shopifyOrderName}`)
-                                    } catch (err: any) {
-                                      toast.toast('error', err.message || 'Failed to download label')
-                                    }
-                                  }}
-                                  title="Directly download official Delhivery shipping label file (no new tab)"
-                                >
-                                  <Icon name="download" size={11} /> DL Label
-                                </button>
-
-                                <button
-                                  type="button"
-                                  className="btn-row-action"
-                                  style={{ color: '#0284c7', borderColor: 'rgba(2,132,199,0.3)', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    openPrintableOrderLabel(order.id)
-                                  }}
-                                  title="Print Delhivery 4R Shipping Label"
-                                >
-                                  🏷️ Label
-                                </button>
-
-                                <button
-                                  type="button"
-                                  className="btn-row-action"
-                                  style={{ color: '#7c3aed', borderColor: 'rgba(124,58,237,0.3)', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
-                                  onClick={async (e) => {
-                                    e.stopPropagation()
-                                    try {
-                                      await downloadSingleLabelAndInvoiceFile(order.id, order.shipment?.waybillNumber || order.shopifyOrderName)
-                                      toast.toast('success', `Downloaded Label + Invoice for ${order.shopifyOrderName}`)
-                                    } catch (err: any) {
-                                      toast.toast('error', err.message || 'Failed to download label and invoice')
-                                    }
-                                  }}
-                                  title="Directly download combined Label + Invoice as a single file (strictly sequenced: Label then Invoice)"
-                                >
-                                  <Icon name="download" size={11} /> Label+Inv
-                                </button>
-
-                                <button
-                                  type="button"
-                                  className="btn-row-action"
-                                  style={{ color: '#7c3aed', borderColor: 'rgba(124,58,237,0.3)', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    openPrintableOrderLabelAndInvoice(order.id)
-                                  }}
-                                  title="Print combined Label then Invoice (Order 1 Label, then Order 1 Invoice)"
-                                >
-                                  🏷️🧾 Print
-                                </button>
-
-                                <button
-                                  type="button"
-                                  className="btn-row-action"
-                                  style={{ color: '#059669', borderColor: 'rgba(5,150,105,0.3)', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
-                                  onClick={async (e) => {
-                                    e.stopPropagation()
-                                    try {
-                                      await downloadSingleInvoiceFile(order.id, order.shopifyOrderName)
-                                      toast.toast('success', `Downloaded GST Invoice for ${order.shopifyOrderName}`)
-                                    } catch (err: any) {
-                                      toast.toast('error', err.message || 'Failed to download invoice')
-                                    }
-                                  }}
-                                  title="Directly download official GST tax invoice file without opening a new tab"
-                                >
-                                  <Icon name="download" size={11} /> DL Inv
-                                </button>
-
-                                <button
-                                  type="button"
-                                  className="btn-row-action"
-                                  style={{ color: '#059669', borderColor: 'rgba(5,150,105,0.3)', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    openPrintableOrderInvoice(order.id)
-                                  }}
-                                  title="Print GST Commercial Tax Invoice"
-                                >
-                                  🧾 Invoice
-                                </button>
-
-                                <button
-                                  type="button"
-                                  className="btn-row-action"
-                                  style={{ color: '#6366f1', borderColor: 'rgba(99,102,241,0.25)', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    navigate(`/communications?orderId=${order.id}`)
-                                  }}
-                                  title="Send transit delay, dispatch update, or delivery alert email to customer"
-                                >
-                                  <Icon name="mail" size={11} /> Email
-                                </button>
-
-                                {!['CANCELLED', 'DELIVERED', 'RTO_DELIVERED', 'REFUNDED'].includes(order.status) && (
-                                  <button
-                                    type="button"
-                                    className="btn-row-action danger"
-                                    onClick={(e) => {
-                                      e.stopPropagation()
-                                      setOrderToCancel(order)
-                                    }}
-                                    title="Cancel order and trigger Delhivery cancellation"
-                                  >
-                                    ✕ Cancel
-                                  </button>
-                                )}
-                              </div>
-                            </>
-                          ) : (
-                            <>
-                              {order.shipment?.status === 'ERROR' && order.shipment.errorMessage && (
-                                <div
-                                  style={{
-                                    fontSize: '10px',
-                                    color: '#991b1b',
-                                    background: '#fef2f2',
-                                    padding: '3px 6px',
-                                    borderRadius: '4px',
-                                    border: '1px solid #fecaca',
-                                    marginBottom: '4px',
-                                    lineHeight: '1.25',
-                                    maxWidth: '220px',
-                                    wordBreak: 'break-word',
-                                  }}
-                                  title={order.shipment.errorMessage}
-                                >
-                                  ⚠️ <strong>Manifest Failed:</strong>{' '}
-                                  {order.shipment.errorMessage.includes('insufficient balance')
-                                    ? 'Low Delhivery Wallet Balance (Recharge wallet)'
-                                    : order.shipment.errorMessage}
-                                </div>
-                              )}
-                              <div className="actions-cell-row">
-                                {(order.hasNdrException || ['FAILED_DELIVERY', 'RTO_INITIATED'].includes(order.status)) && (
-                                  <button
-                                    type="button"
-                                    className="btn-ndr-action"
-                                    onClick={(e) => {
-                                      e.stopPropagation()
-                                      setOrderForNdr(order)
-                                    }}
-                                    title="Resolve Delivery Failure / NDR"
-                                  >
-                                    🚨 Resolve NDR
-                                  </button>
-                                )}
-
-                                {order.status === 'RTO_DELIVERED' && (
-                                  order.paymentMethod !== 'COD' && order.financialStatus !== 'refunded' ? (
-                                    <button
-                                      type="button"
-                                      className="btn-rto-refund"
-                                      disabled={refundingOrderId === order.id}
-                                      onClick={(e) => {
-                                        e.stopPropagation()
-                                        handleProcessRtoRefund(order)
-                                      }}
-                                      title="Auto-refund prepaid order via Easebuzz / PhonePe"
-                                    >
-                                      {refundingOrderId === order.id ? 'Refunding…' : '💸 Auto-Refund'}
-                                    </button>
-                                  ) : (
-                                    <span style={{ fontSize: '10px', background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>
-                                      ✓ Restocked
-                                    </span>
-                                  )
-                                )}
-
-                                {needsDispatch ? (
-                                  <button
-                                    type="button"
-                                    className="prepaid-dispatch-btn"
-                                    disabled={dispatchingId === order.id}
-                                    onClick={(e) => {
-                                      e.stopPropagation()
-                                      handleSingleDispatch(order.id)
-                                    }}
-                                    title="Create Delhivery shipment & trigger fulfillment on Shopify"
-                                  >
-                                    <Icon name="package" size={13} />
-                                    {dispatchingId === order.id ? 'Booking…' : '⚡ Dispatch'}
-                                  </button>
-                                ) : (!isCodConf && ['NEW', 'DISPATCH_PENDING'].includes(order.status)) ? (
-                                  <button
-                                    type="button"
-                                    className="btn-confirm-cod-sm"
-                                    disabled={confirmingCodId === order.id}
-                                    onClick={(e) => {
-                                      e.stopPropagation()
-                                      handleConfirmCod(order.id)
-                                    }}
-                                    title="Verify COD buyer intent and move to Needs Dispatch queue"
-                                  >
-                                    <Icon name="check" size={13} />
-                                    {confirmingCodId === order.id ? 'Confirming…' : '✓ Confirm COD'}
-                                  </button>
-                                ) : null}
-
-                                <button
-                                  type="button"
-                                  className="btn-row-action"
-                                  style={{ color: '#6366f1', borderColor: 'rgba(99,102,241,0.25)', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    navigate(`/communications?orderId=${order.id}`)
-                                  }}
-                                  title="Send transit delay, dispatch update, or delivery alert email to customer"
-                                >
-                                  <Icon name="mail" size={11} /> Email
-                                </button>
-
-                                {!['CANCELLED', 'REFUNDED'].includes(order.status) && (
-                                  <button
-                                    type="button"
-                                    className="btn-row-action danger"
-                                    onClick={(e) => {
-                                      e.stopPropagation()
-                                      setOrderToCancel(order)
-                                    }}
-                                    title="Cancel order"
-                                  >
-                                    ✕ Cancel
-                                  </button>
-                                )}
-
-                                {order.status === 'CANCELLED' && (
-                                  <button
-                                    type="button"
-                                    className="btn-row-action danger"
-                                    onClick={(e) => {
-                                      e.stopPropagation()
-                                      setOrderToDelete(order)
-                                    }}
-                                    title="Permanently delete cancelled order"
-                                  >
-                                    🗑️ Delete
-                                  </button>
-                                )}
-                              </div>
-                            </>
-                          )}
-                        </div>
+                      {/* 7. Logistics — compact pack actions. Extra documents live in More. */}
+                      <td>
+                        <OrderLogisticsActions
+                          order={order}
+                          needsDispatch={needsDispatch}
+                          isCodConfirmed={isCodConf}
+                          dispatching={dispatchingId === order.id}
+                          confirmingCod={confirmingCodId === order.id}
+                          refunding={refundingOrderId === order.id}
+                          onDispatch={() => handleSingleDispatch(order.id)}
+                          onConfirmCod={() => handleConfirmCod(order.id)}
+                          onCancel={() => setOrderToCancel(order)}
+                          onDelete={() => setOrderToDelete(order)}
+                          onNdr={() => setOrderForNdr(order)}
+                          onRefund={() => handleProcessRtoRefund(order)}
+                          onEmail={() => navigate(`/communications?orderId=${order.id}`)}
+                          onChanged={() => queryClient.invalidateQueries({ queryKey: ['orders'] })}
+                          toast={toast.toast}
+                        />
                       </td>
                     </tr>
                   )
@@ -2201,7 +1853,7 @@ export function Orders() {
             type="button"
             className="bulk-btn bulk-btn-secondary"
             onClick={() => setShowPickupModal(true)}
-            title="Schedule Delhivery courier pickup from Surat Warehouse"
+            title="Forward parcels: a warehouse pickup is created automatically after dispatch. Use this to send another request."
           >
             <Icon name="truck" size={15} />
             <span className="bulk-btn-label">Schedule Pickup</span>
@@ -2263,7 +1915,7 @@ export function Orders() {
                 </div>
                 <div>
                   <h3 className="modal-title">Schedule Delhivery Pickup</h3>
-                  <p className="modal-desc">Request courier dispatch from your registered fulfillment location.</p>
+                  <p className="modal-desc">Forward warehouse pickup. Delhivery allows one open request per location. Reverse customer pickups are booked when you create a return, not here.</p>
                 </div>
               </div>
               <button

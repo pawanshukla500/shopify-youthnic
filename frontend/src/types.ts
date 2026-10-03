@@ -176,6 +176,7 @@ export interface Order {
   status: OrderStatus
   shopifyCreatedAt: string
   shopifyUpdatedAt: string | null
+  deliveredAt?: string | null
   createdAt: string
   updatedAt: string
   items?: OrderItem[]
@@ -211,6 +212,12 @@ export interface ReturnRecord {
   returnStatus: ReturnStatus
   returnWaybillNumber: string | null
   returnShipmentStatus: string | null
+  forwardWaybill?: string | null
+  carrier?: string | null
+  pickupAutomatic?: boolean
+  trackingStatus?: string | null
+  trackingLocation?: string | null
+  labelUrl?: string | null
   refundStatus: RefundStatus
   refundAmount: number | null
   shopifyRefundId: string | null

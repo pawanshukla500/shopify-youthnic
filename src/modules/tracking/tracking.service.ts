@@ -1,6 +1,7 @@
 import prisma from '../../database/prisma';
 import delhiveryService from '../delhivery/delhivery.service';
 import notificationEngine from '../notifications/notification.service';
+import returnService from '../returns/return.service';
 import resendService from '../email/resend.service';
 import logger from '../../utils/logger';
 import { config } from '../../config';
@@ -152,6 +153,13 @@ class TrackingService {
           },
         });
       }
+    }
+
+    try {
+      const returnsUpdated = await returnService.syncActiveReturns(force);
+      updatedCount += returnsUpdated;
+    } catch (err: any) {
+      logger.error('Reverse tracking sync failed', { error: err.message });
     }
 
     logger.info('Tracking sync complete', { updatedCount, totalShipped: activeShipments.length });

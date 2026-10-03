@@ -5,6 +5,11 @@ import logger from '../../utils/logger';
 import { isUsableHttpUrl } from '../../utils/signed-url';
 import { withRetry } from '../../utils/retry';
 import { Order } from '@prisma/client';
+import {
+  isExistingPickupError,
+  planWarehousePickupSlot,
+  readPickupId,
+} from './pickup-schedule';
 
 /**
  * Delhivery B2C API Service
@@ -422,6 +427,7 @@ class DelhiveryService {
         create: {
           orderId: order.id,
           waybillNumber,
+          courier: 'Delhivery',
           paymentMode,
           codAmount: codAmount,
           declaredValue: order.totalAmount,
@@ -430,6 +436,7 @@ class DelhiveryService {
         },
         update: {
           waybillNumber,
+          courier: 'Delhivery',
           paymentMode,
           codAmount: codAmount,
           declaredValue: order.totalAmount,
@@ -458,9 +465,17 @@ class DelhiveryService {
         // Label fallback is generated on-the-fly
       }
 
-      // Pickup requests are optional and should normally be batched per warehouse/day.
+      // One open warehouse pickup covers every manifested parcel at this location.
+      // A failure here must not roll back the AWB — the tracking cron retries.
       if (config.delhivery.autoPickup) {
-        await this.requestPickup(undefined, config.delhivery.pickupTime);
+        try {
+          await this.ensureDailyWarehousePickup();
+        } catch (pickupErr: any) {
+          logger.warn('Automatic warehouse pickup was not created', {
+            shopifyOrderId: order.shopifyOrderId,
+            error: pickupErr.message,
+          });
+        }
       }
 
       logger.info('Shipment successfully dispatched on Delhivery', {
@@ -499,23 +514,46 @@ class DelhiveryService {
   }
 
   /**
-   * Create a reverse pickup (RVP) shipment on Delhivery.
-   * Same endpoint as forward creation, but payment_mode = "Pickup".
+   * Create a reverse pickup (RVP / DTO) on Delhivery — the API equivalent of
+   * Delhivery ONE → Delivered order → Initiate Return.
    *
-   * For reverse: customer address = pickup location, return_address = drop (warehouse)
+   * Same manifestation endpoint as a forward order. payment_mode "Pickup"
+   * tells Delhivery to collect from the customer and drop at the registered
+   * warehouse. Delhivery schedules that customer pickup automatically.
+   * Do not also call POST /fm/request/new/ for a reverse shipment.
    */
   async createReturnShipment(
     order: Order,
     returnReason: string,
-    forwardWaybill?: string
-  ): Promise<{ waybillNumber: string }> {
-    // Check if customer pincode is serviceable for reverse pickup
-    const serviceability = await this.checkPincodeServiceability(order.customerPincode);
-    if (!serviceability.serviceable) {
-      throw new Error(
-        `Pincode ${order.customerPincode} is not serviceable for reverse pickup`
-      );
+    forwardWaybill?: string,
+    items?: Array<{ title?: string | null; sku?: string | null; quantity?: number | null }>
+  ): Promise<{ waybillNumber: string; pickupAutomatic: true }> {
+    if (!order.customerPincode || !order.customerPhone || !order.customerAddress) {
+      throw new Error('Customer address, phone, and pincode are required before a reverse pickup can be booked.');
     }
+
+    try {
+      const serviceability = await this.checkPincodeServiceability(order.customerPincode);
+      if (!serviceability.serviceable) {
+        throw new Error(`Pincode ${order.customerPincode} is not serviceable for reverse pickup`);
+      }
+    } catch (err: any) {
+      if (String(err?.message || '').includes('not serviceable')) throw err;
+      logger.warn('Reverse serviceability check failed, continuing to manifest', {
+        shopifyOrderId: order.shopifyOrderId,
+        error: err.message,
+      });
+    }
+
+    const lines = items?.length ? items : [];
+    const itemCount = Math.max(1, lines.length);
+    const isMultiItem = itemCount > 1;
+    const quantity = lines.reduce((sum, line) => sum + Math.max(1, Number(line.quantity) || 1), 0) || 1;
+    const productText = lines
+      .map((line) => [line.title, line.sku ? `(${line.sku})` : ''].filter(Boolean).join(' '))
+      .filter(Boolean)
+      .join(', ');
+    const productsDesc = [productText, returnReason].filter(Boolean).join(' — ').slice(0, 180);
 
     const shipmentData = {
       shipments: [
@@ -527,18 +565,18 @@ class DelhiveryService {
           pin: order.customerPincode,
           city: order.customerCity,
           state: order.customerState,
-          country: order.customerCountry,
-          // "Pickup" payment mode = reverse shipment
+          country: order.customerCountry || 'India',
           payment_mode: 'Pickup',
-          products_desc: returnReason,
-          total_amount: '0',
-          cod_amount: '',
+          products_desc: productsDesc || returnReason,
+          total_amount: String(order.totalAmount || 0),
+          cod_amount: '0',
+          quantity: String(quantity),
           shipping_mode: config.delhivery.shippingMode,
+          address_type: 'home',
           order_date: new Date().toISOString().split('T')[0],
-          // Link back to original forward waybill / order
+          // Ties the reverse order to the delivered forward AWB.
           ref_waybill: forwardWaybill || '',
           reference_number: forwardWaybill || order.shopifyOrderName.replace('#', ''),
-          // For reverse: return address = warehouse (drop location)
           return_name: config.delhivery.seller.name,
           return_add: config.delhivery.seller.address,
           return_city: config.delhivery.seller.city,
@@ -548,6 +586,12 @@ class DelhiveryService {
           return_phone: config.delhivery.seller.phone,
           seller_name: config.delhivery.seller.name,
           seller_add: config.delhivery.seller.address,
+          shipment_length: isMultiItem ? config.delhivery.multiItemLengthCm : config.delhivery.singleItemLengthCm,
+          shipment_breadth: isMultiItem ? config.delhivery.multiItemBreadthCm : config.delhivery.singleItemBreadthCm,
+          shipment_height: isMultiItem ? config.delhivery.multiItemHeightCm : config.delhivery.singleItemHeightCm,
+          shipment_width: isMultiItem ? config.delhivery.multiItemBreadthCm : config.delhivery.singleItemBreadthCm,
+          weight: config.delhivery.declaredWeightGrams,
+          gm: config.delhivery.declaredWeightGrams,
           waybill: '',
         },
       ],
@@ -556,37 +600,59 @@ class DelhiveryService {
       },
     };
 
+    let prefetched = '';
     try {
-      // URL-encoded form data
-      const formData = `format=json&data=${encodeURIComponent(JSON.stringify(shipmentData))}`;
+      const fetched = await this.fetchSingleWaybill();
+      if (typeof fetched === 'string' && /^\d{8,}$/.test(fetched.trim())) {
+        prefetched = fetched.trim();
+        shipmentData.shipments[0].waybill = prefetched;
+      }
+    } catch (wbErr: any) {
+      logger.warn('Reverse waybill pre-fetch failed, Delhivery will assign one', { error: wbErr.message });
+    }
 
+    try {
+      const formData = `format=json&data=${encodeURIComponent(JSON.stringify(shipmentData))}`;
       const response = await this.client.post('/api/cmu/create.json', formData, {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       });
 
-      const waybillNumber =
-        response.data?.packages?.[0]?.waybill ||
-        response.data?.shipments?.[0]?.waybill ||
-        response.data?.waybill;
+      const pkg = response.data?.packages?.[0] || response.data?.shipments?.[0] || {};
+      const remarks = Array.isArray(pkg.remarks) ? pkg.remarks.join('; ') : String(pkg.remarks || response.data?.rmk || '');
+      const packageStatus = String(pkg.status || (response.data?.success === false ? 'Fail' : ''));
+      const waybillNumber = String(pkg.waybill || response.data?.waybill || prefetched || '').trim();
 
-      if (!waybillNumber) {
-        throw new Error('No waybill number returned for return shipment');
+      if (
+        packageStatus.toLowerCase() === 'fail' ||
+        response.data?.success === false ||
+        remarks.toLowerCase().includes('insufficient balance')
+      ) {
+        const detailed = remarks.toLowerCase().includes('insufficient balance')
+          ? 'Delhivery reverse pickup failed: insufficient prepaid wallet balance. Recharge Delhivery ONE and try again.'
+          : remarks || 'Delhivery rejected the reverse pickup.';
+        throw new Error(detailed);
+      }
+
+      if (!/^\d{8,}$/.test(waybillNumber)) {
+        throw new Error(remarks || 'Delhivery did not assign a reverse waybill. The return was not created.');
       }
 
       logger.info('Return shipment (RVP) created on Delhivery', {
         shopifyOrderId: order.shopifyOrderId,
+        forwardWaybill,
         returnWaybill: waybillNumber,
       });
 
-      return { waybillNumber };
+      return { waybillNumber, pickupAutomatic: true };
     } catch (error: any) {
+      const raw = error.response?.data?.rmk || error.response?.data?.packages?.[0]?.remarks || error.message;
+      const message = Array.isArray(raw) ? raw.join('; ') : String(raw || 'Delhivery reverse pickup failed');
       logger.error('Failed to create Delhivery RVP shipment', {
         shopifyOrderId: order.shopifyOrderId,
-        error: error.response?.data || error.message,
+        error: message,
       });
-      throw error;
+      if (error instanceof Error && error.message === message) throw error;
+      throw new Error(message);
     }
   }
 
@@ -1317,7 +1383,7 @@ class DelhiveryService {
     pickupTime?: string,
     packageCount: number = 1,
     pickupLocation?: string
-  ): Promise<{ success: boolean; message: string; data?: any }> {
+  ): Promise<{ success: boolean; message: string; data?: any; pickupId?: string | null; alreadyOpen?: boolean }> {
     const location = pickupLocation || config.delhivery.pickupLocation;
     const date = pickupDate || new Date().toISOString().split('T')[0];
     const time = pickupTime || config.delhivery.pickupTime;
@@ -1331,16 +1397,20 @@ class DelhiveryService {
 
     try {
       const response = await this.client.post('/fm/request/new/', payload);
+      const pickupId = readPickupId(response.data);
       logger.info('Pickup request created on Delhivery', {
         date,
         time,
         location,
         packageCount,
+        pickupId,
         data: response.data,
       });
       return {
         success: true,
-        message: `Pickup scheduled successfully for ${location} on ${date} at ${time} (${packageCount} packages).`,
+        pickupId,
+        alreadyOpen: false,
+        message: `Pickup scheduled for ${location} on ${date} at ${time} (${packageCount} packages)${pickupId ? `. Pickup id ${pickupId}` : ''}.`,
         data: response.data,
       };
     } catch (error: any) {
@@ -1358,13 +1428,108 @@ class DelhiveryService {
         errMsg = error.message;
       }
 
-      logger.warn('Failed to create pickup request on Delhivery', { error: errMsg, payload });
+      const alreadyOpen = isExistingPickupError(errMsg);
+      logger.warn('Failed to create pickup request on Delhivery', { error: errMsg, alreadyOpen, payload });
       return {
         success: false,
-        message: errMsg,
+        alreadyOpen,
+        pickupId: readPickupId(errData),
+        message: alreadyOpen
+          ? `A pickup is already open for ${location} on ${date}. Delhivery will collect the manifested parcels on that request.`
+          : errMsg,
         data: errData,
       };
     }
+  }
+
+  /**
+   * Create today's warehouse pickup if manifested parcels are waiting and
+   * Delhivery does not already have an open request. Safe to call after every
+   * dispatch and from the tracking cron.
+   */
+  async ensureDailyWarehousePickup(): Promise<{
+    scheduled: boolean;
+    skipped?: boolean;
+    alreadyOpen?: boolean;
+    pickupId?: string | null;
+    message: string;
+    date?: string;
+    time?: string;
+    packageCount?: number;
+  }> {
+    if (!config.delhivery.autoPickup) {
+      return { scheduled: false, skipped: true, message: 'Automatic warehouse pickup is turned off.' };
+    }
+
+    const location = config.delhivery.pickupLocation;
+    const awaiting = await prisma.shipment.count({
+      where: {
+        status: 'CREATED',
+        waybillNumber: { not: null },
+        OR: [
+          { courier: null },
+          { courier: { contains: 'delhivery', mode: 'insensitive' } },
+        ],
+      },
+    });
+    if (awaiting < 1) {
+      return { scheduled: false, skipped: true, message: 'No manifested parcels are waiting for pickup.' };
+    }
+
+    const slot = planWarehousePickupSlot(new Date(), config.delhivery.pickupTime);
+    const latest = await prisma.pickupRequest.findFirst({
+      where: { pickupLocation: location, pickupDate: slot.date, direction: 'FORWARD' },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (latest) {
+      const ageMs = Date.now() - new Date(latest.createdAt).getTime();
+      const open = latest.status === 'SCHEDULED' || latest.status === 'ALREADY_OPEN';
+      const cooldownMs = open ? 3 * 60 * 60 * 1000 : 20 * 60 * 1000;
+      if (ageMs < cooldownMs) {
+        return {
+          scheduled: open,
+          skipped: true,
+          alreadyOpen: open,
+          pickupId: latest.pickupId,
+          date: slot.date,
+          time: latest.pickupTime,
+          packageCount: latest.expectedPackageCount,
+          message: open
+            ? `Pickup already open for ${location} on ${slot.date}${latest.pickupId ? ` (id ${latest.pickupId})` : ''}.`
+            : latest.message || 'Pickup request was attempted recently.',
+        };
+      }
+    }
+
+    const result = await this.requestPickup(slot.date, slot.time, awaiting, location);
+    const status = result.success ? 'SCHEDULED' : result.alreadyOpen ? 'ALREADY_OPEN' : 'FAILED';
+    try {
+      await prisma.pickupRequest.create({
+        data: {
+          pickupId: result.pickupId || null,
+          pickupLocation: location,
+          pickupDate: slot.date,
+          pickupTime: slot.time,
+          expectedPackageCount: awaiting,
+          direction: 'FORWARD',
+          status,
+          message: result.message,
+          rawResponse: result.data ?? undefined,
+        },
+      });
+    } catch (saveErr: any) {
+      logger.warn('Pickup request was sent but could not be stored', { error: saveErr.message });
+    }
+
+    return {
+      scheduled: result.success || Boolean(result.alreadyOpen),
+      alreadyOpen: result.alreadyOpen,
+      pickupId: result.pickupId,
+      date: slot.date,
+      time: slot.time,
+      packageCount: awaiting,
+      message: result.message,
+    };
   }
 
   // ═══════════════════════════════════════════════════════════

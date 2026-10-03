@@ -656,7 +656,7 @@ class OrderService {
     await prisma.$transaction([
       prisma.shipment.update({
         where: { orderId: order.id },
-        data: { status: 'CREATED', trackingStatus: 'Label generated' },
+        data: { status: 'CREATED', trackingStatus: 'Label generated', courier: 'Delhivery' },
       }),
       prisma.order.update({
         where: { id: order.id },

@@ -5,6 +5,7 @@ import trackingService from '../modules/tracking/tracking.service';
 import returnService from '../modules/returns/return.service';
 import shopifyService from '../modules/shopify/shopify.service';
 import delhiveryDocumentFetcher from '../modules/delhivery/delhivery-document-fetcher.service';
+import delhiveryService from '../modules/delhivery/delhivery.service';
 import logger from '../utils/logger';
 
 /**
@@ -41,6 +42,14 @@ class Scheduler {
           await trackingService.syncAllTracking();
         } catch (error: any) {
           logger.error('[CRON] Tracking sync failed', { error: error.message });
+        }
+        try {
+          const pickup = await delhiveryService.ensureDailyWarehousePickup();
+          if (!pickup.skipped) {
+            logger.info('[CRON] Warehouse pickup', { message: pickup.message, pickupId: pickup.pickupId });
+          }
+        } catch (error: any) {
+          logger.error('[CRON] Warehouse pickup failed', { error: error.message });
         }
       })
     );

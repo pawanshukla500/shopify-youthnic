@@ -243,9 +243,21 @@ model Return {
   returnReason String
   returnStatus ReturnStatus @default(INITIATED)
 
-  // Return shipment (reverse logistics via Delhivery)
+  // Return shipment (reverse logistics via Delhivery).
+  // A real Delhivery AWB — never a placeholder. Customer pickup is scheduled
+  // by Delhivery when the reverse order is manifested (payment_mode Pickup).
   returnWaybillNumber  String?
   returnShipmentStatus String?
+  forwardWaybill       String? // Delivered forward AWB this return was raised against
+  carrier              String?   @default("Delhivery")
+  pickupAutomatic      Boolean   @default(true)
+  trackingStatus       String?
+  trackingLocation     String?
+  trackingUpdatedAt    DateTime?
+  trackingHistory      Json?
+  labelUrl             String?
+  pickedUpAt           DateTime?
+  receivedAt           DateTime?
 
   // Refund
   refundStatus      RefundStatus @default(NONE)
@@ -274,6 +286,27 @@ model Return {
 
   @@index([returnStatus])
   @@index([refundStatus])
+  @@index([returnWaybillNumber])
+}
+
+// One open warehouse pickup per location per day. Delhivery's pickup API
+// (POST /fm/request/new/) is for forward parcels at the registered warehouse.
+// Reverse customer pickups are scheduled by the reverse manifest itself.
+model PickupRequest {
+  id                    Int      @id @default(autoincrement())
+  pickupId              String?
+  pickupLocation        String
+  pickupDate            String
+  pickupTime            String
+  expectedPackageCount  Int
+  direction             String   @default("FORWARD")
+  status                String // SCHEDULED | ALREADY_OPEN | FAILED
+  message               String?
+  rawResponse           Json?
+  createdAt             DateTime @default(now())
+
+  @@index([pickupLocation, pickupDate])
+  @@index([status])
 }
 
 model ReturnItem {

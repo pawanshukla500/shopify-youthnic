@@ -99,8 +99,8 @@ export function StatusBadge({ status, label }: { status: string | null | undefin
   return <span className={`status-badge ${statusTone(status)}`}><span className="status-dot" />{label ?? labelize(status)}</span>
 }
 
-export function Panel({ children, className = '', style }: { children: ReactNode; className?: string; style?: React.CSSProperties }) {
-  return <section className={`panel ${className}`} style={style}>{children}</section>
+export function Panel({ children, className = '', style, id }: { children: ReactNode; className?: string; style?: React.CSSProperties; id?: string }) {
+  return <section id={id} className={`panel ${className}`} style={style}>{children}</section>
 }
 
 

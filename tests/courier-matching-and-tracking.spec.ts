@@ -62,6 +62,7 @@ const { prismaStub } = vi.hoisted(() => ({
     order: { findUnique: vi.fn(), upsert: vi.fn(), update: vi.fn() },
     orderItem: { findMany: vi.fn(), create: vi.fn(), update: vi.fn() },
     shipment: { findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn(), update: vi.fn() },
+    return: { findMany: vi.fn(async () => []) },
     trackingLog: { findMany: vi.fn(), create: vi.fn() },
     syncLog: { create: vi.fn() },
     emailLog: { findFirst: vi.fn() },

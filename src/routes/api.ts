@@ -1428,6 +1428,28 @@ router.post('/delhivery/pickup', async (req: Request, res: Response): Promise<vo
     const { pickupDate, pickupTime, packageCount, pickupLocation } = req.body;
     const count = parseInt(packageCount, 10) || 1;
     const result = await delhiveryService.requestPickup(pickupDate, pickupTime, count, pickupLocation);
+    const slotDate = pickupDate || new Date().toISOString().split('T')[0];
+    const slotTime = pickupTime || config.delhivery.pickupTime;
+    const location = pickupLocation || config.delhivery.pickupLocation;
+    if (result.success || result.alreadyOpen) {
+      try {
+        await prisma.pickupRequest.create({
+          data: {
+            pickupId: result.pickupId || null,
+            pickupLocation: location,
+            pickupDate: slotDate,
+            pickupTime: slotTime,
+            expectedPackageCount: count,
+            direction: 'FORWARD',
+            status: result.success ? 'SCHEDULED' : 'ALREADY_OPEN',
+            message: result.message,
+            rawResponse: result.data ?? undefined,
+          },
+        });
+      } catch (saveErr: any) {
+        logger.warn('Manual pickup was sent but could not be stored', { error: saveErr.message });
+      }
+    }
 
     res.json({
       success: result.success,

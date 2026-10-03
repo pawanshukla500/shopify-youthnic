@@ -119,8 +119,12 @@ export const config = {
     multiItemBreadthCm: parseInt(optional('DELHIVERY_MULTI_ITEM_BREADTH_CM', '20'), 10),
     multiItemHeightCm: parseInt(optional('DELHIVERY_MULTI_ITEM_HEIGHT_CM', '5'), 10),
     declaredWeightGrams: parseInt(optional('DELHIVERY_DECLARED_WEIGHT_GRAMS', '500'), 10),
-    // Pickup requests are optional and should be batched per warehouse/day.
-    autoPickup: optional('DELHIVERY_AUTO_PICKUP', 'false') === 'true',
+    // Forward warehouse pickups (POST /fm/request/new/) are created automatically
+    // after manifest, one open request per location. Set DELHIVERY_AUTO_PICKUP=false
+    // to keep the manual Schedule Pickup button as the only trigger.
+    // Reverse customer pickups are NOT this API — Delhivery schedules those when
+    // a return is manifested with payment_mode Pickup.
+    autoPickup: optional('DELHIVERY_AUTO_PICKUP', 'true') === 'true',
     pickupTime: optional('DELHIVERY_PICKUP_TIME', '11:00:00'),
     // Optional shared secret for Delhivery scan-push webhooks.
     // When set, /webhooks/delhivery requires ?secret= or x-delhivery-secret header.

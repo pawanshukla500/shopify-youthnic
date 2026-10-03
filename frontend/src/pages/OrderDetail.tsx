@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
@@ -26,7 +26,7 @@ import {
 } from '../api'
 import { carrierTrackingUrl, formatDate, formatMoney, labelize } from '../lib'
 import { Button, ButtonGroup, CopyableBadge, EmptyState, ErrorBox, FormField, Icon, InfoCard, LoadingState, PageIntro, Panel, PanelHeading, StatCard, StatusBadge, useDocumentTitle, useToast } from '../components/UI'
-import type { Order, OrderItem } from '../types'
+import type { Order, OrderItem, ReturnRecord } from '../types'
 
 export function OrderDetail() {
   useDocumentTitle('Order detail')
@@ -141,7 +141,12 @@ export function OrderDetail() {
       })).data
     },
     onSuccess: async (data) => {
-      toast.toast('success', `Return created with waybill ${data.returnWaybill}${data.shopifyTriggered ? ' · Synced to Shopify' : ''}.`)
+      toast.toast(
+        'success',
+        data.pickupAutomatic
+          ? `Reverse AWB ${data.returnWaybill} is live. Delhivery will pick up from the customer — status updates from carrier scans.`
+          : `Return linked with waybill ${data.returnWaybill}${data.shopifyTriggered ? ' · Synced to Shopify' : ''}.`
+      )
       setSelected({})
       setReason('')
       setReturnTracking('')
@@ -150,6 +155,11 @@ export function OrderDetail() {
     },
     onError: (error) => toast.toast('error', apiError(error)),
   })
+
+  useEffect(() => {
+    if (!orderQuery.data || window.location.hash !== '#return-panel') return
+    document.getElementById('return-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [orderQuery.data])
 
   const canDispatch = order && ['NEW', 'DISPATCH_PENDING'].includes(order.status)
   if (orderQuery.isLoading) return <LoadingState label="Loading order detail…" />
@@ -1839,6 +1849,7 @@ export function OrderDetail() {
 
         {/* ─── Reverse Logistics & Return Management ─────────────── */}
         <ReturnForm
+          order={order}
           items={(order.items ?? []).filter((item) => item.returnable)}
           selected={selected}
           setSelected={setSelected}
@@ -2514,7 +2525,10 @@ function DetailRow({
   )
 }
 
+const RETURN_REASONS = ['Size mismatch', 'Defective item', 'Wrong item', 'Changed mind']
+
 function ReturnForm({
+  order,
   items,
   selected,
   setSelected,
@@ -2527,6 +2541,7 @@ function ReturnForm({
   loading,
   onSubmit,
 }: {
+  order: Order
   items: OrderItem[]
   selected: Record<number, number>
   setSelected: (value: Record<number, number>) => void
@@ -2539,100 +2554,166 @@ function ReturnForm({
   loading: boolean
   onSubmit: () => void
 }) {
+  const [linkExisting, setLinkExisting] = useState(false)
+  const active = (order.returns || []).find((row) => !['REFUNDED', 'CANCELLED'].includes(row.returnStatus))
+  const tracking = order.shipment?.trackingStatus || ''
+  const delivered =
+    order.status === 'DELIVERED' ||
+    Boolean(order.deliveredAt) ||
+    order.shipment?.status === 'DELIVERED' ||
+    (/delivered/i.test(tracking) && !/undeliver/i.test(tracking))
+  const forwardAwb = order.shipment?.waybillNumber
+
   return (
-    <Panel className="return-form-panel">
-      <PanelHeading eyebrow="Reverse logistics" title="Create Return & Reverse AWB" />
-      <p className="panel-description">
-        Select items, assign reverse tracking / Delhivery AWB, and synchronize reverse fulfillment directly to Shopify.
-      </p>
-      {items.length ? (
-        <div className="return-items">
-          {items.map((item) => {
-            const quantity = selected[item.id] ?? 0
-            return (
-              <div className={`return-item ${quantity ? 'selected' : ''}`} key={item.id}>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={quantity > 0}
-                    onChange={(event) => setSelected({ ...selected, [item.id]: event.target.checked ? 1 : 0 })}
-                  />
-                  <span>
-                    {item.title}
-                    <small>
-                      <span className="sku-badge" style={{ marginRight: '4px' }}>
-                        {item.sku || 'No SKU'}
-                      </span>
-                      · {item.quantity} available
-                    </small>
-                  </span>
-                </label>
-                {quantity > 0 && (
-                  <input
-                    className="quantity-input"
-                    aria-label={`Quantity for ${item.title}`}
-                    type="number"
-                    min={1}
-                    max={item.quantity}
-                    value={quantity}
-                    onChange={(event) =>
-                      setSelected({
-                        ...selected,
-                        [item.id]: Math.max(1, Math.min(item.quantity, Number(event.target.value) || 1)),
-                      })
-                    }
-                  />
-                )}
-              </div>
-            )
-          })}
-        </div>
+    <Panel className="return-form-panel" id="return-panel">
+      <PanelHeading eyebrow="Reverse logistics" title="Create reverse pickup" />
+      {active ? (
+        <ActiveReturnCard record={active} />
       ) : (
-        <p className="field-hint">No returnable items on this order.</p>
+        <>
+          <p className="panel-description">
+            This books the same reverse order as Delhivery ONE “Initiate Return” on the delivered forward AWB.
+            Delhivery assigns the reverse waybill and collects the parcel from the customer. Pickup, transit, and warehouse arrival update from carrier scans.
+          </p>
+
+          {forwardAwb ? (
+            <div className="reverse-forward-link">
+              <span>Forward AWB</span>
+              <strong className="mono">{forwardAwb}</strong>
+              <span className={delivered ? 'is-ready' : 'is-wait'}>{delivered ? 'Delivered' : order.status.replace(/_/g, ' ').toLowerCase()}</span>
+            </div>
+          ) : (
+            <p className="field-hint">This order has no forward Delhivery AWB yet, so a reverse pickup cannot be tied to it.</p>
+          )}
+
+          {items.length ? (
+            <div className="return-items">
+              {items.map((item) => {
+                const quantity = selected[item.id] ?? 0
+                return (
+                  <div className={`return-item ${quantity ? 'selected' : ''}`} key={item.id}>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={quantity > 0}
+                        onChange={(event) => setSelected({ ...selected, [item.id]: event.target.checked ? 1 : 0 })}
+                      />
+                      <span>
+                        {item.title}
+                        <small>
+                          <span className="sku-badge">{item.sku || 'No SKU'}</span>
+                          {' · '}{item.quantity} available
+                        </small>
+                      </span>
+                    </label>
+                    {quantity > 0 && (
+                      <input
+                        className="quantity-input"
+                        aria-label={`Quantity for ${item.title}`}
+                        type="number"
+                        min={1}
+                        max={item.quantity}
+                        value={quantity}
+                        onChange={(event) =>
+                          setSelected({
+                            ...selected,
+                            [item.id]: Math.max(1, Math.min(item.quantity, Number(event.target.value) || 1)),
+                          })
+                        }
+                      />
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            <p className="field-hint">No returnable items on this order.</p>
+          )}
+
+          <div className="reason-chips" role="group" aria-label="Return reason">
+            {RETURN_REASONS.map((preset) => (
+              <button
+                type="button"
+                key={preset}
+                className={reason === preset ? 'is-selected' : ''}
+                onClick={() => setReason(preset)}
+              >
+                {preset}
+              </button>
+            ))}
+          </div>
+
+          <FormField label="Return reason">
+            <textarea
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+              placeholder="What should the pickup executive know?"
+              rows={2}
+            />
+          </FormField>
+
+          <ol className="reverse-steps">
+            <li>Delhivery manifests a reverse AWB against {forwardAwb || 'this order'}.</li>
+            <li>The customer pickup is scheduled by Delhivery. A warehouse pickup request is not used for returns.</li>
+            <li>Scans move the return the same way a forward shipment moves. Refund still waits for warehouse QC.</li>
+          </ol>
+
+          <button type="button" className="reverse-link-toggle" onClick={() => {
+            setLinkExisting((value) => !value)
+            if (linkExisting) {
+              setCarrier('Delhivery')
+              setReturnTracking('')
+            } else {
+              setCarrier('Other')
+            }
+          }}>
+            {linkExisting ? 'Use automatic Delhivery pickup' : 'Link an AWB that already exists'}
+          </button>
+
+          {linkExisting ? (
+            <div className="reverse-manual">
+              <FormField label="Carrier">
+                <select value={carrier} onChange={(event) => setCarrier(event.target.value)}>
+                  <option value="Delhivery">Delhivery</option>
+                  <option value="Other">Other carrier</option>
+                </select>
+              </FormField>
+              <FormField label="Existing return AWB">
+                <input
+                  value={returnTracking}
+                  onChange={(event) => setReturnTracking(event.target.value)}
+                  placeholder="Numeric Delhivery AWB"
+                />
+              </FormField>
+            </div>
+          ) : null}
+
+          <Button className="button-primary full-button" loading={loading} disabled={!items.length || !delivered} onClick={onSubmit}>
+            <Icon name="return" size={16} />
+            Create reverse pickup
+          </Button>
+          {!delivered ? <p className="field-hint">Available once the forward shipment is delivered.</p> : null}
+        </>
       )}
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '8px' }}>
-        <FormField label="Reverse Courier">
-          <select value={carrier} onChange={(e) => setCarrier(e.target.value)}>
-            <option value="Delhivery">Delhivery</option>
-            <option value="BlueDart">Blue Dart</option>
-            <option value="Shadowfax">Shadowfax</option>
-            <option value="Other">Other Carrier</option>
-          </select>
-        </FormField>
-
-        <FormField label="Return Tracking / AWB">
-          <input
-            value={returnTracking}
-            onChange={(e) => setReturnTracking(e.target.value)}
-            placeholder="Auto or enter AWB"
-          />
-        </FormField>
-      </div>
-
-      <FormField label="Return reason">
-        <textarea
-          value={reason}
-          onChange={(event) => setReason(event.target.value)}
-          placeholder="e.g. Size mismatch, defective item, customer return"
-          rows={2}
-        />
-      </FormField>
-
-      <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '6px', padding: '8px 10px', marginBottom: '12px', fontSize: '10.5px', color: '#166534', display: 'flex', alignItems: 'center', gap: '6px' }}>
-        <Icon name="check" size={13} />
-        <span>Will automatically register return tracking & notes on Shopify order.</span>
-      </div>
-
-      <Button
-        className="button-secondary full-button"
-        loading={loading}
-        disabled={!items.length}
-        onClick={onSubmit}
-      >
-        <Icon name="return" size={16} />
-        Create Return & Trigger on Shopify
-      </Button>
     </Panel>
+  )
+}
+
+function ActiveReturnCard({ record }: { record: ReturnRecord }) {
+  return (
+    <div className="active-return-card">
+      <div>
+        <span className="eyebrow">Reverse in progress</span>
+        <strong className="mono">{record.returnWaybillNumber || 'Waybill pending'}</strong>
+        <p>
+          {record.pickupAutomatic
+            ? 'Customer pickup was scheduled by Delhivery. Status follows carrier scans.'
+            : 'This return is linked to an existing waybill.'}
+          {record.forwardWaybill ? ` Forward AWB ${record.forwardWaybill}.` : ''}
+        </p>
+      </div>
+      <StatusBadge status={record.returnStatus} />
+      {record.trackingStatus ? <span className="cell-muted">{record.trackingStatus}{record.trackingLocation ? ` · ${record.trackingLocation}` : ''}</span> : null}
+    </div>
   )
 }

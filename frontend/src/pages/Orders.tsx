@@ -24,6 +24,7 @@ import {
   syncBulkExternalFulfillments,
 } from '../api'
 import { ORDER_TABS, carrierTrackingUrl, tabForStatus, formatDate, formatMoney, labelize, type OrderTabKey } from '../lib'
+import { classifyOrderTab, isCodConfirmed as codConfirmedTag, isPrepaidOrder as prepaidOrder } from '../../../src/modules/orders/order-tabs'
 import { getOrderTabCounts } from '../api'
 import { Button, EmptyState, ErrorBox, FormField, Icon, LoadingState, PageIntro, Panel, StatusBadge, useDocumentTitle, useToast } from '../components/UI'
 import { OrderLogisticsActions } from '../components/OrderLogisticsActions'
@@ -59,42 +60,16 @@ export function renderRtoRiskBadge(order: Order) {
 }
 
 export function isPrepaidOrder(order: Order): boolean {
-  const pm = (order.paymentMethod || '').toLowerCase()
-  const gw = (order.paymentGateway || '').toLowerCase()
-  const tags = (order.tags || '').toLowerCase()
-  return (
-    pm === 'pre-paid' ||
-    pm === 'prepaid' ||
-    gw.includes('gokwik') ||
-    gw.includes('phonepe') ||
-    tags.includes('prepaid') ||
-    tags.includes('gokwik') ||
-    tags.includes('upi')
-  ) && pm !== 'cod' && !gw.includes('cash')
+  return prepaidOrder(order)
 }
 
 export function isCodConfirmed(order: Order): boolean {
-  const tags = (order.tags || '').toLowerCase()
-  return (
-    tags.includes('cod_confirmed') ||
-    tags.includes('cod confirmed') ||
-    tags.includes('cod-confirmed') ||
-    tags.includes('confirmed')
-  )
+  return codConfirmedTag(order)
 }
 
+/** Same queue as the Ready to Dispatch tab: approved, no label, no Delhivery update. */
 export function isDispatchNeeded(order: Order): boolean {
-  if (['CANCELLED', 'DELIVERED', 'SHIPPED', 'RTO_DELIVERED'].includes(order.status)) return false
-  if (order.shipment?.waybillNumber && order.shipment?.status !== 'ERROR') return false
-  if (!['NEW', 'DISPATCH_PENDING'].includes(order.status) && order.shipment?.status !== 'ERROR') return false
-
-  // 1. Prepaid order needs dispatch
-  if (isPrepaidOrder(order)) return true
-
-  // 2. Confirmed COD order needs dispatch
-  if (isCodConfirmed(order)) return true
-
-  return false
+  return classifyOrderTab(order) === 'dispatch'
 }
 
 export function ShopifyTagList({ tags }: { tags?: string | null }) {
@@ -1309,15 +1284,7 @@ export function Orders() {
               aria-selected={isActive}
               className={`analytics-tab-btn ${isActive ? 'active' : ''}`}
               onClick={() => setTabAndUrl(tab.key)}
-              title={
-                tab.key === 'all'
-                  ? 'All orders'
-                  : tab.key === 'dispatch'
-                    ? 'No AWB yet — click Dispatch to generate AWB + label'
-                    : tab.key === 'ready'
-                      ? 'AWB + label generated — hand over to courier for pickup'
-                      : `${tab.label}: ${tab.statuses.join(', ')}`
-              }
+              title={tab.hint}
               style={isActive ? { borderColor: tab.color, color: tab.color } : undefined}
             >
               <span>{tab.label}</span>
@@ -1328,6 +1295,9 @@ export function Orders() {
           )
         })}
       </div>
+      <p style={{ margin: '-8px 0 16px', color: '#64748b', fontSize: '13px' }}>
+        {ORDER_TABS.find((tab) => tab.key === activeTab)?.hint}
+      </p>
 
       <Panel className="filters-panel">
         <div className="filters-row" style={{ flexWrap: 'wrap', gap: '12px', alignItems: 'center' }}>

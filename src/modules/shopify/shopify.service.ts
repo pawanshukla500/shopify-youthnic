@@ -7,6 +7,14 @@ import { isDelhiveryCourier, normalizeCourierName } from '../../utils/courier';
 import { ShopifyOrderWebhook } from '../../types';
 import { OrderStatus } from '@prisma/client';
 import { shopifyTokenProvider } from './token.provider';
+import {
+  isApprovedForDispatch,
+  isCodConfirmed,
+  isHighRtoCancel,
+  mapShopifyShipmentStatus,
+  orderStatusFromLiveTracking,
+  trackingLabelFromShopify,
+} from '../orders/order-tabs';
 
 /**
  * Shopify Service
@@ -1108,47 +1116,43 @@ class ShopifyService {
    * Determine exact internal OrderStatus from Shopify webhook payload.
    */
   calculateOrderStatus(order: ShopifyOrderWebhook): OrderStatus {
-    if ((order as any).cancelled_at) {
-      return 'CANCELLED';
-    }
-    if (order.financial_status === 'refunded') {
-      return 'REFUNDED';
-    }
+    const fulfillments = ((order as any).fulfillments || []).filter((f: any) => f.status !== 'cancelled');
+    const withShipmentStatus = (wanted: string[]) =>
+      fulfillments.find((f: any) => wanted.includes((f.shipment_status || '').toLowerCase()));
 
-    const fulfillments = (order as any).fulfillments || [];
-    const activeFulfillments = fulfillments.filter((f: any) => f.status !== 'cancelled');
-
-    if (activeFulfillments.length > 0) {
-      const delivered = activeFulfillments.find((f: any) => f.shipment_status === 'delivered');
-      if (delivered) return 'DELIVERED';
-      const rtoDelivered = activeFulfillments.find((f: any) => f.shipment_status === 'rto_delivered');
-      if (rtoDelivered) return 'RTO_DELIVERED';
-      const rto = activeFulfillments.find((f: any) => f.shipment_status === 'rto' || f.shipment_status === 'return_to_origin');
-      if (rto) return 'RTO_INITIATED';
-      const failure = activeFulfillments.find((f: any) => f.shipment_status === 'failure' || f.shipment_status === 'attempted_delivery');
-      if (failure) return 'FAILED_DELIVERY';
-      const outForDelivery = activeFulfillments.find((f: any) => f.shipment_status === 'out_for_delivery');
-      if (outForDelivery) return 'OUT_FOR_DELIVERY';
-      const inTransit = activeFulfillments.find((f: any) => f.shipment_status === 'in_transit');
-      if (inTransit) return 'IN_TRANSIT';
-      if (order.fulfillment_status === 'fulfilled' || activeFulfillments.some((f: any) => f.status === 'success')) {
-        return 'SHIPPED';
-      }
-    }
-
-    if (order.fulfillment_status === 'fulfilled') {
-      return 'SHIPPED';
-    }
-
-    if (order.fulfillment_status === 'partial') {
-      return 'IN_TRANSIT';
-    }
+    // A real carrier scan wins over a later Shopify cancel/refund flag.
+    if (withShipmentStatus(['delivered'])) return 'DELIVERED';
+    if (withShipmentStatus(['rto_delivered'])) return 'RTO_DELIVERED';
+    if (withShipmentStatus(['rto', 'return_to_origin'])) return 'RTO_INITIATED';
+    if (withShipmentStatus(['failure', 'attempted_delivery'])) return 'FAILED_DELIVERY';
+    if (withShipmentStatus(['out_for_delivery'])) return 'OUT_FOR_DELIVERY';
+    if (withShipmentStatus(['in_transit'])) return 'IN_TRANSIT';
 
     const paymentMethod = this.detectPaymentMethod(order);
-    const tags = (order.tags || '').toLowerCase();
-    const isCodConfirmed = tags.includes('cod_confirmed') || tags.includes('cod confirmed') || tags.includes('confirmed');
+    const tagInput = {
+      tags: order.tags,
+      paymentMethod,
+      financialStatus: order.financial_status,
+    };
+    const labelOnly =
+      order.fulfillment_status === 'fulfilled' ||
+      order.fulfillment_status === 'partial' ||
+      fulfillments.some(
+        (f: any) => f.status === 'success' || f.tracking_number || (f.tracking_numbers && f.tracking_numbers.length)
+      );
+    const cancelledBeforePickup =
+      Boolean((order as any).cancelled_at) ||
+      isHighRtoCancel(tagInput) ||
+      ['voided', 'refunded'].includes((order.financial_status || '').toLowerCase());
 
-    if (paymentMethod === 'Pre-paid' || isCodConfirmed) {
+    // Cancelled before the courier picked the parcel, including a label that
+    // was generated and then voided (COD_CANCELLED / High RTO).
+    if (cancelledBeforePickup) return 'CANCELLED';
+
+    // Label / fulfillment exists but Delhivery has not reported a pickup scan.
+    if (labelOnly) return 'DISPATCHED';
+
+    if (paymentMethod === 'Pre-paid' || isCodConfirmed(tagInput)) {
       return 'DISPATCH_PENDING';
     }
 
@@ -1184,7 +1188,7 @@ class ShopifyService {
       (order as any).payment_gateway_names?.[0] ||
       ((order as any).payment_gateway_names || []).join(', ') ||
       null;
-    const status = this.calculateOrderStatus(order);
+    let status = this.calculateOrderStatus(order);
 
     // ─── Extract Payment Partner (Easebuzz), Aggregator (GoKwik), and IDs ───
     const noteAttributes = (order as any).note_attributes || [];
@@ -1272,18 +1276,9 @@ class ShopifyService {
     const deliverOrderCountStr = findAttr(['deliver_order_count', 'delivery_order_count', 'gk_deliver_order_count']);
     const deliverOrderCount = deliverOrderCountStr ? parseInt(deliverOrderCountStr, 10) : null;
 
-    const rawTags = (order.tags || '').toLowerCase();
-    const isCodBlocked =
-      rawTags.includes('gokwik_cod_blocking') ||
-      rawTags.includes('cod_blocking') ||
-      rawTags.includes('cod_cancelled') ||
-      rawTags.includes('c2p-order-cancelled');
-    const isCodConfirmed =
-      rawTags.includes('cod_confirmed') ||
-      rawTags.includes('cod confirmed') ||
-      rawTags.includes('confirmed') ||
-      rawTags.includes('c2p-converted') ||
-      rawTags.includes('c2p-prepaid-order');
+    const tagInput = { tags: order.tags, paymentMethod, financialStatus: order.financial_status };
+    const isCodBlocked = isHighRtoCancel(tagInput);
+    const codConfirmed = isCodConfirmed(tagInput);
 
     let rtoRiskLevel = 'LOW';
     let rtoRiskReason = 'Prepaid order (Zero RTO risk)';
@@ -1292,7 +1287,7 @@ class ShopifyService {
       if (isCodBlocked) {
         rtoRiskLevel = 'HIGH';
         rtoRiskReason = 'GoKwik flagged COD blocked / customer cancelled';
-      } else if (isCodConfirmed) {
+      } else if (codConfirmed) {
         rtoRiskLevel = 'LOW';
         rtoRiskReason = 'Customer verified intent via WhatsApp / GoKwik confirmation';
       } else if (deliverOrderCount && deliverOrderCount >= 2) {
@@ -1310,15 +1305,38 @@ class ShopifyService {
     const hasActiveWaybill = activeFulfillments.some(
       (f: any) => f.tracking_number || (f.tracking_numbers && f.tracking_numbers.length > 0)
     );
-    const dispatchDelayed = ['NEW', 'DISPATCH_PENDING'].includes(status) && !hasActiveWaybill && Date.now() > expectedDispatchAt.getTime();
+    const approvedForDispatch = isApprovedForDispatch(tagInput);
+    const dispatchDelayed =
+      approvedForDispatch && !hasActiveWaybill && Date.now() > expectedDispatchAt.getTime();
 
     // dispatchedAt audit timestamp: initialize when the order carries an active
     // fulfillment or an assigned waybill, and never overwrite a timestamp that a
     // prior dispatch already recorded (read the stored value and preserve it).
+    // Live Delhivery tracking, once polled, owns the lifecycle so a Shopify
+    // fulfillment webhook cannot push a not-picked parcel back to In Transit.
     const existingDispatch = await prisma.order.findUnique({
       where: { shopifyOrderId: order.id.toString() },
-      select: { dispatchedAt: true },
+      select: {
+        dispatchedAt: true,
+        shipment: {
+          select: {
+            status: true,
+            trackingStatus: true,
+            trackingUpdatedAt: true,
+            waybillNumber: true,
+            courier: true,
+          },
+        },
+      },
     });
+    if (existingDispatch?.shipment?.trackingUpdatedAt) {
+      const liveStatus = orderStatusFromLiveTracking(existingDispatch.shipment);
+      const preShipCancel =
+        status === 'CANCELLED' && (liveStatus === 'DISPATCHED' || liveStatus === 'DISPATCH_PENDING');
+      if (liveStatus && !preShipCancel) {
+        status = liveStatus as OrderStatus;
+      }
+    }
     const primaryActiveFulfillment = activeFulfillments[activeFulfillments.length - 1] || null;
     const fulfillmentDispatchedAt = primaryActiveFulfillment?.created_at
       ? new Date(primaryActiveFulfillment.created_at)
@@ -1494,13 +1512,8 @@ class ShopifyService {
           (primaryFulfillment.tracking_urls && primaryFulfillment.tracking_urls[0]) ||
           null;
 
-        let shipmentStatus = 'IN_TRANSIT';
-        if (primaryFulfillment.shipment_status === 'delivered') shipmentStatus = 'DELIVERED';
-        else if (primaryFulfillment.shipment_status === 'rto_delivered') shipmentStatus = 'RTO_DELIVERED';
-        else if (primaryFulfillment.shipment_status === 'rto' || primaryFulfillment.shipment_status === 'return_to_origin') shipmentStatus = 'RTO';
-        else if (primaryFulfillment.shipment_status === 'failure' || primaryFulfillment.shipment_status === 'attempted_delivery') shipmentStatus = 'FAILED';
-        else if (primaryFulfillment.shipment_status === 'out_for_delivery') shipmentStatus = 'OUT_FOR_DELIVERY';
-        else if (primaryFulfillment.shipment_status === 'in_transit') shipmentStatus = 'IN_TRANSIT';
+        const shipmentStatus = mapShopifyShipmentStatus(primaryFulfillment.shipment_status);
+        const shipmentTrackingLabel = trackingLabelFromShopify(primaryFulfillment.shipment_status);
 
         if (waybillNumber) {
           // Delhivery is fulfilled under several carrier labels ("Delhivery",
@@ -1534,6 +1547,10 @@ class ShopifyService {
           const existingShipment = await prisma.shipment.findFirst({
             where: { orderId: dbOrder.id },
           });
+          // A Delhivery poll already recorded the real scan. Do not let a
+          // Shopify fulfillment payload replace Manifested / Not Picked with
+          // a synthetic in-transit status.
+          const preserveLiveTracking = Boolean(existingShipment?.trackingUpdatedAt);
 
           if (existingShipment) {
             await prisma.shipment.update({
@@ -1541,10 +1558,12 @@ class ShopifyService {
               data: {
                 waybillNumber,
                 courier: effectiveCourier,
-                status: shipmentStatus as any,
-                trackingStatus: primaryFulfillment.shipment_status
-                  ? `In Transit · ${primaryFulfillment.shipment_status}`
-                  : 'In Transit',
+                ...(preserveLiveTracking
+                  ? {}
+                  : {
+                      status: shipmentStatus as any,
+                      trackingStatus: shipmentTrackingLabel,
+                    }),
                 labelUrl: isNonDelhivery ? trackingUrl : (existingShipment.labelUrl || trackingUrl),
                 // If courier is not Delhivery, clear any false Delhivery audit discrepancy fields
                 ...(isNonDelhivery
@@ -1588,9 +1607,7 @@ class ShopifyService {
                 paymentMode: paymentMethod === 'COD' ? 'COD' : 'Pre-paid',
                 codAmount: paymentMethod === 'COD' ? parseFloat(order.total_price) || 0 : 0,
                 status: shipmentStatus as any,
-                trackingStatus: primaryFulfillment.shipment_status
-                  ? `In Transit · ${primaryFulfillment.shipment_status}`
-                  : 'In Transit',
+                trackingStatus: shipmentTrackingLabel,
                 labelUrl: trackingUrl,
                 ...(isNonDelhivery ? delhiveryAuditReset : {}),
               },

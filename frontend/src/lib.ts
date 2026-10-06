@@ -23,34 +23,80 @@ export type OrderTabKey = 'all' | 'new' | 'dispatch' | 'ready' | 'transit' | 'de
 export interface OrderTabDef {
   key: OrderTabKey
   label: string
+  hint: string
   statuses: OrderStatus[]
   hasWaybill?: boolean
   color: string
 }
 
-/** Operational segregation — Ready split by AWB (no-AWB needs Dispatch click, AWB needs pickup). */
+/**
+ * Orders-page queues. Membership is decided on the server by classifyOrderTab
+ * (Shopify tags + Delhivery live tracking). The status lists are only a
+ * deep-link hint for ?status= URLs.
+ */
 export const ORDER_TABS: OrderTabDef[] = [
-  { key: 'all', label: 'All', statuses: [], color: '#2563eb' },
-  { key: 'new', label: 'New Order', statuses: ['NEW'], color: '#2563eb' },
-  { key: 'dispatch', label: 'Ready to Dispatch', statuses: ['DISPATCH_PENDING', 'DISPATCHED'], hasWaybill: false, color: '#dc2626' },
-  { key: 'ready', label: 'Ready to Ship', statuses: ['DISPATCH_PENDING', 'DISPATCHED'], hasWaybill: true, color: '#059669' },
-  { key: 'transit', label: 'In Transit', statuses: ['SHIPPED', 'IN_TRANSIT', 'OUT_FOR_DELIVERY', 'FAILED_DELIVERY'], color: '#7c3aed' },
-  { key: 'delivered', label: 'Delivered', statuses: ['DELIVERED'], color: '#059669' },
-  { key: 'return', label: 'Return', statuses: ['RTO_INITIATED', 'RTO_DELIVERED', 'RETURN_REQUESTED', 'RETURN_DISPATCHED', 'RETURN_RECEIVED', 'REFUNDED'], color: '#9333ea' },
-  { key: 'cancel', label: 'Cancel', statuses: ['CANCELLED'], color: '#64748b' },
+  { key: 'all', label: 'All', hint: 'Every order received into the OMS.', statuses: [], color: '#2563eb' },
+  {
+    key: 'new',
+    label: 'New Order',
+    hint: 'Received, not reviewed, not approved, and not shipped. Unconfirmed COD stays here.',
+    statuses: ['NEW'],
+    color: '#2563eb',
+  },
+  {
+    key: 'dispatch',
+    label: 'Ready to Dispatch',
+    hint: 'Prepaid, or COD approved via Low RTO / COD_CONFIRMED. No label yet and nothing updated in Delhivery.',
+    statuses: ['DISPATCH_PENDING'],
+    hasWaybill: false,
+    color: '#dc2626',
+  },
+  {
+    key: 'ready',
+    label: 'Ready to Ship',
+    hint: 'Label generated with the courier. Still at the seller — Manifested or Not Picked, waiting for pickup.',
+    statuses: ['DISPATCHED'],
+    hasWaybill: true,
+    color: '#059669',
+  },
+  {
+    key: 'transit',
+    label: 'In Transit',
+    hint: 'Picked up from the seller and moving until it is delivered. Includes out-for-delivery and NDR attempts.',
+    statuses: ['SHIPPED', 'IN_TRANSIT', 'OUT_FOR_DELIVERY', 'FAILED_DELIVERY'],
+    color: '#7c3aed',
+  },
+  {
+    key: 'delivered',
+    label: 'Delivered',
+    hint: 'Delivered to the customer.',
+    statuses: ['DELIVERED'],
+    color: '#059669',
+  },
+  {
+    key: 'return',
+    label: 'Return',
+    hint: 'RTO and customer return orders.',
+    statuses: ['RTO_INITIATED', 'RTO_DELIVERED', 'RETURN_REQUESTED', 'RETURN_DISPATCHED', 'RETURN_RECEIVED', 'REFUNDED'],
+    color: '#9333ea',
+  },
+  {
+    key: 'cancel',
+    label: 'Cancel',
+    hint: 'Cancelled before pickup, including COD_CANCELLED and High RTO cancels.',
+    statuses: ['CANCELLED'],
+    color: '#64748b',
+  },
 ]
 
 /** Map a legacy ?status= value to its tab (deep-link compat). AWB decides dispatch vs ready. */
 export function tabForStatus(status: string | null | undefined, hasWaybill?: boolean | null): OrderTabKey {
   if (!status) return 'all'
   const upper = status.toUpperCase()
-  if ((upper === 'DISPATCH_PENDING' || upper === 'DISPATCHED') && hasWaybill !== undefined && hasWaybill !== null) {
-    return hasWaybill ? 'ready' : 'dispatch'
-  }
+  if (upper === 'DISPATCHED' || ((upper === 'DISPATCH_PENDING' || upper === 'NEW') && hasWaybill)) return 'ready'
+  if (upper === 'DISPATCH_PENDING') return 'dispatch'
   const found = ORDER_TABS.find((t) => t.statuses.includes(upper as OrderStatus))
   if (!found) return 'all'
-  // Ambiguous without AWB info → default to dispatch queue (needs action first).
-  if (found.key === 'ready' && (hasWaybill === undefined || hasWaybill === null)) return 'dispatch'
   return found.key
 }
 

@@ -25,6 +25,7 @@ import {
   syncExternalOrderFulfillment,
 } from '../api'
 import { carrierTrackingUrl, formatDate, formatMoney, labelize } from '../lib'
+import { classifyOrderTab, isCodConfirmed, isPrepaidOrder } from '../../../src/modules/orders/order-tabs'
 import { Button, ButtonGroup, CopyableBadge, EmptyState, ErrorBox, FormField, Icon, InfoCard, LoadingState, PageIntro, Panel, PanelHeading, StatCard, StatusBadge, useDocumentTitle, useToast } from '../components/UI'
 import type { Order, OrderItem, ReturnRecord } from '../types'
 
@@ -200,17 +201,9 @@ export function OrderDetail() {
     toast.toast('success', `Delhivery Waybill ${awb} copied!`)
   }
 
-  const isPrepaid = (
-    order.paymentMethod === 'Pre-paid' ||
-    order.paymentMethod === 'PREPAID' ||
-    (order.paymentGateway || '').toLowerCase().includes('gokwik') ||
-    (order.paymentGateway || '').toLowerCase().includes('phonepe') ||
-    Boolean(order.tags && /prepaid|gokwik|upi/i.test(order.tags))
-  ) && order.paymentMethod !== 'COD'
-
-  const isCodConf = Boolean(order.tags && /cod_confirmed|cod confirmed|cod-confirmed|confirmed/i.test(order.tags))
-
-  const isDispatchNeeded = (isPrepaid || isCodConf) && ['NEW', 'DISPATCH_PENDING'].includes(order.status) && !order.shipment?.waybillNumber
+  const isPrepaid = isPrepaidOrder(order)
+  const isCodConf = isCodConfirmed(order)
+  const isDispatchNeeded = classifyOrderTab(order) === 'dispatch'
 
   const isNdrOrRtoShipment = Boolean(
     order.hasNdrException ||

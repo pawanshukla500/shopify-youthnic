@@ -11,6 +11,7 @@ import {
   syncExternalOrderFulfillment,
 } from '../api'
 import { carrierTrackingUrl } from '../lib'
+import { isManifestRejected } from '../../../src/modules/orders/order-tabs'
 import type { Order } from '../types'
 import { Icon } from './UI'
 
@@ -53,7 +54,10 @@ export function OrderLogisticsActions({
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
-  const waybill = order.shipment?.waybillNumber
+  // A low-wallet manifest stores a reserved AWB that Delhivery never created.
+  // Hide it so the row stays a dispatch action, not a carrier tracking link.
+  const manifestRejected = isManifestRejected(order)
+  const waybill = manifestRejected ? undefined : order.shipment?.waybillNumber
   const activeReturn = (order.returns || []).find((row) => !['REFUNDED', 'CANCELLED'].includes(row.returnStatus))
   const showNdr = Boolean(order.hasNdrException || ['FAILED_DELIVERY', 'RTO_INITIATED'].includes(order.status))
   const showRtoRefund = order.status === 'RTO_DELIVERED' && order.paymentMethod !== 'COD' && order.financialStatus !== 'refunded'

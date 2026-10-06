@@ -277,6 +277,40 @@ describe('classifyOrderTab — Delhivery live tracking and Shopify tags', () => 
     expect(classifyOrderTab(order({ status: 'REFUNDED', financialStatus: 'refunded' }))).toBe('cancel');
   });
 
+  it('sends a low-wallet manifest failure back to Ready to Dispatch and leaves cancel and RTO alone', () => {
+    const reserved = {
+      waybillNumber: '30100810010275',
+      courier: 'Delhivery',
+      status: 'ERROR',
+      errorMessage:
+        'Delhivery Manifest Failed: Insufficient balance in Delhivery prepaid wallet. Please recharge your Delhivery One account.',
+      trackingStatus: null,
+      trackingUpdatedAt: null,
+    };
+    expect(
+      classifyOrderTab(order({ status: 'DISPATCH_PENDING', tags: 'COD, Low RTO', shipment: reserved }))
+    ).toBe('dispatch');
+    expect(
+      classifyOrderTab(order({ status: 'DISPATCHED', paymentMethod: 'Pre-paid', tags: 'Prepaid', shipment: reserved }))
+    ).toBe('dispatch');
+    expect(classifyOrderTab(order({ status: 'CANCELLED', shipment: reserved }))).toBe('cancel');
+    expect(classifyOrderTab(order({ status: 'RTO_INITIATED', shipment: reserved }))).toBe('return');
+    expect(
+      classifyOrderTab(
+        order({
+          status: 'IN_TRANSIT',
+          shipment: {
+            ...reserved,
+            status: 'IN_TRANSIT',
+            errorMessage: null,
+            trackingStatus: 'In Transit',
+            trackingUpdatedAt: '2026-10-06T12:00:00.000Z',
+          },
+        })
+      )
+    ).toBe('transit');
+  });
+
   it('does not treat a third-party in-transit scan as an unpicked Delhivery label', () => {
     expect(
       classifyOrderTab(

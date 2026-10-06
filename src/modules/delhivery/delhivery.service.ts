@@ -311,8 +311,11 @@ class DelhiveryService {
       },
     };
 
-    // 1. Pre-fetch an official Delhivery AWB number so we are guaranteed a valid waybill
+    // 1. Pre-fetch an official Delhivery AWB number so we are guaranteed a valid waybill.
+    // The number is only kept after Delhivery accepts the manifest. A low-wallet
+    // rejection must not leave this reserved id on the order.
     let waybillNumber = '';
+    let manifestSaved = false;
     try {
       waybillNumber = await this.fetchSingleWaybill();
       shipmentData.shipments[0].waybill = waybillNumber;
@@ -361,29 +364,19 @@ class DelhiveryService {
           logger.error('Delhivery manifest returned non-success remark', {
             shopifyOrderId: order.shopifyOrderId,
             remarks: manifestRemark,
-            waybillNumber,
+            reservedWaybill: waybillNumber || null,
           });
 
-          await prisma.shipment.upsert({
-            where: { orderId: order.id },
-            create: {
-              orderId: order.id,
-              waybillNumber,
-              paymentMode,
-              codAmount,
-              declaredValue: order.totalAmount,
-              status: 'ERROR',
-              errorMessage: detailedError,
-            },
-            update: {
-              status: 'ERROR',
-              errorMessage: detailedError,
-            },
-          });
-
+          // The pre-fetched number is not a shipment. Drop it so the order
+          // stays in Ready to Dispatch instead of showing a dead carrier ID.
+          waybillNumber = '';
+          await this.recordRejectedManifest(order, paymentMode, codAmount, detailedError);
           throw new Error(detailedError);
         }
       } catch (cmuErr: any) {
+        if (!cmuErr?.response && /Manifest Failed|rejected by courier|insufficient balance/i.test(cmuErr?.message || '')) {
+          throw cmuErr;
+        }
         const rawErr = cmuErr.response?.data?.rmk || cmuErr.message || '';
         const detailedError = rawErr.toLowerCase().includes('insufficient balance')
           ? 'Delhivery Manifest Failed: Insufficient balance in Delhivery prepaid wallet. Please recharge your Delhivery One account.'
@@ -391,25 +384,11 @@ class DelhiveryService {
 
         logger.error('Delhivery /api/cmu/create.json call encountered error', {
           error: detailedError,
-          waybillNumber,
+          reservedWaybill: waybillNumber || null,
         });
 
-        await prisma.shipment.upsert({
-          where: { orderId: order.id },
-          create: {
-            orderId: order.id,
-            paymentMode,
-            codAmount,
-            declaredValue: order.totalAmount,
-            status: 'ERROR',
-            errorMessage: detailedError,
-          },
-          update: {
-            status: 'ERROR',
-            errorMessage: detailedError,
-          },
-        });
-
+        waybillNumber = '';
+        await this.recordRejectedManifest(order, paymentMode, codAmount, detailedError);
         throw new Error(detailedError);
       }
 
@@ -450,6 +429,7 @@ class DelhiveryService {
         where: { id: order.id },
         data: { status: 'DISPATCHED' },
       });
+      manifestSaved = true;
 
       // Generate and save the label URL (if Delhivery cloud packing slip is ready)
       let labelUrl = '';
@@ -492,24 +472,102 @@ class DelhiveryService {
         error: error.response?.data || error.message,
       });
 
-      // Record error on shipment
+      // A reserved waybill is cleared only when Delhivery never accepted the manifest.
+      if (manifestSaved) throw error;
+
       await prisma.shipment.upsert({
         where: { orderId: order.id },
         create: {
           orderId: order.id,
+          waybillNumber: null,
+          courier: 'Delhivery',
           paymentMode,
           codAmount: codAmount,
           declaredValue: order.totalAmount,
           status: 'ERROR',
           errorMessage: error.response?.data?.error || error.message,
+          labelUrl: null,
+          trackingStatus: null,
         },
         update: {
+          waybillNumber: null,
+          labelUrl: null,
+          trackingStatus: null,
           status: 'ERROR',
           errorMessage: error.response?.data?.error || error.message,
         },
       });
 
+      const leaveAsIs = [
+        'CANCELLED',
+        'RTO_INITIATED',
+        'RTO_DELIVERED',
+        'RETURN_REQUESTED',
+        'RETURN_DISPATCHED',
+        'RETURN_RECEIVED',
+        'DELIVERED',
+        'REFUNDED',
+      ];
+      if (!leaveAsIs.includes(order.status)) {
+        await prisma.order.update({
+          where: { id: order.id },
+          data: { status: 'DISPATCH_PENDING' },
+        });
+      }
+
       throw error;
+    }
+  }
+
+  /**
+   * Manifest was refused. The reserved waybill is not a Delhivery shipment.
+   * Drop it and send the order back to Ready to Dispatch, except cancel / RTO / delivered.
+   */
+  private async recordRejectedManifest(
+    order: Order,
+    paymentMode: string,
+    codAmount: number,
+    errorMessage: string
+  ): Promise<void> {
+    await prisma.shipment.upsert({
+      where: { orderId: order.id },
+      create: {
+        orderId: order.id,
+        waybillNumber: null,
+        courier: 'Delhivery',
+        paymentMode,
+        codAmount,
+        declaredValue: order.totalAmount,
+        status: 'ERROR',
+        errorMessage,
+        labelUrl: null,
+        trackingStatus: null,
+      },
+      update: {
+        waybillNumber: null,
+        courier: 'Delhivery',
+        status: 'ERROR',
+        errorMessage,
+        labelUrl: null,
+        trackingStatus: null,
+      },
+    });
+
+    const leaveAsIs = [
+      'CANCELLED',
+      'RTO_INITIATED',
+      'RTO_DELIVERED',
+      'RETURN_REQUESTED',
+      'RETURN_DISPATCHED',
+      'RETURN_RECEIVED',
+      'DELIVERED',
+      'REFUNDED',
+    ];
+    if (!leaveAsIs.includes(order.status)) {
+      await prisma.order.update({
+        where: { id: order.id },
+        data: { status: 'DISPATCH_PENDING' },
+      });
     }
   }
 

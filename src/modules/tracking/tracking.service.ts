@@ -39,20 +39,31 @@ class TrackingService {
 
     const activeShipments = await prisma.shipment.findMany({
       where: {
-        status: {
-          notIn: ['DELIVERED', 'CANCELLED', 'RTO_DELIVERED', 'ERROR'],
-        },
         waybillNumber: { not: null },
-        // Only Delhivery shipments are tracked via the Delhivery API. Filtering
-        // here (ILIKE '%delhivery%') keeps third-party couriers (Blue Dart, DTDC,
-        // India Post, ...) out of the batch so their waybills never trigger the
-        // Delhivery 404/not-found poll loops the cron would otherwise generate.
-        courier: { contains: 'delhivery', mode: 'insensitive' },
-        ...(force
-          ? {}
-          : {
-              OR: [{ trackingUpdatedAt: null }, { trackingUpdatedAt: { lt: staleBefore } }],
-            }),
+        // Live shipments, plus ERROR rows that still hold a reserved waybill
+        // from a rejected manifest (low wallet). Those must be checked once:
+        // if Delhivery has no package, the number is dropped and the order
+        // returns to Ready to Dispatch.
+        AND: [
+          {
+            OR: [
+              {
+                status: { notIn: ['DELIVERED', 'CANCELLED', 'RTO_DELIVERED', 'ERROR'] },
+                courier: { contains: 'delhivery', mode: 'insensitive' },
+              },
+              {
+                status: 'ERROR',
+                OR: [
+                  { courier: null },
+                  { courier: { contains: 'delhivery', mode: 'insensitive' } },
+                ],
+              },
+            ],
+          },
+          ...(force
+            ? []
+            : [{ OR: [{ trackingUpdatedAt: null }, { trackingUpdatedAt: { lt: staleBefore } }] }]),
+        ],
       },
       include: { order: { include: { items: true } } },
       orderBy: { trackingUpdatedAt: 'asc' },
@@ -68,10 +79,23 @@ class TrackingService {
       if (!shipment.waybillNumber) continue;
       // Defense-in-depth alongside the query filter: never hand a third-party
       // waybill to the Delhivery API, even if a legacy row slips through.
-      if (!isDelhiveryCourier(shipment.courier)) continue;
+      // ERROR rows from a rejected manifest often have a blank courier; a
+      // numeric Delhivery-style waybill is still ours to verify.
+      const ours = isDelhiveryCourier(shipment.courier, shipment.labelUrl, shipment.waybillNumber);
+      if (!ours && shipment.status !== 'ERROR') continue;
+      if (shipment.status === 'ERROR' && shipment.courier && !ours) continue;
 
       try {
         const tracking = await delhiveryService.trackShipment(shipment.waybillNumber);
+
+        // Reserved AWB from a failed manifest: Delhivery tracking has no package.
+        // Drop the number and put the order back in Ready to Dispatch.
+        // Cancel and RTO orders are left on their own tabs.
+        if (shipment.status === 'ERROR' && this.isMissingDelhiveryPackage(tracking)) {
+          await this.releaseUnmanifestedWaybill(shipment);
+          updatedCount++;
+          continue;
+        }
 
         // Determine new shipment status — pass pickupDone so "Picked Up" scans and
         // PickedupDate/DispatchCount promote CREATED → PICKED_UP (pickup confirmed).
@@ -133,6 +157,8 @@ class TrackingService {
             trackingUpdatedAt: new Date(),
             expectedDeliveryDate: this.parseExpectedDeliveryDate(tracking.expectedDeliveryDate),
             trackingHistory: tracking.history as any,
+            // A live package means the earlier wallet/manifest error is stale.
+            ...(shipment.status === 'ERROR' ? { errorMessage: null, courier: shipment.courier || 'Delhivery' } : {}),
           },
         });
         await this.evaluateConsumerDelay(shipment, tracking);
@@ -164,6 +190,56 @@ class TrackingService {
 
     logger.info('Tracking sync complete', { updatedCount, totalShipped: activeShipments.length });
     return updatedCount;
+  }
+
+  /** Delhivery returned no package for this waybill (reserved, never manifested). */
+  private isMissingDelhiveryPackage(tracking: { status?: string; history?: unknown[] } | null): boolean {
+    if (!tracking) return true;
+    const status = (tracking.status || '').trim().toUpperCase();
+    const history = Array.isArray(tracking.history) ? tracking.history : [];
+    if (status === 'UNKNOWN') return true;
+    return !status && history.length === 0;
+  }
+
+  /**
+   * The carrier id was only reserved. Delhivery tracking has no shipment, so
+   * the order goes back to Ready to Dispatch. Cancel, RTO, and delivered stay put.
+   */
+  private async releaseUnmanifestedWaybill(shipment: any): Promise<void> {
+    logger.info('Reserved waybill is not a Delhivery shipment — returning order to Ready to Dispatch', {
+      waybill: shipment.waybillNumber,
+      orderId: shipment.orderId,
+    });
+    await prisma.shipment.update({
+      where: { id: shipment.id },
+      data: {
+        waybillNumber: null,
+        labelUrl: null,
+        trackingStatus: 'Not manifested',
+        trackingUpdatedAt: new Date(),
+        status: 'ERROR',
+        errorMessage:
+          shipment.errorMessage ||
+          'Delhivery did not create this shipment (manifest rejected, often a low prepaid wallet). The reserved waybill is not trackable.',
+      },
+    });
+    const orderStatus = shipment.order?.status as string | undefined;
+    const leaveAsIs = [
+      'CANCELLED',
+      'RTO_INITIATED',
+      'RTO_DELIVERED',
+      'RETURN_REQUESTED',
+      'RETURN_DISPATCHED',
+      'RETURN_RECEIVED',
+      'DELIVERED',
+      'REFUNDED',
+    ];
+    if (orderStatus && !leaveAsIs.includes(orderStatus)) {
+      await prisma.order.update({
+        where: { id: shipment.orderId },
+        data: { status: 'DISPATCH_PENDING' },
+      });
+    }
   }
 
   /**
@@ -430,7 +506,8 @@ class TrackingService {
       return null;
     }
 
-    if (!isDelhiveryCourier(shipment.courier)) {
+    const ours = isDelhiveryCourier(shipment.courier, shipment.labelUrl, shipment.waybillNumber);
+    if (!ours && !(shipment.status === 'ERROR' && !shipment.courier)) {
       logger.info('Skipping non-Delhivery shipment tracking', {
         courier: shipment.courier,
         waybill: shipment.waybillNumber,
@@ -448,6 +525,14 @@ class TrackingService {
     }
 
     const tracking = await delhiveryService.trackShipment(shipment.waybillNumber);
+    if (shipment.status === 'ERROR' && this.isMissingDelhiveryPackage(tracking)) {
+      await this.releaseUnmanifestedWaybill(shipment);
+      const released = await prisma.shipment.findUnique({
+        where: { id: shipment.id },
+        include: { order: true },
+      });
+      return { shipment: released, tracking, manifestRejected: true };
+    }
     const newShipmentStatus = delhiveryService.mapTrackingToShipmentStatus(
       tracking.statusType,
       tracking.status,
@@ -503,6 +588,7 @@ class TrackingService {
         trackingUpdatedAt: new Date(),
         expectedDeliveryDate: this.parseExpectedDeliveryDate(tracking.expectedDeliveryDate),
         trackingHistory: tracking.history as any,
+        ...(shipment.status === 'ERROR' ? { errorMessage: null, courier: shipment.courier || 'Delhivery' } : {}),
       },
       include: {
         order: true,

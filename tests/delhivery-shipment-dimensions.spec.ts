@@ -195,6 +195,41 @@ describe('Delhivery createShipment — package dimensions', () => {
     expect(shipment.shipment_height).toBe(3);
   });
 
+  it('does not keep the reserved waybill when Delhivery rejects the manifest for a low wallet', async () => {
+    const axios = (await import('axios')).default;
+    const http = axios.create() as any;
+    http.get.mockResolvedValueOnce({
+      data: { delivery_codes: [{ postal_code: { remark: '', cod: 'Y', pre_paid: 'Y' } }] },
+    });
+    http.get.mockResolvedValueOnce({ data: '30100810010275' });
+    http.post.mockResolvedValueOnce({
+      data: {
+        success: false,
+        packages: [
+          {
+            status: 'Fail',
+            waybill: '30100810010275',
+            remarks: ['insufficient balance in prepaid wallet'],
+          },
+        ],
+      },
+    });
+
+    await expect(
+      service.createShipment(fakeOrder({ status: 'DISPATCH_PENDING', paymentMethod: 'COD' }), { itemCount: 1 })
+    ).rejects.toThrow(/Insufficient balance/);
+
+    const writes = prismaStub.shipment.upsert.mock.calls.map((call: any[]) => call[0].create || call[0].update);
+    expect(writes.length).toBeGreaterThan(0);
+    for (const data of writes) {
+      expect(data.waybillNumber ?? null).toBeNull();
+      expect(data.status).toBe('ERROR');
+    }
+    expect(prismaStub.order.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { status: 'DISPATCH_PENDING' } })
+    );
+  });
+
   it('attaches the dimension keys Delhivery expects (shipment_length/breadth/height + weight + gm)', async () => {
     await service.createShipment(fakeOrder(), { itemCount: 2 });
     const shipment = decodeFormBody().shipments[0];

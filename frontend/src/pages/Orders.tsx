@@ -24,7 +24,7 @@ import {
   syncBulkExternalFulfillments,
 } from '../api'
 import { ORDER_TABS, carrierTrackingUrl, tabForStatus, formatDate, formatMoney, labelize, type OrderTabKey } from '../lib'
-import { classifyOrderTab, isCodConfirmed as codConfirmedTag, isPrepaidOrder as prepaidOrder } from '../../../src/modules/orders/order-tabs'
+import { classifyOrderTab, isCodConfirmed as codConfirmedTag, isManifestRejected, isPrepaidOrder as prepaidOrder } from '../../../src/modules/orders/order-tabs'
 import { getOrderTabCounts } from '../api'
 import { Button, EmptyState, ErrorBox, FormField, Icon, LoadingState, PageIntro, Panel, StatusBadge, useDocumentTitle, useToast } from '../components/UI'
 import { OrderLogisticsActions } from '../components/OrderLogisticsActions'
@@ -444,7 +444,12 @@ export function Orders() {
 
     // 1. Channel Filter (Delhivery One Pending AWB + 3-way payment receiving + prepaid urgent dispatch + needs dispatch + SLA delayed + NDR)
     if (channelFilter === 'DELHIVERY_PENDING_AWB') {
-      list = list.filter((o) => !o.shipment?.waybillNumber && o.fulfillmentStatus !== 'fulfilled' && o.status !== 'CANCELLED')
+      list = list.filter(
+        (o) =>
+          (!o.shipment?.waybillNumber || isManifestRejected(o)) &&
+          o.fulfillmentStatus !== 'fulfilled' &&
+          o.status !== 'CANCELLED'
+      )
     } else if (channelFilter === 'PREPAID_PENDING' || channelFilter === 'NEEDS_DISPATCH') {
       list = list.filter((o) => isDispatchNeeded(o))
     } else if (channelFilter === 'DELAYED_DISPATCH') {
@@ -559,7 +564,11 @@ export function Orders() {
     let pendingAwbCount = 0
 
     for (const o of all) {
-      if (!o.shipment?.waybillNumber && o.fulfillmentStatus !== 'fulfilled' && o.status !== 'CANCELLED') {
+      if (
+        (!o.shipment?.waybillNumber || isManifestRejected(o)) &&
+        o.fulfillmentStatus !== 'fulfilled' &&
+        o.status !== 'CANCELLED'
+      ) {
         pendingAwbCount++
       }
       if (isDispatchNeeded(o)) {

@@ -36,6 +36,7 @@ export interface OrderTabShipment {
   trackingStatus?: string | null;
   trackingUpdatedAt?: Date | string | null;
   courier?: string | null;
+  errorMessage?: string | null;
 }
 
 export interface OrderTabSnapshot {
@@ -303,6 +304,26 @@ export function orderStatusFromLiveTracking(shipment?: OrderTabShipment | null):
 }
 
 /**
+ * A waybill saved when Delhivery rejected the manifest (low prepaid wallet,
+ * or any other create failure). That number is only reserved — Delhivery has
+ * no package, so tracking and webhooks never move it. A later live scan means
+ * the package does exist.
+ */
+export function isManifestRejected(order: OrderTabSnapshot): boolean {
+  const shipStatus = (order.shipment?.status || '').toUpperCase();
+  const err = (order.shipment?.errorMessage || '').toLowerCase();
+  const rejected =
+    shipStatus === 'ERROR' ||
+    /insufficient balance|manifest failed|manifest was rejected|low delhivery wallet/.test(err);
+  if (!rejected) return false;
+  if (!order.shipment?.trackingUpdatedAt) return true;
+  const text = (order.shipment.trackingStatus || '').trim();
+  if (!text || /^unknown$/i.test(text) || /not manifested/i.test(text)) return true;
+  const stage = resolveCourierStage(order);
+  return stage !== 'label' && stage !== 'transit' && stage !== 'delivered' && stage !== 'rto';
+}
+
+/**
  * Exactly one operational tab. Higher-priority outcomes (RTO, delivered,
  * cancel-before-pickup) win over the forward pipeline.
  */
@@ -332,6 +353,10 @@ export function classifyOrderTab(order: OrderTabSnapshot): OperationalTab {
   if (preShipCancel && stage !== 'transit') {
     return 'cancel';
   }
+
+  // Low-wallet / rejected manifests keep a reserved AWB that is not a shipment.
+  // Those orders go back to Ready to Dispatch. Cancel and RTO already returned.
+  if (isManifestRejected(order)) return 'dispatch';
 
   if (stage === 'transit') return 'transit';
   if (stage === 'label' || hasWaybill(order)) return 'ready';

@@ -338,7 +338,55 @@ describe('trackingService.syncAllTracking — Delhivery-only polling', () => {
 
     expect(prismaStub.shipment.findMany).toHaveBeenCalledTimes(1);
     const where = prismaStub.shipment.findMany.mock.calls[0][0].where;
-    expect(where.courier).toEqual({ contains: 'delhivery', mode: 'insensitive' });
+    const liveBranch = where.AND[0].OR[0];
+    const rejectedBranch = where.AND[0].OR[1];
+    expect(liveBranch.courier).toEqual({ contains: 'delhivery', mode: 'insensitive' });
+    expect(liveBranch.status.notIn).toContain('ERROR');
+    expect(rejectedBranch.status).toBe('ERROR');
+  });
+
+  it('drops a reserved waybill when Delhivery tracking has no package, except cancel and RTO', async () => {
+    prismaStub.shipment.findMany.mockResolvedValue([
+      shipmentRow({
+        id: 9,
+        status: 'ERROR',
+        waybillNumber: '30100810010275',
+        courier: null,
+        errorMessage: 'Insufficient balance in Delhivery prepaid wallet',
+        order: { id: 1, status: 'DISPATCH_PENDING', customerName: 'Neha', shopifyOrderName: '#26YOU5791' },
+      }),
+      shipmentRow({
+        id: 10,
+        status: 'ERROR',
+        waybillNumber: '30100810010276',
+        courier: 'Delhivery',
+        order: { id: 2, status: 'RTO_INITIATED', customerName: 'R', shopifyOrderName: '#R' },
+      }),
+      shipmentRow({
+        id: 11,
+        status: 'ERROR',
+        waybillNumber: '30100810010277',
+        courier: 'Delhivery',
+        order: { id: 3, status: 'CANCELLED', customerName: 'C', shopifyOrderName: '#C' },
+      }),
+    ]);
+    delhiveryStub.trackShipment.mockResolvedValue({ status: 'UNKNOWN', statusType: '', history: [] });
+
+    await trackingService.syncAllTracking(true);
+
+    expect(delhiveryStub.trackShipment).toHaveBeenCalledTimes(3);
+    for (const id of [9, 10, 11]) {
+      expect(prismaStub.shipment.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id },
+          data: expect.objectContaining({ waybillNumber: null, status: 'ERROR' }),
+        })
+      );
+    }
+    expect(prismaStub.order.update).toHaveBeenCalledTimes(1);
+    expect(prismaStub.order.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 1 }, data: { status: 'DISPATCH_PENDING' } })
+    );
   });
 
   it('VAL-SYNC-013 / VAL-CROSS-007: Delhivery variants are polled and a third-party waybill is never sent to the Delhivery API', async () => {

@@ -7,6 +7,25 @@ import paymentService from '../payments/payment.service';
 import logger from '../../utils/logger';
 import { Order } from '@prisma/client';
 import { ShopifyOrderWebhook } from '../../types';
+import {
+  classifyOrderTab,
+  isApprovedForDispatch,
+  isCodConfirmed as orderIsCodConfirmed,
+  isHighRtoCancel,
+  isOperationalTab,
+  type OrderTab,
+} from './order-tabs';
+
+export {
+  classifyOrderTab,
+  isApprovedForDispatch,
+  isCodConfirmed,
+  isHighRtoCancel,
+  isOperationalTab,
+  isPrepaidOrder,
+  orderStatusFromLiveTracking,
+  resolveCourierStage,
+} from './order-tabs';
 
 /**
  * Order Service
@@ -14,20 +33,20 @@ import { ShopifyOrderWebhook } from '../../types';
  *   NEW → DISPATCH_PENDING → DISPATCHED → SHIPPED → IN_TRANSIT → OUT_FOR_DELIVERY → DELIVERED
  * Each transition triggers appropriate WhatsApp notifications.
  *
- * Operational tabs (Orders page). Ready is split by AWB so the warehouse sees
- * two distinct queues (verified 2026-09-28: 9 no-AWB + 9 label-ready = 18):
- *   new: NEW (fresh, needs confirmation/payment verify)
- *   dispatch: DISPATCH_PENDING/DISPATCHED WITHOUT waybill (needs Dispatch click → AWB+label)
- *   ready: DISPATCH_PENDING/DISPATCHED WITH waybill (label generated, awaiting courier pickup)
- *   transit: SHIPPED, IN_TRANSIT, OUT_FOR_DELIVERY, FAILED_DELIVERY (NDR still in transit loop)
- *   delivered: DELIVERED
- *   return: RTO_INITIATED, RTO_DELIVERED, RETURN_REQUESTED, RETURN_DISPATCHED, RETURN_RECEIVED, REFUNDED
- *   cancel: CANCELLED
+ * Orders-page tabs are NOT a raw status filter. classifyOrderTab() places each
+ * order using Shopify tags and the latest Delhivery tracking scan:
+ *   new: received, not approved, not shipped
+ *   dispatch: prepaid or COD_CONFIRMED (Low RTO), no label, nothing in Delhivery
+ *   ready: label generated, still under pickup (Manifested / Not Picked)
+ *   transit: picked up and moving until the customer receives it (includes NDR)
+ *   delivered: delivered to the customer
+ *   return: RTO and customer returns
+ *   cancel: cancelled before pickup, including COD_CANCELLED / High RTO
  */
 export const ORDER_TABS = {
   new: ['NEW'],
-  dispatch: ['DISPATCH_PENDING', 'DISPATCHED'],
-  ready: ['DISPATCH_PENDING', 'DISPATCHED'],
+  dispatch: ['DISPATCH_PENDING'],
+  ready: ['DISPATCHED'],
   transit: ['SHIPPED', 'IN_TRANSIT', 'OUT_FOR_DELIVERY', 'FAILED_DELIVERY'],
   delivered: ['DELIVERED'],
   return: [
@@ -41,9 +60,12 @@ export const ORDER_TABS = {
   cancel: ['CANCELLED'],
 } as const;
 
-export type OrderTab = keyof typeof ORDER_TABS | 'all';
+export type { OrderTab };
 
-/** dispatch tab = no AWB yet; ready tab = label generated (AWB assigned). */
+/**
+ * Coarse AWB hint kept for older callers. Tab membership itself is
+ * classifyOrderTab(), because a waybill can still be awaiting pickup.
+ */
 export function resolveOrderTabWaybill(tab?: string): boolean | undefined {
   if (!tab) return undefined;
   const key = tab.toLowerCase();
@@ -617,6 +639,12 @@ class OrderService {
       throw new Error(`Order ${order.shopifyOrderName} is not in dispatchable state (current: ${order.status})`);
     }
 
+    if (isHighRtoCancel(order)) {
+      throw new Error(
+        `Order ${order.shopifyOrderName} is COD_CANCELLED / High RTO and was cancelled before dispatch`
+      );
+    }
+
     // Shopify already marks this order fulfilled, so a Delhivery shipment here
     // would ship goods that are already out (or were never meant to be). This
     // catches both historic imports and orders fulfilled through another path.
@@ -693,7 +721,10 @@ class OrderService {
    */
   async autoDispatchPendingOrders(): Promise<number> {
     const pendingOrders = await prisma.order.findMany({
-      where: { status: 'NEW' },
+      where: {
+        status: { in: ['NEW', 'DISPATCH_PENDING'] },
+        OR: [{ shipment: null }, { shipment: { waybillNumber: null } }],
+      },
       include: { shipment: true },
     });
 
@@ -701,8 +732,14 @@ class OrderService {
     let skippedFulfilled = 0;
     for (const order of pendingOrders) {
       // Skip if shipment already exists
-      if (order.shipment) {
+      if (order.shipment?.waybillNumber) {
         logger.info('Order already has a shipment, skipping', { orderId: order.id });
+        continue;
+      }
+
+      // New Order stays untouched until someone approves COD (COD_CONFIRMED /
+      // Low RTO) or the order is prepaid. High RTO / COD_CANCELLED never ships.
+      if (!isApprovedForDispatch(order)) {
         continue;
       }
 
@@ -824,8 +861,9 @@ class OrderService {
       status = optionsOrStatus.status;
       statuses = optionsOrStatus.statuses;
       tab = optionsOrStatus.tab;
-      // Explicit hasWaybill wins; otherwise derive from tab (dispatch=false, ready=true).
-      hasWaybill = optionsOrStatus.hasWaybill ?? resolveOrderTabWaybill(tab);
+      // Tab queues are applied after load via classifyOrderTab (tags + live
+      // Delhivery scan). An explicit hasWaybill filter is still honored.
+      hasWaybill = optionsOrStatus.hasWaybill;
       gateway = optionsOrStatus.gateway;
       paymentMethod = optionsOrStatus.paymentMethod;
       paymentVerified = optionsOrStatus.paymentVerified;
@@ -840,7 +878,6 @@ class OrderService {
 
     if (filter === 'DELAYED_DISPATCH') {
       const twentyFourHoursAgo = new Date(Date.now() - 24 * 3600 * 1000);
-      andConditions.push({ status: { in: ['NEW', 'DISPATCH_PENDING'] } });
       andConditions.push({
         OR: [
           { dispatchDelayed: true },
@@ -875,8 +912,11 @@ class OrderService {
       andConditions.push({ paymentMethod: { not: 'COD' } });
     }
 
-    const tabStatuses = resolveOrderTabStatuses(tab);
-    const explicitStatuses = statuses?.length ? statuses : tabStatuses;
+    // A named tab is classified in memory so Delhivery tracking and Shopify
+    // tags can move an order between queues without a status rewrite.
+    const tabKey = tab?.toLowerCase();
+    const classifyTab = isOperationalTab(tabKey) ? tabKey : undefined;
+    const explicitStatuses = statuses?.length ? statuses : undefined;
     if (explicitStatuses?.length) {
       where.status = { in: explicitStatuses };
     } else if (status) {
@@ -945,54 +985,66 @@ class OrderService {
       where,
       include: { items: true, shipment: true, returns: true },
       orderBy: { shopifyCreatedAt: 'desc' },
-      take: limit,
-      skip: offset,
+      // Pagination is applied after tab classification so a limit cannot
+      // drop an order that belongs in this queue but sits later in the table.
+      take: classifyTab ? undefined : limit,
+      skip: classifyTab ? undefined : offset,
     });
 
-    return orders.map((o) => this.enrichOrderMetadata(o));
+    let mapped = orders.map((o) => this.enrichOrderMetadata(o));
+    if (classifyTab) {
+      mapped = mapped.filter((order) => classifyOrderTab(order) === classifyTab);
+      const start = offset ?? 0;
+      if (limit !== undefined || offset !== undefined) {
+        mapped = mapped.slice(start, limit !== undefined ? start + limit : undefined);
+      }
+    }
+    if (filter === 'DELAYED_DISPATCH') {
+      mapped = mapped.filter((order) => classifyOrderTab(order) === 'dispatch' && order.isDispatchOverdue);
+    }
+    return mapped;
   }
 
   /**
-   * Counts per operational tab. Status-only tabs use one groupBy; the AWB-split
-   * dispatch/ready tabs use two targeted counts (no full-table fetch).
-   * Used for Orders page tab badges.
+   * Counts per operational tab. Each order is placed with classifyOrderTab so
+   * the badge matches the list (Shopify tags + Delhivery live tracking).
    */
-  async getOrderTabCounts(): Promise<Record<OrderTab | 'all', number> & { byStatus: Record<string, number> }> {
-    const grouped = await prisma.order.groupBy({ by: ['status'], _count: { status: true } });
+  async getOrderTabCounts(): Promise<Record<OrderTab, number> & { byStatus: Record<string, number> }> {
+    const rows = await prisma.order.findMany({
+      select: {
+        status: true,
+        paymentMethod: true,
+        paymentGateway: true,
+        financialStatus: true,
+        tags: true,
+        shipment: {
+          select: {
+            status: true,
+            waybillNumber: true,
+            trackingStatus: true,
+            trackingUpdatedAt: true,
+            courier: true,
+          },
+        },
+        returns: { select: { returnStatus: true } },
+      },
+    });
     const byStatus: Record<string, number> = {};
-    let total = 0;
-    for (const row of grouped) {
-      byStatus[row.status] = row._count.status;
-      total += row._count.status;
-    }
-    const countFor = (statuses: readonly string[]): number =>
-      statuses.reduce((sum, s) => sum + (byStatus[s] || 0), 0);
-    // AWB split for the two Ready queues (verified live split 9/9 on 2026-09-28).
-    const [dispatchNoAwb, readyWithAwb] = await Promise.all([
-      prisma.order.count({
-        where: {
-          status: { in: [...ORDER_TABS.dispatch] },
-          OR: [{ shipment: null }, { shipment: { waybillNumber: null } }],
-        },
-      }),
-      prisma.order.count({
-        where: {
-          status: { in: [...ORDER_TABS.ready] },
-          shipment: { waybillNumber: { not: null } },
-        },
-      }),
-    ]);
-    return {
-      all: total,
-      new: countFor(ORDER_TABS.new),
-      dispatch: dispatchNoAwb,
-      ready: readyWithAwb,
-      transit: countFor(ORDER_TABS.transit),
-      delivered: countFor(ORDER_TABS.delivered),
-      return: countFor(ORDER_TABS.return),
-      cancel: countFor(ORDER_TABS.cancel),
-      byStatus,
+    const counts: Record<OrderTab, number> = {
+      all: rows.length,
+      new: 0,
+      dispatch: 0,
+      ready: 0,
+      transit: 0,
+      delivered: 0,
+      return: 0,
+      cancel: 0,
     };
+    for (const row of rows) {
+      byStatus[row.status] = (byStatus[row.status] || 0) + 1;
+      counts[classifyOrderTab(row)] += 1;
+    }
+    return { ...counts, byStatus };
   }
 
   /**
@@ -1029,7 +1081,9 @@ class OrderService {
 
     const hoursSincePlaced = (Date.now() - new Date(order.shopifyCreatedAt).getTime()) / (1000 * 60 * 60);
     const hasWaybill = Boolean(order.shipment?.waybillNumber);
-    const isDispatchOverdue = ['NEW', 'DISPATCH_PENDING'].includes(order.status) && !hasWaybill && hoursSincePlaced > 24;
+    const operationalTab = classifyOrderTab(order);
+    // SLA applies only to orders that are actually waiting for a label.
+    const isDispatchOverdue = operationalTab === 'dispatch' && !hasWaybill && hoursSincePlaced > 24;
     const dispatchOverdueHours = isDispatchOverdue ? Math.round(hoursSincePlaced - 24) : 0;
     const expectedDispatchAt = order.expectedDispatchAt || new Date(new Date(order.shopifyCreatedAt).getTime() + 24 * 3600 * 1000);
 
@@ -1037,18 +1091,8 @@ class OrderService {
       order.status === 'FAILED_DELIVERY' ||
       (order.shipment?.trackingStatus && /fail|attempt|undeliver/i.test(order.shipment.trackingStatus));
 
-    const rawTags = (order.tags || '').toLowerCase();
-    const isCodBlocked =
-      rawTags.includes('gokwik_cod_blocking') ||
-      rawTags.includes('cod_blocking') ||
-      rawTags.includes('cod_cancelled') ||
-      rawTags.includes('c2p-order-cancelled');
-    const isCodConfirmed =
-      rawTags.includes('cod_confirmed') ||
-      rawTags.includes('cod confirmed') ||
-      rawTags.includes('confirmed') ||
-      rawTags.includes('c2p-converted') ||
-      rawTags.includes('c2p-prepaid-order');
+    const isCodBlocked = isHighRtoCancel(order);
+    const isCodConfirmed = orderIsCodConfirmed(order);
 
     let rtoRiskLevel: 'LOW' | 'MEDIUM' | 'HIGH' = (order.rtoRiskLevel as any) || 'LOW';
     let rtoRiskLabel = 'Prepaid (Zero RTO Risk)';
@@ -1083,6 +1127,7 @@ class OrderService {
       dispatchOverdueHours,
       expectedDispatchAt,
       hasNdrException: Boolean(hasNdrException),
+      operationalTab,
       rtoRiskLevel,
       rtoRiskReason,
       rtoRiskLabel,

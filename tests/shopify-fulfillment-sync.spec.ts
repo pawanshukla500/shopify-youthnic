@@ -139,7 +139,7 @@ describe('shopifyService.syncOrderToDb — external fulfillment ingestion', () =
     expect(prismaStub.shipment.update).not.toHaveBeenCalled();
   });
 
-  it('promotes a fulfilled order (success without shipment_status) to SHIPPED', async () => {
+  it('keeps a labelled order with no pickup scan in DISPATCHED (Ready to Ship), not SHIPPED', async () => {
     const order = baseOrder({
       fulfillment_status: 'fulfilled',
       fulfillments: [
@@ -150,7 +150,71 @@ describe('shopifyService.syncOrderToDb — external fulfillment ingestion', () =
     await shopifyService.syncOrderToDb(order);
 
     const upsertArg = prismaStub.order.upsert.mock.calls[0][0];
-    expect(upsertArg.create.status).toBe('SHIPPED');
+    expect(upsertArg.create.status).toBe('DISPATCHED');
+    expect(prismaStub.shipment.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          waybillNumber: 'AWB777',
+          status: 'CREATED',
+          trackingStatus: 'Label generated',
+        }),
+      })
+    );
+  });
+
+  it('puts unconfirmed COD in NEW, COD_CONFIRMED in DISPATCH_PENDING, and COD_CANCELLED in CANCELLED', async () => {
+    await shopifyService.syncOrderToDb(baseOrder({ tags: 'COD, unconfirmed' }));
+    expect(prismaStub.order.upsert.mock.calls[0][0].create.status).toBe('NEW');
+
+    prismaStub.order.upsert.mockClear();
+    await shopifyService.syncOrderToDb(baseOrder({ tags: 'COD, COD_CONFIRMED', financial_status: 'pending' }));
+    expect(prismaStub.order.upsert.mock.calls[0][0].create.status).toBe('DISPATCH_PENDING');
+
+    prismaStub.order.upsert.mockClear();
+    await shopifyService.syncOrderToDb(baseOrder({ tags: 'COD, COD_CANCELLED', financial_status: 'pending' }));
+    expect(prismaStub.order.upsert.mock.calls[0][0].create.status).toBe('CANCELLED');
+  });
+
+  it('does not overwrite a live Delhivery scan with Shopify in_transit', async () => {
+    prismaStub.order.findUnique.mockResolvedValue({
+      dispatchedAt: new Date(AFTER),
+      shipment: {
+        status: 'CREATED',
+        trackingStatus: 'Manifested',
+        trackingUpdatedAt: new Date(AFTER),
+        waybillNumber: 'AWBLIVE',
+        courier: 'Delhivery',
+      },
+    });
+    prismaStub.shipment.findFirst.mockResolvedValue({
+      id: 9,
+      labelUrl: null,
+      trackingUpdatedAt: new Date(AFTER),
+      trackingStatus: 'Manifested',
+      status: 'CREATED',
+    });
+
+    await shopifyService.syncOrderToDb(
+      baseOrder({
+        fulfillment_status: 'fulfilled',
+        fulfillments: [
+          {
+            status: 'success',
+            shipment_status: 'in_transit',
+            tracking_number: 'AWBLIVE',
+            tracking_company: 'Delhivery',
+            created_at: AFTER,
+          },
+        ],
+      })
+    );
+
+    const upsertArg = prismaStub.order.upsert.mock.calls[0][0];
+    expect(upsertArg.update.status).toBe('DISPATCHED');
+    const updateData = prismaStub.shipment.update.mock.calls[0][0].data;
+    expect(updateData.status).toBeUndefined();
+    expect(updateData.trackingStatus).toBeUndefined();
+    expect(updateData.waybillNumber).toBe('AWBLIVE');
   });
 
   it('maps a delivered fulfillment to DELIVERED on both order and shipment', async () => {

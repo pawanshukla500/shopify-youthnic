@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import axios from 'axios';
 import orderService from '../modules/orders/order.service';
+import { classifyOrderTab, isPrepaidOrder } from '../modules/orders/order-tabs';
 import returnService from '../modules/returns/return.service';
 import trackingService from '../modules/tracking/tracking.service';
 import shopifyService from '../modules/shopify/shopify.service';
@@ -114,19 +115,17 @@ router.get('/dashboard/stats', async (_req: Request, res: Response): Promise<voi
     const prepaidRatio = totalOrders > 0 ? (prepaidCount / totalOrders) * 100 : 0;
     const codRatio = totalOrders > 0 ? (codCount / totalOrders) * 100 : 0;
 
-    // Delivery & Dispatches
-    const deliveredOrders = allOrders.filter((o) => o.status === 'DELIVERED');
+    // Delivery & Dispatches — same queues as the Orders page tabs.
+    const tabOf = (order: (typeof allOrders)[number]) => classifyOrderTab(order);
+    const deliveredOrders = allOrders.filter((o) => tabOf(o) === 'delivered');
     const deliveredCount = deliveredOrders.length;
-    const activeShipments = allOrders.filter((o) =>
-      ['SHIPPED', 'IN_TRANSIT', 'OUT_FOR_DELIVERY'].includes(o.status)
-    ).length;
-    const readyToDispatch = allOrders.filter((o) =>
-      ['NEW', 'DISPATCH_PENDING'].includes(o.status)
-    ).length;
+    const transitOrders = allOrders.filter((o) => tabOf(o) === 'transit');
+    const activeShipments = transitOrders.length;
+    const readyToDispatch = allOrders.filter((o) => tabOf(o) === 'dispatch').length;
+    const readyToShip = allOrders.filter((o) => tabOf(o) === 'ready').length;
     const now = new Date();
     const delayedDispatchOrders = allOrders.filter((o) => {
-      if (!['NEW', 'DISPATCH_PENDING'].includes(o.status)) return false;
-      if (o.shipment?.waybillNumber) return false;
+      if (tabOf(o) !== 'dispatch') return false;
       if (o.dispatchDelayed) return true;
       if (o.expectedDispatchAt) return new Date(o.expectedDispatchAt) < now;
       const orderAgeHours = (now.getTime() - new Date(o.shopifyCreatedAt).getTime()) / (1000 * 60 * 60);
@@ -207,19 +206,33 @@ router.get('/dashboard/stats', async (_req: Request, res: Response): Promise<voi
       .slice(0, 6);
 
     // Operations Funnel Breakdown (5 Main Lifecycle Stages)
+    const outForDeliveryOrders = transitOrders.filter(
+      (o) =>
+        o.status === 'OUT_FOR_DELIVERY' ||
+        o.shipment?.status === 'OUT_FOR_DELIVERY' ||
+        /out for delivery/i.test(o.shipment?.trackingStatus || '')
+    );
+    const outForDeliveryIds = new Set(outForDeliveryOrders.map((o) => o.id));
     const funnel = {
       intake: {
-        total: allOrders.filter((o) => o.status === 'NEW').length,
-        unverified: allOrders.filter((o) => !o.paymentVerified && o.status === 'NEW').length,
+        total: allOrders.filter((o) => tabOf(o) === 'new').length,
+        unverified: allOrders.filter((o) => tabOf(o) === 'new' && !o.paymentVerified).length,
       },
       warehouse: {
-        dispatchPending: allOrders.filter((o) => o.status === 'DISPATCH_PENDING').length,
-        dispatched: allOrders.filter((o) => o.status === 'DISPATCHED').length,
+        dispatchPending: readyToDispatch,
+        dispatched: readyToShip,
       },
       logistics: {
-        shipped: allOrders.filter((o) => o.status === 'SHIPPED').length,
-        inTransit: allOrders.filter((o) => o.status === 'IN_TRANSIT').length,
-        outForDelivery: allOrders.filter((o) => o.status === 'OUT_FOR_DELIVERY').length,
+        shipped: transitOrders.filter(
+          (o) => !outForDeliveryIds.has(o.id) && (o.status === 'SHIPPED' || o.shipment?.status === 'PICKED_UP')
+        ).length,
+        inTransit: transitOrders.filter(
+          (o) =>
+            !outForDeliveryIds.has(o.id) &&
+            o.status !== 'SHIPPED' &&
+            o.shipment?.status !== 'PICKED_UP'
+        ).length,
+        outForDelivery: outForDeliveryOrders.length,
       },
       finalMile: {
         delivered: deliveredCount,
@@ -265,13 +278,7 @@ router.get('/dashboard/stats', async (_req: Request, res: Response): Promise<voi
     }
 
     // Priority 1: Prepaid orders needing immediate dispatch
-    const prepaidPendingDispatch = allOrders.filter(
-      (o) =>
-        (o.paymentMethod === 'Pre-paid' ||
-          o.paymentMethod === 'PREPAID' ||
-          (o.tags && /prepaid|gokwik|upi/i.test(o.tags))) &&
-        ['NEW', 'DISPATCH_PENDING'].includes(o.status)
-    );
+    const prepaidPendingDispatch = allOrders.filter((o) => tabOf(o) === 'dispatch' && isPrepaidOrder(o));
     if (prepaidPendingDispatch.length > 0) {
       actionItems.push({
         id: 'prepaid_dispatch_needed',

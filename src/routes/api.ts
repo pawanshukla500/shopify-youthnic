@@ -1810,6 +1810,18 @@ router.post('/orders/:id/returns', async (req: Request, res: Response): Promise<
   }
 });
 
+// Update the return reason before the reverse parcel is picked up.
+router.patch('/returns/:id/reason', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const returnId = parseInt(req.params.id, 10);
+    const { returnReason } = req.body || {};
+    const result = await returnService.updateReturnReason(returnId, String(returnReason || ''));
+    res.json({ success: true, ...result });
+  } catch (error: any) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
 // Process direct refund for an order via Shopify
 router.post('/orders/:id/refund', async (req: Request, res: Response): Promise<void> => {
   try {

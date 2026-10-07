@@ -148,7 +148,9 @@ export function OrderDetail() {
     onSuccess: async (data) => {
       toast.toast(
         'success',
-        data.pickupAutomatic
+        data.shopifyReturnId
+          ? `Reverse AWB ${data.returnWaybill} is live and Shopify return ${data.shopifyReturnId.split('/').pop()} is open.`
+          : data.pickupAutomatic
           ? `Reverse AWB ${data.returnWaybill} is live. Delhivery will pick up from the customer — status updates from carrier scans.`
           : `Return linked with waybill ${data.returnWaybill}${data.shopifyTriggered ? ' · Synced to Shopify' : ''}.`
       )
@@ -2344,7 +2346,7 @@ function DetailRow({
   )
 }
 
-const RETURN_REASONS = ['Size mismatch', 'Defective item', 'Wrong item', 'Changed mind']
+const RETURN_REASONS = ['Damaged product', 'Quality is not good', 'Changed mind', 'Size mismatch', 'Wrong item', 'Others']
 
 function ReturnForm({
   order,
@@ -2391,8 +2393,7 @@ function ReturnForm({
       ) : (
         <>
           <p className="panel-description">
-            This books the same reverse order as Delhivery ONE “Initiate Return” on the delivered forward AWB.
-            Delhivery assigns the reverse waybill and collects the parcel from the customer. Pickup, transit, and warehouse arrival update from carrier scans.
+            This opens a Shopify return on the order and books the reverse pickup the way Delhivery ONE “Initiate Return” does: same sale order id, the delivered forward AWB as the reference, and the return location set to the Surat warehouse. Delhivery assigns the reverse waybill. Pickup and transit update from carrier scans.
           </p>
 
           {forwardAwb ? (
@@ -2519,6 +2520,31 @@ function ReturnForm({
 }
 
 function ActiveReturnCard({ record }: { record: ReturnRecord }) {
+  const queryClient = useQueryClient()
+  const toast = useToast()
+  const [reason, setReason] = useState(record.returnReason || 'Others')
+  const [saving, setSaving] = useState(false)
+  const editable = ['INITIATED', 'PICKUP_SCHEDULED'].includes(record.returnStatus)
+
+  const saveReason = async () => {
+    setSaving(true)
+    try {
+      const res = await api.patch(`/api/returns/${record.id}/reason`, { returnReason: reason })
+      toast.toast(
+        'success',
+        res.data.delhiveryUpdated
+          ? `Reason updated on Delhivery as ${res.data.delhiveryReason}.`
+          : `Reason saved. ${res.data.delhiveryError || 'Delhivery keeps the reason from when the reverse pickup was created.'}`
+      )
+      await queryClient.invalidateQueries({ queryKey: ['order', String(record.orderId)] })
+      await queryClient.invalidateQueries({ queryKey: ['returns'] })
+    } catch (error) {
+      toast.toast('error', apiError(error))
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
     <div className="active-return-card">
       <div>
@@ -2529,7 +2555,21 @@ function ActiveReturnCard({ record }: { record: ReturnRecord }) {
             ? 'Customer pickup was scheduled by Delhivery. Status follows carrier scans.'
             : 'This return is linked to an existing waybill.'}
           {record.forwardWaybill ? ` Forward AWB ${record.forwardWaybill}.` : ''}
+          {record.shopifyReturnId ? ` Shopify return ${record.shopifyReturnId.split('/').pop()}.` : ''}
         </p>
+        <p className="cell-muted">Reason: {record.returnReason}</p>
+        {editable ? (
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '8px' }}>
+            <select value={reason} onChange={(event) => setReason(event.target.value)} aria-label="Update return reason">
+              {(RETURN_REASONS.includes(record.returnReason) ? RETURN_REASONS : [record.returnReason, ...RETURN_REASONS]).map((preset) => (
+                <option key={preset} value={preset}>{preset}</option>
+              ))}
+            </select>
+            <button type="button" className="btn-pack" disabled={saving || reason === record.returnReason} onClick={saveReason}>
+              {saving ? 'Saving…' : 'Update reason'}
+            </button>
+          </div>
+        ) : null}
       </div>
       <StatusBadge status={record.returnStatus} />
       {record.trackingStatus ? <span className="cell-muted">{record.trackingStatus}{record.trackingLocation ? ` · ${record.trackingLocation}` : ''}</span> : null}

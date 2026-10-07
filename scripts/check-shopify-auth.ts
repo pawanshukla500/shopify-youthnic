@@ -15,7 +15,7 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const REQUIRED_SCOPES = ['read_orders', 'write_orders'];
+const REQUIRED_SCOPES = ['read_orders', 'write_orders', 'write_returns', 'read_returns'];
 
 async function main(): Promise<void> {
   const shopDomain = process.env.SHOPIFY_SHOP_DOMAIN;

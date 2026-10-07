@@ -7,6 +7,7 @@ import { isDelhiveryCourier, normalizeCourierName } from '../../utils/courier';
 import { ShopifyOrderWebhook } from '../../types';
 import { OrderStatus } from '@prisma/client';
 import { shopifyTokenProvider } from './token.provider';
+import { mapReturnReason, selectReturnFulfillmentLines } from '../returns/return-reasons';
 import {
   isApprovedForDispatch,
   isCodConfirmed,
@@ -422,9 +423,10 @@ class ShopifyService {
   }
 
   /**
-   * Register a return and reverse tracking on Shopify:
-   * 1. Updates order tags with Return-Initiated and Return-AWB
-   * 2. Appends return details to the Shopify Order note
+   * Open a real Shopify return (Admin → order shows Return), attach the
+   * Delhivery reverse AWB, and keep the timeline note.
+   * Requires the app token to include write_returns. A missing scope still
+   * writes the note so the reverse pickup is not lost.
    */
   async registerReturnOnShopify(
     shopifyOrderId: string,
@@ -432,8 +434,36 @@ class ShopifyService {
       returnReason: string;
       returnTrackingNumber?: string;
       carrier?: string;
+      items?: Array<{ sku?: string | null; title?: string | null; quantity: number }>;
+      noteOnly?: boolean;
     }
-  ): Promise<{ success: boolean; tagsAdded?: string[]; note?: string }> {
+  ): Promise<{
+    success: boolean;
+    tagsAdded?: string[];
+    note?: string;
+    shopifyReturnId?: string | null;
+    returnError?: string;
+  }> {
+    const mapped = mapReturnReason(returnData.returnReason);
+    let shopifyReturnId: string | null = null;
+    let returnError: string | undefined;
+
+    try {
+      if (!returnData.noteOnly) shopifyReturnId = await this.createShopifyReturn(shopifyOrderId, {
+        reason: mapped.shopifyReason,
+        reasonNote: mapped.note,
+        items: returnData.items || [],
+        trackingNumber: returnData.returnTrackingNumber,
+        carrier: returnData.carrier || 'Delhivery',
+      });
+    } catch (error: any) {
+      returnError = error.message || 'Shopify returnCreate failed';
+      logger.error('Shopify returnCreate failed; the order note will still be updated', {
+        shopifyOrderId,
+        error: returnError,
+      });
+    }
+
     try {
       const order = await this.fetchOrder(shopifyOrderId);
       const existingTags = order.tags ? order.tags.split(',').map((t: string) => t.trim()) : [];
@@ -448,7 +478,9 @@ class ShopifyService {
       const returnTimestamp = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
       const returnLogEntry = `[Return Initiated - ${returnTimestamp}] Courier: ${returnData.carrier || 'Delhivery'}${
         returnData.returnTrackingNumber ? ` | Reverse AWB: ${returnData.returnTrackingNumber}` : ''
-      } | Reason: ${returnData.returnReason}`;
+      } | Reason: ${mapped.delhiveryReason} (${mapped.note})${
+        shopifyReturnId ? ` | Shopify return: ${shopifyReturnId}` : ''
+      }`;
       const updatedNote = existingNote ? `${existingNote}\n${returnLogEntry}` : returnLogEntry;
 
       await this.client.put(`/orders/${shopifyOrderId}.json`, {
@@ -459,18 +491,155 @@ class ShopifyService {
         },
       });
 
-      logger.info('Return registered on Shopify order successfully', {
+      logger.info('Return registered on Shopify order', {
         shopifyOrderId,
         returnWaybill: returnData.returnTrackingNumber,
+        shopifyReturnId,
       });
 
-      return { success: true, tagsAdded: newTags, note: updatedNote };
+      return { success: true, tagsAdded: newTags, note: updatedNote, shopifyReturnId, returnError };
     } catch (error: any) {
       logger.error('Failed to register return on Shopify order', {
         shopifyOrderId,
         error: error.response?.data || error.message,
       });
-      return { success: false };
+      return { success: Boolean(shopifyReturnId), shopifyReturnId, returnError: returnError || error.message };
+    }
+  }
+
+  /**
+   * returnCreate + reverse delivery tracking. Throws when Shopify rejects it.
+   */
+  private async createShopifyReturn(
+    shopifyOrderId: string,
+    input: {
+      reason: string;
+      reasonNote: string;
+      items: Array<{ sku?: string | null; title?: string | null; quantity: number }>;
+      trackingNumber?: string;
+      carrier: string;
+    }
+  ): Promise<string> {
+    const orderGid = shopifyOrderId.startsWith('gid://')
+      ? shopifyOrderId
+      : `gid://shopify/Order/${shopifyOrderId}`;
+
+    const linesQuery = `query OrderReturnLines($id: ID!) {
+      order(id: $id) {
+        fulfillments {
+          fulfillmentLineItems(first: 40) {
+            nodes { id quantity lineItem { sku title } }
+          }
+        }
+      }
+    }`;
+    const orderData = await this.graphql<{
+      order: {
+        fulfillments: Array<{
+          fulfillmentLineItems: { nodes: Array<{ id: string; quantity: number; lineItem: { sku?: string | null; title?: string | null } }> };
+        }>;
+      } | null;
+    }>(linesQuery, { id: orderGid });
+
+    const lines = (orderData.order?.fulfillments || []).flatMap((fulfillment) =>
+      (fulfillment.fulfillmentLineItems?.nodes || []).map((node) => ({
+        id: node.id,
+        quantity: node.quantity,
+        sku: node.lineItem?.sku,
+        title: node.lineItem?.title,
+      }))
+    );
+    const requested = input.items.length
+      ? input.items
+      : lines.map((line) => ({ sku: line.sku, title: line.title, quantity: line.quantity }));
+    const returnLineItems = selectReturnFulfillmentLines(lines, requested).map((line) => ({
+      fulfillmentLineItemId: line.fulfillmentLineItemId,
+      quantity: line.quantity,
+      returnReason: input.reason,
+      returnReasonNote: input.reasonNote.slice(0, 255),
+    }));
+    if (!returnLineItems.length) {
+      throw new Error('Shopify has no fulfilled line items to open a return against.');
+    }
+
+    const createMutation = `mutation ReturnCreate($returnInput: ReturnInput!) {
+      returnCreate(returnInput: $returnInput) {
+        userErrors { field message }
+        return { id status }
+      }
+    }`;
+    const created = await this.graphql<{
+      returnCreate: { userErrors: Array<{ message: string }>; return: { id: string; status: string } | null };
+    }>(createMutation, { returnInput: { orderId: orderGid, returnLineItems } });
+    const createErrors = created.returnCreate?.userErrors || [];
+    if (createErrors.length || !created.returnCreate?.return?.id) {
+      throw new Error(createErrors.map((err) => err.message).join('; ') || 'Shopify did not create the return.');
+    }
+    const returnId = created.returnCreate.return.id;
+
+    if (input.trackingNumber) {
+      await this.attachReverseTracking(returnId, input.trackingNumber, input.carrier);
+    }
+    return returnId;
+  }
+
+  private async attachReverseTracking(returnId: string, trackingNumber: string, carrier: string): Promise<void> {
+    const reverseQuery = `query ReturnReverse($id: ID!) {
+      return(id: $id) {
+        reverseFulfillmentOrders(first: 5) {
+          nodes {
+            id
+            lineItems(first: 20) { nodes { id totalQuantity } }
+          }
+        }
+      }
+    }`;
+    const reverse = await this.graphql<{
+      return: {
+        reverseFulfillmentOrders: {
+          nodes: Array<{ id: string; lineItems: { nodes: Array<{ id: string; totalQuantity: number }> } }>;
+        };
+      } | null;
+    }>(reverseQuery, { id: returnId });
+    const reverseOrder = reverse.return?.reverseFulfillmentOrders?.nodes?.[0];
+    const reverseLines = reverseOrder?.lineItems?.nodes || [];
+    if (!reverseOrder || !reverseLines.length) {
+      logger.warn('Shopify return has no reverse fulfillment order yet', { returnId });
+      return;
+    }
+
+    const deliveryMutation = `mutation ReverseDelivery($reverseFulfillmentOrderId: ID!, $reverseDeliveryLineItems: [ReverseDeliveryLineItemInput!]!, $trackingInput: ReverseDeliveryTrackingInput, $notifyCustomer: Boolean) {
+      reverseDeliveryCreateWithShipping(
+        reverseFulfillmentOrderId: $reverseFulfillmentOrderId
+        reverseDeliveryLineItems: $reverseDeliveryLineItems
+        trackingInput: $trackingInput
+        notifyCustomer: $notifyCustomer
+      ) {
+        reverseDelivery { id }
+        userErrors { field message }
+      }
+    }`;
+    const delivered = await this.graphql<{
+      reverseDeliveryCreateWithShipping: { userErrors: Array<{ message: string }>; reverseDelivery: { id: string } | null };
+    }>(deliveryMutation, {
+      reverseFulfillmentOrderId: reverseOrder.id,
+      reverseDeliveryLineItems: reverseLines.map((line) => ({
+        reverseFulfillmentOrderLineItemId: line.id,
+        quantity: line.totalQuantity || 1,
+      })),
+      trackingInput: {
+        number: trackingNumber,
+        url: `https://www.delhivery.com/track/package/${encodeURIComponent(trackingNumber)}`,
+      },
+      notifyCustomer: false,
+    });
+    const errors = delivered.reverseDeliveryCreateWithShipping?.userErrors || [];
+    if (errors.length) {
+      logger.warn('Shopify reverse tracking was not attached', {
+        returnId,
+        carrier,
+        errors,
+      });
     }
   }
 

@@ -106,7 +106,8 @@ describe('Delhivery reverse manifest', () => {
     const payload = JSON.parse(decodeURIComponent(body.replace(/^format=json&data=/, '')));
     const shipment = payload.shipments[0];
     expect(shipment.payment_mode).toBe('Pickup');
-    expect(shipment.order).toBe('RET-26YOU5782');
+    expect(shipment.order).toBe('26YOU5782');
+    expect(shipment.products_desc).toContain('Size mismatch');
     expect(shipment.ref_waybill).toBe('30100810010220');
     expect(shipment.shipment_length).toBe(22);
     expect(shipment.shipment_height).toBe(3);

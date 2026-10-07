@@ -5,6 +5,7 @@ import logger from '../../utils/logger';
 import { isUsableHttpUrl } from '../../utils/signed-url';
 import { withRetry } from '../../utils/retry';
 import { Order } from '@prisma/client';
+import { reverseProductDescription } from '../returns/return-reasons';
 import {
   isExistingPickupError,
   planWarehousePickupSlot,
@@ -611,13 +612,16 @@ class DelhiveryService {
       .map((line) => [line.title, line.sku ? `(${line.sku})` : ''].filter(Boolean).join(' '))
       .filter(Boolean)
       .join(', ');
-    const productsDesc = [productText, returnReason].filter(Boolean).join(' — ').slice(0, 180);
+    const productsDesc = reverseProductDescription(returnReason, productText);
+    // Same sale-order id Delhivery One prefills on Initiate Return. A new
+    // waybill is passed explicitly, which is what lets this order id repeat.
+    const saleOrderId = order.shopifyOrderName.replace('#', '').replace(/[^A-Za-z0-9_-]/g, '');
 
     const shipmentData = {
       shipments: [
         {
           name: order.customerName,
-          order: `RET-${order.shopifyOrderName.replace('#', '')}`,
+          order: saleOrderId,
           phone: order.customerPhone,
           add: order.customerAddress,
           pin: order.customerPincode,

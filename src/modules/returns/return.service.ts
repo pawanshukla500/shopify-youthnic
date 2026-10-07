@@ -5,6 +5,7 @@ import shopifyService from '../shopify/shopify.service';
 import notificationEngine from '../notifications/notification.service';
 import logger from '../../utils/logger';
 import { applyReturnCarrierScan } from './return-tracking';
+import { mapReturnReason, reverseProductDescription } from './return-reasons';
 
 /**
  * Returns Service
@@ -40,6 +41,7 @@ class ReturnService {
     shopifyTriggered: boolean;
     pickupAutomatic: boolean;
     forwardWaybill: string | null;
+    shopifyReturnId: string | null;
   }> {
     const order = await prisma.order.findUnique({
       where: { id: orderId },
@@ -154,13 +156,25 @@ class ReturnService {
 
     // Trigger on Shopify (Tags, Order Notes, and timeline)
     let shopifyTriggered = false;
+    let shopifyReturnId: string | null = null;
     if (options?.triggerShopify !== false) {
       const shopifyRes = await shopifyService.registerReturnOnShopify(order.shopifyOrderId, {
         returnReason,
         returnTrackingNumber: finalReturnWaybill,
         carrier: options?.carrier || 'Delhivery',
+        items: items.map((item) => {
+          const line = order.items.find((row) => row.id === item.orderItemId);
+          return { sku: line?.sku, title: line?.title, quantity: item.quantity };
+        }),
       });
       shopifyTriggered = shopifyRes.success;
+      shopifyReturnId = shopifyRes.shopifyReturnId || null;
+      if (shopifyReturnId) {
+        await prisma.return.update({
+          where: { id: returnRecord.id },
+          data: { shopifyReturnId },
+        });
+      }
     }
 
     // Notify customer via WhatsApp
@@ -191,7 +205,66 @@ class ReturnService {
       shopifyTriggered,
       pickupAutomatic,
       forwardWaybill,
+      shopifyReturnId,
     };
+  }
+
+  /**
+   * Change the return reason before Delhivery picks the parcel up.
+   * Delhivery's edit API accepts products_desc while the reverse shipment is
+   * still manifested / scheduled. Shopify's return reason is fixed at
+   * returnCreate; a later change is written to the order note.
+   */
+  async updateReturnReason(returnId: number, returnReason: string): Promise<{
+    returnReason: string;
+    delhiveryReason: string;
+    delhiveryUpdated: boolean;
+    delhiveryError?: string;
+  }> {
+    const reason = returnReason.trim();
+    if (!reason) throw new Error('A return reason is required.');
+    const record = await prisma.return.findUnique({
+      where: { id: returnId },
+      include: { order: true },
+    });
+    if (!record) throw new Error('Return not found.');
+    const locked = ['PICKED_UP', 'IN_TRANSIT', 'RECEIVED', 'QC_PENDING', 'QC_APPROVED', 'QC_REJECTED', 'REFUND_PENDING', 'REFUNDED', 'CANCELLED'];
+    if (locked.includes(record.returnStatus)) {
+      throw new Error('The reason can only be changed before Delhivery picks up the return.');
+    }
+
+    const mapped = mapReturnReason(reason);
+    let delhiveryUpdated = false;
+    let delhiveryError: string | undefined;
+    if (record.returnWaybillNumber && /delhivery/i.test(record.carrier || 'Delhivery')) {
+      try {
+        await delhiveryService.updateShipment(record.returnWaybillNumber, {
+          productsDescription: reverseProductDescription(reason),
+        });
+        delhiveryUpdated = true;
+      } catch (error: any) {
+        delhiveryError = error.message || 'Delhivery did not accept the reason update.';
+        logger.warn('Delhivery return reason update failed', { returnId, error: delhiveryError });
+      }
+    }
+
+    await prisma.return.update({
+      where: { id: returnId },
+      data: { returnReason: reason },
+    });
+
+    try {
+      await shopifyService.registerReturnOnShopify(record.order.shopifyOrderId, {
+        returnReason: `Reason updated to ${mapped.delhiveryReason}: ${reason}`,
+        returnTrackingNumber: record.returnWaybillNumber || undefined,
+        carrier: record.carrier || 'Delhivery',
+        noteOnly: true,
+      });
+    } catch (error: any) {
+      logger.warn('Shopify note for return reason update failed', { returnId, error: error.message });
+    }
+
+    return { returnReason: reason, delhiveryReason: mapped.delhiveryReason, delhiveryUpdated, delhiveryError };
   }
 
   /**

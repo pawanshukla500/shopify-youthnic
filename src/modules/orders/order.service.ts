@@ -11,6 +11,7 @@ import {
   classifyOrderTab,
   isApprovedForDispatch,
   isCodConfirmed as orderIsCodConfirmed,
+  isCodRiskHold,
   isHighRtoCancel,
   isOperationalTab,
   type OrderTab,
@@ -20,6 +21,7 @@ export {
   classifyOrderTab,
   isApprovedForDispatch,
   isCodConfirmed,
+  isCodRiskHold,
   isHighRtoCancel,
   isOperationalTab,
   isPrepaidOrder,
@@ -1091,7 +1093,7 @@ class OrderService {
       order.status === 'FAILED_DELIVERY' ||
       (order.shipment?.trackingStatus && /fail|attempt|undeliver/i.test(order.shipment.trackingStatus));
 
-    const isCodBlocked = isHighRtoCancel(order);
+    const isCodBlocked = isCodRiskHold(order);
     const isCodConfirmed = orderIsCodConfirmed(order);
 
     let rtoRiskLevel: 'LOW' | 'MEDIUM' | 'HIGH' = (order.rtoRiskLevel as any) || 'LOW';

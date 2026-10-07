@@ -133,7 +133,7 @@ describe('classifyOrderTab — Delhivery live tracking and Shopify tags', () => 
           },
         })
       )
-    ).toBe('ready');
+    ).toBe('transit');
     expect(
       classifyOrderTab(
         order({
@@ -257,8 +257,9 @@ describe('classifyOrderTab — Delhivery live tracking and Shopify tags', () => 
   it('puts pre-ship cancels and High RTO / COD_CANCELLED in Cancel', () => {
     expect(classifyOrderTab(order({ status: 'CANCELLED' }))).toBe('cancel');
     expect(classifyOrderTab(order({ tags: 'COD, COD_CANCELLED', status: 'NEW' }))).toBe('cancel');
-    expect(classifyOrderTab(order({ tags: 'COD, gokwik_cod_blocking', status: 'DISPATCH_PENDING' }))).toBe('cancel');
-    expect(classifyOrderTab(order({ tags: 'COD, High RTO', status: 'NEW' }))).toBe('cancel');
+    expect(classifyOrderTab(order({ tags: 'COD, gokwik_cod_blocking', status: 'DISPATCH_PENDING' }))).toBe('new');
+    expect(classifyOrderTab(order({ tags: 'COD, High RTO', status: 'NEW' }))).toBe('new');
+    expect(classifyOrderTab(order({ tags: 'COD, High RTO', status: 'CANCELLED' }))).toBe('cancel');
     expect(
       classifyOrderTab(
         order({
@@ -305,6 +306,52 @@ describe('classifyOrderTab — Delhivery live tracking and Shopify tags', () => 
             errorMessage: null,
             trackingStatus: 'In Transit',
             trackingUpdatedAt: '2026-10-06T12:00:00.000Z',
+          },
+        })
+      )
+    ).toBe('transit');
+  });
+
+  it('keeps an unconfirmed prepaid block-tag order out of Cancel and a shipped one in transit', () => {
+    // #26YOU5835 — prepaid, payment captured, not confirmed as a cancel, still pending AWB.
+    expect(
+      classifyOrderTab(
+        order({
+          status: 'DISPATCH_PENDING',
+          paymentMethod: 'Pre-paid',
+          paymentGateway: 'GoKwik via Easebuzz',
+          financialStatus: 'paid',
+          tags: 'GoKwik, Prepaid, Pending AWB, Gokwik_cod_blocking',
+          shipment: null,
+        })
+      )
+    ).toBe('dispatch');
+
+    // Same blocking tag on an unconfirmed COD that was never cancelled stays in New Order.
+    expect(
+      classifyOrderTab(
+        order({
+          status: 'NEW',
+          paymentMethod: 'COD',
+          tags: 'GoKwik, COD, Gokwik_cod_blocking',
+        })
+      )
+    ).toBe('new');
+
+    // #26YOU5827 — manifested and shipped. The block tag must not pull it into Cancel.
+    expect(
+      classifyOrderTab(
+        order({
+          status: 'SHIPPED',
+          paymentMethod: 'Pre-paid',
+          financialStatus: 'paid',
+          tags: 'GoKwik, Manifested, Prepaid, Gokwik_cod_blocking',
+          shipment: {
+            waybillNumber: '30100810018426',
+            courier: 'Delhivery',
+            status: 'IN_TRANSIT',
+            trackingStatus: 'In Transit',
+            trackingUpdatedAt: null,
           },
         })
       )

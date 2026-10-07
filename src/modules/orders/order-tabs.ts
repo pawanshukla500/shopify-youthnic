@@ -74,15 +74,23 @@ const COD_CONFIRMED_TAGS = new Set([
   'confirmed',
 ]);
 
+/** The order was actually cancelled before pickup. A risk flag is not a cancel. */
 const HIGH_RTO_CANCEL_TAGS = new Set([
   'cod_cancelled',
   'cod_canceled',
-  'gokwik_cod_blocking',
-  'cod_blocking',
   'c2p_order_cancelled',
   'c2p_order_canceled',
-  'high_rto',
   'high_rto_cancel',
+]);
+
+/**
+ * GoKwik can leave gokwik_cod_blocking on a prepaid order or on a shipment
+ * that already left the warehouse. That tag is a risk signal, not a cancel.
+ */
+const COD_RISK_TAGS = new Set([
+  'gokwik_cod_blocking',
+  'cod_blocking',
+  'high_rto',
   'high_rto_risk',
 ]);
 
@@ -101,6 +109,13 @@ export function isDelhiveryCourierName(courier?: string | null): boolean {
 
 export function isHighRtoCancel(order: OrderTabSnapshot): boolean {
   return orderTagTokens(order.tags).some((tag) => HIGH_RTO_CANCEL_TAGS.has(tag));
+}
+
+/** GoKwik COD block / High RTO risk. Shown on the row. Does not move the tab to Cancel. */
+export function isCodRiskHold(order: OrderTabSnapshot): boolean {
+  return (
+    isHighRtoCancel(order) || orderTagTokens(order.tags).some((tag) => COD_RISK_TAGS.has(tag))
+  );
 }
 
 export function isPrepaidOrder(order: OrderTabSnapshot): boolean {
@@ -343,12 +358,25 @@ export function classifyOrderTab(order: OrderTabSnapshot): OperationalTab {
     return 'delivered';
   }
 
-  const awaitingPickup = stage === 'none' || stage === 'label';
+  const status = order.status || '';
+  const liveNotPicked = Boolean(order.shipment?.trackingUpdatedAt) && isNotPickedText(order.shipment?.trackingStatus || '');
+  // Shipped / in-transit wins over a leftover GoKwik block tag. A live
+  // "Manifested" or "Not Picked" scan still means the parcel is at the seller.
+  if (
+    (TRANSIT_ORDER_STATUSES.has(status) || stage === 'transit') &&
+    !liveNotPicked &&
+    stage !== 'cancel' &&
+    status !== 'CANCELLED'
+  ) {
+    return 'transit';
+  }
+
+  const awaitingPickup = stage === 'none' || stage === 'label' || !hasWaybill(order);
   const preShipCancel =
-    order.status === 'CANCELLED' ||
+    status === 'CANCELLED' ||
     stage === 'cancel' ||
-    (isHighRtoCancel(order) && awaitingPickup) ||
-    (isFinancialCancel(order) && awaitingPickup);
+    (isHighRtoCancel(order) && awaitingPickup && !TRANSIT_ORDER_STATUSES.has(status)) ||
+    (isFinancialCancel(order) && awaitingPickup && !TRANSIT_ORDER_STATUSES.has(status));
 
   if (preShipCancel && stage !== 'transit') {
     return 'cancel';
@@ -360,8 +388,6 @@ export function classifyOrderTab(order: OrderTabSnapshot): OperationalTab {
 
   if (stage === 'transit') return 'transit';
   if (stage === 'label' || hasWaybill(order)) return 'ready';
-
-  if (TRANSIT_ORDER_STATUSES.has(order.status || '')) return 'transit';
 
   if (isApprovedForDispatch(order)) return 'dispatch';
   return 'new';

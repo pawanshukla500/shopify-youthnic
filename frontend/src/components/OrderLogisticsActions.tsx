@@ -11,7 +11,7 @@ import {
   syncExternalOrderFulfillment,
 } from '../api'
 import { carrierTrackingUrl } from '../lib'
-import { isManifestRejected } from '../../../src/modules/orders/order-tabs'
+import { isManifestRejected, isPrepaidOrder } from '../../../src/modules/orders/order-tabs'
 import type { Order } from '../types'
 import { Icon } from './UI'
 
@@ -176,7 +176,7 @@ export function OrderLogisticsActions({
           <button type="button" className="btn-pack btn-pack-primary" disabled={dispatching} onClick={onDispatch}>
             {dispatching ? 'Booking…' : 'Dispatch'}
           </button>
-        ) : !isCodConfirmed && ['NEW', 'DISPATCH_PENDING'].includes(order.status) ? (
+        ) : !isPrepaidOrder(order) && !isCodConfirmed && ['NEW', 'DISPATCH_PENDING'].includes(order.status) ? (
           <button type="button" className="btn-pack btn-pack-amber" disabled={confirmingCod} onClick={onConfirmCod}>
             {confirmingCod ? 'Confirming…' : 'Confirm COD'}
           </button>

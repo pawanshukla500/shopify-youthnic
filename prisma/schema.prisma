@@ -82,6 +82,20 @@ model Order {
   deliveredAt      DateTime? // Set when Delhivery reports delivery
   cancelledAt      DateTime? // Set when the order is cancelled
 
+  // ─── Accounts reconciliation ───
+  // Money actually credited to Youthnic's bank for this order. Prepaid: the
+  // payment-gateway settlement (PhonePe / Easebuzz / GoKwik). COD: the Delhivery
+  // remittance. Filled from uploaded reports or the gateway settlement APIs.
+  paymentReceivedAt     DateTime?
+  paymentReceivedAmount Float? // net amount credited for this order
+  paymentReceivedUtr    String? // bank UTR of the credit
+  paymentReceivedRef    String? // settlement id / Delhivery remittance number
+  paymentReceivedSource String? // DELHIVERY_REMITTANCE | PG_SETTLEMENT_REPORT | PHONEPE_SETTLEMENT_API | EASEBUZZ_PAYOUT_API | MANUAL
+  gatewayFee            Float? // gateway fee + GST deducted from a prepaid settlement
+  // Set once the order is delivered, its payment is in the bank and the
+  // return window has passed with no open return ("Payment Received" tab).
+  accountsClosedAt      DateTime?
+
   // Urgent Customer Support & Return Flagging
   hasUrgentSupport Boolean @default(false)
   supportFlag      String? // e.g. "URGENT_DAMAGE_CLAIM", "RETURN_WINDOW_EXPIRING", "DELAY_COMPLAINT"
@@ -185,6 +199,15 @@ model Shipment {
   billingStatus       String?   @default("ESTIMATED") // ESTIMATED, MANIFESTED, BILLED, AUDITED, WEIGHT_MISMATCH, REBILLED
   lastBilledAt        DateTime?
 
+  // Shipping cost per leg, GST included. ESTIMATE comes from Delhivery's
+  // rate API; ACTUAL replaces it when the wallet ledger / invoice backup that
+  // lists this AWB is uploaded. Null = not known yet.
+  forwardCharge         Float?
+  rtoCharge             Float? // return-to-origin leg, only for RTO parcels
+  shippingCostSource    String? // forward leg: ESTIMATE | ACTUAL
+  rtoChargeSource       String? // RTO leg: ESTIMATE | ACTUAL (legs are billed and uploaded separately)
+  shippingCostUpdatedAt DateTime?
+
   // Error/retry
   errorMessage String?
   retryCount   Int     @default(0)
@@ -279,6 +302,10 @@ model Return {
 
   // Firebase Storage artifact — uploaded by delhiveryDocumentFetcher cron
   qcStoragePath String? // gs://bucket/orders/{orderId}/qc-{ts}.jpg
+
+  // Reverse-pickup shipping cost, GST included (ESTIMATE until ACTUAL is uploaded)
+  shippingCharge     Float?
+  shippingCostSource String? // ESTIMATE | ACTUAL
 
   // WhatsApp notification for return
   customerNotified Boolean @default(false)
@@ -464,6 +491,23 @@ model SyncLog {
 
   @@index([syncType])
   @@index([status])
+}
+
+// ─── Accounts: uploaded reconciliation files ──────────────
+// One row per uploaded Delhivery remittance / charges file or gateway
+// settlement report, so the accounts team can see what was matched.
+model ReconciliationImport {
+  id           Int      @id @default(autoincrement())
+  kind         String // DELHIVERY_REMITTANCE | DELHIVERY_CHARGES | PG_SETTLEMENT
+  fileName     String
+  rowCount     Int
+  matchedCount Int
+  unmatched    Json? // identifiers in the file that matched no order / AWB
+  summary      Json?
+  uploadedBy   String?
+  createdAt    DateTime @default(now())
+
+  @@index([kind, createdAt])
 }
 
 // ─── Settings (key-value store for runtime config) ────────

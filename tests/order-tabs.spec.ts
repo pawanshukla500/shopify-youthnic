@@ -69,7 +69,7 @@ describe('order operational tabs', () => {
 
   it('tab keys match frontend contract', () => {
     const keys = Object.keys(ORDER_TABS);
-    expect(keys).toEqual(['new', 'dispatch', 'ready', 'transit', 'delivered', 'return', 'cancel']);
+    expect(keys).toEqual(['new', 'dispatch', 'ready', 'transit', 'delivered', 'closed', 'return', 'cancel']);
     const _typeCheck: OrderTab = 'dispatch';
     expect(_typeCheck).toBe('dispatch');
   });

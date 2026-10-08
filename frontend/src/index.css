@@ -3093,3 +3093,77 @@ body { min-width: 0; }
 .waybill-track-link:hover { color: #1e3a8a; text-decoration: underline; }
 .json-view { font-size: 12.5px; line-height: 1.5; font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 
+
+/* ─── Order page: one "next step" bar ───────────────────────── */
+.next-step {
+  --tone: var(--blue);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 12px 0 16px;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--tone) 35%, var(--line));
+  border-left: 4px solid var(--tone);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--tone) 8%, var(--panel));
+}
+.next-step-info { --tone: var(--blue); }
+.next-step-warn { --tone: var(--amber); }
+.next-step-danger { --tone: var(--red); }
+.next-step-success { --tone: var(--green); }
+.next-step-neutral { --tone: var(--muted); }
+.next-step-copy { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.next-step-copy strong { color: var(--ink); font-size: 15px; }
+.next-step-copy span { color: var(--ink-secondary, var(--ink)); font-size: 13px; line-height: 1.45; }
+@media (max-width: 640px) {
+  .next-step { flex-direction: column; align-items: stretch; }
+}
+
+/* ─── Order page: money & accounts card ────────────────────── */
+.money-row {
+  display: grid;
+  grid-template-columns: 170px 1fr;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line-subtle, var(--line));
+  font-size: 13px;
+  color: var(--ink);
+}
+.money-row > span { color: var(--muted); }
+.money-row code { font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace; font-size: 12.5px; }
+.money-muted { color: var(--muted); font-size: 12px; }
+.money-legs { display: flex; flex-direction: column; gap: 2px; }
+.money-pending { margin: 0; padding-left: 18px; }
+.money-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.money-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+.money-badge-closed { color: var(--green); border-color: color-mix(in srgb, var(--green) 45%, var(--line)); }
+.money-badge-open { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 45%, var(--line)); }
+@media (max-width: 640px) {
+  .money-row { grid-template-columns: 1fr; gap: 2px; }
+}
+
+/* ─── Order page: secondary details folded away ───────────── */
+.detail-more { margin-top: 4px; }
+.detail-more > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+.detail-more > summary::-webkit-details-marker { display: none; }
+.detail-more > summary::after { content: '▸'; float: right; color: var(--muted); }
+.detail-more[open] > summary::after { content: '▾'; }
+.detail-more[open] > summary { margin-bottom: 12px; }

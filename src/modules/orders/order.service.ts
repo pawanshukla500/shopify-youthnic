@@ -51,6 +51,10 @@ export const ORDER_TABS = {
   ready: ['DISPATCHED'],
   transit: ['SHIPPED', 'IN_TRANSIT', 'OUT_FOR_DELIVERY', 'FAILED_DELIVERY'],
   delivered: ['DELIVERED'],
+  // "Payment Received" has no status of its own: classifyOrderTab moves a
+  // DELIVERED order here once it is paid into the bank and past the return
+  // window, so the coarse status fallback lists nothing for it.
+  closed: [],
   return: [
     'RTO_INITIATED',
     'RTO_DELIVERED',
@@ -1182,6 +1186,10 @@ class OrderService {
           },
         },
         returns: { select: { returnStatus: true } },
+        deliveredAt: true,
+        paymentReceivedAt: true,
+        paymentReceivedUtr: true,
+        accountsClosedAt: true,
       },
     });
     const byStatus: Record<string, number> = {};
@@ -1192,6 +1200,7 @@ class OrderService {
       ready: 0,
       transit: 0,
       delivered: 0,
+      closed: 0,
       return: 0,
       cancel: 0,
     };

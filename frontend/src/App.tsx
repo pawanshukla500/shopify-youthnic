@@ -16,6 +16,7 @@ import { Settings } from './pages/Settings'
 import { Products } from './pages/Products'
 import { Communications } from './pages/Communications'
 import { SupportDesk } from './pages/SupportDesk'
+import { Accounts } from './pages/Accounts'
 import type { ReactNode } from 'react'
 
 const queryClient = new QueryClient({
@@ -68,6 +69,7 @@ export function App() {
                   <Route path="/tracking" element={<Tracking />} />
                   <Route path="/ledger" element={<Navigate to="/tools" replace />} />
                   <Route path="/tools" element={<Tools />} />
+                  <Route path="/accounts" element={<Accounts />} />
                   <Route path="/communications" element={<Communications />} />
                   <Route path="/support" element={<SupportDesk />} />
                   <Route path="/settings" element={<Settings />} />

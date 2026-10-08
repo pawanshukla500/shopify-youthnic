@@ -18,7 +18,7 @@ export const ORDER_STATUSES: OrderStatus[] = [
   'CANCELLED',
 ]
 
-export type OrderTabKey = 'all' | 'new' | 'dispatch' | 'ready' | 'transit' | 'delivered' | 'return' | 'cancel'
+export type OrderTabKey = 'all' | 'new' | 'dispatch' | 'ready' | 'transit' | 'delivered' | 'closed' | 'return' | 'cancel'
 
 export interface OrderTabDef {
   key: OrderTabKey
@@ -69,9 +69,17 @@ export const ORDER_TABS: OrderTabDef[] = [
   {
     key: 'delivered',
     label: 'Delivered',
-    hint: 'Delivered to the customer.',
+    hint: 'Delivered to the customer. Moves to Payment Received once the money is in the bank and the 7-day return window is over.',
     statuses: ['DELIVERED'],
     color: '#059669',
+  },
+  {
+    key: 'closed',
+    label: 'Payment Received',
+    hint: 'Delivered, payment received in the bank (UTR recorded) and the 7-day return window closed. Done for accounts.',
+    // No status of its own: the server moves delivered orders here.
+    statuses: [],
+    color: '#0f766e',
   },
   {
     key: 'return',

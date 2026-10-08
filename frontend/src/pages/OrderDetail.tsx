@@ -6,7 +6,6 @@ import {
   apiError,
   getOrder,
   getPayment,
-  getShippingEstimate,
   confirmCodOrder,
   cancelOrder,
   deleteOrder,
@@ -24,9 +23,11 @@ import {
   downloadBulkPackZip,
   syncExternalOrderFulfillment,
 } from '../api'
-import { carrierTrackingUrl, formatDate, formatMoney, labelize } from '../lib'
+import { ORDER_TABS, carrierTrackingUrl, formatDate, formatMoney, labelize } from '../lib'
 import { classifyOrderTab, isCodConfirmed, isPrepaidOrder } from '../../../src/modules/orders/order-tabs'
 import { Button, ButtonGroup, CopyableBadge, EmptyState, ErrorBox, FormField, Icon, InfoCard, LoadingState, PageIntro, Panel, PanelHeading, StatCard, StatusBadge, useDocumentTitle, useToast } from '../components/UI'
+import { OrderNextStep } from '../components/OrderNextStep'
+import { OrderMoneyCard } from '../components/OrderMoneyCard'
 import type { Order, OrderItem, ReturnRecord } from '../types'
 
 export function OrderDetail() {
@@ -37,7 +38,6 @@ export function OrderDetail() {
   const queryClient = useQueryClient()
   const orderQuery = useQuery({ queryKey: ['order', id], queryFn: () => getOrder(id), enabled: Boolean(id), retry: false })
   const paymentQuery = useQuery({ queryKey: ['payment', id], queryFn: () => getPayment(id), enabled: Boolean(id), retry: false })
-  const estimateQuery = useQuery({ queryKey: ['shipping-estimate', id], queryFn: () => getShippingEstimate(id), enabled: Boolean(id), retry: false })
   const [selected, setSelected] = useState<Record<number, number>>({})
   const [reason, setReason] = useState('')
   const [returnTracking, setReturnTracking] = useState('')
@@ -454,6 +454,8 @@ export function OrderDetail() {
     }
     return { label: 'Unfulfilled', tone: 'shopify-pill-pending' }
   })()
+  // The Orders tab this order sits in, e.g. "Ready to Dispatch" or "Payment Received".
+  const stageTab = ORDER_TABS.find((tab) => tab.key === classifyOrderTab(order))
   const canRefund = order.financialStatus !== 'refunded' && order.status !== 'CANCELLED'
   const openMore = () => {
     if (moreOpen) {
@@ -552,8 +554,7 @@ export function OrderDetail() {
         <Icon name="copy" size={14} />
       </button>
       <span className={`shopify-pill ${paymentPill.tone}`}>{paymentPill.label}</span>
-      <span className={`shopify-pill ${fulfillmentPill.tone}`}>{fulfillmentPill.label}</span>
-      <StatusBadge status={order.status} />
+      <span className="shopify-pill shopify-pill-progress" title={stageTab?.hint}>{stageTab?.label || labelize(order.status)}</span>
       {order.hasUrgentSupport && (
         <button type="button" className="shopify-pill shopify-pill-alert" onClick={() => navigate(`/support?search=${order.shopifyOrderName}`)}>
           Support
@@ -564,189 +565,21 @@ export function OrderDetail() {
       {formatDate(order.shopifyCreatedAt || order.createdAt)} from {order.salesChannel || 'Online Store'}
       {order.customerCity ? ` · ${order.customerCity}, ${order.customerState}` : ''}
     </p>
-    {/* ─── UI UX Max Pro: Urgent Dispatch Alert Banner ─────── */}
-    {isDispatchNeeded && (
-      <div className="prepaid-alert-banner">
-        <div className="prepaid-alert-left">
-          <div className="prepaid-alert-icon" style={{ background: isPrepaid ? '#2563eb' : '#059669' }}>⚡</div>
-          <div>
-            <h4 className="prepaid-alert-title" style={{ color: isPrepaid ? '#1e3a8a' : '#065f46' }}>
-              {isPrepaid ? 'URGENT: PREPAID ORDER AWAITING DISPATCH' : 'COD CONFIRMED: READY FOR IMMEDIATE DISPATCH'}
-            </h4>
-            <p className="prepaid-alert-desc">
-              {isPrepaid
-                ? `Customer has paid in advance via ${order.paymentGateway || 'Prepaid / UPI'}. Prioritize Delhivery AWB manifest and handover immediately.`
-                : `Customer purchase intent has been verified via COD confirmation tag. Ready to manifest and book Delhivery shipment.`}
-            </p>
-          </div>
-        </div>
-        <Button
-          className="button-primary"
-          style={{
-            background: isPrepaid ? '#2563eb' : '#059669',
-            borderColor: isPrepaid ? '#1d4ed8' : '#047857',
-            color: '#fff',
-            whiteSpace: 'nowrap'
-          }}
-          disabled={!canDispatch || action.isPending}
-          loading={action.isPending && action.variables === 'dispatch'}
-          onClick={() => action.mutate('dispatch')}
-        >
-          <Icon name="package" size={16} />
-          {isPrepaid ? 'Priority Delhivery Dispatch' : 'Dispatch with Delhivery'}
-        </Button>
-      </div>
-    )}
-
-    {/* Delayed Dispatch SLA Overdue Alert */}
-    {order.isDispatchOverdue && (
-      <div className="sla-warning-banner" style={{ marginTop: '12px', marginBottom: '12px' }}>
-        <div className="sla-warning-left">
-          <div className="sla-warning-icon">⚠️</div>
-          <div>
-            <h4 className="sla-warning-title">
-              Dispatch SLA Breached (+{order.dispatchOverdueHours || 24} Hours Overdue)
-            </h4>
-            <p className="sla-warning-desc">
-              Order placed on {formatDate(order.shopifyCreatedAt || order.createdAt)}. Expected dispatch SLA (within 24 hours) was {formatDate(order.expectedDispatchAt || new Date(new Date(order.shopifyCreatedAt || order.createdAt).getTime() + 24 * 3600 * 1000).toISOString())}. Expedite Delhivery manifest immediately to avoid customer cancellation.
-            </p>
-          </div>
-        </div>
-        {canDispatch && (
-          <Button
-            className="button-primary"
-            style={{ background: '#be123c', borderColor: '#9f1239', color: '#fff', whiteSpace: 'nowrap' }}
-            disabled={action.isPending}
-            loading={action.isPending && action.variables === 'dispatch'}
-            onClick={() => action.mutate('dispatch')}
-          >
-            <Icon name="package" size={15} />
-            Dispatch Urgently
-          </Button>
-        )}
-      </div>
-    )}
-
-    {/* NDR Delivery Exception Alert Card */}
-    {(order.hasNdrException || ['FAILED_DELIVERY', 'RTO_INITIATED'].includes(order.status)) && (
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '12px',
-          background: 'linear-gradient(135deg, #fff1f2 0%, #ffe4e6 100%)',
-          border: '1.5px solid #fecdd3',
-          borderLeft: '5px solid #e11d48',
-          borderRadius: '8px',
-          padding: '12px 16px',
-          marginTop: '12px',
-          marginBottom: '12px',
-          boxShadow: '0 2px 4px rgba(225, 29, 72, 0.08)',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <div
-            style={{
-              width: '36px',
-              height: '36px',
-              borderRadius: '50%',
-              background: '#ffe4e6',
-              color: '#e11d48',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '18px',
-              flexShrink: 0,
-            }}
-          >
-            🚨
-          </div>
-          <div>
-            <h4 style={{ margin: 0, color: '#9f1239', fontSize: '14px', fontWeight: 800 }}>
-              NDR Delivery Exception · Action Required
-            </h4>
-            <p style={{ margin: '2px 0 0 0', color: '#be123c', fontSize: '12px' }}>
-              Courier ({order.shipment?.courier || 'Delhivery'}) reported: <strong>{order.shipment?.trackingStatus || 'Delivery attempt failed'}</strong>
-              {order.shipment?.trackingLocation ? ` at ${order.shipment.trackingLocation}` : ''}.
-              Resolve delivery exception with courier re-attempt or mark RTO.
-            </p>
-          </div>
-        </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <Button
-            className="button-primary"
-            style={{ background: '#be123c', borderColor: '#9f1239', color: '#fff', whiteSpace: 'nowrap' }}
-            onClick={() => setShowNdrModal(true)}
-          >
-            <Icon name="alert" size={15} />
-            Resolve NDR Exception
-          </Button>
-        </div>
-      </div>
-    )}
-
-    {/* RTO Delivery & Auto-Refund Banner */}
-    {(order.status === 'RTO_DELIVERED' || order.status === 'RTO_INITIATED') && (
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '12px',
-          background: order.paymentMethod !== 'COD' ? '#eff6ff' : '#f0fdf4',
-          border: order.paymentMethod !== 'COD' ? '1.5px solid #bfdbfe' : '1.5px solid #bbf7d0',
-          borderLeft: order.paymentMethod !== 'COD' ? '5px solid #2563eb' : '5px solid #16a34a',
-          borderRadius: '8px',
-          padding: '12px 16px',
-          marginTop: '12px',
-          marginBottom: '12px',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <div
-            style={{
-              width: '36px',
-              height: '36px',
-              borderRadius: '50%',
-              background: order.paymentMethod !== 'COD' ? '#dbeafe' : '#dcfce7',
-              color: order.paymentMethod !== 'COD' ? '#1d4ed8' : '#15803d',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '18px',
-              flexShrink: 0,
-            }}
-          >
-            {order.paymentMethod !== 'COD' ? '💸' : '📦'}
-          </div>
-          <div>
-            <h4 style={{ margin: 0, color: order.paymentMethod !== 'COD' ? '#1e40af' : '#166534', fontSize: '14px', fontWeight: 800 }}>
-              {order.status === 'RTO_DELIVERED' ? 'Returned Package Safely Received at Warehouse' : 'Package in Transit to Warehouse (RTO Initiated)'}
-            </h4>
-            <p style={{ margin: '2px 0 0 0', color: order.paymentMethod !== 'COD' ? '#1d4ed8' : '#15803d', fontSize: '12px' }}>
-              {order.paymentMethod !== 'COD'
-                ? order.financialStatus === 'refunded'
-                  ? `Full refund of ₹${order.totalAmount} has been processed via Shopify back to ${order.paymentProvider || order.paymentGateway || 'Easebuzz / PhonePe'}. Tags applied: RTO_DELIVERED, RTO_AUTO_REFUNDED.`
-                  : `Prepaid Order · Package has been returned. Click below to issue full refund of ₹${order.totalAmount} via Shopify directly to ${order.paymentProvider || order.paymentGateway || 'Easebuzz / PhonePe'}.`
-                : 'COD Order · Returned goods restocked into warehouse inventory. No customer refund required.'}
-            </p>
-          </div>
-        </div>
-        {order.paymentMethod !== 'COD' && order.financialStatus !== 'refunded' && (
-          <Button
-            className="button-primary"
-            style={{ background: '#2563eb', borderColor: '#1d4ed8', color: '#fff', whiteSpace: 'nowrap' }}
-            disabled={isRefundingRto}
-            loading={isRefundingRto}
-            onClick={handleProcessRtoRefund}
-          >
-            <Icon name="check" size={15} />
-            💸 Process Auto-Refund
-          </Button>
-        )}
-      </div>
-    )}
+    <OrderNextStep
+      order={order}
+      isPrepaid={isPrepaid}
+      isCodConfirmed={isCodConf}
+      isDispatchNeeded={isDispatchNeeded}
+      canDispatch={Boolean(canDispatch)}
+      dispatching={action.isPending && action.variables === 'dispatch'}
+      confirmingCod={isConfirmingCod}
+      refundingRto={isRefundingRto}
+      onDispatch={() => action.mutate('dispatch')}
+      onConfirmCod={handleConfirmCod}
+      onPrintLabel={() => openPrintableOrderLabel(order.id)}
+      onResolveNdr={() => setShowNdrModal(true)}
+      onRtoRefund={handleProcessRtoRefund}
+    />
 
     <div className="detail-grid">
       <div className="detail-main">
@@ -785,6 +618,14 @@ export function OrderDetail() {
           </div>
           <ItemsTable items={order.items ?? []} currency={order.currency} order={order} section="summary" />
         </Panel>
+
+        <OrderMoneyCard
+          order={order}
+          onChanged={() => {
+            queryClient.invalidateQueries({ queryKey: ['order', id] })
+            queryClient.invalidateQueries({ queryKey: ['orders'] })
+          }}
+        />
 
         <OrderLifecycleStepper order={order} />
 
@@ -1202,87 +1043,6 @@ export function OrderDetail() {
           )}
         </Panel>
 
-        {/* ─── Carrier Logistics Charges / Economics ──────────────── */}
-        <Panel>
-          <PanelHeading
-            eyebrow="Carrier economics"
-            title={
-              order.shipment?.courier && order.shipment.courier.toLowerCase() !== 'delhivery' ? (
-                `${order.shipment.courier} Logistics`
-              ) : (
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
-                  <img src="/logos/delhivery.png" alt="Delhivery" style={{ height: '13px', objectFit: 'contain' }} />
-                  <span>Delhivery Logistics Charges</span>
-                </span>
-              )
-            }
-          />
-          {order.shipment?.courier && order.shipment.courier.toLowerCase() !== 'delhivery' ? (
-            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '16px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#1e293b', fontWeight: 700, fontSize: '13px' }}>
-                <Icon name="package" size={18} />
-                <span>Fulfilled via {order.shipment.courier} (AWB: {order.shipment.waybillNumber})</span>
-              </div>
-              <p style={{ margin: '8px 0 0 0', fontSize: '12px', color: '#64748b', lineHeight: 1.5 }}>
-                This order was dispatched via external carrier <strong>{order.shipment.courier}</strong>. Live tracking status is synced directly from Shopify fulfillments. Delhivery rate estimation applies only to orders dispatched through Delhivery; billed amounts are checked in the Delhivery ONE panel.
-              </p>
-            </div>
-          ) : estimateQuery.isLoading ? (
-            <LoadingState label="Calculating carrier logistics charges…" />
-          ) : estimateQuery.data ? (
-            <div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', background: '#f8fafc', padding: '12px', borderRadius: '8px', marginBottom: '10px' }}>
-                <div>
-                  <span className="detail-label">Origin Pincode</span>
-                  <strong className="mono" style={{ color: '#1e3a8a' }}>{estimateQuery.data.originPincode} (Surat)</strong>
-                </div>
-                <div>
-                  <span className="detail-label">Destination Pincode</span>
-                  <strong className="mono" style={{ color: '#0f172a' }}>{estimateQuery.data.destinationPincode} ({order.customerCity})</strong>
-                </div>
-                <div>
-                  <span className="detail-label">Chargeable Weight</span>
-                  <strong>{estimateQuery.data.chargeableWeightGrams}g</strong>
-                </div>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 14px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px' }}>
-                <div>
-                  <span style={{ fontSize: '10px', color: '#1e40af', textTransform: 'uppercase', fontWeight: 700 }}>
-                    Estimated Shipping Cost
-                  </span>
-                  <strong style={{ display: 'block', fontSize: '20px', color: '#1e3a8a', fontWeight: 800 }}>
-                    {formatMoney(Number(estimateQuery.data.charges?.total_amount ?? estimateQuery.data.charges?.shippingCost ?? estimateQuery.data.charges?.cost ?? estimateQuery.data.charges?.amount ?? 0))}
-                  </strong>
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                  <span style={{ display: 'block', fontSize: '11px', color: '#1d4ed8', fontWeight: 700 }}>
-                    Mode: {order.paymentMethod === 'COD' ? 'Surface COD' : 'Surface Prepaid'}
-                  </span>
-                  <span style={{ fontSize: '9.5px', color: '#64748b' }}>Zone: Domestic Surface</span>
-                </div>
-              </div>
-
-              {/* ─── Actual billed charges live in the Delhivery ONE panel ─── */}
-              {order.shipment?.waybillNumber && (
-                <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: '1px dashed #cbd5e1' }}>
-                  <div style={{ fontSize: '11px', color: '#475569', lineHeight: 1.6 }}>
-                    🧾 Actual billed debits, weight re-weighments and reversals live in{' '}
-                    <strong>Delhivery ONE → Finances → Wallet → Transactions</strong> (search AWB{' '}
-                    <code>{order.shipment.waybillNumber}</code>). Delhivery offers no wallet
-                    API, so billed amounts are checked in the panel, not here.
-                  </div>
-                </div>
-              )}
-
-              <p style={{ margin: '8px 0 0', fontSize: '10.5px', color: '#64748b', lineHeight: 1.45 }}>
-                ℹ️ Computed via Delhivery Rate API. Actual billed logistics charges per AWB are audited post-delivery upon hub weighment and billed in the Delhivery ONE Billing MIS.
-              </p>
-            </div>
-          ) : (
-            <p style={{ fontSize: '11px', color: '#94a3b8' }}>Logistics charges will be calculated based on destination pincode and shipment weight.</p>
-          )}
-        </Panel>
-
         {/* ─── Carrier Tracking Timeline ────────────────────────── */}
         <Panel>
           <PanelHeading eyebrow="Carrier events" title="Tracking timeline" />
@@ -1352,366 +1112,369 @@ export function OrderDetail() {
             <button className="quick-action-btn quick-action-copy" onClick={copyAddress}><Icon name="copy" size={14} /> Copy Address</button>
           </div>
         </Panel>
-        {/* ─── GoKwik Buyer Intelligence & RTO Risk Assessment ─── */}
-        <Panel>
-          <PanelHeading
-            eyebrow="GoKwik Buyer Intelligence"
-            title="RTO Risk Assessment"
-            action={
-              <span className={`rto-risk-pill ${(order.rtoRiskLevel || 'MEDIUM').toLowerCase()}`} style={{ fontSize: '11px', padding: '2px 8px' }}>
-                {order.rtoRiskLevel === 'LOW'
-                  ? '✓ Low RTO Risk'
-                  : order.rtoRiskLevel === 'HIGH'
-                  ? '⛔ High RTO Risk'
-                  : '⚡ Medium RTO Risk'}
-              </span>
-            }
-          />
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '7px', padding: '10px 12px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                <span className="detail-label">GoKwik Delivery Track Record</span>
-                <span style={{ fontSize: '11px', fontWeight: 800, color: (order.deliverOrderCount || 0) >= 2 ? '#047857' : '#b45309' }}>
-                  {order.deliverOrderCount ?? 0} Prior Deliveries
+        <details className="detail-more">
+          <summary>More details: RTO risk, Shopify tags, payment IDs, notifications</summary>
+          {/* ─── GoKwik Buyer Intelligence & RTO Risk Assessment ─── */}
+          <Panel>
+            <PanelHeading
+              eyebrow="GoKwik Buyer Intelligence"
+              title="RTO Risk Assessment"
+              action={
+                <span className={`rto-risk-pill ${(order.rtoRiskLevel || 'MEDIUM').toLowerCase()}`} style={{ fontSize: '11px', padding: '2px 8px' }}>
+                  {order.rtoRiskLevel === 'LOW'
+                    ? '✓ Low RTO Risk'
+                    : order.rtoRiskLevel === 'HIGH'
+                    ? '⛔ High RTO Risk'
+                    : '⚡ Medium RTO Risk'}
                 </span>
-              </div>
-              <p style={{ margin: 0, fontSize: '11.5px', color: '#334155', lineHeight: 1.45 }}>
-                {order.rtoRiskReason ||
-                  (order.paymentMethod !== 'COD'
-                    ? 'Prepaid order captured upfront · Zero RTO risk'
-                    : isCodConf
-                    ? 'Customer purchase intent verified via WhatsApp COD confirmation'
-                    : 'Awaiting customer COD confirmation before dispatch')}
-              </p>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-              <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '8px 10px' }}>
-                <span className="detail-label">Payment Mode</span>
-                <strong style={{ fontSize: '12px', color: '#0f172a' }}>{order.paymentMethod || 'Prepaid'}</strong>
-              </div>
-              <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '8px 10px' }}>
-                <span className="detail-label">COD Confirmation</span>
-                <strong style={{ fontSize: '12px', color: isCodConf ? '#047857' : '#64748b' }}>
-                  {isCodConf ? '✓ Confirmed' : order.paymentMethod === 'COD' ? 'Pending' : 'N/A (Prepaid)'}
-                </strong>
-              </div>
-            </div>
-          </div>
-        </Panel>
-
-        {/* ─── UI UX Max Pro: Shopify Order Tags & Channel Sync ─── */}
-        <Panel>
-          <PanelHeading
-            eyebrow="Shopify Store Metadata"
-            title="Order Tags & Channel Sync"
-            action={
-              <span className="shopify-channel-pill">
-                <Icon name="tag" size={11} /> Shopify Synced
-              </span>
-            }
-          />
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <div>
-              <span className="detail-label" style={{ marginBottom: '6px', display: 'block' }}>
-                Store Tags (Payment & Automation)
-              </span>
-              {order.tags ? (
-                <div className="shopify-tags-list">
-                  {order.tags.split(',').map((t) => t.trim()).filter(Boolean).map((tag) => {
-                    const lower = tag.toLowerCase()
-                    let modifier = 'tag-default'
-                    if (lower.includes('weight-mismatch') || lower.includes('mismatch')) modifier = 'tag-mismatch'
-                    else if (lower.includes('rebilled')) modifier = 'tag-rebilled'
-                    else if (lower.includes('gokwik') || lower.includes('kwik')) modifier = 'tag-gokwik'
-                    else if (lower.includes('prepaid')) modifier = 'tag-prepaid'
-                    else if (lower.includes('upi')) modifier = 'tag-upi'
-                    else if (lower.includes('cod')) modifier = 'tag-cod'
-                    else if (lower.includes('dispatch') || lower.includes('awb')) modifier = 'tag-dispatched'
-                    else if (lower.includes('refund')) modifier = 'tag-refund'
-
-                    return (
-                      <span key={tag} className={`shopify-tag-pill ${modifier}`} style={{ fontSize: '11px', padding: '3px 9px' }}>
-                        {tag}
-                      </span>
-                    )
-                  })}
-                </div>
-              ) : (
-                <span style={{ fontSize: '12px', color: '#94a3b8' }}>No tags assigned on Shopify</span>
-              )}
-            </div>
-
-            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '10px 12px', fontSize: '11px', color: '#334155', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontWeight: 700, color: '#0f172a' }}>🔗 Delhivery ONE Channel Link</span>
-                <span style={{ color: '#16a34a', fontWeight: 700 }}>● Active</span>
-              </div>
-              <p style={{ margin: 0, fontSize: '10.5px', color: '#64748b', lineHeight: 1.4 }}>
-                When Shopify is linked in Delhivery ONE, dispatches triggered from this OMS automatically update Shopify fulfillment tracking with carrier <strong>Delhivery</strong> and append the generated AWB to order tags.
-              </p>
-            </div>
-          </div>
-        </Panel>
-
-        {/* ─── Financials & 3-Way Money Reconciliation ─────────── */}
-        <Panel>
-          <PanelHeading
-            eyebrow="Financials"
-            title="Payment & Receipt"
-            action={
-              <span className={`payment-state ${payment?.paymentVerified ?? order.paymentVerified ? 'verified' : ''}`}>
-                <span />
-                {payment?.paymentVerified ?? order.paymentVerified ? 'Verified' : 'Unverified'}
-              </span>
-            }
-          />
-          {paymentQuery.isError ? (
-            <ErrorBox compact message={apiError(paymentQuery.error)} />
-          ) : (
-            <div className="payment-detail">
-              {/* ─── GoKwik / Easebuzz Aggregated Partner Payment Card ─── */}
-              {(order.paymentAggregator === 'GoKwik' ||
-                (order.paymentGateway || '').toLowerCase().includes('kwik') ||
-                order.paymentProvider) && (
-                <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '14px', marginBottom: '14px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px', flexWrap: 'wrap', gap: '6px' }}>
-                    <span style={{ fontSize: '11px', fontWeight: 800, color: '#0f172a', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                      Payment Routing & Partner Settlement
-                    </span>
-                    <span className={`verified-badge ${order.paymentVerified ? 'verified' : 'unverified'}`}>
-                      {order.paymentVerified ? 'Captured & Verified' : 'Verification Pending'}
-                    </span>
-                  </div>
-
-                  {/* Flow Banner */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '10px 14px', marginBottom: '12px', flexWrap: 'wrap' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <img src="/logos/gokwik.png" alt="GoKwik" style={{ height: '20px', objectFit: 'contain' }} />
-                      <div>
-                        <div style={{ fontSize: '11.5px', fontWeight: 700, color: '#034694' }}>GoKwik Checkout</div>
-                        <div style={{ fontSize: '9.5px', color: '#64748b' }}>Order & 1-Click Aggregator</div>
-                      </div>
-                    </div>
-                    <span style={{ color: '#94a3b8', fontSize: '13px', fontWeight: 700 }}>➔</span>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <img src="/logos/easebuzz.png" alt="Easebuzz" style={{ height: '18px', objectFit: 'contain' }} />
-                      <div>
-                        <div style={{ fontSize: '11.5px', fontWeight: 700, color: '#0f172a' }}>
-                          {order.paymentProvider || 'Easebuzz'}
-                        </div>
-                        <div style={{ fontSize: '9.5px', color: '#059669', fontWeight: 600 }}>Acquiring Payment Partner</div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* IDs Grid */}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '8px' }}>
-                    {order.paymentProviderPaymentId && (
-                      <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '7px 9px' }}>
-                        <span className="detail-label" style={{ fontSize: '10px', color: '#64748b' }}>Easebuzz Payment ID</span>
-                        <div
-                          className="waybill-chip"
-                          onClick={() => {
-                            navigator.clipboard.writeText(order.paymentProviderPaymentId || '')
-                            toast.toast('success', 'Easebuzz Payment ID copied!')
-                          }}
-                          style={{ marginTop: '2px', cursor: 'pointer' }}
-                          title="Click to copy Easebuzz ID"
-                        >
-                          <span className="mono" style={{ fontSize: '11px', fontWeight: 700, color: '#0f172a' }}>
-                            {order.paymentProviderPaymentId}
-                          </span>
-                          <Icon name="copy" size={11} />
-                        </div>
-                      </div>
-                    )}
-                    {order.gokwikPaymentId && (
-                      <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '7px 9px' }}>
-                        <span className="detail-label" style={{ fontSize: '10px', color: '#64748b' }}>GoKwik Payment ID</span>
-                        <div
-                          className="waybill-chip"
-                          onClick={() => {
-                            navigator.clipboard.writeText(order.gokwikPaymentId || '')
-                            toast.toast('success', 'GoKwik Payment ID copied!')
-                          }}
-                          style={{ marginTop: '2px', cursor: 'pointer' }}
-                          title="Click to copy GoKwik ID"
-                        >
-                          <span className="mono" style={{ fontSize: '11px', fontWeight: 700, color: '#034694' }}>
-                            {order.gokwikPaymentId}
-                          </span>
-                          <Icon name="copy" size={11} />
-                        </div>
-                      </div>
-                    )}
-                    {order.paymentReference && (
-                      <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '7px 9px' }}>
-                        <span className="detail-label" style={{ fontSize: '10px', color: '#64748b' }}>Bank Reference / UTR</span>
-                        <div
-                          className="waybill-chip"
-                          onClick={() => {
-                            navigator.clipboard.writeText(order.paymentReference || '')
-                            toast.toast('success', 'Bank UTR copied!')
-                          }}
-                          style={{ marginTop: '2px', cursor: 'pointer' }}
-                          title="Click to copy Bank UTR"
-                        >
-                          <span className="mono" style={{ fontSize: '11px', fontWeight: 700, color: '#15803d' }}>
-                            {order.paymentReference}
-                          </span>
-                          <Icon name="copy" size={11} />
-                        </div>
-                      </div>
-                    )}
-                    {order.paymentAuthorizationKey && (
-                      <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '7px 9px' }}>
-                        <span className="detail-label" style={{ fontSize: '10px', color: '#64748b' }}>Authorization Key</span>
-                        <div
-                          className="waybill-chip"
-                          onClick={() => {
-                            navigator.clipboard.writeText(order.paymentAuthorizationKey || '')
-                            toast.toast('success', 'Auth Key copied!')
-                          }}
-                          style={{ marginTop: '2px', cursor: 'pointer' }}
-                          title="Click to copy Auth Key"
-                        >
-                          <span className="mono" style={{ fontSize: '11px', fontWeight: 700, color: '#475569' }}>
-                            {order.paymentAuthorizationKey}
-                          </span>
-                          <Icon name="copy" size={11} />
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              <DetailRow
-                label="Amount"
-                value={formatMoney(payment?.totalAmount ?? order.totalAmount, payment?.currency ?? order.currency)}
-                strong
-              />
-              <DetailRow label="Method" value={payment?.paymentMethod ?? order.paymentMethod} />
-              <DetailRow
-                label="Money Source"
-                value={
-                  order.paymentMethod === 'COD' ? (
-                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                      {order.shipment?.courier?.toLowerCase() === 'delhivery' && (
-                        <img src="/logos/delhivery.png" alt="Delhivery" style={{ height: '11px', objectFit: 'contain' }} />
-                      )}
-                      <span>{order.shipment?.courier || 'Cash'} on Delivery Collection</span>
-                    </div>
-                  ) : order.paymentAggregator === 'GoKwik' || (order.paymentGateway || '').toLowerCase().includes('gokwik') ? (
-                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                      <img src="/logos/gokwik.png" alt="GoKwik" style={{ height: '14px', objectFit: 'contain' }} />
-                      <span style={{ color: '#94a3b8', fontSize: '11px' }}>via</span>
-                      <img src="/logos/easebuzz.png" alt="Easebuzz" style={{ height: '13px', objectFit: 'contain' }} />
-                      <span style={{ fontWeight: 600, color: '#0f172a' }}>{order.paymentProvider || 'Easebuzz'}</span>
-                    </div>
-                  ) : (order.paymentGateway || '').toLowerCase().includes('phonepe') ? (
-                    'PhonePe Payment Gateway'
-                  ) : (
-                    payment?.paymentGateway ?? order.paymentGateway
-                  )
-                }
-              />
-              {order.paymentAggregator && (
-                <DetailRow
-                  label="Aggregator"
-                  value={
-                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                      {order.paymentAggregator.toLowerCase() === 'gokwik' && (
-                        <img src="/logos/gokwik.png" alt="GoKwik" style={{ height: '13px', objectFit: 'contain' }} />
-                      )}
-                      <span>{order.paymentAggregator} Checkout</span>
-                    </div>
-                  }
-                />
-              )}
-              {order.paymentProvider && (
-                <DetailRow
-                  label="Acquiring Partner"
-                  value={
-                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                      {order.paymentProvider.toLowerCase() === 'easebuzz' && (
-                        <img src="/logos/easebuzz.png" alt="Easebuzz" style={{ height: '13px', objectFit: 'contain' }} />
-                      )}
-                      <span style={{ fontWeight: 700, color: '#0f172a' }}>{order.paymentProvider}</span>
-                    </div>
-                  }
-                />
-              )}
-              <DetailRow label="Gateway" value={payment?.paymentGateway ?? order.paymentGateway} />
-              <DetailRow
-                label="Transaction ID"
-                value={payment?.gatewayTransactionId ?? order.gatewayTransactionId}
-                mono
-                copyable
-                onCopy={(val) => {
-                  navigator.clipboard.writeText(val)
-                  toast.toast('success', 'Transaction ID copied!')
-                }}
-              />
-              <DetailRow label="Financial status" value={payment?.financialStatus ?? order.financialStatus} />
-              <DetailRow label="Channel" value={order.salesChannel} />
-              <DetailRow label="Verified at" value={formatDate(payment?.paymentVerifiedAt ?? order.paymentVerifiedAt)} />
-
-              {!order.paymentVerified && (
-                <Button
-                  className="button-primary full-button"
-                  loading={action.isPending && action.variables === 'verify'}
-                  onClick={() => action.mutate('verify')}
-                >
-                  <Icon name="shield" size={16} />
-                  Verify payment
-                </Button>
-              )}
-
-              {/* Direct Shopify Refund Option */}
-              {order.status !== 'REFUNDED' && (
-                <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: '1px dashed #e2e8f0', display: 'flex', flexDirection: 'column', gap: '7px' }}>
-                  <Button
-                    className="button-secondary full-button"
-                    style={{ borderColor: '#fca5a5', color: '#b91c1c', background: '#fff5f5' }}
-                    loading={refundMutation.isPending}
-                    onClick={() => refundMutation.mutate()}
-                  >
-                    <Icon name="dollar" size={15} />
-                    Issue Shopify Refund ({formatMoney(order.totalAmount, order.currency)})
-                  </Button>
-                  <span style={{ fontSize: '10px', color: '#64748b', textAlign: 'center' }}>
-                    ⚡ Processes refund directly via Shopify API. Shopify automatically routes the refund back through {order.paymentAggregator || 'GoKwik'}{order.paymentProvider ? ` / ${order.paymentProvider}` : ''} to the customer.
+              }
+            />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '7px', padding: '10px 12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                  <span className="detail-label">GoKwik Delivery Track Record</span>
+                  <span style={{ fontSize: '11px', fontWeight: 800, color: (order.deliverOrderCount || 0) >= 2 ? '#047857' : '#b45309' }}>
+                    {order.deliverOrderCount ?? 0} Prior Deliveries
                   </span>
                 </div>
-              )}
-            </div>
-          )}
-        </Panel>
+                <p style={{ margin: 0, fontSize: '11.5px', color: '#334155', lineHeight: 1.45 }}>
+                  {order.rtoRiskReason ||
+                    (order.paymentMethod !== 'COD'
+                      ? 'Prepaid order captured upfront · Zero RTO risk'
+                      : isCodConf
+                      ? 'Customer purchase intent verified via WhatsApp COD confirmation'
+                      : 'Awaiting customer COD confirmation before dispatch')}
+                </p>
+              </div>
 
-        {/* ─── Customer Notifications ───────────────────────────── */}
-        <Panel>
-          <PanelHeading eyebrow="Customer communication" title="Notifications" />
-          {order.notifications?.length ? (
-            <div className="notification-list">
-              {order.notifications.map((notice, index) => (
-                <div className="notification-row" key={notice.id ?? index}>
-                  <div className="notification-icon">
-                    <Icon name="check" size={14} />
-                  </div>
-                  <div>
-                    <strong>{notice.type ?? notice.channel ?? 'Notification'}</strong>
-                    <span>{notice.message ?? notice.status ?? 'Sent'}</span>
-                    <time>{formatDate(notice.sentAt ?? notice.createdAt)}</time>
-                  </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '8px 10px' }}>
+                  <span className="detail-label">Payment Mode</span>
+                  <strong style={{ fontSize: '12px', color: '#0f172a' }}>{order.paymentMethod || 'Prepaid'}</strong>
                 </div>
-              ))}
+                <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '8px 10px' }}>
+                  <span className="detail-label">COD Confirmation</span>
+                  <strong style={{ fontSize: '12px', color: isCodConf ? '#047857' : '#64748b' }}>
+                    {isCodConf ? '✓ Confirmed' : order.paymentMethod === 'COD' ? 'Pending' : 'N/A (Prepaid)'}
+                  </strong>
+                </div>
+              </div>
             </div>
-          ) : (
-            <EmptyState title="No notifications" description="Messages sent for this order will appear here." icon="box" />
-          )}
-        </Panel>
+          </Panel>
+
+          {/* ─── UI UX Max Pro: Shopify Order Tags & Channel Sync ─── */}
+          <Panel>
+            <PanelHeading
+              eyebrow="Shopify Store Metadata"
+              title="Order Tags & Channel Sync"
+              action={
+                <span className="shopify-channel-pill">
+                  <Icon name="tag" size={11} /> Shopify Synced
+                </span>
+              }
+            />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div>
+                <span className="detail-label" style={{ marginBottom: '6px', display: 'block' }}>
+                  Store Tags (Payment & Automation)
+                </span>
+                {order.tags ? (
+                  <div className="shopify-tags-list">
+                    {order.tags.split(',').map((t) => t.trim()).filter(Boolean).map((tag) => {
+                      const lower = tag.toLowerCase()
+                      let modifier = 'tag-default'
+                      if (lower.includes('weight-mismatch') || lower.includes('mismatch')) modifier = 'tag-mismatch'
+                      else if (lower.includes('rebilled')) modifier = 'tag-rebilled'
+                      else if (lower.includes('gokwik') || lower.includes('kwik')) modifier = 'tag-gokwik'
+                      else if (lower.includes('prepaid')) modifier = 'tag-prepaid'
+                      else if (lower.includes('upi')) modifier = 'tag-upi'
+                      else if (lower.includes('cod')) modifier = 'tag-cod'
+                      else if (lower.includes('dispatch') || lower.includes('awb')) modifier = 'tag-dispatched'
+                      else if (lower.includes('refund')) modifier = 'tag-refund'
+
+                      return (
+                        <span key={tag} className={`shopify-tag-pill ${modifier}`} style={{ fontSize: '11px', padding: '3px 9px' }}>
+                          {tag}
+                        </span>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <span style={{ fontSize: '12px', color: '#94a3b8' }}>No tags assigned on Shopify</span>
+                )}
+              </div>
+
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '10px 12px', fontSize: '11px', color: '#334155', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontWeight: 700, color: '#0f172a' }}>🔗 Delhivery ONE Channel Link</span>
+                  <span style={{ color: '#16a34a', fontWeight: 700 }}>● Active</span>
+                </div>
+                <p style={{ margin: 0, fontSize: '10.5px', color: '#64748b', lineHeight: 1.4 }}>
+                  When Shopify is linked in Delhivery ONE, dispatches triggered from this OMS automatically update Shopify fulfillment tracking with carrier <strong>Delhivery</strong> and append the generated AWB to order tags.
+                </p>
+              </div>
+            </div>
+          </Panel>
+
+          {/* ─── Financials & 3-Way Money Reconciliation ─────────── */}
+          <Panel>
+            <PanelHeading
+              eyebrow="Financials"
+              title="Payment & Receipt"
+              action={
+                <span className={`payment-state ${payment?.paymentVerified ?? order.paymentVerified ? 'verified' : ''}`}>
+                  <span />
+                  {payment?.paymentVerified ?? order.paymentVerified ? 'Verified' : 'Unverified'}
+                </span>
+              }
+            />
+            {paymentQuery.isError ? (
+              <ErrorBox compact message={apiError(paymentQuery.error)} />
+            ) : (
+              <div className="payment-detail">
+                {/* ─── GoKwik / Easebuzz Aggregated Partner Payment Card ─── */}
+                {(order.paymentAggregator === 'GoKwik' ||
+                  (order.paymentGateway || '').toLowerCase().includes('kwik') ||
+                  order.paymentProvider) && (
+                  <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '14px', marginBottom: '14px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px', flexWrap: 'wrap', gap: '6px' }}>
+                      <span style={{ fontSize: '11px', fontWeight: 800, color: '#0f172a', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                        Payment Routing & Partner Settlement
+                      </span>
+                      <span className={`verified-badge ${order.paymentVerified ? 'verified' : 'unverified'}`}>
+                        {order.paymentVerified ? 'Captured & Verified' : 'Verification Pending'}
+                      </span>
+                    </div>
+
+                    {/* Flow Banner */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '10px 14px', marginBottom: '12px', flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <img src="/logos/gokwik.png" alt="GoKwik" style={{ height: '20px', objectFit: 'contain' }} />
+                        <div>
+                          <div style={{ fontSize: '11.5px', fontWeight: 700, color: '#034694' }}>GoKwik Checkout</div>
+                          <div style={{ fontSize: '9.5px', color: '#64748b' }}>Order & 1-Click Aggregator</div>
+                        </div>
+                      </div>
+                      <span style={{ color: '#94a3b8', fontSize: '13px', fontWeight: 700 }}>➔</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <img src="/logos/easebuzz.png" alt="Easebuzz" style={{ height: '18px', objectFit: 'contain' }} />
+                        <div>
+                          <div style={{ fontSize: '11.5px', fontWeight: 700, color: '#0f172a' }}>
+                            {order.paymentProvider || 'Easebuzz'}
+                          </div>
+                          <div style={{ fontSize: '9.5px', color: '#059669', fontWeight: 600 }}>Acquiring Payment Partner</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* IDs Grid */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '8px' }}>
+                      {order.paymentProviderPaymentId && (
+                        <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '7px 9px' }}>
+                          <span className="detail-label" style={{ fontSize: '10px', color: '#64748b' }}>Easebuzz Payment ID</span>
+                          <div
+                            className="waybill-chip"
+                            onClick={() => {
+                              navigator.clipboard.writeText(order.paymentProviderPaymentId || '')
+                              toast.toast('success', 'Easebuzz Payment ID copied!')
+                            }}
+                            style={{ marginTop: '2px', cursor: 'pointer' }}
+                            title="Click to copy Easebuzz ID"
+                          >
+                            <span className="mono" style={{ fontSize: '11px', fontWeight: 700, color: '#0f172a' }}>
+                              {order.paymentProviderPaymentId}
+                            </span>
+                            <Icon name="copy" size={11} />
+                          </div>
+                        </div>
+                      )}
+                      {order.gokwikPaymentId && (
+                        <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '7px 9px' }}>
+                          <span className="detail-label" style={{ fontSize: '10px', color: '#64748b' }}>GoKwik Payment ID</span>
+                          <div
+                            className="waybill-chip"
+                            onClick={() => {
+                              navigator.clipboard.writeText(order.gokwikPaymentId || '')
+                              toast.toast('success', 'GoKwik Payment ID copied!')
+                            }}
+                            style={{ marginTop: '2px', cursor: 'pointer' }}
+                            title="Click to copy GoKwik ID"
+                          >
+                            <span className="mono" style={{ fontSize: '11px', fontWeight: 700, color: '#034694' }}>
+                              {order.gokwikPaymentId}
+                            </span>
+                            <Icon name="copy" size={11} />
+                          </div>
+                        </div>
+                      )}
+                      {order.paymentReference && (
+                        <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '7px 9px' }}>
+                          <span className="detail-label" style={{ fontSize: '10px', color: '#64748b' }}>Bank Reference / UTR</span>
+                          <div
+                            className="waybill-chip"
+                            onClick={() => {
+                              navigator.clipboard.writeText(order.paymentReference || '')
+                              toast.toast('success', 'Bank UTR copied!')
+                            }}
+                            style={{ marginTop: '2px', cursor: 'pointer' }}
+                            title="Click to copy Bank UTR"
+                          >
+                            <span className="mono" style={{ fontSize: '11px', fontWeight: 700, color: '#15803d' }}>
+                              {order.paymentReference}
+                            </span>
+                            <Icon name="copy" size={11} />
+                          </div>
+                        </div>
+                      )}
+                      {order.paymentAuthorizationKey && (
+                        <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '7px 9px' }}>
+                          <span className="detail-label" style={{ fontSize: '10px', color: '#64748b' }}>Authorization Key</span>
+                          <div
+                            className="waybill-chip"
+                            onClick={() => {
+                              navigator.clipboard.writeText(order.paymentAuthorizationKey || '')
+                              toast.toast('success', 'Auth Key copied!')
+                            }}
+                            style={{ marginTop: '2px', cursor: 'pointer' }}
+                            title="Click to copy Auth Key"
+                          >
+                            <span className="mono" style={{ fontSize: '11px', fontWeight: 700, color: '#475569' }}>
+                              {order.paymentAuthorizationKey}
+                            </span>
+                            <Icon name="copy" size={11} />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                <DetailRow
+                  label="Amount"
+                  value={formatMoney(payment?.totalAmount ?? order.totalAmount, payment?.currency ?? order.currency)}
+                  strong
+                />
+                <DetailRow label="Method" value={payment?.paymentMethod ?? order.paymentMethod} />
+                <DetailRow
+                  label="Money Source"
+                  value={
+                    order.paymentMethod === 'COD' ? (
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                        {order.shipment?.courier?.toLowerCase() === 'delhivery' && (
+                          <img src="/logos/delhivery.png" alt="Delhivery" style={{ height: '11px', objectFit: 'contain' }} />
+                        )}
+                        <span>{order.shipment?.courier || 'Cash'} on Delivery Collection</span>
+                      </div>
+                    ) : order.paymentAggregator === 'GoKwik' || (order.paymentGateway || '').toLowerCase().includes('gokwik') ? (
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                        <img src="/logos/gokwik.png" alt="GoKwik" style={{ height: '14px', objectFit: 'contain' }} />
+                        <span style={{ color: '#94a3b8', fontSize: '11px' }}>via</span>
+                        <img src="/logos/easebuzz.png" alt="Easebuzz" style={{ height: '13px', objectFit: 'contain' }} />
+                        <span style={{ fontWeight: 600, color: '#0f172a' }}>{order.paymentProvider || 'Easebuzz'}</span>
+                      </div>
+                    ) : (order.paymentGateway || '').toLowerCase().includes('phonepe') ? (
+                      'PhonePe Payment Gateway'
+                    ) : (
+                      payment?.paymentGateway ?? order.paymentGateway
+                    )
+                  }
+                />
+                {order.paymentAggregator && (
+                  <DetailRow
+                    label="Aggregator"
+                    value={
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                        {order.paymentAggregator.toLowerCase() === 'gokwik' && (
+                          <img src="/logos/gokwik.png" alt="GoKwik" style={{ height: '13px', objectFit: 'contain' }} />
+                        )}
+                        <span>{order.paymentAggregator} Checkout</span>
+                      </div>
+                    }
+                  />
+                )}
+                {order.paymentProvider && (
+                  <DetailRow
+                    label="Acquiring Partner"
+                    value={
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                        {order.paymentProvider.toLowerCase() === 'easebuzz' && (
+                          <img src="/logos/easebuzz.png" alt="Easebuzz" style={{ height: '13px', objectFit: 'contain' }} />
+                        )}
+                        <span style={{ fontWeight: 700, color: '#0f172a' }}>{order.paymentProvider}</span>
+                      </div>
+                    }
+                  />
+                )}
+                <DetailRow label="Gateway" value={payment?.paymentGateway ?? order.paymentGateway} />
+                <DetailRow
+                  label="Transaction ID"
+                  value={payment?.gatewayTransactionId ?? order.gatewayTransactionId}
+                  mono
+                  copyable
+                  onCopy={(val) => {
+                    navigator.clipboard.writeText(val)
+                    toast.toast('success', 'Transaction ID copied!')
+                  }}
+                />
+                <DetailRow label="Financial status" value={payment?.financialStatus ?? order.financialStatus} />
+                <DetailRow label="Channel" value={order.salesChannel} />
+                <DetailRow label="Verified at" value={formatDate(payment?.paymentVerifiedAt ?? order.paymentVerifiedAt)} />
+
+                {!order.paymentVerified && (
+                  <Button
+                    className="button-primary full-button"
+                    loading={action.isPending && action.variables === 'verify'}
+                    onClick={() => action.mutate('verify')}
+                  >
+                    <Icon name="shield" size={16} />
+                    Verify payment
+                  </Button>
+                )}
+
+                {/* Direct Shopify Refund Option */}
+                {order.status !== 'REFUNDED' && (
+                  <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: '1px dashed #e2e8f0', display: 'flex', flexDirection: 'column', gap: '7px' }}>
+                    <Button
+                      className="button-secondary full-button"
+                      style={{ borderColor: '#fca5a5', color: '#b91c1c', background: '#fff5f5' }}
+                      loading={refundMutation.isPending}
+                      onClick={() => refundMutation.mutate()}
+                    >
+                      <Icon name="dollar" size={15} />
+                      Issue Shopify Refund ({formatMoney(order.totalAmount, order.currency)})
+                    </Button>
+                    <span style={{ fontSize: '10px', color: '#64748b', textAlign: 'center' }}>
+                      ⚡ Processes refund directly via Shopify API. Shopify automatically routes the refund back through {order.paymentAggregator || 'GoKwik'}{order.paymentProvider ? ` / ${order.paymentProvider}` : ''} to the customer.
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+          </Panel>
+
+          {/* ─── Customer Notifications ───────────────────────────── */}
+          <Panel>
+            <PanelHeading eyebrow="Customer communication" title="Notifications" />
+            {order.notifications?.length ? (
+              <div className="notification-list">
+                {order.notifications.map((notice, index) => (
+                  <div className="notification-row" key={notice.id ?? index}>
+                    <div className="notification-icon">
+                      <Icon name="check" size={14} />
+                    </div>
+                    <div>
+                      <strong>{notice.type ?? notice.channel ?? 'Notification'}</strong>
+                      <span>{notice.message ?? notice.status ?? 'Sent'}</span>
+                      <time>{formatDate(notice.sentAt ?? notice.createdAt)}</time>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <EmptyState title="No notifications" description="Messages sent for this order will appear here." icon="box" />
+            )}
+          </Panel>
+        </details>
 
         {/* ─── Reverse Logistics & Return Management ─────────────── */}
         <ReturnForm

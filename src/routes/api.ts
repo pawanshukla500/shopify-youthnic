@@ -7,6 +7,8 @@ import trackingService from '../modules/tracking/tracking.service';
 import shopifyService from '../modules/shopify/shopify.service';
 import paymentService from '../modules/payments/payment.service';
 import delhiveryService from '../modules/delhivery/delhivery.service';
+import { readSpreadsheet } from '../modules/accounts/spreadsheet';
+import { importDelhiveryRemittance, recordPaymentReceived } from '../modules/accounts/reconciliation.service';
 import { config } from '../config';
 import prisma from '../database/prisma';
 import logger from '../utils/logger';
@@ -117,7 +119,8 @@ router.get('/dashboard/stats', async (_req: Request, res: Response): Promise<voi
 
     // Delivery & Dispatches — same queues as the Orders page tabs.
     const tabOf = (order: (typeof allOrders)[number]) => classifyOrderTab(order);
-    const deliveredOrders = allOrders.filter((o) => tabOf(o) === 'delivered');
+    // "Payment Received" orders are delivered orders that also closed for accounts.
+    const deliveredOrders = allOrders.filter((o) => tabOf(o) === 'delivered' || tabOf(o) === 'closed');
     const deliveredCount = deliveredOrders.length;
     const transitOrders = allOrders.filter((o) => tabOf(o) === 'transit');
     const activeShipments = transitOrders.length;
@@ -2473,23 +2476,16 @@ router.post('/cod/remittance', async (req: Request, res: Response): Promise<void
         },
       });
 
+      // Same money fields as the remittance upload on Payments & Accounts.
+      // The remittance reference is not the customer's payment reference, so
+      // paymentReference is left alone.
       if (shipment.order) {
-        const currentTags = shipment.order.tags || '';
-        const tagSet = new Set(currentTags.split(',').map((t) => t.trim()).filter(Boolean));
-        tagSet.add('COD_REMITTED');
-        tagSet.add(`Remittance-${remittanceRef}`);
-        tagSet.add('Paid');
-
-        await prisma.order.update({
-          where: { id: shipment.order.id },
-          data: {
-            financialStatus: 'paid',
-            paymentVerified: true,
-            paymentVerificationSource: 'delhivery_cod_remittance',
-            paymentVerifiedAt: when,
-            paymentReference: String(remittanceRef),
-            tags: Array.from(tagSet).join(', '),
-          },
+        await recordPaymentReceived(shipment.order.id, {
+          receivedAt: when,
+          amount: remittedAmount,
+          utr: req.body?.utr ? String(req.body.utr) : null,
+          ref: String(remittanceRef),
+          source: 'DELHIVERY_REMITTANCE',
         });
       }
 
@@ -2502,126 +2498,28 @@ router.post('/cod/remittance', async (req: Request, res: Response): Promise<void
   }
 });
 
-// Import Delhivery Remittances CSV (Downloaded directly from Delhivery ONE > Finances > Remittances)
+// Import a Delhivery remittance export (Delhivery ONE > Finances > Remittance).
+// Kept for older callers; Payments & Accounts uploads use /api/accounts/import.
 router.post('/cod/remittance/import', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { csvContent } = req.body || {};
+    const { csvContent, fileName, utr, remittanceRef, remittedAt } = req.body || {};
     if (!csvContent || typeof csvContent !== 'string') {
       res.status(400).json({ error: 'csvContent is required' });
       return;
     }
-
-    const lines = csvContent
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter(Boolean);
-
-    if (lines.length < 2) {
-      res.status(400).json({ error: 'CSV file contains no data rows' });
-      return;
-    }
-
-    // Split headers
-    const delimiter = lines[0].includes('\t') ? '\t' : lines[0].includes(';') ? ';' : ',';
-    const cleanCell = (c: string) => c.replace(/^["']|["']$/g, '').trim();
-    const headers = lines[0].split(delimiter).map(cleanCell);
-
-    const findCol = (pattern: RegExp) => headers.findIndex((h) => pattern.test(h));
-    const wbnIdx = findCol(/waybill|awb|lrn|tracking/i);
-    const refIdx = findCol(/remittance.*(?:id|no|num|ref)|crn|utr|batch/i);
-    const amtIdx = findCol(/remitted.*amount|cod.*amount|net.*amount|amount|credit/i);
-    const dateIdx = findCol(/date|processed|remitted.*at/i);
-    const orderIdx = findCol(/order.*(?:id|no|name|ref)|client.*order/i);
-
-    if (wbnIdx === -1 && orderIdx === -1) {
-      res.status(400).json({
-        error: 'Could not detect Waybill or Order ID column in CSV. Expected headers: Waybill, Remittance ID, Amount.',
-        headers,
-      });
-      return;
-    }
-
-    let updatedCount = 0;
-    const notFound: string[] = [];
-    let totalRemitted = 0;
-
-    for (let i = 1; i < lines.length; i++) {
-      const parts = lines[i].split(delimiter).map(cleanCell);
-      const waybill = wbnIdx !== -1 ? parts[wbnIdx] : '';
-      const orderRef = orderIdx !== -1 ? parts[orderIdx] : '';
-      const ref = refIdx !== -1 && parts[refIdx] ? parts[refIdx] : 'DELHIVERY-REMITTANCE';
-      const rawAmt = amtIdx !== -1 ? parseFloat(parts[amtIdx].replace(/[^0-9.]/g, '')) : NaN;
-      const rawDate = dateIdx !== -1 && parts[dateIdx] ? new Date(parts[dateIdx]) : new Date();
-      const when = Number.isNaN(rawDate.getTime()) ? new Date() : rawDate;
-
-      const identifier = waybill || orderRef;
-      if (!identifier) continue;
-
-      const shipment = await prisma.shipment.findFirst({
-        where: {
-          OR: [
-            ...(waybill ? [{ waybillNumber: waybill }] : []),
-            ...(orderRef
-              ? [
-                  { order: { shopifyOrderName: orderRef } },
-                  { order: { shopifyOrderName: `#${orderRef}` } },
-                  { order: { shopifyOrderName: orderRef.replace(/^#/, '') } },
-                ]
-              : []),
-          ],
-        },
-        include: { order: true },
-      });
-
-      if (!shipment) {
-        notFound.push(identifier);
-        continue;
-      }
-
-      const amountToCredit = !isNaN(rawAmt) && rawAmt > 0 ? rawAmt : (shipment.codAmount || shipment.order?.totalAmount || 0);
-
-      await prisma.shipment.update({
-        where: { id: shipment.id },
-        data: {
-          codCollected: true,
-          codCollectedAt: shipment.codCollectedAt || when,
-          codRemitted: true,
-          codRemittedAt: when,
-          codRemittanceRef: ref,
-          codRemittedAmount: amountToCredit,
-        },
-      });
-
-      if (shipment.order) {
-        const currentTags = shipment.order.tags || '';
-        const tagSet = new Set(currentTags.split(',').map((t) => t.trim()).filter(Boolean));
-        tagSet.add('COD_REMITTED');
-        tagSet.add(`Remittance-${ref}`);
-        tagSet.add('Paid');
-
-        await prisma.order.update({
-          where: { id: shipment.order.id },
-          data: {
-            financialStatus: 'paid',
-            paymentVerified: true,
-            paymentVerificationSource: 'delhivery_cod_remittance',
-            paymentVerifiedAt: when,
-            paymentReference: ref,
-            tags: Array.from(tagSet).join(', '),
-          },
-        });
-      }
-
-      updatedCount++;
-      totalRemitted += amountToCredit;
-    }
-
+    const sheets = await readSpreadsheet(fileName || 'remittance.csv', Buffer.from(csvContent, 'utf8'));
+    const result = await importDelhiveryRemittance(
+      fileName || 'remittance.csv',
+      sheets,
+      { utr, remittanceRef, remittedAt },
+      (req as any).user?.email
+    );
     res.json({
       success: true,
-      message: `Processed remittance: ${updatedCount} shipments marked remitted, totaling ₹${totalRemitted.toFixed(2)}.`,
-      updated: updatedCount,
-      notFound,
-      totalAmount: totalRemitted,
+      message: `Processed remittance: ${result.matchedCount} shipments marked remitted.`,
+      updated: result.matchedCount,
+      notFound: result.unmatched,
+      notes: result.notes,
     });
   } catch (error: any) {
     res.status(500).json({ error: error.message });

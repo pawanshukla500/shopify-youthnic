@@ -25,6 +25,9 @@ const SECRET_KEYS = [
   'RESEND_API_KEY',
   'META_API_KEY',
   'FIREBASE_SERVICE_ACCOUNT_JSON',
+  // Optional gateway settlement API keys (Payments & Accounts)
+  'PHONEPE_CLIENT_SECRET',
+  'EASEBUZZ_SALT',
 ];
 
 const REMOTE_ENV_PATH = '/opt/shopify/Shopify/.env';

@@ -19,7 +19,7 @@
    - Avoid PowerShell pipeline redirection typos like `> $null` which creates a literal file named `$null`.
 
 3. **Verification Before Committing**:
-   - All unit and integration tests must pass: `cmd.exe /c "npm test"` (Vitest suite, 221 passing tests across 28 test files).
+   - All unit and integration tests must pass: `cmd.exe /c "npm test"` (Vitest suite, 279 passing tests across 33 test files).
    - Backend TypeScript build must compile cleanly: `cmd.exe /c "npm run build"`.
    - Frontend Vite bundle must build cleanly: `cmd.exe /c "cd frontend && npm run build"`.
 
@@ -140,6 +140,27 @@
 - `customerAddress` joins `address1` and `address2`; `customerName` is the shipping-address (consignee) name.
 - A Shopify webhook id is released when processing fails, so Shopify's retry is processed instead of deduplicated.
 
+### N. Payments & Accounts (closing orders for accounts)
+- **Payment received** means money credited to Youthnic's bank for the order: the gateway settlement for prepaid (PhonePe / Easebuzz / GoKwik), the Delhivery COD remittance for COD. It is stored in `Order.paymentReceived{At,Amount,Utr,Ref,Source}` + `gatewayFee`, always through `recordPaymentReceived`. `paymentReference` stays the customer's checkout reference and is never overwritten by a remittance.
+- **Payment Received tab** (`closed`): `order-tabs.accountsStatus` is the single rule, shared by the Orders tab, the order page and the monthly report. An order is CLOSED when it is delivered, payment received **with a bank UTR** (`paymentReceivedAt` + `paymentReceivedUtr`; a payment recorded without a UTR stays open as "UTR missing"), `RETURN_WINDOW_DAYS` (7) past `deliveredAt`, and no return is open. Cancelled, RTO and refunded orders are NOT_A_SALE. `closed` maps to no status in `ORDER_TABS`; it is classified only.
+- The hourly job (`runAccountsMaintenance`) backfills `deliveredAt` for older delivered orders and stamps `accountsClosedAt` plus the Shopify tags `Payment_Received` and `Return_Window_Closed`.
+- **No Delhivery API exists for COD remittance or billed charges.** Both come from uploaded panel files (`/api/accounts/import`): the Remittance export and the Wallet Ledger / invoice AWB backup.
+  - The charge for a leg is its **latest debit** per AWB and leg; credits/refunds are not costs. A reverse-pickup AWB is recognised by matching `Return.returnWaybillNumber`.
+  - Only a description/narration column decides the RTO leg, never a parcel Status column.
+  - Each leg keeps its own source: forward `shippingCostSource`, RTO `rtoChargeSource`, reverse `Return.shippingCostSource`.
+  - Report references match an order only if exactly one order matches (`findOrderByReference`).
+  - A UTR typed on the upload form is applied only to files covering a single remittance.
+  - `.xlsx` reading caches `columnCount` (exceljs recomputes it per call, which made large ledgers block the server for minutes). Merged title cells are blanked, and exceljs dates are read as IST wall-clock time.
+- **Shipping cost estimates** come only from Delhivery's live rate API (`fetchLiveShippingRate`): about 8 spaced calls every 15 minutes, because the limit is 50 per 5 minutes per IP.
+  - Never write `calculateRateCardMatrix` (a made-up pincode table) into accounts data.
+  - `ACTUAL` costs are never overwritten by estimates.
+  - Prisma `not`/`NOT` on a nullable column drops NULL rows, so spell out `null`.
+- **Gateway settlement APIs** (PhonePe v2 OAuth settlements, Easebuzz Payout API) run daily only when their keys are set. PhonePe amounts are in paise; `phonePeAmountToRupees` checks them against the order total. Without keys, the settlement report is uploaded instead.
+- **Monthly report** (`accounts-report.service`) covers orders **placed** in a month, IST boundaries, as an Excel workbook with sheets Summary, Orders, COD Remittance, Prepaid Settlements, Shipping Costs, and Returns & Refunds.
+  - Sending: emailed on the 8th at 09:00 IST to the recipients set on the Payments & Accounts page (or `ACCOUNTS_REPORT_EMAILS`), at most once per month. The hourly job catches up if the 8th was missed, but never before 09:00 IST on the 8th.
+  - One sender per month: the send is claimed by creating the unique `Setting accounts_report_sent:YYYY-MM` (`SENDING:<time>`). A failed send deletes the claim so the next hour retries, and a claim older than 30 minutes is taken over.
+  - Format: data sheets start at row 1 with a frozen, filterable header, real dates, and `SUBTOTAL(109)` totals so they can be exported as they are.
+
 ---
 
 ## 4. Summary of Recent Agent Developments (PR #1 to PR #13)
@@ -166,7 +187,7 @@
 ## 5. Development & Testing Commands
 
 ```bash
-# 1. Run all Vitest unit tests (221 tests across 28 test files)
+# 1. Run all Vitest unit tests (279 tests across 33 test files)
 cmd.exe /c "npm test"
 
 # 2. Typecheck and build backend

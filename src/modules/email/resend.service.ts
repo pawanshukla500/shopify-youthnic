@@ -358,6 +358,46 @@ class ResendService {
     }
   }
 
+  /**
+   * Internal (team) email with optional attachments, e.g. the monthly accounts
+   * report. Not a customer template: no tracking pixel, no EmailLog row.
+   * Throws when Resend is not configured or rejects the message, so the
+   * caller can retry rather than believe it was sent.
+   */
+  async sendInternalEmail(options: {
+    to: string[];
+    subject: string;
+    html: string;
+    attachments?: Array<{ filename: string; content: Buffer }>;
+  }): Promise<{ id: string }> {
+    if (!this.apiKey) {
+      throw new Error('RESEND_API_KEY is not configured, so the email cannot be sent');
+    }
+    const response = await axios.post(
+      `${this.apiUrl}/emails`,
+      {
+        from: this.fromEmail,
+        to: options.to,
+        subject: options.subject,
+        html: options.html,
+        ...(config.resend.replyToEmail ? { reply_to: config.resend.replyToEmail } : {}),
+        ...(options.attachments?.length
+          ? {
+              attachments: options.attachments.map((file) => ({
+                filename: file.filename,
+                content: file.content.toString('base64'),
+              })),
+            }
+          : {}),
+      },
+      {
+        headers: { Authorization: `Bearer ${this.apiKey}`, 'Content-Type': 'application/json' },
+        timeout: 30000,
+      }
+    );
+    return { id: response.data?.id || '' };
+  }
+
   getStatus() {
     return {
       apiKeyConfigured: Boolean(this.apiKey),

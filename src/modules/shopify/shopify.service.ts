@@ -16,6 +16,7 @@ import {
   orderStatusFromLiveTracking,
   trackingLabelFromShopify,
 } from '../orders/order-tabs';
+import { OMS_OWNED_ORDER_STATUSES } from '../orders/order-lifecycle';
 
 /**
  * Shopify Service
@@ -32,6 +33,47 @@ const KNOWN_ORDER_SOURCES: Record<string, string> = {
   iphone: 'Shopify Mobile (iPhone)',
   android: 'Shopify Mobile (Android)',
 };
+
+/** Round a rupee amount to paise. */
+export function roundMoney(value: number): number {
+  return Math.round((Number(value) || 0) * 100) / 100;
+}
+
+/**
+ * Find the Shopify line item for one of our order items.
+ *
+ * Every size of a product shares the same title, so title is only a last
+ * resort: variant id first, then SKU, then title + variant title, then a title
+ * whose line is the only one with that title. Lines in `taken` are skipped so
+ * two of our items never map onto the same Shopify line.
+ */
+export function matchShopifyLineItem<T extends { id: number; variant_id?: number | string | null; sku?: string | null; title?: string | null; variant_title?: string | null }>(
+  lineItems: T[],
+  item: { shopifyVariantId?: string | null; sku?: string | null; title?: string | null; variantTitle?: string | null },
+  taken: Set<number> = new Set()
+): T | undefined {
+  const open = lineItems.filter((li) => !taken.has(li.id));
+  const variantId = (item.shopifyVariantId || '').toString().trim();
+  if (variantId) {
+    const byVariant = open.find((li) => li.variant_id != null && li.variant_id.toString() === variantId);
+    if (byVariant) return byVariant;
+  }
+  if (item.sku) {
+    const bySku = open.find((li) => li.sku && li.sku === item.sku);
+    if (bySku) return bySku;
+  }
+  if (item.title && item.variantTitle) {
+    const byTitleAndVariant = open.find(
+      (li) => li.title === item.title && (li.variant_title || '') === item.variantTitle
+    );
+    if (byTitleAndVariant) return byTitleAndVariant;
+  }
+  if (item.title) {
+    const sameTitle = open.filter((li) => li.title === item.title);
+    if (sameTitle.length === 1) return sameTitle[0];
+  }
+  return undefined;
+}
 
 class ShopifyService {
   private client: AxiosInstance;
@@ -292,15 +334,22 @@ class ShopifyService {
    */
   verifyWebhook(rawBody: string, hmacHeader: string): boolean {
     if (!config.shopify.webhookSecret) {
+      // A forged orders/create marked "paid" would otherwise be imported and
+      // dispatched. Only local development may run without a secret.
+      if (config.nodeEnv === 'production') {
+        logger.error('Shopify webhook rejected: no SHOPIFY_CLIENT_SECRET / SHOPIFY_WEBHOOK_SECRET configured');
+        return false;
+      }
       logger.warn('SHOPIFY_WEBHOOK_SECRET not set — skipping verification');
       return true;
     }
     const crypto = require('crypto');
-    const hmac = crypto
+    const expected: Buffer = crypto
       .createHmac('sha256', config.shopify.webhookSecret)
       .update(rawBody, 'utf8')
-      .digest('base64');
-    return hmac === hmacHeader;
+      .digest();
+    const provided = Buffer.from(hmacHeader || '', 'base64');
+    return provided.length === expected.length && crypto.timingSafeEqual(provided, expected);
   }
 
   /**
@@ -308,26 +357,41 @@ class ShopifyService {
    * This processes the refund through Shopify so the customer gets their money back
    * via the original payment gateway.
    *
-   * @param shopifyOrderId - Shopify order ID (REST id as string)
-   * @param refundAmount - amount to refund
-   * @param refundLineItems - items being refunded with quantities
-   */
-  /**
-   * Create a refund on Shopify for an order.
-   * This processes the refund through Shopify so the customer gets their money back
-   * via the original payment gateway.
+   * Shopify's refunds/calculate decides the refund line items, shipping and the
+   * amount per parent transaction, so order discounts and taxes are respected.
    *
    * @param shopifyOrderId - Shopify order ID (REST id as string)
-   * @param refundAmount - amount to refund
+   * @param refundAmount - amount to refund; null refunds exactly what Shopify
+   *   calculates for the given line items (and shipping). A number is capped at
+   *   what the order still has refundable.
    * @param refundLineItems - items being refunded with quantities
+   * @param refundShipping - also refund the order's shipping charge
+   * @param options.idempotencyKey - written into the refund note. If a refund
+   *   with this key already exists (an earlier attempt reached Shopify but its
+   *   response was lost), it is returned instead of refunding again.
+   * @returns amount actually refunded, and moneyMoved=false when the order had
+   *   no captured payment (COD), so nothing went back to the customer.
    */
   async createRefund(
     shopifyOrderId: string,
-    refundAmount: number,
+    refundAmount: number | null,
     refundLineItems: Array<{ lineItemId: number; quantity: number; restockType?: string }>,
-    refundShipping: boolean = false
-  ): Promise<{ refundId: string; success: boolean }> {
+    refundShipping: boolean = false,
+    options: { idempotencyKey?: string } = {}
+  ): Promise<{ refundId: string; success: boolean; amount: number; moneyMoved: boolean; alreadyRefunded: boolean }> {
     try {
+      if (options.idempotencyKey) {
+        const existing = await this.findRefundByKey(shopifyOrderId, options.idempotencyKey);
+        if (existing) {
+          logger.warn('Shopify already has a refund for this key, not refunding again', {
+            shopifyOrderId,
+            idempotencyKey: options.idempotencyKey,
+            refundId: existing.refundId,
+          });
+          return { ...existing, success: true, alreadyRefunded: true };
+        }
+      }
+
       // Calculate first so Shopify determines valid refundable line items,
       // duties, taxes, and shipping values for the current order state.
       const calculationResponse = await this.client.post(
@@ -349,37 +413,67 @@ class ShopifyService {
         throw new Error('Shopify did not return a calculated refund');
       }
 
-      // Fetch transactions from Shopify's transaction resource
-      const transactionResponse = await this.client.get(
-        `/orders/${shopifyOrderId}/transactions.json`
+      let transactionsPayload: Array<{ parent_id: number; amount: string; kind: 'refund'; gateway: string }> = [];
+      let amount = 0;
+
+      // Shopify suggests one refund per parent payment, with the most that can
+      // still be refunded from it.
+      const suggested = (calculatedRefund.transactions || []).filter(
+        (t: any) => t.kind === 'suggested_refund' && t.parent_id
       );
-      const transactions = transactionResponse.data.transactions || [];
+      if (suggested.length > 0) {
+        const maxRefundable = roundMoney(
+          suggested.reduce((sum: number, t: any) => sum + (parseFloat(t.maximum_refundable) || 0), 0)
+        );
+        const suggestedAmount = roundMoney(
+          suggested.reduce((sum: number, t: any) => sum + (parseFloat(t.amount) || 0), 0)
+        );
+        amount = refundAmount === null ? suggestedAmount : Math.min(roundMoney(refundAmount), maxRefundable);
+        if (refundAmount !== null && refundAmount > maxRefundable) {
+          logger.warn('Refund amount capped at what Shopify still has refundable', {
+            shopifyOrderId,
+            requested: refundAmount,
+            maxRefundable,
+          });
+        }
+        let remaining = amount;
+        for (const t of suggested) {
+          if (remaining <= 0) break;
+          const part = roundMoney(Math.min(remaining, parseFloat(t.maximum_refundable) || 0));
+          if (part > 0) {
+            transactionsPayload.push({ parent_id: t.parent_id, amount: part.toFixed(2), kind: 'refund', gateway: t.gateway });
+            remaining = roundMoney(remaining - part);
+          }
+        }
+      } else if (refundAmount !== null && refundAmount > 0) {
+        // Older behaviour for gateways Shopify gives no suggestion for: refund
+        // against the first successful sale/capture.
+        const transactionResponse = await this.client.get(
+          `/orders/${shopifyOrderId}/transactions.json`
+        );
+        const transactions = transactionResponse.data.transactions || [];
+        const parentTx = transactions.find(
+          (t: any) =>
+            (t.kind === 'sale' || t.kind === 'capture') &&
+            (t.status === 'success' || t.status === 'captured')
+        );
+        if (parentTx) {
+          amount = roundMoney(refundAmount);
+          transactionsPayload = [
+            { parent_id: parentTx.id, amount: amount.toFixed(2), kind: 'refund', gateway: parentTx.gateway },
+          ];
+        }
+      }
 
-      // Find the parent transaction (the original payment) to refund against
-      const parentTx = transactions.find(
-        (t: any) =>
-          (t.kind === 'sale' || t.kind === 'capture') &&
-          (t.status === 'success' || t.status === 'captured')
-      );
-
-      const transactionsPayload = parentTx
-        ? [
-            {
-              parent_id: parentTx.id,
-              amount: refundAmount.toFixed(2),
-              kind: 'refund',
-              gateway: parentTx.gateway,
-            },
-          ]
-        : [];
-
+      const moneyMoved = transactionsPayload.length > 0 && amount > 0;
       const refundPayload = {
         refund: {
+          ...(options.idempotencyKey ? { note: `[${options.idempotencyKey}] Refund issued by Youthnic OMS` } : {}),
           refund_line_items: calculatedRefund.refund_line_items,
           ...(refundShipping && calculatedRefund.shipping
             ? { shipping: calculatedRefund.shipping }
             : {}),
-          ...(transactionsPayload.length > 0 ? { transactions: transactionsPayload } : {}),
+          ...(moneyMoved ? { transactions: transactionsPayload } : {}),
         },
       };
 
@@ -389,15 +483,16 @@ class ShopifyService {
       );
 
       const refundId = response.data.refund?.id?.toString() || 'REFUND-' + Date.now();
-      logger.info('Refund created on Shopify', { shopifyOrderId, refundId, refundAmount });
+      const refundAmountLabel = moneyMoved ? amount : 0;
+      logger.info('Refund created on Shopify', { shopifyOrderId, refundId, amount: refundAmountLabel, moneyMoved });
 
       // Update order tags and notes on Shopify
       try {
         const orderData = await this.fetchOrder(shopifyOrderId);
         const existingTags = orderData.tags ? orderData.tags.split(',').map((t: string) => t.trim()) : [];
-        const newTags = Array.from(new Set([...existingTags, 'Refunded', `Refund-Processed:Rs${Math.round(refundAmount)}`]));
+        const newTags = Array.from(new Set([...existingTags, 'Refunded', `Refund-Processed:Rs${Math.round(refundAmountLabel)}`]));
         const timestamp = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
-        const noteAddition = `\n[Refund Processed - ${timestamp}] Amount: ₹${refundAmount.toFixed(2)} | Refund ID: ${refundId}`;
+        const noteAddition = `\n[Refund Processed - ${timestamp}] Amount: ₹${refundAmountLabel.toFixed(2)} | Refund ID: ${refundId}`;
         const updatedNote = (orderData as any).note ? `${(orderData as any).note}\n${noteAddition}` : noteAddition.trim();
 
         await this.client.put(`/orders/${shopifyOrderId}.json`, {
@@ -411,7 +506,7 @@ class ShopifyService {
         logger.warn('Could not append refund tag/note to Shopify order', { error: tagErr.message });
       }
 
-      return { refundId, success: true };
+      return { refundId, success: true, amount: refundAmountLabel, moneyMoved, alreadyRefunded: false };
     } catch (error: any) {
       logger.error('Failed to create refund on Shopify', {
         shopifyOrderId,
@@ -420,6 +515,30 @@ class ShopifyService {
       });
       throw error;
     }
+  }
+
+  /**
+   * The refund an earlier attempt created with this idempotency key, if any.
+   * Throws when Shopify cannot be read, so a caller never refunds blind.
+   */
+  private async findRefundByKey(
+    shopifyOrderId: string,
+    idempotencyKey: string
+  ): Promise<{ refundId: string; amount: number; moneyMoved: boolean } | null> {
+    const response = await this.client.get(`/orders/${shopifyOrderId}/refunds.json`);
+    const refunds: any[] = response.data?.refunds || [];
+    const match = refunds.find(
+      (refund) => typeof refund?.note === 'string' && refund.note.includes(`[${idempotencyKey}]`)
+    );
+    if (!match) return null;
+    // Payment-app gateways (Easebuzz, GoKwik) keep a refund "pending" while
+    // they settle it; that money is already on its way back.
+    const amount = roundMoney(
+      (match.transactions || [])
+        .filter((t: any) => t.kind === 'refund' && (t.status === 'success' || t.status === 'pending'))
+        .reduce((sum: number, t: any) => sum + (parseFloat(t.amount) || 0), 0)
+    );
+    return { refundId: String(match.id), amount, moneyMoved: amount > 0 };
   }
 
   /**
@@ -1350,6 +1469,19 @@ class ShopifyService {
     const phone = this.normalizePhone(
       order.phone || address?.phone || customer?.phone || ''
     );
+    // The consignee is whoever the parcel is addressed to, which is not always
+    // the account holder (gift orders). Delhivery prints this on the label.
+    const customerName =
+      (address?.name || `${address?.first_name || ''} ${address?.last_name || ''}`).trim() ||
+      `${customer?.first_name || ''} ${customer?.last_name || ''}`.trim() ||
+      'Customer';
+    // address2 carries the flat / house number and landmark. Dropping it is a
+    // common cause of "address incomplete" NDRs.
+    const customerAddress =
+      [address?.address1, address?.address2]
+        .map((part) => (part || '').trim())
+        .filter(Boolean)
+        .join(', ') || 'N/A';
 
     const { sourceName, salesChannel } = await this.resolveSalesChannel(order);
     const paymentMethod = this.detectPaymentMethod(order);
@@ -1487,6 +1619,8 @@ class ShopifyService {
       where: { shopifyOrderId: order.id.toString() },
       select: {
         dispatchedAt: true,
+        status: true,
+        shopifyUpdatedAt: true,
         shipment: {
           select: {
             status: true,
@@ -1498,6 +1632,19 @@ class ShopifyService {
         },
       },
     });
+    // Webhooks and the hourly poll can deliver an older copy of an order after
+    // a newer one was stored (a 10:04 poll result landing after a 10:05
+    // cancel). The older copy must never overwrite the newer state.
+    const storedUpdatedAt = (existingDispatch as any)?.shopifyUpdatedAt as Date | null | undefined;
+    if (storedUpdatedAt && order.updated_at && new Date(order.updated_at) < new Date(storedUpdatedAt)) {
+      logger.info('Skipping stale Shopify payload, a newer copy of this order is stored', {
+        orderName: order.name,
+        payloadUpdatedAt: order.updated_at,
+        storedUpdatedAt,
+      });
+      return;
+    }
+
     if (existingDispatch?.shipment?.trackingUpdatedAt) {
       const liveStatus = orderStatusFromLiveTracking(existingDispatch.shipment);
       const preShipCancel =
@@ -1505,6 +1652,13 @@ class ShopifyService {
       if (liveStatus && !preShipCancel) {
         status = liveStatus as OrderStatus;
       }
+    }
+
+    // Returns and refunds are run by the OMS, not Shopify. A refund's own
+    // orders/updated webhook would otherwise flip REFUNDED back to DELIVERED.
+    const storedStatus = (existingDispatch as any)?.status as string | undefined;
+    if (storedStatus && OMS_OWNED_ORDER_STATUSES.has(storedStatus)) {
+      status = storedStatus as OrderStatus;
     }
     const primaryActiveFulfillment = activeFulfillments[activeFulfillments.length - 1] || null;
     const fulfillmentDispatchedAt = primaryActiveFulfillment?.created_at
@@ -1522,10 +1676,10 @@ class ShopifyService {
           shopifyOrderId: order.id.toString(),
           shopifyOrderName: order.name,
           shopifyOrderNumber: order.number,
-          customerName: `${customer?.first_name || ''} ${customer?.last_name || ''}`.trim() || 'Customer',
+          customerName,
           customerPhone: phone || '0000000000',
           customerEmail: order.email || customer?.email || null,
-          customerAddress: address?.address1 || 'N/A',
+          customerAddress,
           customerCity: address?.city || 'N/A',
           customerState: address?.province || 'N/A',
           customerPincode: address?.zip || 'N/A',
@@ -1581,10 +1735,10 @@ class ShopifyService {
         },
         update: {
           shopifyOrderName: order.name,
-          customerName: `${customer?.first_name || ''} ${customer?.last_name || ''}`.trim() || 'Customer',
+          customerName,
           customerPhone: phone || '0000000000',
           customerEmail: order.email || customer?.email || null,
-          customerAddress: address?.address1 || 'N/A',
+          customerAddress,
           customerCity: address?.city || 'N/A',
           customerState: address?.province || 'N/A',
           customerPincode: address?.zip || 'N/A',
@@ -1629,17 +1783,29 @@ class ShopifyService {
           where: { orderId: dbOrder.id },
         });
 
+        // Every size of a product shares one title, so a row is matched on the
+        // variant id. Title is only used for rows stored without a variant id,
+        // and no row is matched twice (Kurta-S and Kurta-M stay two rows).
+        const matchedRowIds = new Set<number>();
         for (const item of order.line_items) {
           const vId = item.variant_id?.toString() || null;
           const imgUrl = vId ? imageMap.get(vId) || null : null;
-          const existingItem = existingItems.find(
-            (i) => (vId && i.shopifyVariantId === vId) || i.title === item.title
-          );
+          const unmatched = existingItems.filter((i) => !matchedRowIds.has(i.id));
+          const existingItem =
+            (vId ? unmatched.find((i) => i.shopifyVariantId === vId) : undefined) ||
+            unmatched.find(
+              (i) =>
+                i.title === item.title &&
+                (!vId || !i.shopifyVariantId) &&
+                (!item.variant_title || !i.variantTitle || i.variantTitle === item.variant_title)
+            );
+          if (existingItem) matchedRowIds.add(existingItem.id);
 
           if (existingItem) {
             await prisma.orderItem.update({
               where: { id: existingItem.id },
               data: {
+                shopifyVariantId: vId || existingItem.shopifyVariantId || null,
                 sku: item.sku || existingItem.sku || null,
                 title: item.title,
                 variantTitle: item.variant_title || existingItem.variantTitle || null,

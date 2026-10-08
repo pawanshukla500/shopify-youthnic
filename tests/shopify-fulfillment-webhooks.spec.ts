@@ -45,7 +45,7 @@ const { prismaStub } = vi.hoisted(() => ({
 }));
 vi.mock('../src/database/prisma', () => ({ default: prismaStub }));
 
-import webhookRouter from '../src/routes/webhooks';
+import webhookRouter, { resetWebhookCache } from '../src/routes/webhooks';
 import shopifyService from '../src/modules/shopify/shopify.service';
 
 function getShopifyHandler(): (req: any, res: any) => Promise<void> {
@@ -132,6 +132,33 @@ describe('Shopify fulfillment webhook handling', () => {
     expect(shopifyService.fetchOrder).not.toHaveBeenCalled();
     expect(shopifyService.syncOrderToDb).not.toHaveBeenCalled();
     expect(prismaStub.syncLog.create).not.toHaveBeenCalled();
+  });
+
+  it('processes Shopify\'s retry of a delivery that failed, but still dedupes a successful one', async () => {
+    resetWebhookCache();
+    const withId = (id: string) => {
+      const req = fulfillmentReq('fulfillments/update', { id: 1002, order_id: 456 });
+      req.headers['x-shopify-webhook-id'] = id;
+      return req;
+    };
+
+    // First delivery fails (e.g. Shopify fetch timed out) -> 500.
+    (shopifyService.fetchOrder as any).mockRejectedValueOnce(new Error('timeout'));
+    const failed = mockRes();
+    await getShopifyHandler()(withId('hook-retry-1'), failed);
+    expect(failed.statusCode).toBe(500);
+
+    // Shopify retries with the same webhook id: it must be processed, not deduplicated.
+    const retried = mockRes();
+    await getShopifyHandler()(withId('hook-retry-1'), retried);
+    expect(retried.body).toEqual({ received: true });
+    expect(shopifyService.syncOrderToDb).toHaveBeenCalledTimes(1);
+
+    // A third copy after success is a real duplicate.
+    const duplicate = mockRes();
+    await getShopifyHandler()(withId('hook-retry-1'), duplicate);
+    expect(duplicate.body).toEqual({ received: true, deduplicated: true });
+    expect(shopifyService.syncOrderToDb).toHaveBeenCalledTimes(1);
   });
 
   it('acknowledges but skips syncing when a fulfillment webhook has no order_id', async () => {

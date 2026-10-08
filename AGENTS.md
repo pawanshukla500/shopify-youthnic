@@ -19,7 +19,7 @@
    - Avoid PowerShell pipeline redirection typos like `> $null` which creates a literal file named `$null`.
 
 3. **Verification Before Committing**:
-   - All unit and integration tests must pass: `cmd.exe /c "npm test"` (Vitest suite, 88 passing tests across 15 test suites).
+   - All unit and integration tests must pass: `cmd.exe /c "npm test"` (Vitest suite, 221 passing tests across 28 test files).
    - Backend TypeScript build must compile cleanly: `cmd.exe /c "npm run build"`.
    - Frontend Vite bundle must build cleanly: `cmd.exe /c "cd frontend && npm run build"`.
 
@@ -70,9 +70,14 @@
 ### C. Dispatch State Transition (PR #11)
 - When a Delhivery AWB is generated:
   - The order status must be promoted from `DISPATCH_PENDING` / `NEW` to **`DISPATCHED`**.
-  - The shipment status must be promoted to **`IN_TRANSIT`** (or `AWB_ASSIGNED`).
+  - The shipment status must be promoted to **`CREATED`** with `trackingStatus: 'Label generated'` (awaiting pickup). Pickup counting and Shopify cancels depend on `CREATED`; the enum has no `AWB_ASSIGNED`.
   - An audit timestamp **`dispatchedAt`** is written to the order.
   - The tracking cron polls `PENDING`, `CREATED`, and `IN_TRANSIT` shipments so tracking updates flow continuously.
+- `dispatchOrder` is the only path to Delhivery (single, bulk, and the `/orders/sync` auto-dispatch) and enforces, on the server:
+  - **Approval**: prepaid, or COD with `COD_CONFIRMED` / Low RTO (`isApprovedForDispatch`). Unconfirmed COD is rejected.
+  - **Cutoff**: orders created before `ORDER_SYNC_START_DATE` are rejected.
+  - **No second AWB**: an order whose shipment has a live waybill (not `ERROR`/`CANCELLED`) is rejected.
+  - **Atomic claim**: `Order.dispatchLockedAt` is claimed with a conditional `updateMany` before the manifest call and released afterwards (stale after 5 min), so double clicks and concurrent callers cannot book two AWBs.
 
 ### D. Delhivery Package Dimensions & Freight Slab (PR #8)
 - Every shipment creation request sends explicit package dimensions to prevent courier overcharging:
@@ -91,9 +96,10 @@
 - The Youthnic logo is hosted on Firebase Storage (`https://storage.googleapis.com/.../public/youthnic-logo.png`) rather than inline base64 to ensure universal rendering across Outlook desktop, Apple Mail, and Gmail.
 - AWB tracking numbers use a clean monospace font stack (`JetBrains Mono`, `SF Mono`, `Menlo`, `Consolas`).
 
-### G. Database Schema & Deployment (Commit `3829719`)
-- Before building the application in CI/CD or production containers, execute `npx prisma db push --accept-data-loss`.
-- This ensures additive schema changes (such as `dispatchedAt`, `qcStoragePath`, `labelStoragePath`) exist in PostgreSQL before the generated Prisma client executes queries.
+### G. Database Schema & Deployment (Commit `3829719`, revised)
+- `deploy.yml` runs `npx prisma db push` **after** tests and both builds pass, and before the container is replaced, so a red build never changes the production schema under the running release.
+- Additive changes (new nullable or defaulted columns, indexes, tables) apply on every push to `main`.
+- A change Prisma flags as data loss (dropping a column/table, adding a unique constraint) stops the deploy. Re-run the workflow manually (`workflow_dispatch`) with **allow_data_loss** checked once that change is intended. Prefer additive schema changes.
 
 ### H. Alternating Label + Invoice Sequence (PR #13)
 - When generating combined shipping and invoice documents (single or bulk), pages must strictly follow the alternating sequence:
@@ -107,6 +113,32 @@
 ### J. External Fulfillment Telemetry Sync (PR #13)
 - External fulfillments (from Shopify Admin, Delhivery One, or 3PL) ingested via `fulfillments/create` or `fulfillments/update` webhooks must immediately trigger live tracking from the Delhivery tracking API in the background (`trackingService.syncShipmentTracking`).
 - Live tracking telemetry is exposed in real-time via `POST /api/orders/:id/track` and `POST /api/tracking/:waybill/sync`.
+
+### K. Refunds Move Money Exactly Once
+- Return refunds (`returnService.processRefund`) refund **only the returned items**, at the amount Shopify's `refunds/calculate` returns (discounts and taxes applied). Shipping is refunded only when QC fully approved a return of every unit. `PARTIAL` QC refunds without shipping and with `no_restock`.
+- A refund is claimed atomically (`refundStatus` NONE/FAILED → PENDING via `updateMany`) before Shopify is called, and carries an idempotency key in the Shopify refund note (`[oms-return-<id>]`, `[oms-rto-<orderId>]`). `createRefund` adopts an existing refund with the same key instead of refunding again.
+- Once Shopify accepted a refund, OMS bookkeeping errors are logged and never mark it `FAILED`. The hourly retry only retries QC-passed returns, keeps their QC result, and stops at `Return.refundAttempts` = 5.
+- A rescan of a scanned-in refunded return, or of one whose refund is pending, throws; it never refunds again. A return refunded before it arrived (direct full refund) is still scanned in: receipt and QC are recorded, no refund is issued. A refund claim left `PENDING` for 30+ minutes (dead process) is reset to `FAILED` and retried; the idempotency key adopts any refund Shopify already made.
+- A direct refund from the order page: a partial (goodwill) amount is money only, leaves the order status and any open return alone, and sets `financialStatus: partially_refunded`. A full refund closes the open return and restocks only when that return is bringing the items back.
+- `createRefund` reports `moneyMoved: false` when the order has no captured online payment (COD). Then no "refund processed" message or email is sent, and the return records that the customer must be paid by hand.
+- RTO auto-refunds (`orderService.processRtoRefund`) run only for an order that was never delivered, only after Delhivery's authenticated tracking API confirms `RTO_DELIVERED`, and never on a partially refunded or voided order. A prepaid order cancelled after pickup still gets its RTO refund (Shopify's cancel does not refund it); the carrier lock routes that one case to `processRtoRefund` (`needsRtoRefundAfterCancel`). Failures set `supportFlag` `RTO_REFUND_FAILED` (retried hourly, 5 attempts) or `RTO_REFUND_REVIEW` (needs a person).
+
+### L. Carrier Updates (Delhivery webhooks + tracking cron)
+- Shared rules live in `src/modules/orders/order-lifecycle.ts`; the webhook and the cron must use them, not their own copies.
+- The scan/EPOD webhooks may be called without a secret. Terminal statuses they push (`DELIVERED`, `RTO_DELIVERED`, `CANCELLED`) are applied only after `confirmTerminalStatus` re-reads the AWB from Delhivery's tracking API; unconfirmed claims are dropped entirely. EPOD lookups never use the internal numeric order id.
+- A pushed scan older than the newest one in `trackingHistory` is history only and never moves status. `DELIVERED` and `RTO_DELIVERED` are final for pushes.
+- Status changes use a conditional `updateMany` on the previously read status; the order transition and customer message run only for the writer that changed it.
+- An empty / `UNKNOWN` Delhivery answer for a live shipment changes nothing.
+- Cancelled, refunded and returned orders (`CARRIER_LOCKED_ORDER_STATUSES`) are not moved or messaged by carrier updates; a moving parcel on a cancelled/refunded order sets `supportFlag` `PARCEL_MOVING_ON_CLOSED_ORDER`.
+- Delivery stamps `Order.deliveredAt` and marks COD collected in the same write on both paths.
+- A Delhivery cancel is recorded only when Delhivery accepted it (`orderService.cancelLiveShipment`); a refusal keeps the shipment tracked and flags `DELHIVERY_CANCEL_FAILED`.
+
+### M. Shopify Sync Must Not Corrupt Stored Orders
+- A payload whose `updated_at` is older than the stored `shopifyUpdatedAt` is skipped.
+- `RETURN_REQUESTED`, `RETURN_DISPATCHED`, `RETURN_RECEIVED` and `REFUNDED` are owned by the OMS; Shopify sync never overwrites them.
+- Line items match on Shopify variant id (title only for rows without one, never the same row twice), so different sizes of one product stay separate rows. Refunds match lines with `matchShopifyLineItem` (variant → SKU → title + variant title).
+- `customerAddress` joins `address1` and `address2`; `customerName` is the shipping-address (consignee) name.
+- A Shopify webhook id is released when processing fails, so Shopify's retry is processed instead of deduplicated.
 
 ---
 
@@ -134,7 +166,7 @@
 ## 5. Development & Testing Commands
 
 ```bash
-# 1. Run all Vitest unit tests (88 tests across 15 test files)
+# 1. Run all Vitest unit tests (221 tests across 28 test files)
 cmd.exe /c "npm test"
 
 # 2. Typecheck and build backend

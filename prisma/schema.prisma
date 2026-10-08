@@ -75,6 +75,10 @@ model Order {
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
   dispatchedAt     DateTime? // Set when createShipment succeeds on Delhivery (AWB assigned, label printed)
+  // Claimed by dispatchOrder for the length of one Delhivery manifest call, so
+  // a double click, bulk dispatch and the sync auto-dispatch cannot manifest the
+  // same order twice. A claim older than a few minutes is treated as abandoned.
+  dispatchLockedAt DateTime?
   deliveredAt      DateTime? // Set when Delhivery reports delivery
   cancelledAt      DateTime? // Set when the order is cancelled
 
@@ -264,6 +268,9 @@ model Return {
   refundAmount      Float?
   shopifyRefundId   String?
   refundProcessedAt DateTime?
+  // Failed refund attempts. The hourly retry stops at the cap and leaves the
+  // return for a person instead of retrying forever.
+  refundAttempts    Int          @default(0)
 
   // Quality check on returned goods
   qcStatus    QcStatus? // set when return is scanned/delivered back

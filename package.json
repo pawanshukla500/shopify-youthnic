@@ -8,6 +8,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "auth:check": "tsx scripts/check-shopify-auth.ts",
+    "env:pull": "tsx scripts/pull-env-secrets.ts",
     "delhivery:check": "tsx scripts/check-delhivery-access.ts",
     "webhook:status": "tsx scripts/check-delhivery-access.ts",
     "order:fetch": "tsx scripts/fetch-order.ts",

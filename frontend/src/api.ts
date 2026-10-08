@@ -8,10 +8,35 @@ import type {
   ReturnRecord,
 } from './types'
 
+import { auth } from './firebase'
+
 export const api = axios.create({ baseURL: '/', headers: { 'Content-Type': 'application/json' } })
 
-api.interceptors.request.use((config) => {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('youthnic_firebase_token') : null
+const TOKEN_KEY = 'youthnic_firebase_token'
+
+/**
+ * A current Firebase ID token. Firebase ID tokens expire after an hour;
+ * getIdToken() returns the cached one and refreshes it shortly before expiry,
+ * so a long shift never sends an expired token (which used to bounce the
+ * operator to the login page mid-way through a bulk action). The stored copy
+ * is only used while Firebase is still restoring the session on page load.
+ */
+async function currentIdToken(forceRefresh = false): Promise<string | null> {
+  const user = auth.currentUser
+  if (user) {
+    try {
+      const token = await user.getIdToken(forceRefresh)
+      localStorage.setItem(TOKEN_KEY, token)
+      return token
+    } catch {
+      // fall through to the stored token
+    }
+  }
+  return typeof window !== 'undefined' ? localStorage.getItem(TOKEN_KEY) : null
+}
+
+api.interceptors.request.use(async (config) => {
+  const token = await currentIdToken()
   if (token && config.headers) {
     config.headers.Authorization = `Bearer ${token}`
   }
@@ -20,7 +45,17 @@ api.interceptors.request.use((config) => {
 
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
+    // One retry with a freshly minted token before treating the session as over.
+    const original = error.config
+    if (error.response?.status === 401 && original && !original._authRetried && auth.currentUser) {
+      original._authRetried = true
+      const token = await currentIdToken(true)
+      if (token) {
+        original.headers.Authorization = `Bearer ${token}`
+        return api(original)
+      }
+    }
     if (error.response?.status === 401 && typeof window !== 'undefined') {
       // Clear expired credentials and route to login
       localStorage.removeItem('youthnic_firebase_token')
@@ -179,6 +214,9 @@ export async function cancelOrder(
 ): Promise<{
   success: boolean
   message: string
+  /** Set when Delhivery refused to cancel the AWB: the parcel may still move. */
+  warning?: string
+  delhiveryCancel?: 'none' | 'cancelled' | 'refused'
   order: import('./types').Order
 }> {
   const response = await api.post(`/api/orders/${orderId}/cancel`, { reason })

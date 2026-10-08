@@ -1,6 +1,6 @@
 # Shopify OMS — Automated Order Management System
 
-[![Vitest Tests](https://img.shields.io/badge/Vitest-88%20Passed-brightgreen)](tests/)
+[![Vitest Tests](https://img.shields.io/badge/Vitest-221%20Passed-brightgreen)](tests/)
 [![TaskFlow Project](https://img.shields.io/badge/TaskFlow-Shopify%20Youthnic%20OMS-6366F1)](https://task.youthnic.shop/my-tasks?task=164ba233-9b5f-4c14-bc34-066cef4300fc)
 [![Branch](https://img.shields.io/badge/Git-origin%2Fmain-blue)](https://github.com/pawanshukla500/shopify-youthnic)
 
@@ -141,8 +141,13 @@ npx prisma db push
 
 # 4. Configure environment variables
 cp .env.example .env
+#    Fill the secret keys from the deployed server (GitHub secrets are
+#    write-only). Copies only empty secret keys over your own SSH key and
+#    never prints a value. Keep CRON_ENABLED=false locally: the .env then
+#    holds production credentials and production already runs the crons.
+npm run env:pull
 
-# 5. Run tests (Vitest suite — 38 tests)
+# 5. Run tests (Vitest suite — 221 tests)
 cmd.exe /c "npm test"
 
 # 6. Run development server (Port 3000)
@@ -170,7 +175,7 @@ Access the panel at <http://localhost:5173>.
 The project maintains comprehensive test coverage across critical business logic and integrations:
 
 ```bash
-# Run unit and integration tests (88 tests across 15 test suites)
+# Run unit and integration tests (221 tests across 28 test files)
 cmd.exe /c "npm test"
 
 # Run backend TypeScript compilation

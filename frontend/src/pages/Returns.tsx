@@ -23,7 +23,10 @@ export function Returns() {
       return (await api.post('/api/returns/scan', { waybillNumber: waybill.trim(), qcStatus, qcRemark: remark.trim() || undefined })).data
     },
     onSuccess: async (data) => {
-      toast.toast('success', data.message ?? `Package scanned${data.refundProcessed ? ' · Refund processed' : ''}.`)
+      toast.toast(
+        data.refundError ? 'error' : 'success',
+        data.message ?? `Package scanned${data.refundProcessed ? ' · Refund processed' : ''}.`
+      )
       setWaybill('')
       setRemark('')
       await queryClient.invalidateQueries({ queryKey: ['returns'] })
@@ -33,13 +36,22 @@ export function Returns() {
   })
 
   const refund = useMutation({
-    mutationFn: async ({ id, amount, orderName }: { id: number; amount: number; orderName?: string }) => {
-      const confirmed = window.confirm(`Process refund of ${formatMoney(amount)} for ${orderName || `Return #${id}`} directly via Shopify?`)
+    mutationFn: async ({ id, orderName }: { id: number; orderName?: string }) => {
+      // The server refunds only the returned items, at the price Shopify
+      // calculates (discounts and taxes applied), using the QC result recorded
+      // at the scan. There is no amount to show before Shopify calculates it.
+      const confirmed = window.confirm(
+        `Refund the returned items of ${orderName || `Return #${id}`} via Shopify? Shopify calculates the amount from what the customer paid.`
+      )
       if (!confirmed) throw new Error('USER_CANCELLED_REFUND')
-      return (await api.post(`/api/returns/${id}/refund`, { partial: false })).data
+      return (await api.post(`/api/returns/${id}/refund`, {})).data
     },
     onSuccess: async (data) => {
-      toast.toast('success', `Shopify refund processed${typeof data.refundAmount === 'number' ? ` · ${formatMoney(data.refundAmount)}` : ''}.`)
+      if (data.moneyMoved === false) {
+        toast.toast('error', 'Shopify recorded the refund, but this order has no online payment (COD). Pay the customer by UPI or bank transfer.')
+      } else {
+        toast.toast('success', `Shopify refund processed${typeof data.refundAmount === 'number' ? ` · ${formatMoney(data.refundAmount)}` : ''}.`)
+      }
       await queryClient.invalidateQueries({ queryKey: ['returns'] })
       await queryClient.invalidateQueries({ queryKey: ['orders'] })
     },
@@ -277,7 +289,9 @@ export function Returns() {
                     </td>
                     <td style={{ fontSize: '10px', color: '#64748b' }}>{formatDate(item.createdAt)}</td>
                     <td style={{ textAlign: 'right' }}>
-                      {item.refundStatus !== 'PROCESSED' && (
+                      {/* Only a return that was scanned in and passed QC can be refunded; FAILED can be retried. */}
+                      {(item.refundStatus === 'NONE' || item.refundStatus === 'FAILED') &&
+                        (item.qcStatus === 'APPROVED' || item.qcStatus === 'PARTIAL') && (
                         <Button
                           className="button-small button-secondary"
                           style={{ borderColor: '#fca5a5', color: '#b91c1c' }}
@@ -285,7 +299,6 @@ export function Returns() {
                           onClick={() =>
                             refund.mutate({
                               id: item.id,
-                              amount: item.refundAmount ?? 0,
                               orderName: item.order?.shopifyOrderName,
                             })
                           }

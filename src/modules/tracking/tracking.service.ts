@@ -7,6 +7,16 @@ import logger from '../../utils/logger';
 import { config } from '../../config';
 import { isDelhiveryCourier } from '../../utils/courier';
 import { ShipmentStatus } from '@prisma/client';
+import {
+  MOVING_SHIPMENT_STATUSES,
+  PARCEL_MOVING_ON_CLOSED_ORDER,
+  deliveredShipmentData,
+  isCarrierLockedOrderStatus,
+  needsRtoRefundAfterCancel,
+} from '../orders/order-lifecycle';
+
+/** Shipment states in which a customer may get a transit-delay notice. */
+const DELAY_NOTICE_SHIPMENT_STATUSES = new Set(['PICKED_UP', 'IN_TRANSIT', 'OUT_FOR_DELIVERY', 'FAILED']);
 
 /**
  * Tracking Service
@@ -66,7 +76,9 @@ class TrackingService {
         ],
       },
       include: { order: { include: { items: true } } },
-      orderBy: { trackingUpdatedAt: 'asc' },
+      // Never-polled shipments first. Postgres sorts NULLs last by default,
+      // which starved fresh AWBs whenever the stale backlog filled the batch.
+      orderBy: { trackingUpdatedAt: { sort: 'asc', nulls: 'first' } },
       take: batchLimit,
     });
 
@@ -94,6 +106,22 @@ class TrackingService {
         if (shipment.status === 'ERROR' && this.isMissingDelhiveryPackage(tracking)) {
           await this.releaseUnmanifestedWaybill(shipment);
           updatedCount++;
+          continue;
+        }
+
+        // No package data for a live shipment is "no news", not a scan. The
+        // status mapping would read it as IN_TRANSIT and pull an out-for-
+        // delivery or RTO parcel back, wiping its history and messaging the
+        // customer. Note the poll and wait for the next one.
+        if (this.isMissingDelhiveryPackage(tracking)) {
+          logger.warn('Delhivery returned no package data, shipment left unchanged', {
+            waybill: shipment.waybillNumber,
+            status: shipment.status,
+          });
+          await prisma.shipment.update({
+            where: { id: shipment.id },
+            data: { trackingUpdatedAt: new Date() },
+          });
           continue;
         }
 
@@ -259,13 +287,57 @@ class TrackingService {
       delhiveryStatusText,
     });
 
-    // Update shipment status
-    await prisma.shipment.update({
-      where: { id: shipment.id },
-      data: { status: newStatus },
+    // Update shipment status, conditional on the status this batch loaded. A
+    // scan webhook may have applied the same change since; then it already
+    // ran the transition and messaged the customer, so stop here.
+    const moved = await prisma.shipment.updateMany({
+      where: { id: shipment.id, status: oldStatus },
+      data: {
+        status: newStatus,
+        ...(newStatus === 'DELIVERED' ? deliveredShipmentData(shipment) : {}),
+      },
     });
+    if (moved.count === 0) {
+      logger.info('Shipment status changed elsewhere during this poll, transition skipped', {
+        waybill: shipment.waybillNumber,
+        oldStatus,
+        newStatus,
+      });
+      return;
+    }
 
     const order = shipment.order;
+
+    // Cancelled, refunded and returned orders are closed: the courier's
+    // update is recorded on the shipment, the order and customer are left
+    // alone, and a cancelled order whose parcel keeps moving is flagged.
+    if (isCarrierLockedOrderStatus(order.status)) {
+      if (needsRtoRefundAfterCancel(order, newStatus)) {
+        try {
+          const orderService = (await import('../orders/order.service')).default;
+          await orderService.processRtoRefund(order.id);
+        } catch (rtoErr: any) {
+          logger.error('RTO refund for a cancelled order failed during tracking update', { error: rtoErr.message });
+        }
+        return;
+      }
+      if (
+        (order.status === 'CANCELLED' || order.status === 'REFUNDED') &&
+        MOVING_SHIPMENT_STATUSES.has(newStatus) &&
+        !order.supportFlag
+      ) {
+        await prisma.order.update({
+          where: { id: order.id },
+          data: { hasUrgentSupport: true, supportFlag: PARCEL_MOVING_ON_CLOSED_ORDER },
+        });
+      }
+      logger.warn('Carrier update on a closed order, order left unchanged', {
+        orderId: order.id,
+        orderStatus: order.status,
+        shipmentStatus: newStatus,
+      });
+      return;
+    }
 
     // Map shipment status → order status + notifications
     switch (newStatus) {
@@ -323,20 +395,13 @@ class TrackingService {
       case 'DELIVERED':
         await prisma.order.update({
           where: { id: order.id },
-          data: { status: 'DELIVERED' },
+          data: { status: 'DELIVERED', deliveredAt: order.deliveredAt || new Date() },
         });
         // The courier collects the cash at delivery, so a delivered COD
         // shipment's COD amount is now "collected" and awaiting remittance
         // from Delhivery (Finances > Remittance in the Delhivery panel).
-        if (
-          shipment.paymentMode === 'COD' &&
-          (shipment.codAmount || 0) > 0 &&
-          !shipment.codCollected
-        ) {
-          await prisma.shipment.update({
-            where: { id: shipment.id },
-            data: { codCollected: true, codCollectedAt: new Date() },
-          });
+        // Written with the status change above (deliveredShipmentData).
+        if (deliveredShipmentData(shipment).codCollected) {
           logger.info('COD marked collected on delivery', {
             waybill: shipment.waybillNumber,
             codAmount: shipment.codAmount,
@@ -617,6 +682,18 @@ class TrackingService {
   async evaluateConsumerDelay(shipment: any, tracking: any): Promise<void> {
     const order = shipment.order;
     if (!order?.customerEmail) return;
+    if (isCarrierLockedOrderStatus(order.status)) return;
+
+    // A delay notice is only for a parcel still on its way to the customer.
+    // RTO parcels are past their expected date by design, and a delivered or
+    // cancelled one must not get "not delivered yet".
+    const liveStatus = delhiveryService.mapTrackingToShipmentStatus(
+      tracking.statusType || '',
+      tracking.status || '',
+      tracking.pickupDone,
+      tracking.remarks
+    );
+    if (!DELAY_NOTICE_SHIPMENT_STATUSES.has(liveStatus)) return;
 
     const expectedDelivery = tracking.expectedDeliveryDate
       ? new Date(tracking.expectedDeliveryDate)
@@ -666,7 +743,8 @@ class TrackingService {
           courier: shipment.courier || 'Delhivery Express',
           currentLocation: tracking.location || shipment.trackingLocation || 'Delhivery transit network',
           delayReason,
-          newEstimatedDelivery: expectedDelivery
+          // A date already missed is not a new estimate.
+          newEstimatedDelivery: expectedDelivery && !overdueExpectedDelivery
             ? expectedDelivery.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
             : 'Expected in 2-3 business days',
           items: order.items?.map((item: any) => ({

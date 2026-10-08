@@ -67,8 +67,17 @@ app.use((_req, res, next) => {
 // CORS
 app.use(cors());
 
-// Logging
-app.use(morgan('combined', { stream: { write: (msg) => logger.info(msg.trim()) } }));
+// Logging. Same as morgan's "combined" format, but a webhook secret passed as
+// ?secret= is masked so it never lands in the log files.
+morgan.token('safe-url', (req: any) =>
+  String(req.originalUrl || req.url || '').replace(/([?&](?:secret|token)=)[^&]*/gi, '$1[REDACTED]')
+);
+app.use(
+  morgan(
+    ':remote-addr - :remote-user [:date[clf]] ":method :safe-url HTTP/:http-version" :status :res[content-length] ":referrer" ":user-agent"',
+    { stream: { write: (msg) => logger.info(msg.trim()) } }
+  )
+);
 
 // Serve static logos (Easebuzz, GoKwik, Delhivery)
 app.use('/logos', express.static(path.join(__dirname, '../frontend/public/logos')));
@@ -165,6 +174,11 @@ const server = app.listen(config.port, () => {
   }
   if (!config.kwikenage.apiKey) {
     unconfigured.push('KWIKENAGE_API_KEY: WhatsApp notifications will fail');
+  }
+  if (!config.delhivery.webhookSecret && config.nodeEnv === 'production') {
+    unconfigured.push(
+      'DELHIVERY_WEBHOOK_SECRET: Delhivery webhooks accept unauthenticated posts (terminal statuses are still verified against the tracking API)'
+    );
   }
   if (unconfigured.length > 0) {
     logger.warn('Some integrations are not configured', { unconfigured });

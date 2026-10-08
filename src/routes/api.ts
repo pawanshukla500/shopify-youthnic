@@ -1534,20 +1534,28 @@ router.post('/orders/:id/cancel', async (req: Request, res: Response): Promise<v
       res.status(404).json({ error: 'Order not found' });
       return;
     }
-
-    let delhiveryCancelled = false;
-    if (order.shipment?.waybillNumber && order.shipment.status !== 'CANCELLED') {
-      try {
-        await delhiveryService.cancelShipment(order.shipment.waybillNumber);
-        await prisma.shipment.update({
-          where: { id: order.shipment.id },
-          data: { status: 'CANCELLED' },
-        });
-        delhiveryCancelled = true;
-      } catch (delErr: any) {
-        logger.warn('Failed to cancel Delhivery shipment during order cancel', { error: delErr.message });
-      }
+    if (
+      ['DELIVERED', 'RTO_DELIVERED', 'RETURN_REQUESTED', 'RETURN_DISPATCHED', 'RETURN_RECEIVED', 'REFUNDED'].includes(
+        order.status
+      )
+    ) {
+      res.status(409).json({
+        error: `Order ${order.shopifyOrderName} is ${order.status.replaceAll('_', ' ').toLowerCase()}. Use a return or refund instead of cancelling it.`,
+      });
+      return;
     }
+
+    // Delhivery answers a refused cancel with false, not an error. The shipment
+    // is marked cancelled only when Delhivery accepted, and the operator is
+    // told when the parcel may still move.
+    let delhiveryCancel: 'none' | 'cancelled' | 'refused' = 'none';
+    try {
+      delhiveryCancel = await orderService.cancelLiveShipment(order);
+    } catch (delErr: any) {
+      delhiveryCancel = 'refused';
+      logger.warn('Failed to cancel Delhivery shipment during order cancel', { error: delErr.message });
+    }
+    const delhiveryCancelled = delhiveryCancel === 'cancelled';
 
     let shopifyCancelled = false;
     try {
@@ -1567,14 +1575,25 @@ router.post('/orders/:id/cancel', async (req: Request, res: Response): Promise<v
       data: {
         status: 'CANCELLED',
         tags: updatedTags,
+        cancelledAt: order.cancelledAt || new Date(),
+        ...(delhiveryCancel === 'refused'
+          ? { hasUrgentSupport: true, supportFlag: 'DELHIVERY_CANCEL_FAILED' }
+          : {}),
       },
       include: { items: true, shipment: true },
     });
 
-    logger.info('Order cancelled successfully', { orderId, orderName: order.shopifyOrderName });
+    logger.info('Order cancelled successfully', { orderId, orderName: order.shopifyOrderName, delhiveryCancel });
     res.json({
       success: true,
-      message: `Order ${order.shopifyOrderName} cancelled.${delhiveryCancelled ? ' Delhivery shipment cancelled.' : ''}${shopifyCancelled ? ' Shopify order cancelled.' : ''}`,
+      delhiveryCancel,
+      warning:
+        delhiveryCancel === 'refused'
+          ? `Delhivery did not accept the cancel for AWB ${order.shipment?.waybillNumber}. Cancel it in Delhivery One; the parcel may still move.`
+          : undefined,
+      message: `Order ${order.shopifyOrderName} cancelled.${delhiveryCancelled ? ' Delhivery shipment cancelled.' : ''}${
+        delhiveryCancel === 'refused' ? ' Delhivery REFUSED the shipment cancel.' : ''
+      }${shopifyCancelled ? ' Shopify order cancelled.' : ''}`,
       order: updated,
     });
   } catch (error: any) {
@@ -1689,7 +1708,8 @@ router.post('/orders/:id/rto-refund', async (req: Request, res: Response): Promi
   try {
     const orderId = parseInt(req.params.id, 10);
     const result = await orderService.processRtoRefund(orderId);
-    res.json(result);
+    // A held refund (not confirmed as RTO, already part-refunded, ...) is not a success.
+    res.status(result.success ? 200 : 409).json(result.success ? result : { ...result, error: result.message });
   } catch (error: any) {
     logger.error('Error processing RTO refund', { orderId: req.params.id, error: error.message });
     res.status(500).json({ success: false, error: error.message });
@@ -1830,13 +1850,16 @@ router.post('/orders/:id/refund', async (req: Request, res: Response): Promise<v
     const result = await returnService.refundOrder(orderId, amount ? parseFloat(amount) : undefined, reason);
 
     // Send Refund Processed Email from Youthnic Refunds <refunds@youthnic.com>
+    // only when money went back (a COD order has no online payment to refund).
     let emailDispatched = false;
     let emailResult: any = null;
     try {
-      const order = await prisma.order.findUnique({
-        where: { id: orderId },
-        include: { items: true },
-      });
+      const order = result.moneyMoved
+        ? await prisma.order.findUnique({
+            where: { id: orderId },
+            include: { items: true },
+          })
+        : null;
       if (order?.customerEmail) {
         emailResult = await resendService.sendEmail({
           to: order.customerEmail,
@@ -1916,7 +1939,7 @@ router.post('/returns/scan', async (req: Request, res: Response): Promise<void> 
     // If refund was processed (item received, no issue, QC approved) -> dispatch email from refunds@youthnic.com with refund ID
     let emailDispatched = false;
     let emailResult: any = null;
-    if (result.refundProcessed) {
+    if (result.refundProcessed && result.moneyMoved !== false) {
       try {
         const returnRec = await prisma.return.findUnique({
           where: { id: result.returnId },
@@ -1978,8 +2001,14 @@ router.post('/returns/scan', async (req: Request, res: Response): Promise<void> 
       emailDispatched,
       emailResult,
       message: result.refundProcessed
-        ? 'Return received, QC passed (no issue), refund processed and details emailed to consumer from refunds@youthnic.com'
-        : 'Return received but refund not processed (QC pending or rejected)',
+        ? result.moneyMoved === false
+          ? 'Return received and QC passed. Shopify recorded the refund, but this order has no online payment (COD): pay the customer by UPI/bank transfer.'
+          : 'Return received, QC passed (no issue), refund processed and details emailed to consumer from refunds@youthnic.com'
+        : result.alreadyRefunded
+          ? 'Return received and QC recorded. This return was already refunded, so no second refund was issued.'
+          : result.refundError
+            ? `Return received, but the refund did not go through: ${result.refundError}`
+            : 'Return received but refund not processed (QC rejected)',
     });
   } catch (error: any) {
     res.status(400).json({ error: error.message });
@@ -1991,12 +2020,21 @@ router.post('/returns/:id/refund', async (req: Request, res: Response): Promise<
   try {
     const returnId = parseInt(req.params.id, 10);
     const { partial } = req.body;
-    const result = await returnService.processRefund(returnId, partial);
+    // Without an explicit flag, the QC result stored on the return decides.
+    const result = await returnService.processRefund(
+      returnId,
+      typeof partial === 'boolean' ? partial : undefined
+    );
+    if (!result.success) {
+      res.status(409).json({ success: false, refundAmount: result.refundAmount, error: result.error || 'Refund not processed' });
+      return;
+    }
 
     // Send Refund Processed Email from Youthnic Refunds <refunds@youthnic.com>
+    // only when money went back (a COD order has no online payment to refund).
     let emailDispatched = false;
     let emailResult: any = null;
-    if (result.success) {
+    if (result.moneyMoved) {
       try {
         const returnRec = await prisma.return.findUnique({
           where: { id: returnId },
@@ -2050,7 +2088,13 @@ router.post('/returns/:id/refund', async (req: Request, res: Response): Promise<
       }
     }
 
-    res.json({ success: result.success, refundAmount: result.refundAmount, emailDispatched, emailResult });
+    res.json({
+      success: result.success,
+      refundAmount: result.refundAmount,
+      moneyMoved: result.moneyMoved,
+      emailDispatched,
+      emailResult,
+    });
   } catch (error: any) {
     res.status(400).json({ error: error.message });
   }

@@ -23,6 +23,7 @@ const prismaStub = {
   order: {
     findUnique: vi.fn(),
     update: vi.fn(async () => ({})),
+    updateMany: vi.fn(async () => ({ count: 1 })),
   },
   shipment: {
     update: vi.fn(async () => ({})),
@@ -32,26 +33,57 @@ const prismaStub = {
   },
   syncLog: { create: vi.fn(async () => ({})) },
   trackingLog: { upsert: vi.fn() },
-  $transaction: vi.fn(async (...args: any[]) => {
-    // Capture the args — each arg is a Promise-returning Prisma call.
-    // We just call them in sequence and return their results.
+  $transaction: vi.fn(async (queries: any[]) => {
+    // Like Prisma's batch transaction: takes an array of queries and resolves
+    // to an array of their results, in order.
     const results = [];
-    for (const arg of args) {
-      results.push(await arg);
+    for (const query of queries) {
+      results.push(await query);
     }
     return results;
   }),
 };
 vi.mock('../src/database/prisma', () => ({ default: prismaStub }));
 
+const { createShipmentMock, cancelShipmentMock } = vi.hoisted(() => ({
+  createShipmentMock: vi.fn(),
+  cancelShipmentMock: vi.fn(async () => true),
+}));
 vi.mock('../src/modules/delhivery/delhivery.service', () => ({
   default: {
-    createShipment: vi.fn(async () => ({
-      waybillNumber: '30100810009999',
-      labelUrl: 'https://example.com/label.pdf',
-    })),
+    createShipment: createShipmentMock,
+    cancelShipment: cancelShipmentMock,
   },
 }));
+
+import { config } from '../src/config';
+
+// Fixture orders are created just after the configured import cutoff, so they
+// are dispatchable whatever ORDER_SYNC_START_DATE is (or isn't) set to.
+const afterCutoff = () => new Date(config.shopify.syncStartDate.getTime() + 60 * 60 * 1000);
+
+function dispatchableOrder(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 1,
+    shopifyOrderId: 'gid://shopify/Order/1',
+    shopifyOrderName: '#1001',
+    shopifyCreatedAt: afterCutoff(),
+    customerName: 'Test',
+    customerPhone: '919999999999',
+    customerAddress: '1 Test',
+    customerCity: 'Surat',
+    customerState: 'Gujarat',
+    customerPincode: '395002',
+    customerCountry: 'India',
+    paymentMethod: 'Prepaid',
+    totalAmount: 999,
+    items: [{ id: 1 }],
+    status: 'DISPATCH_PENDING',
+    fulfillmentStatus: null,
+    shipment: null,
+    ...overrides,
+  };
+}
 
 vi.mock('../src/modules/shopify/shopify.service', () => ({
   default: {
@@ -91,51 +123,14 @@ describe('dispatchOrder status transitions', () => {
       orderId: 1,
       status: 'PENDING',
     }));
-
-    let findCallCount = 0;
-    prismaStub.order.findUnique = vi.fn(async () => {
-      findCallCount += 1;
-      if (findCallCount === 1) {
-        // Initial fetch
-        return {
-          id: 1,
-          shopifyOrderId: 'gid://shopify/Order/1',
-          shopifyOrderName: '#1001',
-          shopifyCreatedAt: new Date('2026-09-26'),
-          customerName: 'Test',
-          customerPhone: '919999999999',
-          customerAddress: '1 Test',
-          customerCity: 'Surat',
-          customerState: 'Gujarat',
-          customerPincode: '395002',
-          customerCountry: 'India',
-          paymentMethod: 'Prepaid',
-          totalAmount: 999,
-          items: [{ id: 1 }],
-          status: 'DISPATCH_PENDING',
-          fulfillmentStatus: null,
-        };
-      }
-      // Verified re-fetch (after payment check)
-      return {
-        id: 1,
-        shopifyOrderId: 'gid://shopify/Order/1',
-        shopifyOrderName: '#1001',
-        shopifyCreatedAt: new Date('2026-09-26'),
-        customerName: 'Test',
-        customerPhone: '919999999999',
-        customerAddress: '1 Test',
-        customerCity: 'Surat',
-        customerState: 'Gujarat',
-        customerPincode: '395002',
-        customerCountry: 'India',
-        paymentMethod: 'Prepaid',
-        totalAmount: 999,
-        items: [{ id: 1 }],
-        status: 'DISPATCH_PENDING',
-        fulfillmentStatus: null,
-      };
+    prismaStub.order.updateMany = vi.fn(async () => ({ count: 1 }));
+    createShipmentMock.mockReset().mockResolvedValue({
+      waybillNumber: '30100810009999',
+      labelUrl: 'https://example.com/label.pdf',
     });
+
+    // Initial fetch, then the verified re-fetch after the payment check.
+    prismaStub.order.findUnique = vi.fn(async () => dispatchableOrder());
 
     const mod = await import('../src/modules/orders/order.service');
     orderService = mod.default;
@@ -160,16 +155,31 @@ describe('dispatchOrder status transitions', () => {
       })
     );
 
-    // order update -> DISPATCHED + dispatchedAt: <Date>
-    expect(prismaStub.order.update).toHaveBeenCalledWith(
+    // order update -> DISPATCHED + dispatchedAt: <Date>, conditional on the
+    // order not having been cancelled during the manifest call
+    expect(prismaStub.order.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 1 },
+        where: { id: 1, status: { in: ['NEW', 'DISPATCH_PENDING', 'DISPATCHED'] } },
         data: expect.objectContaining({
           status: 'DISPATCHED',
           dispatchedAt: expect.any(Date),
         }),
       })
     );
+  });
+
+  it('cancels the new AWB when the order was cancelled during the manifest call', async () => {
+    // claim succeeds, the promotion finds the order CANCELLED (count 0), release succeeds
+    prismaStub.order.updateMany = vi
+      .fn()
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 })
+      .mockResolvedValue({ count: 1 });
+    prismaStub.shipment.findUnique = vi.fn(async () => ({ id: 99, waybillNumber: '30100810009999', status: 'CREATED' }));
+    cancelShipmentMock.mockResolvedValueOnce(true);
+
+    await expect(orderService.dispatchOrder(1)).rejects.toThrow(/cancelled while it was being dispatched.*was cancelled at Delhivery/);
+    expect(cancelShipmentMock).toHaveBeenCalledWith('30100810009999');
   });
 
   it('rejects dispatch if order is not in NEW or DISPATCH_PENDING state', async () => {
@@ -192,5 +202,75 @@ describe('dispatchOrder status transitions', () => {
       fulfillmentStatus: null,
     }));
     await expect(orderService.dispatchOrder(1)).rejects.toThrow(/not in dispatchable state/);
+  });
+
+  it('claims the order before manifesting and releases the claim afterwards', async () => {
+    await orderService.dispatchOrder(1);
+
+    const calls = prismaStub.order.updateMany.mock.calls.map((call: any[]) => call[0]);
+    const claim = calls[0];
+    const release = calls[calls.length - 1];
+    expect(claim.where).toMatchObject({ id: 1, status: { in: ['NEW', 'DISPATCH_PENDING'] } });
+    expect(claim.data.dispatchLockedAt).toBeInstanceOf(Date);
+    expect(release.where).toMatchObject({ id: 1, dispatchLockedAt: claim.data.dispatchLockedAt });
+    expect(release.data).toEqual({ dispatchLockedAt: null });
+  });
+
+  it('does not manifest when another dispatch holds the claim', async () => {
+    prismaStub.order.updateMany = vi.fn(async () => ({ count: 0 }));
+
+    await expect(orderService.dispatchOrder(1)).rejects.toThrow(/already being dispatched/);
+    expect(createShipmentMock).not.toHaveBeenCalled();
+  });
+
+  it('releases the claim when Delhivery rejects the manifest', async () => {
+    createShipmentMock.mockRejectedValueOnce(new Error('Insufficient balance'));
+
+    await expect(orderService.dispatchOrder(1)).rejects.toThrow(/Insufficient balance/);
+    const release = prismaStub.order.updateMany.mock.calls[1][0];
+    expect(release.data).toEqual({ dispatchLockedAt: null });
+  });
+
+  it('rejects an unconfirmed COD order on the server, whatever the caller', async () => {
+    prismaStub.order.findUnique = vi.fn(async () =>
+      dispatchableOrder({ paymentMethod: 'COD', tags: 'GoKwik', status: 'NEW' })
+    );
+
+    await expect(orderService.dispatchOrder(1)).rejects.toThrow(/unconfirmed COD/);
+    expect(createShipmentMock).not.toHaveBeenCalled();
+  });
+
+  it('dispatches a COD order the customer confirmed', async () => {
+    prismaStub.order.findUnique = vi.fn(async () =>
+      dispatchableOrder({ paymentMethod: 'COD', tags: 'GoKwik, COD_CONFIRMED' })
+    );
+
+    await expect(orderService.dispatchOrder(1)).resolves.toEqual({ waybillNumber: '30100810009999' });
+  });
+
+  it('refuses to manifest an order that already has a live AWB', async () => {
+    prismaStub.order.findUnique = vi.fn(async () =>
+      dispatchableOrder({ shipment: { waybillNumber: '30100810001111', status: 'CREATED' } })
+    );
+
+    await expect(orderService.dispatchOrder(1)).rejects.toThrow(/already has Delhivery AWB 30100810001111/);
+    expect(createShipmentMock).not.toHaveBeenCalled();
+  });
+
+  it('re-dispatches an order whose earlier manifest was rejected', async () => {
+    prismaStub.order.findUnique = vi.fn(async () =>
+      dispatchableOrder({ shipment: { waybillNumber: null, status: 'ERROR' } })
+    );
+
+    await expect(orderService.dispatchOrder(1)).resolves.toEqual({ waybillNumber: '30100810009999' });
+  });
+
+  it('rejects an order created before the import cutoff', async () => {
+    prismaStub.order.findUnique = vi.fn(async () =>
+      dispatchableOrder({ shopifyCreatedAt: new Date(config.shopify.syncStartDate.getTime() - 1000) })
+    );
+
+    await expect(orderService.dispatchOrder(1)).rejects.toThrow(/cutoff/);
+    expect(createShipmentMock).not.toHaveBeenCalled();
   });
 });

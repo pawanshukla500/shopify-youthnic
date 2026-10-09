@@ -21,6 +21,12 @@ vi.mock('../src/modules/delhivery/delhivery-document-fetcher.service', () => ({
   },
 }));
 
+// The authenticated tracking API's answer, used to confirm pushed terminal
+// statuses. Defaults to "Delivered"; tests override it to simulate a forgery.
+const { liveTracking } = vi.hoisted(() => ({
+  liveTracking: { statusType: 'DL', status: 'Delivered', history: [] as any[] } as any,
+}));
+
 vi.mock('../src/modules/delhivery/delhivery.service', () => ({
   default: {
     mapTrackingToShipmentStatus: vi.fn((statusType: string) => {
@@ -29,6 +35,7 @@ vi.mock('../src/modules/delhivery/delhivery.service', () => ({
       if (statusType === 'RT') return 'RTO';
       return 'IN_TRANSIT';
     }),
+    trackShipment: vi.fn(async () => liveTracking),
     downloadDocument: vi.fn(async () => ({ success: true, url: 'https://test.delhivery.com/doc.jpg' })),
   },
 }));
@@ -101,6 +108,9 @@ describe('Delhivery EPOD & Scan Webhook Processing', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     config.delhivery.webhookSecret = '';
+    liveTracking.statusType = 'DL';
+    liveTracking.status = 'Delivered';
+    prismaStub.shipment.updateMany.mockResolvedValue({ count: 1 });
   });
 
   describe('normalizeEpodPayload', () => {
@@ -204,10 +214,10 @@ describe('Delhivery EPOD & Scan Webhook Processing', () => {
         expect.any(Date)
       );
 
-      // Verify shipment transitioned to DELIVERED
-      expect(prismaStub.shipment.update).toHaveBeenCalledWith(
+      // Verify shipment transitioned to DELIVERED, conditional on the status read
+      expect(prismaStub.shipment.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: 10 },
+          where: { id: 10, status: 'IN_TRANSIT' },
           data: expect.objectContaining({
             status: 'DELIVERED',
             epodReceivedBy: 'Pooja Verma (Self)',
@@ -215,21 +225,21 @@ describe('Delhivery EPOD & Scan Webhook Processing', () => {
         })
       );
 
-      // Verify order transitioned to DELIVERED
+      // Verify order transitioned to DELIVERED with its delivery time
       expect(prismaStub.order.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: 100 },
-          data: { status: 'DELIVERED' },
+          data: { status: 'DELIVERED', deliveredAt: expect.any(Date) },
         })
       );
 
       // Verify delivery notification sent
       expect(notificationEngine.notifyDelivered).toHaveBeenCalledWith(mockShipment.order);
 
-      // Verify tracking log created
-      expect(prismaStub.trackingLog.create).toHaveBeenCalledWith(
+      // Verify tracking log written idempotently
+      expect(prismaStub.trackingLog.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({
+          create: expect.objectContaining({
             shipmentId: 10,
             waybill: 'DELHI998877',
             status: 'EPOD_RECEIVED',
@@ -237,6 +247,42 @@ describe('Delhivery EPOD & Scan Webhook Processing', () => {
           }),
         })
       );
+    });
+
+    it('ignores an EPOD that Delhivery tracking does not confirm as delivered', async () => {
+      liveTracking.statusType = 'UD';
+      liveTracking.status = 'In Transit';
+      prismaStub.shipment.findFirst.mockResolvedValueOnce({
+        id: 12,
+        orderId: 102,
+        waybillNumber: 'DELHI-FORGED',
+        status: 'IN_TRANSIT',
+        order: { id: 102, status: 'IN_TRANSIT' },
+      });
+
+      const { req, res } = createMockReqRes({
+        body: { waybill: 'DELHI-FORGED', EPOD: 'https://attacker.example/epod.jpg' },
+      });
+      await handleEpodPush(req, res);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.data.processed).toBe(0);
+      expect(mockSaveEpodArtifact).not.toHaveBeenCalled();
+      expect(prismaStub.shipment.updateMany).not.toHaveBeenCalled();
+      expect(prismaStub.order.update).not.toHaveBeenCalled();
+      expect(notificationEngine.notifyDelivered).not.toHaveBeenCalled();
+    });
+
+    it('never looks an EPOD order up by the sequential internal order id', async () => {
+      prismaStub.shipment.findFirst.mockResolvedValueOnce(null);
+      prismaStub.order.findFirst.mockResolvedValueOnce(null);
+
+      const { req, res } = createMockReqRes({ body: { waybill: 'UNKNOWN-AWB', orderID: '42' } });
+      await handleEpodPush(req, res);
+
+      const where = prismaStub.order.findFirst.mock.calls[0][0].where;
+      expect(where.OR).not.toContainEqual({ id: 42 });
+      expect(where.OR).toContainEqual({ shopifyOrderId: '42' });
     });
 
     it('falls back to tryFetchArtifact if EPOD webhook only carries waybill notification', async () => {
@@ -322,15 +368,108 @@ describe('Delhivery EPOD & Scan Webhook Processing', () => {
       expect(res.data.received).toBe(true);
 
       // Status transitioned to DELIVERED
-      expect(prismaStub.shipment.update).toHaveBeenCalledWith(
+      expect(prismaStub.shipment.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: 20 },
+          where: { id: 20, status: 'IN_TRANSIT' },
           data: expect.objectContaining({ status: 'DELIVERED' }),
         })
       );
 
       // Background document fetch was triggered
       expect(mockTryFetchArtifact).toHaveBeenCalledWith(200, 'DELHI-SCAN-DLV', 'epod');
+    });
+
+    it('drops a pushed "Delivered" scan that the tracking API does not confirm', async () => {
+      liveTracking.statusType = 'UD';
+      liveTracking.status = 'In Transit';
+      prismaStub.shipment.findFirst.mockResolvedValueOnce({
+        id: 22,
+        orderId: 202,
+        waybillNumber: 'DELHI-FAKE-DLV',
+        status: 'IN_TRANSIT',
+        order: { id: 202, status: 'IN_TRANSIT' },
+      });
+
+      const { req, res } = createMockReqRes({
+        body: { Shipment: { AWB: 'DELHI-FAKE-DLV', Status: { Status: 'Delivered', StatusType: 'DL' } } },
+      });
+      await handleScanPush(req, res);
+
+      expect(res.statusCode).toBe(200);
+      expect(prismaStub.shipment.updateMany).not.toHaveBeenCalled();
+      expect(prismaStub.shipment.update).not.toHaveBeenCalled();
+      expect(prismaStub.trackingLog.upsert).not.toHaveBeenCalled();
+      expect(prismaStub.order.update).not.toHaveBeenCalled();
+      expect(notificationEngine.notifyDelivered).not.toHaveBeenCalled();
+    });
+
+    it('records a scan older than the newest applied one without moving the status', async () => {
+      prismaStub.shipment.findFirst.mockResolvedValueOnce({
+        id: 23,
+        orderId: 203,
+        waybillNumber: 'DELHI-LATE',
+        status: 'OUT_FOR_DELIVERY',
+        trackingHistory: [{ status: 'Dispatched', dateTime: '2026-10-03T09:00:00.000Z' }],
+        order: { id: 203, status: 'OUT_FOR_DELIVERY' },
+      });
+
+      const { req, res } = createMockReqRes({
+        body: {
+          Shipment: {
+            AWB: 'DELHI-LATE',
+            Status: { Status: 'In Transit', StatusType: 'UD', StatusDateTime: '2026-10-02T09:00:00Z' },
+          },
+        },
+      });
+      await handleScanPush(req, res);
+
+      expect(prismaStub.shipment.updateMany).not.toHaveBeenCalled();
+      const update = prismaStub.shipment.update.mock.calls[0][0];
+      expect(update.data.status).toBeUndefined();
+      expect(update.data.trackingStatus).toBeUndefined();
+      expect(update.data.trackingHistory).toHaveLength(2);
+      expect(prismaStub.order.update).not.toHaveBeenCalled();
+    });
+
+    it('does not reopen or message a cancelled order whose parcel moves, and flags it', async () => {
+      prismaStub.shipment.findFirst.mockResolvedValueOnce({
+        id: 24,
+        orderId: 204,
+        waybillNumber: 'DELHI-CANCELLED',
+        status: 'CREATED',
+        order: { id: 204, status: 'CANCELLED', supportFlag: null },
+      });
+
+      const { req, res } = createMockReqRes({
+        body: { Shipment: { AWB: 'DELHI-CANCELLED', Status: { Status: 'In Transit', StatusType: 'UD' } } },
+      });
+      await handleScanPush(req, res);
+
+      expect(prismaStub.order.update).toHaveBeenCalledTimes(1);
+      expect(prismaStub.order.update).toHaveBeenCalledWith({
+        where: { id: 204 },
+        data: { hasUrgentSupport: true, supportFlag: 'PARCEL_MOVING_ON_CLOSED_ORDER' },
+      });
+      expect(trackingStub.evaluateConsumerDelay).not.toHaveBeenCalled();
+    });
+
+    it('skips the transition when another writer already moved the shipment', async () => {
+      prismaStub.shipment.updateMany.mockResolvedValueOnce({ count: 0 });
+      prismaStub.shipment.findFirst.mockResolvedValueOnce({
+        id: 25,
+        orderId: 205,
+        waybillNumber: 'DELHI-RACE',
+        status: 'IN_TRANSIT',
+        order: { id: 205, status: 'IN_TRANSIT' },
+      });
+
+      const { req, res } = createMockReqRes({
+        body: { Shipment: { AWB: 'DELHI-RACE', Status: { Status: 'Delivered', StatusType: 'DL' } } },
+      });
+      await handleScanPush(req, res);
+
+      expect(prismaStub.order.update).not.toHaveBeenCalled();
+      expect(notificationEngine.notifyDelivered).not.toHaveBeenCalled();
     });
 
     it('immediately evaluates a delay scan for customer notification', async () => {

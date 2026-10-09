@@ -81,7 +81,11 @@ vi.mock('axios', () => {
 // Prisma stub — only the calls used by createShipment need to exist.
 vi.mock('../src/database/prisma', () => ({
   default: {
-    order: { findUnique: vi.fn(), update: vi.fn(async () => ({})) },
+    order: {
+      findUnique: vi.fn(),
+      update: vi.fn(async () => ({})),
+      updateMany: vi.fn(async () => ({ count: 1 })),
+    },
     shipment: {
       create: vi.fn(async () => ({})),
       upsert: vi.fn(async () => ({})),

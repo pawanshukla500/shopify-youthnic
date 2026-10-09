@@ -63,6 +63,11 @@ class Scheduler {
         } catch (error: any) {
           logger.error('[CRON] Retry failed operations error', { error: error.message });
         }
+        try {
+          await orderService.retryFailedRtoRefunds();
+        } catch (error: any) {
+          logger.error('[CRON] Retry failed RTO refunds error', { error: error.message });
+        }
       })
     );
 

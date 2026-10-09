@@ -1,11 +1,29 @@
 import prisma from '../../database/prisma';
 import { config } from '../../config';
 import delhiveryService from '../delhivery/delhivery.service';
-import shopifyService from '../shopify/shopify.service';
+import shopifyService, { matchShopifyLineItem } from '../shopify/shopify.service';
 import notificationEngine from '../notifications/notification.service';
 import logger from '../../utils/logger';
 import { applyReturnCarrierScan } from './return-tracking';
 import { mapReturnReason, reverseProductDescription } from './return-reasons';
+
+/** Failed refund attempts before the hourly retry leaves a return for a person. */
+export const REFUND_MAX_ATTEMPTS = 5;
+
+/** A refund claim (PENDING) older than this was abandoned by a dead process. */
+const STALE_REFUND_CLAIM_MS = 30 * 60 * 1000;
+
+/**
+ * Orders with a refund or reverse-pickup booking in flight in this process.
+ * A double click must not refund twice or book two Delhivery reverse pickups
+ * (each booking takes a fresh waybill, so Delhivery does not dedupe them).
+ */
+const refundsInFlight = new Set<number>();
+const returnBookingsInFlight = new Set<number>();
+
+/** Note for an order with no captured online payment, so nothing was refunded. */
+const NO_ONLINE_PAYMENT_NOTE =
+  'Shopify recorded the refund, but the order has no captured online payment (COD), so no money moved. Pay the customer by UPI or bank transfer.';
 
 /**
  * Returns Service
@@ -19,14 +37,38 @@ import { mapReturnReason, reverseProductDescription } from './return-reasons';
 class ReturnService {
   /**
    * Create a return request for an order.
-   * This creates the return in our DB and initiates a reverse pickup with Delhivery.
-   */
-  /**
-   * Create a return request for an order.
    * This creates the return in our DB and initiates a reverse pickup with Delhivery,
    * while also triggering reverse tracking and notes on Shopify.
    */
   async createReturn(
+    orderId: number,
+    returnReason: string,
+    items: Array<{ orderItemId: number; quantity: number }>,
+    options?: {
+      returnWaybillNumber?: string;
+      carrier?: string;
+      triggerShopify?: boolean;
+    }
+  ): Promise<{
+    returnId: number;
+    returnWaybill: string;
+    shopifyTriggered: boolean;
+    pickupAutomatic: boolean;
+    forwardWaybill: string | null;
+    shopifyReturnId: string | null;
+  }> {
+    if (returnBookingsInFlight.has(orderId)) {
+      throw new Error('A return for this order is already being booked. Wait for it to finish.');
+    }
+    returnBookingsInFlight.add(orderId);
+    try {
+      return await this.bookReturn(orderId, returnReason, items, options);
+    } finally {
+      returnBookingsInFlight.delete(orderId);
+    }
+  }
+
+  private async bookReturn(
     orderId: number,
     returnReason: string,
     items: Array<{ orderItemId: number; quantity: number }>,
@@ -319,7 +361,23 @@ class ReturnService {
     orderId: number,
     refundAmount?: number,
     reason?: string
-  ): Promise<{ success: boolean; refundId: string; refundAmount: number }> {
+  ): Promise<{ success: boolean; refundId: string; refundAmount: number; moneyMoved: boolean }> {
+    if (refundsInFlight.has(orderId)) {
+      throw new Error('A refund for this order is already in progress.');
+    }
+    refundsInFlight.add(orderId);
+    try {
+      return await this.refundOrderUnlocked(orderId, refundAmount, reason);
+    } finally {
+      refundsInFlight.delete(orderId);
+    }
+  }
+
+  private async refundOrderUnlocked(
+    orderId: number,
+    refundAmount?: number,
+    reason?: string
+  ): Promise<{ success: boolean; refundId: string; refundAmount: number; moneyMoved: boolean }> {
     const order = await prisma.order.findUnique({
       where: { id: orderId },
       include: { items: true, returns: true },
@@ -330,69 +388,95 @@ class ReturnService {
     }
 
     const amount = refundAmount && refundAmount > 0 ? refundAmount : order.totalAmount;
-
-    // Fetch order from Shopify to match line items
-    const shopifyOrder = await shopifyService.fetchOrder(order.shopifyOrderId);
-    const shopifyRefundItems = (order.items || []).map((item) => {
-      const matched = shopifyOrder.line_items.find(
-        (li) => (item.sku && li.sku === item.sku) || li.title === item.title
-      );
-      return {
-        lineItemId: matched?.id || 0,
-        quantity: item.quantity,
-        restockType: 'return' as const,
-      };
-    }).filter((i) => i.lineItemId > 0);
-
     const isPartial = amount < order.totalAmount;
+    // An open customer return is closed by a full refund only. A partial
+    // (goodwill) refund leaves it to run its normal scan → QC → refund course.
+    const openReturn = isPartial ? undefined : order.returns.find((r) => r.refundStatus !== 'PROCESSED');
+
+    // A partial refund is money only. A full refund also closes the line items
+    // on Shopify, matched by variant so sizes are not mixed up. Items are
+    // restocked only when a return is bringing them back (that return's scan
+    // then records receipt without refunding again); otherwise the goods may
+    // still be with the customer and are not restocked.
+    let shopifyRefundItems: Array<{ lineItemId: number; quantity: number; restockType: 'return' | 'no_restock' }> = [];
+    if (!isPartial) {
+      const restockType = openReturn ? ('return' as const) : ('no_restock' as const);
+      const shopifyOrder = await shopifyService.fetchOrder(order.shopifyOrderId);
+      const taken = new Set<number>();
+      shopifyRefundItems = (order.items || []).flatMap((item) => {
+        const matched = matchShopifyLineItem(shopifyOrder.line_items, item, taken);
+        if (!matched) return [];
+        taken.add(matched.id);
+        return [{ lineItemId: matched.id, quantity: item.quantity, restockType }];
+      });
+    }
+
     const refundResult = await shopifyService.createRefund(
       order.shopifyOrderId,
       amount,
       shopifyRefundItems,
       !isPartial
     );
+    const refundedAmount = refundResult.amount;
 
-    // Update DB Order
-    await prisma.order.update({
-      where: { id: order.id },
-      data: {
-        status: 'REFUNDED',
-        financialStatus: isPartial ? 'partially_refunded' : 'refunded',
-      },
-    });
+    // Shopify has the refund now. Bookkeeping failures below are logged, never
+    // reported as a failed refund (which would invite a second one).
+    let activeReturn = openReturn;
+    try {
+      // A partial refund does not close the order: an in-transit parcel must
+      // still be delivered and tracked normally.
+      await prisma.order.update({
+        where: { id: order.id },
+        data: isPartial
+          ? { financialStatus: 'partially_refunded' }
+          : { status: 'REFUNDED', financialStatus: 'refunded' },
+      });
 
-    // Update any linked return record
-    const activeReturn = order.returns.find((r) => r.refundStatus !== 'PROCESSED');
-    if (activeReturn) {
-      await prisma.return.update({
-        where: { id: activeReturn.id },
+      // Close the open return. Its later warehouse scan sees PROCESSED,
+      // records receipt and QC, and does not refund again.
+      if (activeReturn) {
+        await prisma.return.update({
+          where: { id: activeReturn.id },
+          data: {
+            returnStatus: 'REFUNDED',
+            refundStatus: 'PROCESSED',
+            refundAmount: refundedAmount,
+            shopifyRefundId: refundResult.refundId,
+            refundProcessedAt: new Date(),
+            ...(refundResult.moneyMoved ? {} : { errorMessage: NO_ONLINE_PAYMENT_NOTE }),
+          },
+        });
+      }
+
+      await prisma.syncLog.create({
         data: {
-          returnStatus: 'REFUNDED',
-          refundStatus: 'PROCESSED',
-          refundAmount: amount,
-          shopifyRefundId: refundResult.refundId,
-          refundProcessedAt: new Date(),
+          orderId: order.id,
+          syncType: 'REFUND_PROCESS',
+          status: 'SUCCESS',
+          message: refundResult.moneyMoved
+            ? `Refund of ₹${refundedAmount} processed on Shopify. Refund ID: ${refundResult.refundId}. Reason: ${reason || 'Customer refund'}`
+            : `Refund recorded on Shopify (Refund ID: ${refundResult.refundId}) with no money moved. ${NO_ONLINE_PAYMENT_NOTE}`,
         },
       });
+    } catch (dbErr: any) {
+      logger.error('Refund succeeded on Shopify but OMS bookkeeping failed', {
+        orderId: order.id,
+        refundId: refundResult.refundId,
+        error: dbErr.message,
+      });
+      activeReturn = undefined;
     }
 
-    // Record sync log
-    await prisma.syncLog.create({
-      data: {
-        orderId: order.id,
-        syncType: 'REFUND_PROCESS',
-        status: 'SUCCESS',
-        message: `Refund of ₹${amount} processed on Shopify. Refund ID: ${refundResult.refundId}. Reason: ${reason || 'Customer refund'}`,
-      },
-    });
-
-    // Send WhatsApp notification
-    await notificationEngine.notifyRefundProcessed(order, amount, activeReturn);
+    // Tell the customer only when money actually went back to them.
+    if (refundResult.moneyMoved) {
+      await notificationEngine.notifyRefundProcessed(order, refundedAmount, activeReturn);
+    }
 
     return {
       success: true,
       refundId: refundResult.refundId,
-      refundAmount: amount,
+      refundAmount: refundedAmount,
+      moneyMoved: refundResult.moneyMoved,
     };
   }
 
@@ -411,7 +495,14 @@ class ReturnService {
     waybillNumber: string,
     qcStatus: 'APPROVED' | 'REJECTED' | 'PARTIAL' = 'APPROVED',
     qcRemark?: string
-  ): Promise<{ returnId: number; refundProcessed: boolean; refundAmount?: number }> {
+  ): Promise<{
+    returnId: number;
+    refundProcessed: boolean;
+    refundAmount?: number;
+    moneyMoved?: boolean;
+    refundError?: string;
+    alreadyRefunded?: boolean;
+  }> {
     // Find return by waybill number
     const returnRecord = await prisma.return.findFirst({
       where: { returnWaybillNumber: waybillNumber },
@@ -423,6 +514,42 @@ class ReturnService {
 
     if (!returnRecord) {
       throw new Error(`No return found for waybill: ${waybillNumber}`);
+    }
+
+    // A second scan (barcode gun double read, re-scan on another desk) must
+    // never reopen a return whose refund is done or under way. A QC_REJECTED
+    // return may be scanned again to change the decision.
+    if (returnRecord.refundStatus === 'PENDING') {
+      throw new Error(`Return ${waybillNumber} was already sent for refund. Scanning it again does not refund again.`);
+    }
+    if (returnRecord.returnStatus === 'CANCELLED') {
+      throw new Error(`Return ${waybillNumber} is cancelled.`);
+    }
+    const refundedAlready = returnRecord.returnStatus === 'REFUNDED' || returnRecord.refundStatus === 'PROCESSED';
+    if (refundedAlready) {
+      if (returnRecord.qcCheckedAt) {
+        throw new Error(`Return ${waybillNumber} was already scanned in and refunded. Scanning it again does not refund again.`);
+      }
+      // Refunded before the parcel arrived (direct refund from the order page).
+      // The goods still have to be received and inspected; nothing is refunded.
+      const now = new Date();
+      await prisma.return.update({
+        where: { id: returnRecord.id },
+        data: { qcStatus, qcRemark: qcRemark || null, qcCheckedAt: now, receivedAt: returnRecord.receivedAt || now },
+      });
+      await prisma.returnItem.updateMany({
+        where: { returnId: returnRecord.id },
+        data: { qcStatus, qcRemark: qcRemark || null },
+      });
+      await prisma.syncLog.create({
+        data: {
+          orderId: returnRecord.orderId,
+          syncType: 'RETURN_TRACKING',
+          status: 'SUCCESS',
+          message: `Return ${waybillNumber} received at warehouse after it was refunded. QC: ${qcStatus}. No second refund.`,
+        },
+      });
+      return { returnId: returnRecord.id, refundProcessed: false, alreadyRefunded: true };
     }
 
     logger.info('Return scanned at warehouse', {
@@ -471,6 +598,8 @@ class ReturnService {
         returnId: returnRecord.id,
         refundProcessed: refundResult.success,
         refundAmount: refundResult.refundAmount,
+        moneyMoved: refundResult.moneyMoved,
+        refundError: refundResult.error,
       };
     }
 
@@ -494,14 +623,30 @@ class ReturnService {
    * Process a refund through Shopify API.
    * This automatically refunds the customer via the original payment method.
    */
+  /**
+   * Refund a received, QC-passed return on Shopify.
+   *
+   * Only the returned items are refunded, at the price the customer actually
+   * paid (Shopify's refunds/calculate applies order discounts and taxes).
+   * Shipping is refunded only when QC fully approved a return of every unit in
+   * the order. PARTIAL QC refunds the items but does not restock them as
+   * sellable, since part of the return failed inspection.
+   *
+   * Safe to call twice: the return is claimed atomically (NONE/FAILED →
+   * PENDING) before Shopify is called, and the refund carries an idempotency
+   * key, so a retry after a lost response adopts the refund Shopify already
+   * made instead of refunding again.
+   *
+   * @param partial - true for PARTIAL QC. Defaults to the QC result stored on the return.
+   */
   async processRefund(
     returnId: number,
-    partial: boolean = false
-  ): Promise<{ success: boolean; refundAmount: number; shopifyRefundId?: string }> {
+    partial?: boolean
+  ): Promise<{ success: boolean; refundAmount: number; shopifyRefundId?: string; moneyMoved?: boolean; error?: string }> {
     const returnRecord = await prisma.return.findUnique({
       where: { id: returnId },
       include: {
-        order: true,
+        order: { include: { items: true } },
         items: { include: { orderItem: true } },
       },
     });
@@ -510,108 +655,66 @@ class ReturnService {
       throw new Error(`Return not found: ${returnId}`);
     }
 
-    // Calculate refund amount
-    let refundAmount = 0;
-    const refundLineItems: Array<{ lineItemId: number; quantity: number }> = [];
-
-    for (const item of returnRecord.items) {
-      const itemTotal = item.orderItem.price * item.quantity;
-      refundAmount += itemTotal;
-      // Find Shopify line item ID (we store orderItem.id, but we need Shopify's line item ID)
-      // We need to map our OrderItem.id to Shopify's line_item.id
-      // For now, we query Shopify to get the line items and match by SKU/title
-      refundLineItems.push({
-        lineItemId: parseInt(item.orderItem.shopifyVariantId || '0'),
-        quantity: item.quantity,
-      });
+    if (returnRecord.qcStatus !== 'APPROVED' && returnRecord.qcStatus !== 'PARTIAL') {
+      return {
+        success: false,
+        refundAmount: 0,
+        error: `Return ${returnRecord.returnWaybillNumber || returnId} has not passed QC (${returnRecord.qcStatus || 'not scanned'}). Scan it in with QC first.`,
+      };
     }
+    const partialQc = partial ?? returnRecord.qcStatus === 'PARTIAL';
 
-    // For partial refunds, only refund the returned items' value
-    // For full refunds, refund the entire order
-    if (!partial) {
-      // Add shipping refund — refund full order total
-      refundAmount = returnRecord.order.totalAmount;
-    }
-
-    // Update return status
-    await prisma.return.update({
-      where: { id: returnId },
-      data: { returnStatus: 'REFUND_PENDING', refundStatus: 'PENDING', refundAmount },
+    // Claim the refund. Only one caller (scan, retry cron, Returns page button)
+    // can move it out of NONE/FAILED; everyone else stops here.
+    const claim = await prisma.return.updateMany({
+      where: { id: returnId, refundStatus: { in: ['NONE', 'FAILED'] } },
+      data: { returnStatus: 'REFUND_PENDING', refundStatus: 'PENDING' },
     });
+    if (claim.count === 0) {
+      return {
+        success: false,
+        refundAmount: returnRecord.refundAmount || 0,
+        error: `Refund for return ${returnRecord.returnWaybillNumber || returnId} is already ${returnRecord.refundStatus === 'PROCESSED' ? 'done' : 'in progress'}.`,
+      };
+    }
 
+    let refundResult: Awaited<ReturnType<typeof shopifyService.createRefund>>;
     try {
-      // Call Shopify to create the refund
-      // We need the Shopify REST order ID and line item IDs
       const shopifyOrderId = returnRecord.order.shopifyOrderId;
 
       // Fetch the order from Shopify to get accurate line item IDs
       const shopifyOrder = await shopifyService.fetchOrder(shopifyOrderId);
 
-      // Map our return items to Shopify line items
+      const restockType = partialQc ? ('no_restock' as const) : ('return' as const);
+      const taken = new Set<number>();
       const shopifyRefundItems = returnRecord.items.map((retItem) => {
-        const shopifyLineItem = shopifyOrder.line_items.find(
-          (li) =>
-            (retItem.orderItem.sku && li.sku === retItem.orderItem.sku) ||
-            li.title === retItem.orderItem.title
-        );
-        return {
-          lineItemId: shopifyLineItem?.id || 0,
-          quantity: retItem.quantity,
-          restockType: 'return' as const,
-        };
-      }).filter((item) => item.lineItemId > 0);
+        const lineItem = matchShopifyLineItem(shopifyOrder.line_items, retItem.orderItem, taken);
+        if (!lineItem) {
+          throw new Error(
+            `Could not match returned item "${retItem.orderItem.title}${retItem.orderItem.variantTitle ? ` / ${retItem.orderItem.variantTitle}` : ''}" to a Shopify line item`
+          );
+        }
+        taken.add(lineItem.id);
+        return { lineItemId: lineItem.id, quantity: retItem.quantity, restockType };
+      });
 
-      const refundResult = await shopifyService.createRefund(
+      const orderUnits = (returnRecord.order.items || []).reduce((sum, item) => sum + item.quantity, 0);
+      const returnedUnits = returnRecord.items.reduce((sum, item) => sum + item.quantity, 0);
+      const refundShipping = !partialQc && orderUnits > 0 && returnedUnits >= orderUnits;
+
+      refundResult = await shopifyService.createRefund(
         shopifyOrderId,
-        refundAmount,
+        null,
         shopifyRefundItems,
-        !partial
+        refundShipping,
+        { idempotencyKey: `oms-return-${returnId}` }
       );
-
-      // Update return record
-      await prisma.return.update({
-        where: { id: returnId },
-        data: {
-          returnStatus: 'REFUNDED',
-          refundStatus: 'PROCESSED',
-          shopifyRefundId: refundResult.refundId,
-          refundProcessedAt: new Date(),
-          order: {
-            update: { status: 'REFUNDED' },
-          },
-        },
-      });
-
-      // Notify customer that refund is processed
-      await notificationEngine.notifyRefundProcessed(
-        returnRecord.order,
-        refundAmount,
-        returnRecord
-      );
-
-      // Record sync log
-      await prisma.syncLog.create({
-        data: {
-          orderId: returnRecord.orderId,
-          syncType: 'REFUND_PROCESS',
-          status: 'SUCCESS',
-          message: `Refund of Rs. ${refundAmount} processed on Shopify. Refund ID: ${refundResult.refundId}`,
-        },
-      });
-
-      logger.info('Refund processed successfully', {
-        returnId,
-        refundAmount,
-        shopifyRefundId: refundResult.refundId,
-      });
-
-      return { success: true, refundAmount, shopifyRefundId: refundResult.refundId };
     } catch (error: any) {
-      // Mark refund as failed
       await prisma.return.update({
         where: { id: returnId },
         data: {
           refundStatus: 'FAILED',
+          refundAttempts: { increment: 1 },
           errorMessage: error.message,
         },
       });
@@ -631,8 +734,64 @@ class ReturnService {
         error: error.message,
       });
 
-      return { success: false, refundAmount };
+      return { success: false, refundAmount: 0, error: error.message };
     }
+
+    // Shopify has the refund now. Bookkeeping failures below are logged and
+    // must never mark the refund FAILED, which would make the cron retry it.
+    const refundAmount = refundResult.amount;
+    try {
+      await prisma.return.update({
+        where: { id: returnId },
+        data: {
+          returnStatus: 'REFUNDED',
+          refundStatus: 'PROCESSED',
+          refundAmount,
+          shopifyRefundId: refundResult.refundId,
+          refundProcessedAt: new Date(),
+          errorMessage: refundResult.moneyMoved ? null : NO_ONLINE_PAYMENT_NOTE,
+          order: {
+            update: { status: 'REFUNDED' },
+          },
+        },
+      });
+
+      await prisma.syncLog.create({
+        data: {
+          orderId: returnRecord.orderId,
+          syncType: 'REFUND_PROCESS',
+          status: 'SUCCESS',
+          message: refundResult.moneyMoved
+            ? `Refund of Rs. ${refundAmount} processed on Shopify. Refund ID: ${refundResult.refundId}`
+            : `Return refund recorded on Shopify (Refund ID: ${refundResult.refundId}) with no money moved. ${NO_ONLINE_PAYMENT_NOTE}`,
+        },
+      });
+    } catch (dbErr: any) {
+      logger.error('Refund succeeded on Shopify but the return row was not updated', {
+        returnId,
+        refundId: refundResult.refundId,
+        error: dbErr.message,
+      });
+    }
+
+    // Tell the customer only when money actually went back to them.
+    if (refundResult.moneyMoved) {
+      await notificationEngine.notifyRefundProcessed(returnRecord.order, refundAmount, returnRecord);
+    }
+
+    logger.info('Refund processed successfully', {
+      returnId,
+      refundAmount,
+      moneyMoved: refundResult.moneyMoved,
+      shopifyRefundId: refundResult.refundId,
+    });
+
+    return {
+      success: true,
+      refundAmount,
+      shopifyRefundId: refundResult.refundId,
+      moneyMoved: refundResult.moneyMoved,
+    };
   }
 
   /**
@@ -653,15 +812,35 @@ class ReturnService {
    * Retry failed refunds.
    */
   async retryFailedRefunds(): Promise<number> {
+    // A claim (PENDING) left behind by a process that died mid-refund (a
+    // deploy restart) is retried too. The idempotency key makes that retry
+    // adopt the refund if Shopify already made it.
+    await prisma.return.updateMany({
+      where: {
+        refundStatus: 'PENDING',
+        updatedAt: { lt: new Date(Date.now() - STALE_REFUND_CLAIM_MS) },
+      },
+      data: { refundStatus: 'FAILED', errorMessage: 'Refund attempt was interrupted; retrying.' },
+    });
+
+    // Only returns that passed QC, and only up to the attempt cap. The QC
+    // result stored on the return decides full vs partial, so a PARTIAL
+    // return is never retried as a full refund.
     const failedReturns = await prisma.return.findMany({
-      where: { refundStatus: 'FAILED' },
+      where: {
+        refundStatus: 'FAILED',
+        qcStatus: { in: ['APPROVED', 'PARTIAL'] },
+        refundAttempts: { lt: REFUND_MAX_ATTEMPTS },
+      },
+      select: { id: true },
+      take: 50,
     });
 
     let retriedCount = 0;
     for (const ret of failedReturns) {
       try {
-        await this.processRefund(ret.id);
-        retriedCount++;
+        const result = await this.processRefund(ret.id);
+        if (result.success) retriedCount++;
       } catch (error: any) {
         logger.error('Retry refund failed', { returnId: ret.id, error: error.message });
       }

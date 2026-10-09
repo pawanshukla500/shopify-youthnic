@@ -20,7 +20,11 @@ export interface ShopifyOrderWebhook {
     phone?: string;
     email?: string;
     default_address?: {
+      name?: string;
+      first_name?: string;
+      last_name?: string;
       address1?: string;
+      address2?: string;
       city?: string;
       province?: string;
       zip?: string;
@@ -29,7 +33,12 @@ export interface ShopifyOrderWebhook {
     };
   };
   shipping_address?: {
+    name?: string;
+    first_name?: string;
+    last_name?: string;
     address1?: string;
+    // Flat / house number, landmark. Delhivery needs it to deliver.
+    address2?: string;
     city?: string;
     province?: string;
     zip?: string;

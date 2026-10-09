@@ -65,6 +65,28 @@ export const ORDER_TABS = {
 export type { OrderTab };
 
 /**
+ * How long a dispatch claim (Order.dispatchLockedAt) holds. Longer than one
+ * manifest round trip (pincode check + waybill fetch + manifest, ~1 min worst
+ * case); a claim left by a crashed process is ignored after this.
+ */
+export const DISPATCH_LOCK_TTL_MS = 5 * 60 * 1000;
+
+/**
+ * Order states in which an RTO auto-refund is never issued without a person.
+ * CANCELLED is not one: a prepaid order cancelled after pickup comes back as
+ * RTO and still needs its refund (Shopify's cancel does not refund it).
+ */
+const RTO_REFUND_BLOCKING_STATUSES = new Set([
+  'DELIVERED',
+  'RETURN_REQUESTED',
+  'RETURN_DISPATCHED',
+  'RETURN_RECEIVED',
+]);
+
+/** Failed RTO refund attempts before the retry cron hands the order to a person. */
+export const RTO_REFUND_MAX_ATTEMPTS = 5;
+
+/**
  * Coarse AWB hint kept for older callers. Tab membership itself is
  * classifyOrderTab(), because a waybill can still be awaiting pickup.
  */
@@ -630,7 +652,7 @@ class OrderService {
   async dispatchOrder(orderId: number): Promise<{ waybillNumber: string }> {
     const order = await prisma.order.findUnique({
       where: { id: orderId },
-      include: { items: true },
+      include: { items: true, shipment: true },
     });
 
     if (!order) {
@@ -647,6 +669,21 @@ class OrderService {
       );
     }
 
+    // Every dispatch path (single, bulk, sync auto-dispatch) goes through here,
+    // so the approval rule is enforced once on the server: prepaid, or COD the
+    // customer confirmed (COD_CONFIRMED / Low RTO). Unconfirmed COD stays in New.
+    if (!isApprovedForDispatch(order)) {
+      throw new Error(
+        `Order ${order.shopifyOrderName} is unconfirmed COD. Confirm COD before dispatching it.`
+      );
+    }
+
+    if (order.shopifyCreatedAt && new Date(order.shopifyCreatedAt) < config.shopify.syncStartDate) {
+      throw new Error(
+        `Order ${order.shopifyOrderName} was created before the ${config.shopify.syncStartDate.toISOString().slice(0, 10)} cutoff and is never dispatched by the OMS`
+      );
+    }
+
     // Shopify already marks this order fulfilled, so a Delhivery shipment here
     // would ship goods that are already out (or were never meant to be). This
     // catches both historic imports and orders fulfilled through another path.
@@ -655,6 +692,49 @@ class OrderService {
         `Order ${order.shopifyOrderName} is already fulfilled on Shopify and cannot be dispatched again`
       );
     }
+
+    // A live AWB means Delhivery already has this parcel. Manifesting again
+    // would create a second shipment and overwrite the first AWB. Rejected
+    // manifests (ERROR) and cancelled shipments may be dispatched again.
+    const existing = (order as any).shipment;
+    if (existing?.waybillNumber && !['ERROR', 'CANCELLED'].includes(existing.status)) {
+      throw new Error(
+        `Order ${order.shopifyOrderName} already has Delhivery AWB ${existing.waybillNumber}`
+      );
+    }
+
+    // Claim the order for this dispatch. Only one caller can win the
+    // conditional update; the others fail fast instead of booking a second AWB.
+    const claimedAt = new Date();
+    const claim = await prisma.order.updateMany({
+      where: {
+        id: order.id,
+        status: { in: ['NEW', 'DISPATCH_PENDING'] },
+        OR: [
+          { dispatchLockedAt: null },
+          { dispatchLockedAt: { lt: new Date(claimedAt.getTime() - DISPATCH_LOCK_TTL_MS) } },
+        ],
+      },
+      data: { dispatchLockedAt: claimedAt },
+    });
+    if (claim.count === 0) {
+      throw new Error(`Order ${order.shopifyOrderName} is already being dispatched`);
+    }
+
+    try {
+      return await this.dispatchClaimedOrder(order);
+    } finally {
+      await prisma.order
+        .updateMany({ where: { id: order.id, dispatchLockedAt: claimedAt }, data: { dispatchLockedAt: null } })
+        .catch((releaseErr: any) =>
+          logger.warn('Could not release dispatch claim', { orderId: order.id, error: releaseErr.message })
+        );
+    }
+  }
+
+  /** The manifest itself. Only called by dispatchOrder while it holds the claim. */
+  private async dispatchClaimedOrder(order: Order): Promise<{ waybillNumber: string }> {
+    const orderId = order.id;
 
     // Verify payment before dispatch (prepaid orders must be paid, COD is always OK)
     const paymentCheck = await paymentService.isReadyForDispatch(order);
@@ -672,6 +752,12 @@ class OrderService {
     if (!verifiedOrder) {
       throw new Error(`Order not found after verification: ${orderId}`);
     }
+    // A Shopify cancel can land while payment is being verified.
+    if (verifiedOrder.status !== 'NEW' && verifiedOrder.status !== 'DISPATCH_PENDING') {
+      throw new Error(
+        `Order ${verifiedOrder.shopifyOrderName} changed to ${verifiedOrder.status} before dispatch; not manifested`
+      );
+    }
 
     // Create shipment on Delhivery
     const result = await delhiveryService.createShipment(verifiedOrder, {
@@ -683,16 +769,31 @@ class OrderService {
     // would stay on the yellow badge forever even though Delhivery has the
     // shipment. Pre-PR #10 round-2 finding (round-2 audit G3 was about EPOD
     // webhook gaps; this is the same class of bug for the dispatch flow).
-    await prisma.$transaction([
+    const [, promoted] = await prisma.$transaction([
       prisma.shipment.update({
         where: { orderId: order.id },
         data: { status: 'CREATED', trackingStatus: 'Label generated', courier: 'Delhivery' },
       }),
-      prisma.order.update({
-        where: { id: order.id },
+      // Conditional: a Shopify cancel that landed during the manifest call
+      // must not be overwritten back to DISPATCHED.
+      prisma.order.updateMany({
+        where: { id: order.id, status: { in: ['NEW', 'DISPATCH_PENDING', 'DISPATCHED'] } },
         data: { status: 'DISPATCHED', dispatchedAt: new Date() },
       }),
     ]);
+    if (promoted?.count === 0) {
+      const shipment = await prisma.shipment.findUnique({ where: { orderId: order.id } });
+      const outcome = await this.cancelLiveShipment({
+        id: order.id,
+        shopifyOrderName: order.shopifyOrderName,
+        shipment: shipment
+          ? { id: shipment.id, waybillNumber: shipment.waybillNumber, status: shipment.status }
+          : null,
+      });
+      throw new Error(
+        `Order ${order.shopifyOrderName} was cancelled while it was being dispatched. AWB ${result.waybillNumber} ${outcome === 'cancelled' ? 'was cancelled at Delhivery' : 'could NOT be cancelled at Delhivery; cancel it in Delhivery One'}.`
+      );
+    }
 
     // Sync fulfillment and tracking number directly to Shopify order
     try {
@@ -809,21 +910,73 @@ class OrderService {
       return;
     }
 
-    // If shipment was created, try to cancel on Delhivery
-    if (order.shipment?.waybillNumber && order.shipment.status === 'CREATED') {
-      await delhiveryService.cancelShipment(order.shipment.waybillNumber);
-      await prisma.shipment.update({
-        where: { id: order.shipment.id },
-        data: { status: 'CANCELLED' },
-      });
-    }
+    const delhiveryCancel = await this.cancelLiveShipment(order);
 
     await prisma.order.update({
       where: { id: order.id },
-      data: { status: 'CANCELLED' },
+      data: {
+        status: 'CANCELLED',
+        cancelledAt: order.cancelledAt || new Date(),
+        ...(delhiveryCancel === 'refused'
+          ? { hasUrgentSupport: true, supportFlag: 'DELHIVERY_CANCEL_FAILED' }
+          : {}),
+      },
     });
 
-    logger.info('Order cancelled', { shopifyOrderId, orderName: order.shopifyOrderName });
+    logger.info('Order cancelled', {
+      shopifyOrderId,
+      orderName: order.shopifyOrderName,
+      delhiveryCancel,
+    });
+  }
+
+  /**
+   * Cancel the order's Delhivery shipment if it is still live.
+   *
+   * Delhivery accepts a forward cancel while the parcel is Manifested, In
+   * Transit or Pending (after pickup it comes back as RTO). The shipment is
+   * marked CANCELLED only when Delhivery accepts; a refusal keeps it active so
+   * tracking keeps polling it, and records why.
+   */
+  async cancelLiveShipment(order: {
+    id: number;
+    shopifyOrderName: string;
+    shipment?: { id: number; waybillNumber: string | null; status: string } | null;
+  }): Promise<'none' | 'cancelled' | 'refused'> {
+    const shipment = order.shipment;
+    const live =
+      shipment?.waybillNumber &&
+      !['CANCELLED', 'ERROR', 'DELIVERED', 'RTO', 'RTO_DELIVERED'].includes(shipment.status);
+    if (!shipment || !live) return 'none';
+
+    const accepted = await delhiveryService.cancelShipment(shipment.waybillNumber!);
+    if (accepted) {
+      await prisma.shipment.update({
+        where: { id: shipment.id },
+        data: { status: 'CANCELLED', trackingStatus: 'Cancelled by seller' },
+      });
+      return 'cancelled';
+    }
+
+    const message = `Delhivery did not accept the cancel for AWB ${shipment.waybillNumber}. The parcel may still move; cancel it in Delhivery One.`;
+    await prisma.shipment.update({
+      where: { id: shipment.id },
+      data: { errorMessage: message },
+    });
+    await prisma.syncLog.create({
+      data: {
+        orderId: order.id,
+        syncType: 'SHIPMENT_CREATE',
+        status: 'FAILED',
+        message: `Cancel ${order.shopifyOrderName}: Delhivery refused`,
+        errorMessage: message,
+      },
+    });
+    logger.warn('Delhivery refused shipment cancel', {
+      orderId: order.id,
+      waybill: shipment.waybillNumber,
+    });
+    return 'refused';
   }
 
   /**
@@ -1163,6 +1316,10 @@ class OrderService {
     if (order.financialStatus === 'refunded' || order.status === 'REFUNDED') {
       return { success: true, message: 'Order is already marked as refunded.' };
     }
+    // A voided authorization was never captured: there is nothing to refund.
+    if ((order.financialStatus || '').toLowerCase() === 'voided') {
+      return { success: true, message: 'Payment was voided, nothing to refund.' };
+    }
 
     const isPrepaid = order.paymentMethod !== 'COD';
     if (!isPrepaid) {
@@ -1181,22 +1338,96 @@ class OrderService {
       return { success: true, message: 'COD Order marked RTO Delivered and restocked (no customer refund required).' };
     }
 
-    // Prepaid Order: Call Shopify Refund API (routing to Easebuzz / GoKwik)
-    const refundResult = await shopifyService.createRefund(
-      order.shopifyOrderId,
-      order.totalAmount,
-      [],
-      true // full refund
-    );
+    // A parcel the customer received is never an RTO. Late or forged carrier
+    // data must not turn a delivered order into an automatic refund.
+    if (order.deliveredAt || RTO_REFUND_BLOCKING_STATUSES.has(order.status)) {
+      return this.holdRtoRefund(
+        order,
+        'RTO_REFUND_REVIEW',
+        `RTO auto-refund skipped: ${order.shopifyOrderName} is ${order.status}${order.deliveredAt ? ' and was delivered' : ''}. Review it before refunding.`
+      );
+    }
+    if ((order.financialStatus || '').toLowerCase() === 'partially_refunded') {
+      return this.holdRtoRefund(
+        order,
+        'RTO_REFUND_REVIEW',
+        `RTO auto-refund skipped: ${order.shopifyOrderName} is already partially refunded. Refund the balance by hand.`
+      );
+    }
 
-    // Update in DB
-    await prisma.order.update({
-      where: { id: order.id },
-      data: {
-        status: 'REFUNDED',
-        financialStatus: 'refunded',
-      },
-    });
+    // Only Delhivery's authenticated tracking API can confirm the RTO. The
+    // scan webhook is open, so its claim alone never moves money.
+    const waybill = order.shipment?.waybillNumber;
+    if (!waybill) {
+      return this.holdRtoRefund(order, 'RTO_REFUND_REVIEW', `RTO auto-refund skipped: ${order.shopifyOrderName} has no forward AWB to verify.`);
+    }
+    let carrierStatus: string;
+    try {
+      const live = await delhiveryService.trackShipment(waybill);
+      carrierStatus = delhiveryService.mapTrackingToShipmentStatus(
+        live.statusType,
+        live.status,
+        live.pickupDone,
+        live.remarks
+      );
+    } catch (verifyErr: any) {
+      await this.holdRtoRefund(
+        order,
+        'RTO_REFUND_FAILED',
+        `Could not confirm the RTO of ${waybill} with Delhivery: ${verifyErr.message}`
+      );
+      throw verifyErr;
+    }
+    if (carrierStatus !== 'RTO_DELIVERED') {
+      return this.holdRtoRefund(
+        order,
+        'RTO_REFUND_REVIEW',
+        `Delhivery reports ${carrierStatus} for ${waybill}, not RTO delivered. No refund issued.`
+      );
+    }
+
+    await prisma.order.update({ where: { id: order.id }, data: { status: 'RTO_DELIVERED' } });
+
+    // Prepaid Order: Call Shopify Refund API (routing to Easebuzz / GoKwik).
+    // The idempotency key makes a retry after a timeout adopt the refund that
+    // already went through instead of refunding twice.
+    let refundResult: Awaited<ReturnType<typeof shopifyService.createRefund>>;
+    try {
+      refundResult = await shopifyService.createRefund(
+        order.shopifyOrderId,
+        order.totalAmount,
+        [],
+        true, // full refund
+        { idempotencyKey: `oms-rto-${order.id}` }
+      );
+    } catch (refundErr: any) {
+      await this.holdRtoRefund(
+        order,
+        'RTO_REFUND_FAILED',
+        `Shopify refund for RTO ${order.shopifyOrderName} failed: ${refundErr.message}`
+      );
+      throw refundErr;
+    }
+
+    // Shopify has the refund now. Bookkeeping failures below are logged and
+    // must never send this order back through the refund path.
+    const refundedAmount = refundResult.amount;
+    try {
+      await prisma.order.update({
+        where: { id: order.id },
+        data: {
+          status: 'REFUNDED',
+          financialStatus: 'refunded',
+          ...(order.supportFlag?.startsWith('RTO_REFUND') ? { supportFlag: null, hasUrgentSupport: false } : {}),
+        },
+      });
+    } catch (dbErr: any) {
+      logger.error('RTO refund succeeded on Shopify but the order row was not updated', {
+        orderId: order.id,
+        refundId: refundResult.refundId,
+        error: dbErr.message,
+      });
+    }
 
     // Tag on Shopify
     try {
@@ -1210,31 +1441,98 @@ class OrderService {
       logger.warn('Failed to add refund tags to Shopify', { error: tagErr.message });
     }
 
-    // Send customer WhatsApp notification
-    try {
-      await notificationEngine.sendCustomMessage(
-        order,
-        `Hi ${order.customerName}, your returned package for order ${order.shopifyOrderName} has been safely received at our Surat warehouse. A full refund of ₹${order.totalAmount} has been automatically processed to your original payment mode (${order.paymentProvider || order.paymentGateway || 'Prepaid'}). Refund ID: ${refundResult.refundId}.`
-      );
-    } catch (notifErr: any) {
-      logger.warn('Failed to send refund WhatsApp notification', { error: notifErr.message });
+    // Tell the customer only when money actually moved back to them.
+    if (refundResult.moneyMoved) {
+      try {
+        await notificationEngine.sendCustomMessage(
+          order,
+          `Hi ${order.customerName}, your returned package for order ${order.shopifyOrderName} has been safely received at our Surat warehouse. A refund of ₹${refundedAmount} has been processed to your original payment mode (${order.paymentProvider || order.paymentGateway || 'Prepaid'}). Refund ID: ${refundResult.refundId}.`
+        );
+      } catch (notifErr: any) {
+        logger.warn('Failed to send refund WhatsApp notification', { error: notifErr.message });
+      }
     }
 
     // Record sync log
-    await prisma.syncLog.create({
-      data: {
-        orderId: order.id,
-        syncType: 'REFUND_PROCESS',
-        status: 'SUCCESS',
-        message: `Auto-refund of ₹${order.totalAmount} processed for RTO delivered order ${order.shopifyOrderName} (Refund ID: ${refundResult.refundId})`,
-      },
-    });
+    await prisma.syncLog
+      .create({
+        data: {
+          orderId: order.id,
+          syncType: 'REFUND_PROCESS',
+          status: 'SUCCESS',
+          message: refundResult.moneyMoved
+            ? `Auto-refund of ₹${refundedAmount} processed for RTO delivered order ${order.shopifyOrderName} (Refund ID: ${refundResult.refundId})`
+            : `RTO ${order.shopifyOrderName} recorded on Shopify (Refund ID: ${refundResult.refundId}) but no captured payment was found, so no money moved. Pay the customer by hand if they paid outside Shopify.`,
+        },
+      })
+      .catch((logErr: any) => logger.warn('Could not write RTO refund sync log', { error: logErr.message }));
 
     return {
       success: true,
       refundId: refundResult.refundId,
-      message: `Auto-refund of ₹${order.totalAmount} processed successfully for ${order.shopifyOrderName}!`,
+      message: `Auto-refund of ₹${refundedAmount} processed successfully for ${order.shopifyOrderName}!`,
     };
+  }
+
+  /**
+   * Leave an RTO refund for retry (RTO_REFUND_FAILED) or for a person
+   * (RTO_REFUND_REVIEW): flag the order so it surfaces in the support queue.
+   */
+  private async holdRtoRefund(
+    order: { id: number; shopifyOrderName: string },
+    flag: 'RTO_REFUND_FAILED' | 'RTO_REFUND_REVIEW',
+    message: string
+  ): Promise<{ success: false; message: string }> {
+    logger.warn('RTO refund held', { orderId: order.id, flag, message });
+    await prisma.order.update({
+      where: { id: order.id },
+      data: { hasUrgentSupport: true, supportFlag: flag },
+    });
+    await prisma.syncLog.create({
+      data: {
+        orderId: order.id,
+        syncType: 'REFUND_PROCESS',
+        status: 'FAILED',
+        message: `RTO refund held (${flag}) for ${order.shopifyOrderName}`,
+        errorMessage: message,
+      },
+    });
+    return { success: false, message };
+  }
+
+  /**
+   * Retry RTO refunds that failed for a transient reason (Delhivery or Shopify
+   * unreachable). Called by the hourly retry cron. After RTO_REFUND_MAX_ATTEMPTS
+   * failures the order is left for a person.
+   */
+  async retryFailedRtoRefunds(): Promise<number> {
+    const flagged = await prisma.order.findMany({
+      where: { supportFlag: 'RTO_REFUND_FAILED', status: 'RTO_DELIVERED' },
+      select: { id: true, shopifyOrderName: true },
+      take: 50,
+    });
+
+    let refunded = 0;
+    for (const order of flagged) {
+      const failures = await prisma.syncLog.count({
+        where: { orderId: order.id, syncType: 'REFUND_PROCESS', status: 'FAILED' },
+      });
+      if (failures >= RTO_REFUND_MAX_ATTEMPTS) {
+        await prisma.order.update({
+          where: { id: order.id },
+          data: { supportFlag: 'RTO_REFUND_REVIEW' },
+        });
+        logger.warn('RTO refund gave up after repeated failures', { orderId: order.id, failures });
+        continue;
+      }
+      try {
+        const result = await this.processRtoRefund(order.id);
+        if (result.success) refunded++;
+      } catch (error: any) {
+        logger.error('RTO refund retry failed', { orderId: order.id, error: error.message });
+      }
+    }
+    return refunded;
   }
 
   /**

@@ -425,9 +425,10 @@ class DelhiveryService {
         },
       });
 
-      // Update order status to DISPATCHED
-      await prisma.order.update({
-        where: { id: order.id },
+      // Update order status to DISPATCHED, unless a Shopify cancel landed while
+      // the manifest call was running (dispatchOrder then cancels this AWB).
+      await prisma.order.updateMany({
+        where: { id: order.id, status: { in: ['NEW', 'DISPATCH_PENDING'] } },
         data: { status: 'DISPATCHED' },
       });
       manifestSaved = true;

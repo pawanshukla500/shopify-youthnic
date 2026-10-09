@@ -37,6 +37,15 @@ export function resetWebhookCache(): void {
 }
 
 /**
+ * Forget a webhook id whose processing failed. isDuplicateWebhook() claims the
+ * id when a delivery arrives; without this, Shopify's retry of a failed
+ * delivery would be acknowledged as a duplicate and the update lost for good.
+ */
+export function releaseWebhook(webhookId: string): void {
+  if (webhookId) processedWebhooks.delete(webhookId);
+}
+
+/**
  * Shopify Webhook Handler
  * Receives webhooks for: orders/create, orders/paid, orders/updated,
  * orders/cancelled, refunds/create
@@ -45,6 +54,7 @@ export function resetWebhookCache(): void {
  * In app.ts, we set up express.json with verify for the /webhooks/shopify path.
  */
 router.post('/shopify', async (req: Request, res: Response): Promise<void> => {
+  let claimedWebhookId = '';
   try {
     // Verify webhook signature
     const hmacHeader = (req.headers['x-shopify-hmac-sha256'] as string) || '';
@@ -69,6 +79,7 @@ router.post('/shopify', async (req: Request, res: Response): Promise<void> => {
       res.status(200).json({ received: true, deduplicated: true });
       return;
     }
+    claimedWebhookId = webhookId;
 
     logger.info('Received Shopify webhook', { topic, orderId: payload?.id, webhookId });
 
@@ -140,6 +151,8 @@ router.post('/shopify', async (req: Request, res: Response): Promise<void> => {
 
     res.status(200).json({ received: true });
   } catch (error: any) {
+    // Let Shopify's retry of this delivery be processed instead of deduplicated.
+    releaseWebhook(claimedWebhookId);
     logger.error('Webhook processing error', { error: error.message });
     res.status(500).json({ error: 'Webhook processing failed' });
   }

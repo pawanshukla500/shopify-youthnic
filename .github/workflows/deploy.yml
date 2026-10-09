@@ -5,6 +5,13 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      allow_data_loss:
+        description: >-
+          Pass --accept-data-loss to prisma db push. Only for a schema change that
+          intentionally drops a column/table or adds a unique constraint.
+        type: boolean
+        default: false
 
 concurrency:
   group: production-deploy
@@ -33,16 +40,6 @@ jobs:
       - name: Generate Prisma Client
         run: npx prisma generate
 
-      - name: Apply Prisma schema to production database
-        # Without this step, the generated Prisma client references new columns
-        # (Shipment.epodStoragePath, Return.qcStoragePath, TrackingLog.waybill, ...)
-        # that the running database does not yet have. Result: every page that
-        # touches those tables throws "column does not exist". `db push` is safe
-        # for purely additive changes (new nullable columns, new indexes).
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: npx prisma db push --skip-generate --accept-data-loss
-
       - name: Run Backend Unit Tests
         run: npm test
 
@@ -54,6 +51,24 @@ jobs:
 
       - name: Build Vite React Frontend
         run: cd frontend && npm run build
+
+      - name: Apply Prisma schema to production database
+        # Without this step, the generated Prisma client references new columns
+        # (Shipment.epodStoragePath, Return.qcStoragePath, TrackingLog.waybill, ...)
+        # that the running database does not yet have. Result: every page that
+        # touches those tables throws "column does not exist".
+        #
+        # Runs only after tests and both builds pass, so a red build never
+        # changes the production schema under the still-running old release.
+        # Additive changes (new nullable columns, new indexes, new tables) apply
+        # on every push. A change Prisma flags as data loss (dropping a column or
+        # table, adding a unique constraint) stops the deploy here instead of
+        # silently deleting data; re-run this workflow manually with
+        # allow_data_loss checked once that change is intended.
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATA_LOSS_FLAG: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_data_loss && '--accept-data-loss' || '' }}
+        run: npx prisma db push --skip-generate $DATA_LOSS_FLAG
 
   deploy:
     name: Deploy to Hostinger VPS
@@ -93,6 +108,9 @@ jobs:
           ORDER_SYNC_START_DATE: ${{ vars.ORDER_SYNC_START_DATE || '2026-09-25' }}
           CRON_ORDER_SYNC: ${{ vars.CRON_ORDER_SYNC || '0 * * * *' }}
           DELHIVERY_API_TOKEN: ${{ secrets.DELHIVERY_API_TOKEN }}
+          # Optional. Once set, Delhivery must call the webhook URLs with
+          # ?secret=<value> or an x-delhivery-secret header (see docs/delhivery-outreach-drafts.md).
+          DELHIVERY_WEBHOOK_SECRET: ${{ secrets.DELHIVERY_WEBHOOK_SECRET }}
           DELHIVERY_PICKUP_LOCATION: ${{ vars.DELHIVERY_PICKUP_LOCATION }}
           DELHIVERY_SELLER_NAME: ${{ vars.DELHIVERY_SELLER_NAME }}
           DELHIVERY_SELLER_ADDRESS: ${{ vars.DELHIVERY_SELLER_ADDRESS }}
@@ -133,6 +151,7 @@ jobs:
           ORDER_SYNC_START_DATE=${ORDER_SYNC_START_DATE}
           CRON_ORDER_SYNC=${CRON_ORDER_SYNC}
           DELHIVERY_API_TOKEN=${DELHIVERY_API_TOKEN}
+          DELHIVERY_WEBHOOK_SECRET=${DELHIVERY_WEBHOOK_SECRET}
           DELHIVERY_PICKUP_LOCATION=${DELHIVERY_PICKUP_LOCATION}
           DELHIVERY_SELLER_NAME=${DELHIVERY_SELLER_NAME}
           DELHIVERY_SELLER_ADDRESS=${DELHIVERY_SELLER_ADDRESS}

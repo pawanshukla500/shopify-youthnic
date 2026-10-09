@@ -1,20 +1,39 @@
 import { Router, Request, Response } from 'express';
+import { timingSafeEqual } from 'crypto';
 import prisma from '../database/prisma';
 import delhiveryService from '../modules/delhivery/delhivery.service';
 import delhiveryDocumentFetcher from '../modules/delhivery/delhivery-document-fetcher.service';
 import notificationEngine from '../modules/notifications/notification.service';
 import trackingService from '../modules/tracking/tracking.service';
 import { applyReturnCarrierScan } from '../modules/returns/return-tracking';
+import {
+  MOVING_SHIPMENT_STATUSES,
+  PARCEL_MOVING_ON_CLOSED_ORDER,
+  TERMINAL_SHIPMENT_STATUSES,
+  deliveredShipmentData,
+  isCarrierLockedOrderStatus,
+  isStaleScan,
+  needsRtoRefundAfterCancel,
+} from '../modules/orders/order-lifecycle';
 import { config } from '../config';
 import logger from '../utils/logger';
 
 const router = Router();
 
+function secretMatches(candidate: string | undefined, expected: string): boolean {
+  if (!candidate) return false;
+  const a = Buffer.from(candidate);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
 /**
  * Verify optional shared-secret gate.
  * When DELHIVERY_WEBHOOK_SECRET is configured, accepts ?secret=,
  * x-delhivery-secret, x-delhivery-token, or Authorization headers.
- * When unset, allows requests through for backwards compatibility.
+ * When unset, allows requests through for backwards compatibility. Even then
+ * an open request cannot close a shipment or move money: terminal statuses are
+ * confirmed with Delhivery's authenticated tracking API (confirmTerminalStatus).
  */
 function verifyDelhiveryWebhookSecret(req: Request): boolean {
   const expected = config.delhivery.webhookSecret;
@@ -25,7 +44,44 @@ function verifyDelhiveryWebhookSecret(req: Request): boolean {
   const authHeader = req.headers['authorization'] as string | undefined;
   const bearerToken = authHeader ? authHeader.replace(/^(Bearer|Token)\s+/i, '').trim() : undefined;
 
-  return querySecret === expected || headerSecret === expected || bearerToken === expected;
+  return (
+    secretMatches(querySecret, expected) ||
+    secretMatches(headerSecret, expected) ||
+    secretMatches(bearerToken, expected)
+  );
+}
+
+/**
+ * Pushed terminal statuses (delivered, RTO delivered, cancelled) are applied
+ * only when Delhivery's authenticated tracking API reports the same. They
+ * close the order, mark COD collected, stop tracking for good and can trigger
+ * an automatic refund, while the push endpoint can be called by anyone who
+ * knows an AWB. If the API disagrees or is down, the tracking poll decides.
+ */
+export async function confirmTerminalStatus(waybill: string, claimed: string): Promise<boolean> {
+  try {
+    const live = await delhiveryService.trackShipment(waybill);
+    const actual = delhiveryService.mapTrackingToShipmentStatus(
+      live.statusType,
+      live.status,
+      live.pickupDone,
+      live.remarks
+    );
+    if (actual === claimed) return true;
+    logger.warn('Delhivery webhook status not confirmed by the tracking API, ignored', {
+      waybill,
+      claimed,
+      actual,
+    });
+    return false;
+  } catch (error: any) {
+    logger.warn('Could not confirm Delhivery webhook status, left for the tracking poll', {
+      waybill,
+      claimed,
+      error: error.message,
+    });
+    return false;
+  }
 }
 
 /**
@@ -90,8 +146,35 @@ export async function handleScanPush(req: Request, res: Response): Promise<void>
         continue;
       }
 
-      // Save tracking log — idempotent upsert on (waybill, status, scannedAt)
       const scannedAt = parseScanDate(scan.scanDateTime);
+
+      // Map to internal status. Remarks/instructions carry NDR reasons that
+      // the status token alone ("Pending") does not.
+      const scanText = scan.rawStatus || scan.status || '';
+      const newShipmentStatus = delhiveryService.mapTrackingToShipmentStatus(
+        scan.statusType || '',
+        scanText,
+        /pick.*up|pickedup|received at origin/i.test(`${scanText} ${scan.remarks || ''}`),
+        [scan.instructions, scan.remarks].filter(Boolean).join(' ')
+      );
+
+      // A scan older than one already applied is history only: it must not
+      // move the shipment backwards (a late "In Transit" after "Delivered").
+      const stale = isStaleScan(scannedAt, shipment.trackingHistory);
+      // Delivered and RTO-delivered end the forward journey; no push reopens them.
+      const finalAlready = shipment.status === 'DELIVERED' || shipment.status === 'RTO_DELIVERED';
+      let applyStatus = !stale && !finalAlready && newShipmentStatus !== shipment.status;
+
+      if (applyStatus && TERMINAL_SHIPMENT_STATUSES.has(newShipmentStatus)) {
+        applyStatus = await confirmTerminalStatus(scan.waybill, newShipmentStatus);
+        if (!applyStatus) {
+          // Not even recorded: the order tabs read the tracking text, so an
+          // unconfirmed "Delivered" would still move the order on screen.
+          continue;
+        }
+      }
+
+      // Save tracking log — idempotent upsert on (waybill, status, scannedAt)
       try {
         await prisma.trackingLog.upsert({
           where: {
@@ -126,15 +209,6 @@ export async function handleScanPush(req: Request, res: Response): Promise<void>
         });
       }
 
-      // Map to internal status. Remarks/instructions carry NDR reasons that
-      // the status token alone ("Pending") does not.
-      const scanText = scan.rawStatus || scan.status || '';
-      const newShipmentStatus = delhiveryService.mapTrackingToShipmentStatus(
-        scan.statusType || '',
-        scanText,
-        /pick.*up|pickedup|received at origin/i.test(`${scanText} ${scan.remarks || ''}`),
-        [scan.instructions, scan.remarks].filter(Boolean).join(' ')
-      );
       const historyEntry = {
         status: scan.rawStatus || scan.status,
         statusType: scan.statusType || '',
@@ -151,33 +225,43 @@ export async function handleScanPush(req: Request, res: Response): Promise<void>
         historyEntry,
       ].slice(-80);
 
-      // Check if status changed
-      if (newShipmentStatus !== shipment.status) {
-        await prisma.shipment.update({
-          where: { id: shipment.id },
+      let statusApplied = false;
+      if (applyStatus) {
+        // Conditional on the status this request read: if the tracking cron or
+        // a concurrent push moved the shipment meanwhile, this one does not
+        // repeat the transition (and its customer message).
+        const moved = await prisma.shipment.updateMany({
+          where: { id: shipment.id, status: shipment.status },
           data: {
             status: newShipmentStatus as any,
             trackingStatus: scan.rawStatus || scan.status,
             trackingLocation: scan.location || null,
             trackingUpdatedAt: new Date(),
             trackingHistory: trackingHistory as any,
+            ...(newShipmentStatus === 'DELIVERED' ? deliveredShipmentData(shipment) : {}),
           },
         });
+        statusApplied = moved.count === 1;
 
-        // Trigger order status transition + notifications
-        await handleStatusTransition(
-          shipment.order,
-          newShipmentStatus,
-          scan.rawStatus || scan.status,
-          scan.location,
-          scan.waybill
-        );
-      } else {
+        if (statusApplied) {
+          // Trigger order status transition + notifications
+          await handleStatusTransition(
+            shipment.order,
+            newShipmentStatus,
+            scan.rawStatus || scan.status,
+            scan.location,
+            scan.waybill
+          );
+        }
+      }
+      if (!statusApplied) {
         await prisma.shipment.update({
           where: { id: shipment.id },
           data: {
-            trackingStatus: scan.rawStatus || scan.status,
-            trackingLocation: scan.location || null,
+            // A stale scan joins the history but does not replace the latest text.
+            ...(stale || finalAlready
+              ? {}
+              : { trackingStatus: scan.rawStatus || scan.status, trackingLocation: scan.location || null }),
             trackingUpdatedAt: new Date(),
             trackingHistory: trackingHistory as any,
           },
@@ -187,16 +271,18 @@ export async function handleScanPush(req: Request, res: Response): Promise<void>
       // Scan pushes arrive before the next tracking cron run. Evaluate the
       // remark now so a Delhivery delay/exception reaches the customer
       // immediately; the shared cooldown prevents a duplicate cron email.
-      await trackingService.evaluateConsumerDelay(shipment, {
-        status: scan.rawStatus || scan.status,
-        statusType: scan.statusType,
-        location: scan.location,
-        remarks: scan.remarks || scan.instructions,
-        history: [{ status: scan.status, remark: scan.remarks || scan.instructions }],
-      });
+      if (!stale && !finalAlready && !isCarrierLockedOrderStatus(shipment.order?.status)) {
+        await trackingService.evaluateConsumerDelay(shipment, {
+          status: scan.rawStatus || scan.status,
+          statusType: scan.statusType,
+          location: scan.location,
+          remarks: scan.remarks || scan.instructions,
+          history: [{ status: scan.status, remark: scan.remarks || scan.instructions }],
+        });
+      }
 
       // If package is delivered and EPOD is missing, trigger background document fetch
-      if (newShipmentStatus === 'DELIVERED' && !shipment.epodStoragePath) {
+      if (statusApplied && newShipmentStatus === 'DELIVERED' && !shipment.epodStoragePath) {
         delhiveryDocumentFetcher.tryFetchArtifact(shipment.orderId, scan.waybill, 'epod').catch((docErr) => {
           logger.debug('Background EPOD fetch on DELIVERED scan failed (will retry on cron)', {
             waybill: scan.waybill,
@@ -267,12 +353,13 @@ export async function handleEpodPush(req: Request, res: Response): Promise<void>
         include: { order: true },
       });
 
-      // If not found by waybill, attempt fallback by reference order id
+      // If not found by waybill, fall back to the Delhivery reference number,
+      // which is our Shopify order name/id. Never our internal row id: those
+      // are sequential, so a caller could walk every order.
       if (!shipment && epod.orderId) {
         const order = await prisma.order.findFirst({
           where: {
             OR: [
-              ...(Number.isInteger(Number(epod.orderId)) ? [{ id: Number(epod.orderId) }] : []),
               { shopifyOrderId: String(epod.orderId) },
               { shopifyOrderName: String(epod.orderId).startsWith('#') ? String(epod.orderId) : `#${epod.orderId}` },
             ],
@@ -289,6 +376,14 @@ export async function handleEpodPush(req: Request, res: Response): Promise<void>
           waybill: epod.waybill,
           orderId: epod.orderId,
         });
+        continue;
+      }
+
+      // An EPOD marks the order delivered and downloads the pushed image, so it
+      // is acted on only when Delhivery's tracking API confirms the delivery of
+      // our own AWB. The document fetcher cron backfills EPODs it skips.
+      const ourWaybill = shipment.waybillNumber || epod.waybill;
+      if (shipment.status !== 'DELIVERED' && !(await confirmTerminalStatus(ourWaybill, 'DELIVERED'))) {
         continue;
       }
 
@@ -317,18 +412,21 @@ export async function handleEpodPush(req: Request, res: Response): Promise<void>
 
       // EPOD receipt is conclusive proof of delivery — transition to DELIVERED
       if (shipment.status !== 'DELIVERED') {
-        await prisma.shipment.update({
-          where: { id: shipment.id },
+        const moved = await prisma.shipment.updateMany({
+          where: { id: shipment.id, status: shipment.status },
           data: {
             status: 'DELIVERED',
             trackingStatus: 'Delivered (EPOD Verified)',
             trackingUpdatedAt: new Date(),
             ...(epod.receivedBy ? { epodReceivedBy: epod.receivedBy } : {}),
             epodReceivedAt: epod.receivedAt || new Date(),
+            ...deliveredShipmentData(shipment),
           },
         });
 
-        if (shipment.order && shipment.order.status !== 'DELIVERED') {
+        // Only the writer that moved the shipment sends the "Delivered" message;
+        // a scan push for the same delivery may have got there first.
+        if (moved.count === 1 && shipment.order && shipment.order.status !== 'DELIVERED') {
           await handleStatusTransition(
             shipment.order,
             'DELIVERED',
@@ -347,9 +445,14 @@ export async function handleEpodPush(req: Request, res: Response): Promise<void>
         });
       }
 
-      // Log tracking history
-      await prisma.trackingLog.create({
-        data: {
+      // Log tracking history. Delhivery retries pushes; a repeat of the same
+      // EPOD must not throw and abort the rest of the batch.
+      const epodScannedAt = epod.receivedAt || new Date();
+      await prisma.trackingLog.upsert({
+        where: {
+          waybill_status_time: { waybill: epod.waybill, status: 'EPOD_RECEIVED', scannedAt: epodScannedAt },
+        },
+        create: {
           shipmentId: shipment.id,
           waybill: epod.waybill,
           status: 'EPOD_RECEIVED',
@@ -357,9 +460,10 @@ export async function handleEpodPush(req: Request, res: Response): Promise<void>
           remark: `Electronic Proof of Delivery (EPOD) confirmed from Delhivery${
             epod.receivedBy ? `. Received by: ${epod.receivedBy}` : ''
           }`,
-          scannedAt: epod.receivedAt || new Date(),
+          scannedAt: epodScannedAt,
           receivedBy: epod.receivedBy || null,
         },
+        update: {},
       });
 
       // Record SyncLog
@@ -686,6 +790,38 @@ async function handleStatusTransition(
 ): Promise<void> {
   if (!order) return;
 
+  // Cancelled, refunded and returned orders are closed: a forward scan must
+  // not reopen them or message the customer. A cancelled order whose parcel
+  // keeps moving needs a person (the Delhivery cancel did not take).
+  if (isCarrierLockedOrderStatus(order.status)) {
+    if (needsRtoRefundAfterCancel(order, newShipmentStatus)) {
+      try {
+        const orderService = (await import('../modules/orders/order.service')).default;
+        await orderService.processRtoRefund(order.id);
+      } catch (rtoErr: any) {
+        logger.error('RTO refund for a cancelled order failed in Delhivery webhook', { error: rtoErr.message });
+      }
+      return;
+    }
+    if (
+      (order.status === 'CANCELLED' || order.status === 'REFUNDED') &&
+      MOVING_SHIPMENT_STATUSES.has(newShipmentStatus) &&
+      !order.supportFlag
+    ) {
+      await prisma.order.update({
+        where: { id: order.id },
+        data: { hasUrgentSupport: true, supportFlag: PARCEL_MOVING_ON_CLOSED_ORDER },
+      });
+    }
+    logger.warn('Carrier update on a closed order, order left unchanged', {
+      orderId: order.id,
+      orderStatus: order.status,
+      shipmentStatus: newShipmentStatus,
+      waybill,
+    });
+    return;
+  }
+
   switch (newShipmentStatus) {
     case 'CREATED':
       if (['DISPATCH_PENDING', 'SHIPPED', 'IN_TRANSIT'].includes(order.status)) {
@@ -722,7 +858,7 @@ async function handleStatusTransition(
     case 'DELIVERED':
       await prisma.order.update({
         where: { id: order.id },
-        data: { status: 'DELIVERED' },
+        data: { status: 'DELIVERED', deliveredAt: order.deliveredAt || new Date() },
       });
       await notificationEngine.notifyDelivered(order);
       break;

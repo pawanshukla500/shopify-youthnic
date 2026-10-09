@@ -24,7 +24,7 @@ import {
   syncBulkExternalFulfillments,
 } from '../api'
 import { ORDER_TABS, carrierTrackingUrl, tabForStatus, formatDate, formatMoney, labelize, type OrderTabKey } from '../lib'
-import { classifyOrderTab, isCodConfirmed as codConfirmedTag, isManifestRejected, isPrepaidOrder as prepaidOrder } from '../../../src/modules/orders/order-tabs'
+import { classifyOrderTab, isApprovedForDispatch, isCodConfirmed as codConfirmedTag, isManifestRejected, isPrepaidOrder as prepaidOrder } from '../../../src/modules/orders/order-tabs'
 import { getOrderTabCounts } from '../api'
 import { Button, EmptyState, ErrorBox, FormField, Icon, LoadingState, PageIntro, Panel, StatusBadge, useDocumentTitle, useToast } from '../components/UI'
 import { OrderLogisticsActions } from '../components/OrderLogisticsActions'
@@ -138,7 +138,9 @@ export function Orders() {
   const [activeTab, setActiveTab] = useState<OrderTabKey>(initialTab)
   const [selectedState, setSelectedState] = useState<string>('')
   const [search, setSearch] = useState('')
-  const [dispatchingId, setDispatchingId] = useState<number | null>(null)
+  // Every order with a dispatch request in flight. One shared id let a click on
+  // row B re-enable row A's button while A was still manifesting.
+  const [dispatchingIds, setDispatchingIds] = useState<Set<number>>(() => new Set())
   const [confirmingCodId, setConfirmingCodId] = useState<number | null>(null)
 
   // Trigger Modals for Cancel / Delete
@@ -233,7 +235,8 @@ export function Orders() {
 
   // Single order dispatch action
   const handleSingleDispatch = async (orderId: number) => {
-    setDispatchingId(orderId)
+    if (dispatchingIds.has(orderId)) return
+    setDispatchingIds((prev) => new Set(prev).add(orderId))
     try {
       const res = await api.post(`/api/orders/${orderId}/dispatch`)
       toast.toast('success', `Order dispatched · Delhivery AWB: ${res.data.waybillNumber || 'Assigned'}`)
@@ -241,7 +244,11 @@ export function Orders() {
     } catch (err: any) {
       toast.toast('error', apiError(err))
     } finally {
-      setDispatchingId(null)
+      setDispatchingIds((prev) => {
+        const next = new Set(prev)
+        next.delete(orderId)
+        return next
+      })
     }
   }
 
@@ -265,7 +272,7 @@ export function Orders() {
     setIsCancelling(true)
     try {
       const res = await cancelOrder(orderToCancel.id, cancelReason)
-      toast.toast('success', res.message || `Order ${orderToCancel.shopifyOrderName} cancelled.`)
+      toast.toast(res.warning ? 'error' : 'success', res.warning || res.message || `Order ${orderToCancel.shopifyOrderName} cancelled.`)
       setOrderToCancel(null)
       await queryClient.invalidateQueries({ queryKey: ['orders'] })
     } catch (err: any) {
@@ -370,7 +377,12 @@ export function Orders() {
     try {
       const res: any = await api.post('/api/orders/sync')
       const count = res.data?.syncedCount ?? res.syncedCount ?? 0
-      toast.toast('success', `Synced ${count} orders from Shopify!`)
+      // Sync also auto-dispatches approved orders from the last 48 hours; say so.
+      const dispatched = res.data?.dispatchedCount ?? 0
+      toast.toast(
+        'success',
+        `Synced ${count} orders from Shopify${dispatched > 0 ? ` and auto-dispatched ${dispatched} ready order${dispatched === 1 ? '' : 's'} to Delhivery` : ''}.`
+      )
       await queryClient.invalidateQueries({ queryKey: ['orders'] })
     } catch (err: any) {
       toast.toast('error', apiError(err))
@@ -718,11 +730,20 @@ export function Orders() {
 
   // Bulk Dispatch action
   const handleBulkDispatch = async () => {
-    const candidateOrders = filtered.filter(
-      (o) => selectedOrderIds.has(o.id) && ['NEW', 'DISPATCH_PENDING'].includes(o.status)
+    const selected = filtered.filter((o) => selectedOrderIds.has(o.id))
+    // Same rule the server enforces: prepaid or confirmed COD, not yet
+    // manifested. Unconfirmed COD in New is never shipped from a bulk select.
+    const hasLiveAwb = (o: Order) =>
+      Boolean(o.shipment?.waybillNumber) && !['ERROR', 'CANCELLED'].includes(o.shipment?.status || '')
+    const candidateOrders = selected.filter(
+      (o) => ['NEW', 'DISPATCH_PENDING'].includes(o.status) && isApprovedForDispatch(o) && !hasLiveAwb(o)
     )
+    const notEligible = selected.length - candidateOrders.length
     if (!candidateOrders.length) {
-      toast.toast('error', 'None of the selected orders are ready for dispatch (must be in NEW or DISPATCH_PENDING status).')
+      toast.toast(
+        'error',
+        'None of the selected orders can be dispatched. Only prepaid or confirmed-COD orders without an AWB are dispatched; confirm COD orders first.'
+      )
       return
     }
 
@@ -730,10 +751,21 @@ export function Orders() {
     try {
       const candidateIds = candidateOrders.map((o) => o.id)
       const res: any = await api.post('/api/orders/bulk-dispatch', { orderIds: candidateIds })
-      const dispatched = res.data?.dispatched ?? res.dispatched ?? 0
-      const failed = res.data?.failed ?? res.failed ?? 0
-      toast.toast('success', `Dispatched ${dispatched} order${dispatched > 1 ? 's' : ''} to Delhivery!${failed > 0 ? ` (${failed} skipped/failed)` : ''}`)
-      setSelectedOrderIds(new Set())
+      const results: Array<{ orderId: number; success: boolean; error?: string }> = res.data?.results ?? []
+      const dispatched = res.data?.dispatched ?? results.filter((r) => r.success).length
+      const failures = results.filter((r) => !r.success)
+      const nameOf = (id: number) => candidateOrders.find((o) => o.id === id)?.shopifyOrderName || `#${id}`
+
+      const parts = [`Dispatched ${dispatched} order${dispatched === 1 ? '' : 's'} to Delhivery.`]
+      if (notEligible > 0) parts.push(`${notEligible} not eligible (unconfirmed COD or already manifested) were skipped.`)
+      if (failures.length > 0) {
+        const shown = failures.slice(0, 3).map((f) => `${nameOf(f.orderId)}: ${f.error || 'failed'}`)
+        parts.push(`${failures.length} failed: ${shown.join(' | ')}${failures.length > 3 ? ' …' : ''}`)
+      }
+      toast.toast(failures.length > 0 ? 'error' : 'success', parts.join(' '))
+
+      // Keep the failed orders selected so they can be fixed and retried.
+      setSelectedOrderIds(new Set(failures.map((f) => f.orderId)))
       await queryClient.invalidateQueries({ queryKey: ['orders'] })
     } catch (err: any) {
       toast.toast('error', apiError(err))
@@ -1644,7 +1676,7 @@ export function Orders() {
                           order={order}
                           needsDispatch={needsDispatch}
                           isCodConfirmed={isCodConf}
-                          dispatching={dispatchingId === order.id}
+                          dispatching={dispatchingIds.has(order.id)}
                           confirmingCod={confirmingCodId === order.id}
                           refunding={refundingOrderId === order.id}
                           onDispatch={() => handleSingleDispatch(order.id)}

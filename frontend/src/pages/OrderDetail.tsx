@@ -236,7 +236,7 @@ export function OrderDetail() {
     setIsCancelling(true)
     try {
       const res = await cancelOrder(order.id, cancelReason)
-      toast.toast('success', res.message || `Order ${order.shopifyOrderName} cancelled.`)
+      toast.toast(res.warning ? 'error' : 'success', res.warning || res.message || `Order ${order.shopifyOrderName} cancelled.`)
       setShowCancelModal(false)
       await queryClient.invalidateQueries({ queryKey: ['order', id] })
       await queryClient.invalidateQueries({ queryKey: ['orders'] })

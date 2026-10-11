@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import type { AuthenticatedRequest } from '../middleware/auth.middleware';
 import axios from 'axios';
 import orderService from '../modules/orders/order.service';
-import { classifyOrderTab, isPrepaidOrder } from '../modules/orders/order-tabs';
+import { classifyOrderTab, isPrepaidOrder, prioritizeOrdersForDispatch } from '../modules/orders/order-tabs';
 import returnService from '../modules/returns/return.service';
 import trackingService from '../modules/tracking/tracking.service';
 import shopifyService from '../modules/shopify/shopify.service';
@@ -897,7 +897,7 @@ router.post('/orders/:id/dispatch', async (req: Request, res: Response): Promise
   }
 });
 
-// Bulk dispatch multiple orders
+// Bulk dispatch multiple orders with priority: Prepaid first (FIFO), then COD (FIFO)
 router.post('/orders/bulk-dispatch', async (req: Request, res: Response): Promise<void> => {
   try {
     const { orderIds } = req.body;
@@ -905,20 +905,46 @@ router.post('/orders/bulk-dispatch', async (req: Request, res: Response): Promis
       res.status(400).json({ error: 'orderIds array is required' });
       return;
     }
-    const results: Array<{ orderId: number; success: boolean; waybillNumber?: string; error?: string }> = [];
-    for (const id of orderIds) {
+
+    const numericIds = orderIds.map((id) => Number(id)).filter((id) => !isNaN(id));
+
+    // Fetch orders to determine payment methods and creation dates for prioritization
+    const dbOrders = await prisma.order.findMany({
+      where: { id: { in: numericIds } },
+      include: { shipment: true },
+    });
+
+    // Enforce priority: Prepaid orders ALWAYS dispatched first (FIFO), then COD (FIFO)
+    const prioritizedOrders = prioritizeOrdersForDispatch(dbOrders);
+
+    // If any IDs were not in DB, keep them at the end preserving input order
+    const prioritizedIds = prioritizedOrders.map((o) => o.id);
+    const missingIds = numericIds.filter((id) => !prioritizedIds.includes(id));
+    const finalDispatchQueue = [...prioritizedIds, ...missingIds];
+
+    const results: Array<{ orderId: number; success: boolean; waybillNumber?: string; error?: string; paymentMode?: string }> = [];
+    for (const id of finalDispatchQueue) {
+      const order = dbOrders.find((o) => o.id === id);
+      const isPrepaid = order ? isPrepaidOrder(order) : false;
+      const paymentMode = order ? (isPrepaid ? 'Prepaid' : 'COD') : undefined;
+
       try {
         const result = await orderService.dispatchOrder(Number(id));
-        results.push({ orderId: Number(id), success: true, waybillNumber: result.waybillNumber });
+        results.push({ orderId: Number(id), success: true, waybillNumber: result.waybillNumber, paymentMode });
       } catch (err: any) {
-        results.push({ orderId: Number(id), success: false, error: err.message });
+        results.push({ orderId: Number(id), success: false, error: err.message, paymentMode });
       }
     }
     const successfulCount = results.filter((r) => r.success).length;
+    const prepaidDispatched = results.filter((r) => r.success && r.paymentMode === 'Prepaid').length;
+    const codDispatched = results.filter((r) => r.success && r.paymentMode === 'COD').length;
+
     res.json({
       success: true,
       total: orderIds.length,
       dispatched: successfulCount,
+      prepaidDispatched,
+      codDispatched,
       failed: orderIds.length - successfulCount,
       results,
     });

@@ -15,6 +15,7 @@ import {
   isCodRiskHold,
   isHighRtoCancel,
   isOperationalTab,
+  prioritizeOrdersForDispatch,
   type OrderTab,
 } from './order-tabs';
 
@@ -27,6 +28,7 @@ export {
   isOperationalTab,
   isPrepaidOrder,
   orderStatusFromLiveTracking,
+  prioritizeOrdersForDispatch,
   resolveCourierStage,
 } from './order-tabs';
 
@@ -836,9 +838,12 @@ class OrderService {
       include: { shipment: true },
     });
 
+    // Prioritize: Prepaid orders ALWAYS processed first (FIFO), followed by COD orders (FIFO)
+    const prioritizedPending = prioritizeOrdersForDispatch(pendingOrders);
+
     let dispatchedCount = 0;
     let skippedFulfilled = 0;
-    for (const order of pendingOrders) {
+    for (const order of prioritizedPending) {
       // Skip if shipment already exists
       if (order.shipment?.waybillNumber) {
         logger.info('Order already has a shipment, skipping', { orderId: order.id });

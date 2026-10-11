@@ -24,7 +24,7 @@ import {
   syncBulkExternalFulfillments,
 } from '../api'
 import { ORDER_TABS, carrierTrackingUrl, tabForStatus, formatDate, formatMoney, labelize, type OrderTabKey } from '../lib'
-import { classifyOrderTab, isApprovedForDispatch, isCodConfirmed as codConfirmedTag, isManifestRejected, isPrepaidOrder as prepaidOrder } from '../../../src/modules/orders/order-tabs'
+import { classifyOrderTab, isApprovedForDispatch, isCodConfirmed as codConfirmedTag, isManifestRejected, isPrepaidOrder as prepaidOrder, prioritizeOrdersForDispatch } from '../../../src/modules/orders/order-tabs'
 import { getOrderTabCounts } from '../api'
 import { Button, EmptyState, ErrorBox, FormField, Icon, LoadingState, PageIntro, Panel, StatusBadge, useDocumentTitle, useToast } from '../components/UI'
 import { OrderLogisticsActions } from '../components/OrderLogisticsActions'
@@ -749,14 +749,19 @@ export function Orders() {
 
     setIsBulkDispatching(true)
     try {
-      const candidateIds = candidateOrders.map((o) => o.id)
+      // Prioritize: Prepaid orders ALWAYS dispatched first (FIFO), then COD (FIFO)
+      const prioritizedCandidates = prioritizeOrdersForDispatch(candidateOrders)
+      const candidateIds = prioritizedCandidates.map((o) => o.id)
       const res: any = await api.post('/api/orders/bulk-dispatch', { orderIds: candidateIds })
-      const results: Array<{ orderId: number; success: boolean; error?: string }> = res.data?.results ?? []
+      const results: Array<{ orderId: number; success: boolean; error?: string; paymentMode?: string }> = res.data?.results ?? []
       const dispatched = res.data?.dispatched ?? results.filter((r) => r.success).length
+      const prepaidDispatched = res.data?.prepaidDispatched ?? results.filter((r) => r.success && (r.paymentMode === 'Prepaid' || prepaidOrder(candidateOrders.find((o) => o.id === r.orderId) || {} as any))).length
+      const codDispatched = res.data?.codDispatched ?? (dispatched - prepaidDispatched)
       const failures = results.filter((r) => !r.success)
       const nameOf = (id: number) => candidateOrders.find((o) => o.id === id)?.shopifyOrderName || `#${id}`
 
-      const parts = [`Dispatched ${dispatched} order${dispatched === 1 ? '' : 's'} to Delhivery.`]
+      const prioritySummary = dispatched > 0 ? ` (${prepaidDispatched} Prepaid prioritized, ${codDispatched} COD on FIFO)` : ''
+      const parts = [`Dispatched ${dispatched} order${dispatched === 1 ? '' : 's'} to Delhivery${prioritySummary}.`]
       if (notEligible > 0) parts.push(`${notEligible} not eligible (unconfirmed COD or already manifested) were skipped.`)
       if (failures.length > 0) {
         const shown = failures.slice(0, 3).map((f) => `${nameOf(f.orderId)}: ${f.error || 'failed'}`)

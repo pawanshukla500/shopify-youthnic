@@ -3,6 +3,7 @@ import { config } from '../../config';
 import delhiveryService from '../delhivery/delhivery.service';
 import shopifyService, { matchShopifyLineItem } from '../shopify/shopify.service';
 import notificationEngine from '../notifications/notification.service';
+import { recordAccountTrailEvent, type AccountTrailActor } from '../accounts/account-trail.service';
 import logger from '../../utils/logger';
 import { applyReturnCarrierScan } from './return-tracking';
 import { mapReturnReason, reverseProductDescription } from './return-reasons';
@@ -360,14 +361,15 @@ class ReturnService {
   async refundOrder(
     orderId: number,
     refundAmount?: number,
-    reason?: string
+    reason?: string,
+    actor?: AccountTrailActor | null
   ): Promise<{ success: boolean; refundId: string; refundAmount: number; moneyMoved: boolean }> {
     if (refundsInFlight.has(orderId)) {
       throw new Error('A refund for this order is already in progress.');
     }
     refundsInFlight.add(orderId);
     try {
-      return await this.refundOrderUnlocked(orderId, refundAmount, reason);
+      return await this.refundOrderUnlocked(orderId, refundAmount, reason, actor);
     } finally {
       refundsInFlight.delete(orderId);
     }
@@ -376,7 +378,8 @@ class ReturnService {
   private async refundOrderUnlocked(
     orderId: number,
     refundAmount?: number,
-    reason?: string
+    reason?: string,
+    actor?: AccountTrailActor | null
   ): Promise<{ success: boolean; refundId: string; refundAmount: number; moneyMoved: boolean }> {
     const order = await prisma.order.findUnique({
       where: { id: orderId },
@@ -467,6 +470,33 @@ class ReturnService {
       activeReturn = undefined;
     }
 
+    try {
+      await recordAccountTrailEvent({
+        orderId: order.id,
+        returnId: activeReturn?.id,
+        eventType: 'REFUND_AUTOMATIC',
+        actorType: actor?.uid ? 'USER' : 'SYSTEM',
+        actor: actor || { name: 'OMS automation', role: 'SYSTEM' },
+        source: 'ORDER_PAGE',
+        status: refundResult.moneyMoved ? 'COMPLETED' : 'NO_MONEY_MOVED',
+        amount: refundResult.moneyMoved ? refundedAmount : 0,
+        currency: order.currency || 'INR',
+        refundMode: refundResult.moneyMoved ? 'ORIGINAL_PAYMENT_METHOD' : null,
+        accountUsed: refundResult.moneyMoved
+          ? order.paymentProvider || order.paymentGateway || 'Shopify original payment method'
+          : null,
+        externalReference: refundResult.refundId,
+        note: reason || 'Refund initiated from order details.',
+        metadata: { moneyMoved: refundResult.moneyMoved, isPartial, alreadyRefunded: refundResult.alreadyRefunded },
+      });
+    } catch (auditError: any) {
+      logger.error('Refund succeeded but account-trail event could not be written', {
+        orderId: order.id,
+        refundId: refundResult.refundId,
+        error: auditError.message,
+      });
+    }
+
     // Tell the customer only when money actually went back to them.
     if (refundResult.moneyMoved) {
       await notificationEngine.notifyRefundProcessed(order, refundedAmount, activeReturn);
@@ -494,7 +524,8 @@ class ReturnService {
   async scanReturn(
     waybillNumber: string,
     qcStatus: 'APPROVED' | 'REJECTED' | 'PARTIAL' = 'APPROVED',
-    qcRemark?: string
+    qcRemark?: string,
+    actor?: AccountTrailActor | null
   ): Promise<{
     returnId: number;
     refundProcessed: boolean;
@@ -593,7 +624,7 @@ class ReturnService {
 
     // If QC approved, auto-process refund
     if (qcStatus === 'APPROVED' || qcStatus === 'PARTIAL') {
-      const refundResult = await this.processRefund(returnRecord.id, qcStatus === 'PARTIAL');
+      const refundResult = await this.processRefund(returnRecord.id, qcStatus === 'PARTIAL', actor);
       return {
         returnId: returnRecord.id,
         refundProcessed: refundResult.success,
@@ -641,7 +672,8 @@ class ReturnService {
    */
   async processRefund(
     returnId: number,
-    partial?: boolean
+    partial?: boolean,
+    actor?: AccountTrailActor | null
   ): Promise<{ success: boolean; refundAmount: number; shopifyRefundId?: string; moneyMoved?: boolean; error?: string }> {
     const returnRecord = await prisma.return.findUnique({
       where: { id: returnId },
@@ -771,6 +803,37 @@ class ReturnService {
         returnId,
         refundId: refundResult.refundId,
         error: dbErr.message,
+      });
+    }
+
+    try {
+      await recordAccountTrailEvent({
+        orderId: returnRecord.orderId,
+        returnId,
+        eventType: 'REFUND_AUTOMATIC',
+        actorType: actor?.uid ? 'USER' : 'SYSTEM',
+        actor: actor || { name: 'OMS automation', role: 'SYSTEM' },
+        source: 'RETURN_QC',
+        status: refundResult.moneyMoved ? 'COMPLETED' : 'NO_MONEY_MOVED',
+        amount: refundResult.moneyMoved ? refundAmount : 0,
+        currency: returnRecord.order.currency || 'INR',
+        refundMode: refundResult.moneyMoved ? 'ORIGINAL_PAYMENT_METHOD' : null,
+        accountUsed: refundResult.moneyMoved
+          ? returnRecord.order.paymentProvider || returnRecord.order.paymentGateway || 'Shopify original payment method'
+          : null,
+        externalReference: refundResult.refundId,
+        note: refundResult.moneyMoved ? 'Automatically refunded after warehouse QC.' : NO_ONLINE_PAYMENT_NOTE,
+        metadata: {
+          moneyMoved: refundResult.moneyMoved,
+          alreadyRefunded: refundResult.alreadyRefunded,
+          qcStatus: returnRecord.qcStatus,
+        },
+      });
+    } catch (auditError: any) {
+      logger.error('Refund succeeded but account-trail event could not be written', {
+        returnId,
+        refundId: refundResult.refundId,
+        error: auditError.message,
       });
     }
 

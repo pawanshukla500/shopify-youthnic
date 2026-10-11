@@ -104,6 +104,7 @@ model Order {
   items         OrderItem[]
   shipment      Shipment?
   returns       Return[]
+  accountTrailEvents AccountTrailEvent[]
   notifications Notification[]
   syncLogs      SyncLog[]
   emailLogs     EmailLog[]
@@ -316,6 +317,7 @@ model Return {
 
   // Relations
   items         ReturnItem[]
+  accountTrailEvents AccountTrailEvent[]
   notifications Notification[]
 
   @@index([returnStatus])
@@ -354,6 +356,44 @@ model ReturnItem {
   quantity Int
   qcStatus QcStatus?
   qcRemark String?
+}
+
+// Immutable account/refund audit trail. Actor fields are snapshots from the
+// authenticated request so history remains readable if a user account changes.
+// Evidence paths point to private Firebase Storage objects, never public URLs.
+model AccountTrailEvent {
+  id       Int  @id @default(autoincrement())
+  orderId  Int
+  order    Order @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  returnId Int?
+  returnObj Return? @relation(fields: [returnId], references: [id], onDelete: SetNull)
+
+  eventType String // COD_APPROVED | RETURN_CREATED | REFUND_AUTOMATIC | REFUND_MANUAL
+  actorType String // USER | SYSTEM
+  actorUid  String?
+  actorEmail String?
+  actorName String?
+  actorRole String?
+  source    String? // OMS_UI | RETURN_QC | RTO_AUTO_REFUND | SHOPIFY | MANUAL_PAYOUT
+  status    String? // COMPLETED | NO_MONEY_MOVED | FAILED
+
+  amount            Float?
+  currency          String? @default("INR")
+  refundMode        String? // ORIGINAL_PAYMENT_METHOD | UPI | BANK_TRANSFER | CASH | OTHER
+  accountUsed       String?
+  externalReference String? // Shopify refund ID, UTR, or payout reference
+  note              String?
+
+  evidenceStoragePath  String?
+  evidenceFileName     String?
+  evidenceContentType  String?
+  metadata             Json?
+  createdAt            DateTime @default(now())
+
+  @@index([orderId, createdAt])
+  @@index([returnId, createdAt])
+  @@index([eventType, createdAt])
+  @@unique([orderId, eventType, externalReference], map: "AccountTrailEvent_refund_dedupe_key")
 }
 
 // ─── WhatsApp Notifications ───────────────────────────────
@@ -605,6 +645,7 @@ enum SyncType {
   REFUND_PROCESS
   PAYMENT_VERIFY
   WEBHOOK_RECEIVE
+  ACCOUNT_TRAIL_BACKFILL
 }
 
 enum SyncLogStatus {

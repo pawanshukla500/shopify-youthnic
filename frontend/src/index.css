@@ -3167,3 +3167,26 @@ body { min-width: 0; }
 .detail-more > summary::after { content: '▸'; float: right; color: var(--muted); }
 .detail-more[open] > summary::after { content: '▾'; }
 .detail-more[open] > summary { margin-bottom: 12px; }
+
+/* ─── Account and refund audit trail ───────────────────────── */
+.account-trail-panel { scroll-margin-top: 16px; }
+.account-trail-form { margin-top: 14px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: color-mix(in srgb, var(--panel) 82%, var(--line)); }
+.account-trail-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.account-trail-form-actions { display: flex; justify-content: flex-end; margin-top: 12px; }
+.account-trail-proof-preview { display: block; max-width: 240px; max-height: 180px; object-fit: contain; border: 1px solid var(--line); border-radius: 8px; margin-top: 10px; }
+.account-trail-events { display: grid; gap: 10px; margin-top: 16px; }
+.account-trail-event { min-width: 0; padding: 12px 14px; border: 1px solid var(--line); border-left: 3px solid #5b8def; border-radius: 9px; background: var(--panel); }
+.account-trail-event-heading { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.account-trail-event-heading strong { color: var(--ink); font-size: 13px; }
+.account-trail-actor { margin: 7px 0 3px; color: var(--ink); font-size: 12px; font-weight: 600; }
+.account-trail-event time { display: block; color: var(--muted); font-size: 10px; }
+.account-trail-money { margin-top: 8px; color: var(--ink); font-size: 14px; font-weight: 750; }
+.account-trail-meta { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 6px; color: var(--muted); font-size: 11px; }
+.account-trail-reference { display: inline-block; margin: 6px 8px 0 0; color: var(--muted); font-size: 10px; overflow-wrap: anywhere; }
+.account-trail-note { margin: 8px 0 0; color: var(--ink); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.account-trail-evidence { display: inline-block; margin-top: 8px; color: #2563eb; font-size: 11px; font-weight: 700; }
+@media (max-width: 640px) {
+  .account-trail-form-grid { grid-template-columns: 1fr; }
+  .account-trail-form-actions { justify-content: stretch; }
+  .account-trail-form-actions > * { width: 100%; }
+}

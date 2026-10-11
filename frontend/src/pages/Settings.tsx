@@ -817,9 +817,7 @@ export function Settings() {
                   {/* PhonePe */}
                   <div style={{ border: '1px solid var(--line)', borderRadius: '10px', padding: '14px', background: 'var(--canvas)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
-                      <div style={{ width: '26px', height: '26px', borderRadius: '50%', background: '#5f259f', color: '#ffffff', display: 'grid', placeItems: 'center', fontWeight: 900, fontSize: '13px' }}>
-                        पे
-                      </div>
+                      <img src="/logos/phonepe.png" alt="PhonePe" style={{ height: '24px', objectFit: 'contain' }} onError={(e) => { (e.target as HTMLElement).style.display = 'none' }} />
                       <div>
                         <strong style={{ fontSize: '12px', display: 'block', color: 'var(--ink)' }}>PhonePe</strong>
                         <span style={{ fontSize: '10px', color: '#64748b' }}>Secondary UPI Rail</span>

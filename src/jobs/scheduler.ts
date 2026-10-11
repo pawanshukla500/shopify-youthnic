@@ -7,6 +7,7 @@ import shopifyService from '../modules/shopify/shopify.service';
 import delhiveryDocumentFetcher from '../modules/delhivery/delhivery-document-fetcher.service';
 import delhiveryService from '../modules/delhivery/delhivery.service';
 import { runAccountsMaintenance } from '../modules/accounts/accounts.service';
+import { backfillMissingRefundTrailEvents } from '../modules/accounts/account-trail.service';
 import { sendDueMonthlyReport } from '../modules/accounts/accounts-report.service';
 import { estimatePendingShippingCosts } from '../modules/accounts/shipping-cost.service';
 import { syncGatewaySettlements } from '../modules/accounts/gateway-settlement.service';
@@ -66,6 +67,16 @@ class Scheduler {
           await returnService.retryFailedRefunds();
         } catch (error: any) {
           logger.error('[CRON] Retry failed operations error', { error: error.message });
+        }
+        try {
+          // A PROCESSED return whose trail write was lost is retried above
+          // never (it is not FAILED); recreate its audit entry instead.
+          const backfilled = await backfillMissingRefundTrailEvents();
+          if (backfilled > 0) {
+            logger.info('[CRON] Backfilled missing refund trail events', { backfilled });
+          }
+        } catch (error: any) {
+          logger.error('[CRON] Refund trail backfill error', { error: error.message });
         }
         try {
           await orderService.retryFailedRtoRefunds();

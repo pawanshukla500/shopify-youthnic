@@ -21,6 +21,7 @@ const { prismaStub } = vi.hoisted(() => ({
     order: { findUnique: vi.fn(), update: vi.fn(), findMany: vi.fn(), updateMany: vi.fn() },
     return: { findUnique: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
     returnItem: { updateMany: vi.fn() },
+    accountTrailEvent: { create: vi.fn(), findMany: vi.fn(), update: vi.fn(), upsert: vi.fn() },
     syncLog: { create: vi.fn(), count: vi.fn() },
     shipment: { update: vi.fn() },
   },
@@ -52,6 +53,7 @@ function resetStubs() {
   prismaStub.return.update.mockResolvedValue({});
   prismaStub.order.update.mockResolvedValue({});
   prismaStub.syncLog.create.mockResolvedValue({});
+  prismaStub.accountTrailEvent.create.mockResolvedValue({ id: 1 });
   prismaStub.returnItem.updateMany.mockResolvedValue({});
 }
 
@@ -230,6 +232,20 @@ describe('returnService.processRefund', () => {
       false,
       { idempotencyKey: 'oms-return-7' }
     );
+    expect(prismaStub.accountTrailEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        orderId: 1,
+        returnId: 7,
+        eventType: 'REFUND_AUTOMATIC',
+        actorType: 'SYSTEM',
+        source: 'RETURN_QC',
+        status: 'COMPLETED',
+        amount: 719.1,
+        refundMode: 'ORIGINAL_PAYMENT_METHOD',
+        accountUsed: 'Shopify original payment method',
+        externalReference: '3001',
+      }),
+    });
   });
 
   it('refunds shipping when QC approved a return of every unit', async () => {
@@ -300,6 +316,25 @@ describe('returnService.processRefund', () => {
     expect(failedWrites).toHaveLength(0);
   });
 
+  it('attributes the refund to the operator who triggered it from the Returns page', async () => {
+    prismaStub.return.findUnique.mockResolvedValue(returnOf([returnedM]));
+    const actor = { uid: 'u-7', email: 'ops@youthnic.com', name: 'Ops User', role: 'OPERATOR' };
+
+    await returnService.processRefund(7, undefined, actor);
+
+    expect(prismaStub.accountTrailEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        orderId: 1,
+        returnId: 7,
+        eventType: 'REFUND_AUTOMATIC',
+        actorType: 'USER',
+        actorUid: 'u-7',
+        actorEmail: 'ops@youthnic.com',
+        source: 'RETURN_QC',
+      }),
+    });
+  });
+
   it('does not message the customer when no money moved (COD)', async () => {
     prismaStub.return.findUnique.mockResolvedValue(returnOf([returnedM]));
     (shopifyService.createRefund as any).mockResolvedValueOnce({
@@ -316,6 +351,17 @@ describe('returnService.processRefund', () => {
     expect(notifyStub.notifyRefundProcessed).not.toHaveBeenCalled();
     const bookkeeping = prismaStub.return.update.mock.calls[0][0].data;
     expect(bookkeeping.errorMessage).toMatch(/no money moved/);
+    expect(prismaStub.accountTrailEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        eventType: 'REFUND_AUTOMATIC',
+        actorType: 'SYSTEM',
+        status: 'NO_MONEY_MOVED',
+        amount: 0,
+        refundMode: null,
+        accountUsed: null,
+        externalReference: '3005',
+      }),
+    });
   });
 });
 
@@ -367,6 +413,51 @@ describe('returnService.scanReturn and retryFailedRefunds', () => {
     prismaStub.return.findFirst.mockResolvedValue({ id: 9, returnStatus: 'REFUND_PENDING', refundStatus: 'PENDING', order: { items: [] }, items: [] });
 
     await expect(returnService.scanReturn('30100810077777')).rejects.toThrow(/already sent for refund/);
+  });
+
+  it('keeps the scanning operator on the refund trail event', async () => {
+    const orderItem = { id: 12, quantity: 1, shopifyVariantId: '9002', sku: 'KURTA-M', title: 'Cotton Kurta', variantTitle: 'M' };
+    prismaStub.return.findFirst.mockResolvedValue({
+      id: 7,
+      returnStatus: 'IN_TRANSIT',
+      refundStatus: 'NONE',
+      qcCheckedAt: null,
+      order: { items: [] },
+      items: [],
+    });
+    prismaStub.return.findUnique.mockResolvedValue({
+      id: 7,
+      orderId: 1,
+      returnWaybillNumber: '30100810099999',
+      returnStatus: 'RECEIVED',
+      refundStatus: 'NONE',
+      qcStatus: 'APPROVED',
+      order: { id: 1, shopifyOrderId: '123', totalAmount: 1648, currency: 'INR', paymentProvider: null, paymentGateway: null, items: [orderItem] },
+      items: [{ quantity: 1, orderItem }],
+    });
+    prismaStub.return.updateMany.mockResolvedValue({ count: 1 });
+    vi.spyOn(shopifyService, 'fetchOrder').mockResolvedValue({ line_items: [kurtaS, kurtaM] } as any);
+    vi.spyOn(shopifyService, 'createRefund').mockResolvedValue({
+      refundId: '3001',
+      success: true,
+      amount: 719.1,
+      moneyMoved: true,
+      alreadyRefunded: false,
+    });
+    const actor = { uid: 'u-9', email: 'warehouse@youthnic.com', name: 'Warehouse User', role: 'OPERATOR' };
+
+    const result = await returnService.scanReturn('30100810099999', 'APPROVED', undefined, actor);
+
+    expect(result.refundProcessed).toBe(true);
+    expect(prismaStub.accountTrailEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        orderId: 1,
+        returnId: 7,
+        eventType: 'REFUND_AUTOMATIC',
+        actorType: 'USER',
+        actorUid: 'u-9',
+      }),
+    });
   });
 
   it('reclaims a refund left PENDING by a dead process before retrying', async () => {
@@ -435,6 +526,28 @@ describe('returnService.refundOrder (direct refund from the order page)', () => 
     expect(prismaStub.return.update).not.toHaveBeenCalled();
   });
 
+  it('records the authenticated user who initiated a direct Shopify refund', async () => {
+    const actor = { uid: 'u-12', email: 'finance@youthnic.com', name: 'Finance User', role: 'ADMIN' };
+    await returnService.refundOrder(3, 200, 'goodwill', actor);
+
+    expect(prismaStub.accountTrailEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        orderId: 3,
+        returnId: null,
+        eventType: 'REFUND_AUTOMATIC',
+        actorType: 'USER',
+        actorUid: 'u-12',
+        actorEmail: 'finance@youthnic.com',
+        actorName: 'Finance User',
+        source: 'ORDER_PAGE',
+        status: 'COMPLETED',
+        amount: 200,
+        refundMode: 'ORIGINAL_PAYMENT_METHOD',
+        externalReference: '5001',
+      }),
+    });
+  });
+
   it('a full refund closes the open return and restocks the items it brings back', async () => {
     await returnService.refundOrder(3);
 
@@ -495,6 +608,18 @@ describe('orderService.processRtoRefund', () => {
     expect(result.success).toBe(true);
     expect(delhiveryStub.trackShipment).toHaveBeenCalledWith('30100810055555');
     expect(shopifyService.createRefund).toHaveBeenCalledWith('555', 999, [], true, { idempotencyKey: 'oms-rto-5' });
+    expect(prismaStub.accountTrailEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        orderId: 5,
+        eventType: 'REFUND_AUTOMATIC',
+        actorType: 'SYSTEM',
+        source: 'RTO_AUTO_REFUND',
+        status: 'COMPLETED',
+        amount: 999,
+        refundMode: 'ORIGINAL_PAYMENT_METHOD',
+        externalReference: '4001',
+      }),
+    });
   });
 
   it('never refunds an order the customer received, whatever the carrier data says', async () => {

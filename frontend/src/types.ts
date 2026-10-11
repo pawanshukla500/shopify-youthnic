@@ -250,6 +250,31 @@ export interface ReturnRecord {
   order?: Order
 }
 
+export interface AccountTrailEvent {
+  id: number
+  orderId: number
+  returnId: number | null
+  eventType: string
+  actorType: 'USER' | 'SYSTEM' | 'EXTERNAL'
+  actorUid: string | null
+  actorEmail: string | null
+  actorName: string | null
+  actorRole: string | null
+  source: string | null
+  status: string | null
+  amount: number | null
+  currency: string | null
+  refundMode: string | null
+  accountUsed: string | null
+  externalReference: string | null
+  note: string | null
+  evidenceFileName: string | null
+  evidenceContentType: string | null
+  evidenceUrl: string | null
+  metadata?: Record<string, unknown> | null
+  createdAt: string
+}
+
 export interface PaymentDetails {
   paymentGateway: string | null
   gatewayTransactionId: string | null

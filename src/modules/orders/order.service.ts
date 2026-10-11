@@ -4,6 +4,7 @@ import shopifyService from '../shopify/shopify.service';
 import delhiveryService from '../delhivery/delhivery.service';
 import notificationEngine from '../notifications/notification.service';
 import paymentService from '../payments/payment.service';
+import { recordAccountTrailEvent } from '../accounts/account-trail.service';
 import logger from '../../utils/logger';
 import { Order } from '@prisma/client';
 import { ShopifyOrderWebhook } from '../../types';
@@ -1435,6 +1436,34 @@ class OrderService {
         orderId: order.id,
         refundId: refundResult.refundId,
         error: dbErr.message,
+      });
+    }
+
+    try {
+      await recordAccountTrailEvent({
+        orderId: order.id,
+        eventType: 'REFUND_AUTOMATIC',
+        actorType: 'SYSTEM',
+        actor: { name: 'OMS automation', role: 'SYSTEM' },
+        source: 'RTO_AUTO_REFUND',
+        status: refundResult.moneyMoved ? 'COMPLETED' : 'NO_MONEY_MOVED',
+        amount: refundResult.moneyMoved ? refundedAmount : 0,
+        currency: order.currency || 'INR',
+        refundMode: refundResult.moneyMoved ? 'ORIGINAL_PAYMENT_METHOD' : null,
+        accountUsed: refundResult.moneyMoved
+          ? order.paymentProvider || order.paymentGateway || 'Shopify original payment method'
+          : null,
+        externalReference: refundResult.refundId,
+        note: refundResult.moneyMoved
+          ? 'Automatically refunded after Delhivery confirmed RTO delivery.'
+          : 'Shopify refund record created, but no captured payment moved; review for manual payout.',
+        metadata: { moneyMoved: refundResult.moneyMoved, alreadyRefunded: refundResult.alreadyRefunded },
+      });
+    } catch (auditError: any) {
+      logger.error('RTO refund succeeded but account-trail event could not be written', {
+        orderId: order.id,
+        refundId: refundResult.refundId,
+        error: auditError.message,
       });
     }
 

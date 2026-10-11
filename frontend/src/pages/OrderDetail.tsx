@@ -28,7 +28,7 @@ import { classifyOrderTab, isCodConfirmed, isPrepaidOrder } from '../../../src/m
 import { Button, ButtonGroup, CopyableBadge, EmptyState, ErrorBox, FormField, Icon, InfoCard, LoadingState, PageIntro, Panel, PanelHeading, StatCard, StatusBadge, useDocumentTitle, useToast } from '../components/UI'
 import { OrderNextStep } from '../components/OrderNextStep'
 import { OrderMoneyCard } from '../components/OrderMoneyCard'
-import type { Order, OrderItem, ReturnRecord } from '../types'
+import type { AccountTrailEvent, Order, OrderItem, ReturnRecord } from '../types'
 
 export function OrderDetail() {
   useDocumentTitle('Order detail')
@@ -1373,7 +1373,10 @@ export function OrderDetail() {
                         <span style={{ fontWeight: 600, color: '#0f172a' }}>{order.paymentProvider || 'Easebuzz'}</span>
                       </div>
                     ) : (order.paymentGateway || '').toLowerCase().includes('phonepe') ? (
-                      'PhonePe Payment Gateway'
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                        <img src="/logos/phonepe.png" alt="PhonePe" style={{ height: '14px', objectFit: 'contain' }} />
+                        <span>PhonePe Payment Gateway</span>
+                      </div>
                     ) : (
                       payment?.paymentGateway ?? order.paymentGateway
                     )
@@ -1490,6 +1493,12 @@ export function OrderDetail() {
           setCarrier={setCarrier}
           loading={returnMutation.isPending}
           onSubmit={() => returnMutation.mutate()}
+        />
+        <AccountTrailPanel
+          orderId={order.id}
+          returns={order.returns ?? []}
+          defaultAmount={order.totalAmount}
+          currency={order.currency}
         />
       </div>
     </div>
@@ -2106,6 +2115,181 @@ function DetailRow({
         )}
       </div>
     </div>
+  )
+}
+
+async function encodeFileBase64(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  let binary = ''
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000))
+  }
+  return window.btoa(binary)
+}
+
+function AccountTrailPanel({
+  orderId,
+  returns,
+  defaultAmount,
+  currency,
+}: {
+  orderId: number
+  returns: ReturnRecord[]
+  defaultAmount: number
+  currency: string
+}) {
+  const queryClient = useQueryClient()
+  const toast = useToast()
+  const [formOpen, setFormOpen] = useState(false)
+  const [amount, setAmount] = useState(String(defaultAmount))
+  const [returnId, setReturnId] = useState('')
+  const [refundMode, setRefundMode] = useState('')
+  const [accountUsed, setAccountUsed] = useState('')
+  const [externalReference, setExternalReference] = useState('')
+  const [note, setNote] = useState('')
+  const [evidenceFile, setEvidenceFile] = useState<File | null>(null)
+  const [proofPreview, setProofPreview] = useState<string | null>(null)
+
+  const trailQuery = useQuery({
+    queryKey: ['account-trail', orderId],
+    queryFn: async () => (await api.get<{ events: AccountTrailEvent[] }>(`/api/orders/${orderId}/account-trail`)).data.events,
+    retry: false,
+  })
+
+  useEffect(() => {
+    if (!evidenceFile) {
+      setProofPreview(null)
+      return
+    }
+    const previewUrl = URL.createObjectURL(evidenceFile)
+    setProofPreview(previewUrl)
+    return () => URL.revokeObjectURL(previewUrl)
+  }, [evidenceFile])
+
+  const manualRefundMutation = useMutation({
+    mutationFn: async () => {
+      const numericAmount = Number(amount)
+      if (!Number.isFinite(numericAmount) || numericAmount <= 0) throw new Error('Enter a refund amount greater than zero.')
+      if (!refundMode) throw new Error('Choose how the refund was sent.')
+      if (!accountUsed.trim()) throw new Error('Enter the account or payment source used.')
+      if (evidenceFile && evidenceFile.size > 5 * 1024 * 1024) throw new Error('Screenshot must be smaller than 5 MB.')
+      if (!window.confirm('Record this manual refund as already sent? This only saves the audit record; it will not transfer money or create another Shopify refund.')) {
+        throw new Error('USER_CANCELLED_REFUND_RECORD')
+      }
+      const evidence = evidenceFile
+        ? { fileName: evidenceFile.name, contentType: evidenceFile.type, contentBase64: await encodeFileBase64(evidenceFile) }
+        : undefined
+      return (await api.post(`/api/orders/${orderId}/refunds/manual`, {
+        amount: numericAmount,
+        returnId: returnId ? Number(returnId) : undefined,
+        refundMode,
+        accountUsed: accountUsed.trim(),
+        externalReference: externalReference.trim() || undefined,
+        note: note.trim() || undefined,
+        evidence,
+      })).data.event as AccountTrailEvent
+    },
+    onSuccess: async () => {
+      toast.toast('success', 'Manual refund recorded in the account trail.')
+      setFormOpen(false)
+      setEvidenceFile(null)
+      setExternalReference('')
+      setNote('')
+      await queryClient.invalidateQueries({ queryKey: ['account-trail', orderId] })
+      await queryClient.invalidateQueries({ queryKey: ['order', String(orderId)] })
+    },
+    onError: (error) => {
+      if (error instanceof Error && error.message === 'USER_CANCELLED_REFUND_RECORD') return
+      toast.toast('error', apiError(error))
+    },
+  })
+
+  return (
+    <Panel className="account-trail-panel">
+      <PanelHeading eyebrow="Financial audit" title="COD approval & refund trail" />
+      <p className="panel-description">A permanent, user-attributed trail of COD approval, return creation, and refunds. Manual entries record a payout already sent; they never initiate a transfer.</p>
+      <Button className="button-secondary" onClick={() => setFormOpen((open) => !open)}>
+        <Icon name="plus" size={15} />
+        {formOpen ? 'Close manual refund form' : 'Record manual refund'}
+      </Button>
+
+      {formOpen && (
+        <div className="account-trail-form">
+          <div className="account-trail-form-grid">
+            <FormField label="Refund amount">
+              <input type="number" min="0.01" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} />
+            </FormField>
+            <FormField label="Refund mode">
+              <select value={refundMode} onChange={(event) => setRefundMode(event.target.value)}>
+                <option value="">Choose refund mode</option>
+                <option value="ORIGINAL_PAYMENT_METHOD">Original payment method</option>
+                <option value="UPI">UPI</option>
+                <option value="BANK_TRANSFER">Bank transfer</option>
+                <option value="CASH">Cash</option>
+                <option value="OTHER">Other</option>
+              </select>
+            </FormField>
+            <FormField label="Account / source used">
+              <input value={accountUsed} onChange={(event) => setAccountUsed(event.target.value)} placeholder="e.g. HDFC current account ··4821" maxLength={160} />
+              <small className="field-hint">Use a safe label or masked suffix only—never enter a full card or bank number.</small>
+            </FormField>
+            <FormField label="Related return (optional)">
+              <select value={returnId} onChange={(event) => setReturnId(event.target.value)}>
+                <option value="">Order-level refund</option>
+                {returns.map((record) => <option key={record.id} value={record.id}>Return #{record.id} · {record.returnStatus}{record.returnWaybillNumber ? ` · AWB ${record.returnWaybillNumber}` : ''}</option>)}
+              </select>
+            </FormField>
+            <FormField label="Payment reference (optional)">
+              <input value={externalReference} onChange={(event) => setExternalReference(event.target.value)} placeholder="UTR / transaction reference" maxLength={160} />
+            </FormField>
+            <FormField label="Note (optional)">
+              <textarea value={note} onChange={(event) => setNote(event.target.value)} rows={2} placeholder="Reason or reconciliation note" maxLength={1000} />
+            </FormField>
+          </div>
+          <FormField label="Payout screenshot (optional)">
+            <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => setEvidenceFile(event.target.files?.[0] ?? null)} />
+            <small className="field-hint">PNG, JPEG, or WebP; up to 5 MB. Stored privately; the audit view uses a short-lived link.</small>
+          </FormField>
+          {proofPreview && evidenceFile ? <img className="account-trail-proof-preview" src={proofPreview} alt={`Preview of ${evidenceFile.name}`} /> : null}
+          <div className="account-trail-form-actions">
+            <Button className="button-primary" loading={manualRefundMutation.isPending} onClick={() => manualRefundMutation.mutate()}>
+              Save refund audit record
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <div className="account-trail-events">
+        {trailQuery.isLoading ? <p className="field-hint">Loading account trail…</p> : null}
+        {trailQuery.isError ? <ErrorBox message={apiError(trailQuery.error)} /> : null}
+        {trailQuery.isSuccess && !trailQuery.data.length ? <EmptyState title="No account events yet" description="COD approvals, returns, and refunds will appear here." icon="box" /> : null}
+        {trailQuery.data?.map((event) => (
+          <article className="account-trail-event" key={event.id}>
+            <div className="account-trail-event-heading">
+              <strong>{event.eventType.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase())}</strong>
+              {event.status ? <StatusBadge status={event.status} /> : null}
+            </div>
+            <p className="account-trail-actor">
+              {event.actorName || event.actorEmail || (event.actorType === 'SYSTEM' ? 'System automation' : event.actorType)}
+              {event.actorRole ? ` · ${event.actorRole}` : ''}
+              {event.actorEmail && event.actorName ? ` · ${event.actorEmail}` : ''}
+            </p>
+            <time>{formatDate(event.createdAt)}{event.source ? ` · ${event.source.replace(/_/g, ' ')}` : ''}</time>
+            {event.amount !== null ? <div className="account-trail-money">{formatMoney(event.amount, event.currency || currency)}</div> : null}
+            {event.refundMode || event.accountUsed ? (
+              <div className="account-trail-meta">
+                {event.refundMode ? <span>Mode: {event.refundMode.replace(/_/g, ' ').toLowerCase()}</span> : null}
+                {event.accountUsed ? <span>Account: {event.accountUsed}</span> : null}
+              </div>
+            ) : null}
+            {event.returnId ? <span className="account-trail-reference">Return #{event.returnId}</span> : null}
+            {event.externalReference ? <span className="account-trail-reference">Reference: {event.externalReference}</span> : null}
+            {event.note ? <p className="account-trail-note">{event.note}</p> : null}
+            {event.evidenceUrl ? <a className="account-trail-evidence" href={event.evidenceUrl} target="_blank" rel="noreferrer">View payout screenshot{event.evidenceFileName ? ` · ${event.evidenceFileName}` : ''}</a> : null}
+          </article>
+        ))}
+      </div>
+    </Panel>
   )
 }
 

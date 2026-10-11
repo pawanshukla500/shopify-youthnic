@@ -535,9 +535,14 @@ export function Settings() {
                 {/* 1. Hostinger PostgreSQL Database */}
                 <Panel style={{ padding: '18px 20px', position: 'relative' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: '#ecfdf5', color: '#059669', display: 'grid', placeItems: 'center' }}>
-                        <Icon name="database" size={17} />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: '#ffffff', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px', flexShrink: 0, boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+                        <img
+                          src="/logos/postgresql.png"
+                          alt="PostgreSQL"
+                          style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                          onError={(e) => { (e.currentTarget as HTMLImageElement).src = 'https://cdn.brandfetch.io/idjSeCeMle/w/540/h/557/theme/dark/logo.png?c=1bxz7nrnjqcuvlb6lc2wbkb2gh18SXdPupo' }}
+                        />
                       </div>
                       <div>
                         <strong style={{ fontSize: '13px', display: 'block', color: 'var(--ink)' }}>PostgreSQL VPS</strong>
@@ -571,9 +576,14 @@ export function Settings() {
                 {/* 2. Shopify 2026-07 Engine */}
                 <Panel style={{ padding: '18px 20px', position: 'relative' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: '#eff6ff', color: '#2563eb', display: 'grid', placeItems: 'center' }}>
-                        <Icon name="package" size={17} />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: '#ffffff', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px', flexShrink: 0, boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+                        <img
+                          src="/logos/shopify.svg"
+                          alt="Shopify"
+                          style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                          onError={(e) => { (e.currentTarget as HTMLImageElement).src = 'https://cdn.brandfetch.io/idAgPm7IvG/theme/light/logo.svg?c=1bxz7nrnjqcuvlb6lc2wbkb2gh18SXdPupo' }}
+                        />
                       </div>
                       <div>
                         <strong style={{ fontSize: '13px', display: 'block', color: 'var(--ink)' }}>Shopify API</strong>
@@ -607,9 +617,14 @@ export function Settings() {
                 {/* 3. Delhivery Express Logistics */}
                 <Panel style={{ padding: '18px 20px', position: 'relative' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: '#fef3c7', color: '#d97706', display: 'grid', placeItems: 'center' }}>
-                        <Icon name="truck" size={17} />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: '#ffffff', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px', flexShrink: 0, boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+                        <img
+                          src="/logos/delhivery.png"
+                          alt="Delhivery"
+                          style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                          onError={(e) => { (e.currentTarget as HTMLImageElement).src = 'https://cdn.brandfetch.io/idz2dv9TsL/theme/dark/logo.svg?c=1bxz7nrnjqcuvlb6lc2wbkb2gh18SXdPupo' }}
+                        />
                       </div>
                       <div>
                         <strong style={{ fontSize: '13px', display: 'block', color: 'var(--ink)' }}>Delhivery Express</strong>
@@ -643,9 +658,14 @@ export function Settings() {
                 {/* 4. Runtime & Host Uptime */}
                 <Panel style={{ padding: '18px 20px', position: 'relative' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: '#f3e8ff', color: '#7c3aed', display: 'grid', placeItems: 'center' }}>
-                        <Icon name="server" size={17} />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: '#ffffff', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px', flexShrink: 0, boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+                        <img
+                          src="/logos/nodejs.svg"
+                          alt="Node.js"
+                          style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                          onError={(e) => { (e.currentTarget as HTMLImageElement).src = 'https://cdn.brandfetch.io/id7JRtQEAa/theme/dark/logo.svg?c=1bxz7nrnjqcuvlb6lc2wbkb2gh18SXdPupo' }}
+                        />
                       </div>
                       <div>
                         <strong style={{ fontSize: '13px', display: 'block', color: 'var(--ink)' }}>Node & Express</strong>
@@ -680,7 +700,19 @@ export function Settings() {
                 <Panel>
                   <PanelHeading
                     eyebrow="Automated Customer Email Gateway"
-                    title="Resend Mail API & Transit Notification Engine"
+                    title={
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                        <div style={{ width: '22px', height: '22px', borderRadius: '4px', background: '#000000', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '3px', flexShrink: 0 }}>
+                          <img
+                            src="/logos/resend.svg"
+                            alt="Resend"
+                            style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                            onError={(e) => { (e.currentTarget as HTMLImageElement).src = 'https://cdn.brandfetch.io/id0BqaqET6/theme/dark/symbol.svg?c=1bxz7nrnjqcuvlb6lc2wbkb2gh18SXdPupo' }}
+                          />
+                        </div>
+                        <span>Resend Mail API & Transit Notification Engine</span>
+                      </div>
+                    }
                     action={
                       <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                         <button
@@ -781,11 +813,18 @@ export function Settings() {
                     </span>
                   }
                 />
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '14px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px' }}>
                   {/* GoKwik */}
                   <div style={{ border: '1px solid var(--line)', borderRadius: '10px', padding: '14px', background: 'var(--canvas)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
-                      <img src="/logos/gokwik.png" alt="GoKwik" style={{ height: '24px', objectFit: 'contain' }} onError={(e) => { (e.target as HTMLElement).style.display = 'none' }} />
+                      <div style={{ width: '40px', height: '40px', borderRadius: '8px', background: '#ffffff', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '5px', flexShrink: 0, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+                        <img
+                          src="/logos/gokwik.png"
+                          alt="GoKwik"
+                          style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                          onError={(e) => { (e.currentTarget as HTMLImageElement).src = 'https://cdn.brandfetch.io/idOPkt8Wn5/w/800/h/289/theme/light/logo.png?c=1bxz7nrnjqcuvlb6lc2wbkb2gh18SXdPupo' }}
+                        />
+                      </div>
                       <div>
                         <strong style={{ fontSize: '12px', display: 'block', color: 'var(--ink)' }}>GoKwik</strong>
                         <span style={{ fontSize: '10px', color: '#64748b' }}>Checkout Aggregator</span>
@@ -801,7 +840,14 @@ export function Settings() {
                   {/* Easebuzz */}
                   <div style={{ border: '1px solid var(--line)', borderRadius: '10px', padding: '14px', background: 'var(--canvas)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
-                      <img src="/logos/easebuzz.png" alt="Easebuzz" style={{ height: '24px', objectFit: 'contain' }} onError={(e) => { (e.target as HTMLElement).style.display = 'none' }} />
+                      <div style={{ width: '40px', height: '40px', borderRadius: '8px', background: '#ffffff', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '5px', flexShrink: 0, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+                        <img
+                          src="/logos/easebuzz.png"
+                          alt="Easebuzz"
+                          style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                          onError={(e) => { (e.currentTarget as HTMLImageElement).src = 'https://cdn.brandfetch.io/id1_ejsPh1/w/820/h/199/theme/dark/logo.png?c=1bxz7nrnjqcuvlb6lc2wbkb2gh18SXdPupo' }}
+                        />
+                      </div>
                       <div>
                         <strong style={{ fontSize: '12px', display: 'block', color: 'var(--ink)' }}>Easebuzz</strong>
                         <span style={{ fontSize: '10px', color: '#64748b' }}>Settlement Partner</span>
@@ -817,7 +863,14 @@ export function Settings() {
                   {/* PhonePe */}
                   <div style={{ border: '1px solid var(--line)', borderRadius: '10px', padding: '14px', background: 'var(--canvas)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
-                      <img src="/logos/phonepe.png" alt="PhonePe" style={{ height: '24px', objectFit: 'contain' }} onError={(e) => { (e.target as HTMLElement).style.display = 'none' }} />
+                      <div style={{ width: '40px', height: '40px', borderRadius: '8px', background: '#ffffff', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '5px', flexShrink: 0, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+                        <img
+                          src="/logos/phonepe.png"
+                          alt="PhonePe"
+                          style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                          onError={(e) => { (e.currentTarget as HTMLImageElement).src = 'https://cdn.brandfetch.io/idcE0OdG8i/w/800/h/218/theme/dark/logo.png?c=1bxz7nrnjqcuvlb6lc2wbkb2gh18SXdPupo' }}
+                        />
+                      </div>
                       <div>
                         <strong style={{ fontSize: '12px', display: 'block', color: 'var(--ink)' }}>PhonePe</strong>
                         <span style={{ fontSize: '10px', color: '#64748b' }}>Secondary UPI Rail</span>
@@ -833,7 +886,14 @@ export function Settings() {
                   {/* COD Remittance */}
                   <div style={{ border: '1px solid var(--line)', borderRadius: '10px', padding: '14px', background: 'var(--canvas)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
-                      <img src="/logos/delhivery.png" alt="Delhivery" style={{ height: '20px', objectFit: 'contain' }} onError={(e) => { (e.target as HTMLElement).style.display = 'none' }} />
+                      <div style={{ width: '40px', height: '40px', borderRadius: '8px', background: '#ffffff', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '5px', flexShrink: 0, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+                        <img
+                          src="/logos/delhivery.png"
+                          alt="Delhivery"
+                          style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                          onError={(e) => { (e.currentTarget as HTMLImageElement).src = 'https://cdn.brandfetch.io/idz2dv9TsL/theme/dark/logo.svg?c=1bxz7nrnjqcuvlb6lc2wbkb2gh18SXdPupo' }}
+                        />
+                      </div>
                       <div>
                         <strong style={{ fontSize: '12px', display: 'block', color: 'var(--ink)' }}>Delhivery COD</strong>
                         <span style={{ fontSize: '10px', color: '#64748b' }}>Cash Remittance</span>
@@ -843,6 +903,52 @@ export function Settings() {
                       <div>• Cash on Delivery collection</div>
                       <div>• Live rate-API freight estimates</div>
                       <div>• Automated discrepancy flagging</div>
+                    </div>
+                  </div>
+
+                  {/* Razorpay */}
+                  <div style={{ border: '1px solid var(--line)', borderRadius: '10px', padding: '14px', background: 'var(--canvas)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
+                      <div style={{ width: '40px', height: '40px', borderRadius: '8px', background: '#ffffff', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '5px', flexShrink: 0, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+                        <img
+                          src="/logos/razorpay.svg"
+                          alt="Razorpay"
+                          style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                          onError={(e) => { (e.currentTarget as HTMLImageElement).src = 'https://cdn.brandfetch.io/idHc4m3b7C/theme/light/logo.svg?c=1bxz7nrnjqcuvlb6lc2wbkb2gh18SXdPupo' }}
+                        />
+                      </div>
+                      <div>
+                        <strong style={{ fontSize: '12px', display: 'block', color: 'var(--ink)' }}>Razorpay</strong>
+                        <span style={{ fontSize: '10px', color: '#64748b' }}>Cards & Subscriptions</span>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: '10.5px', color: '#475569', display: 'grid', gap: '4px' }}>
+                      <div>• Instant refunds via Razorpay API</div>
+                      <div>• Multi-bank netbanking aggregator</div>
+                      <div>• 3D secure international card rail</div>
+                    </div>
+                  </div>
+
+                  {/* Cashfree */}
+                  <div style={{ border: '1px solid var(--line)', borderRadius: '10px', padding: '14px', background: 'var(--canvas)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
+                      <div style={{ width: '40px', height: '40px', borderRadius: '8px', background: '#ffffff', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '5px', flexShrink: 0, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+                        <img
+                          src="/logos/cashfree.svg"
+                          alt="Cashfree"
+                          style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                          onError={(e) => { (e.currentTarget as HTMLImageElement).src = 'https://cdn.brandfetch.io/idLecjUPYL/theme/light/logo.svg?c=1bxz7nrnjqcuvlb6lc2wbkb2gh18SXdPupo' }}
+                        />
+                      </div>
+                      <div>
+                        <strong style={{ fontSize: '12px', display: 'block', color: 'var(--ink)' }}>Cashfree</strong>
+                        <span style={{ fontSize: '10px', color: '#64748b' }}>Payouts & API Banking</span>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: '10.5px', color: '#475569', display: 'grid', gap: '4px' }}>
+                      <div>• Automated instant vendor payouts</div>
+                      <div>• 24x7 IMPS/UPI customer refund engine</div>
+                      <div>• Bank account verification validation</div>
                     </div>
                   </div>
                 </div>

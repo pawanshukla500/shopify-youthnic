@@ -482,3 +482,45 @@ export function classifyOrderTab(order: OrderTabSnapshot): OperationalTab {
 export function isOperationalTab(tab?: string | null): tab is OperationalTab {
   return OPERATIONAL_TABS.includes((tab || '') as OperationalTab);
 }
+
+/**
+ * Prioritizes orders for dispatch execution:
+ * 1. PREPAID orders ALWAYS take absolute priority over COD.
+ *    Within prepaid orders, they are processed strictly on a FIFO basis (oldest placed order first).
+ * 2. COD orders are processed after prepaid orders, strictly on a FIFO basis (oldest placed order first).
+ */
+export function prioritizeOrdersForDispatch<
+  T extends {
+    id?: number | string;
+    paymentMethod?: string | null;
+    paymentGateway?: string | null;
+    financialStatus?: string | null;
+    tags?: string | null;
+    shopifyCreatedAt?: Date | string | null;
+    createdAt?: Date | string | null;
+    shipment?: any;
+  }
+>(orders: T[]): T[] {
+  return [...orders].sort((a, b) => {
+    const aIsPrepaid = isPrepaidOrder(a);
+    const bIsPrepaid = isPrepaidOrder(b);
+
+    // Rule 1: Priority to Prepaid over COD
+    if (aIsPrepaid && !bIsPrepaid) return -1;
+    if (!aIsPrepaid && bIsPrepaid) return 1;
+
+    // Rule 2: Within same category (both Prepaid or both COD), sort strictly FIFO (oldest first)
+    const aDate = new Date(a.shopifyCreatedAt || a.createdAt || 0).getTime();
+    const bDate = new Date(b.shopifyCreatedAt || b.createdAt || 0).getTime();
+
+    if (aDate !== bDate) {
+      return aDate - bDate;
+    }
+
+    // Tie-breaker: lowest numeric ID first
+    const aId = Number(a.id) || 0;
+    const bId = Number(b.id) || 0;
+    return aId - bId;
+  });
+}
+

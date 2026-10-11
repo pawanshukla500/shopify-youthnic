@@ -26,6 +26,7 @@ const operationsNav: NavItem[] = [
 ]
 
 const financeNav: NavItem[] = [
+  { to: '/accounts', label: 'Payments & Accounts', icon: 'dollar' },
   { to: '/tools', label: 'Rate & Serviceability', icon: 'tool' },
 ]
 

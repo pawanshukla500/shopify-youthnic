@@ -13,6 +13,8 @@
  *   ready      label generated, still under pickup (not picked from the seller)
  *   transit    picked up and moving until the customer receives it
  *   delivered  delivered to the customer
+ *   closed     "Payment Received": delivered, money in Youthnic's bank (UTR),
+ *              return window over, no open return. Ready for accounts.
  *   return     RTO and customer returns
  *   cancel     cancelled before pickup, including COD_CANCELLED / High RTO
  */
@@ -23,6 +25,7 @@ export const OPERATIONAL_TABS = [
   'ready',
   'transit',
   'delivered',
+  'closed',
   'return',
   'cancel',
 ] as const;
@@ -47,6 +50,88 @@ export interface OrderTabSnapshot {
   tags?: string | null;
   shipment?: OrderTabShipment | null;
   returns?: Array<{ status?: string | null; returnStatus?: string | null }> | null;
+  // Accounts reconciliation (see accountsStatus)
+  deliveredAt?: Date | string | null;
+  paymentReceivedAt?: Date | string | null;
+  paymentReceivedUtr?: string | null;
+  accountsClosedAt?: Date | string | null;
+}
+
+// ─── Accounts closing ("Payment Received") ─────────────────
+
+/** Days after delivery in which a customer may still ask for a return or exchange (7-day policy). */
+export const RETURN_WINDOW_DAYS = 7;
+
+export type AccountsState = 'CLOSED' | 'OPEN' | 'NOT_A_SALE';
+
+export interface AccountsStatus {
+  state: AccountsState;
+  delivered: boolean;
+  paymentReceived: boolean;
+  returnWindowClosesAt: Date | null;
+  returnWindowClosed: boolean;
+  openReturn: boolean;
+  /** What still stops an OPEN order from closing, in plain words. */
+  pending: string[];
+}
+
+function toDate(value?: Date | string | null): Date | null {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/** Delivery date + the return window, or null while the order is not delivered. */
+export function returnWindowClosesAt(order: Pick<OrderTabSnapshot, 'deliveredAt'>): Date | null {
+  const delivered = toDate(order.deliveredAt);
+  return delivered ? new Date(delivered.getTime() + RETURN_WINDOW_DAYS * 24 * 3600 * 1000) : null;
+}
+
+/**
+ * Where an order stands for the accounts team.
+ *
+ *   CLOSED      delivered, payment received in the bank (prepaid settlement
+ *               or Delhivery COD remittance), return window over, no open
+ *               return. The order is done and can be booked.
+ *   OPEN        a sale that is still waiting for one of those; `pending`
+ *               says which.
+ *   NOT_A_SALE  cancelled, returned to origin, or refunded: nothing to collect.
+ */
+export function accountsStatus(order: OrderTabSnapshot, now: Date = new Date()): AccountsStatus {
+  const closesAt = returnWindowClosesAt(order);
+  const delivered = Boolean(toDate(order.deliveredAt)) || order.status === 'DELIVERED';
+  // Received means the bank credit is identified: a payment recorded without
+  // its UTR (e.g. a remittance file with no Bank Transaction ID) stays open.
+  const paymentRecorded = Boolean(toDate(order.paymentReceivedAt));
+  const paymentReceived = paymentRecorded && Boolean((order.paymentReceivedUtr || '').trim());
+  const returnWindowClosed = Boolean(closesAt && now.getTime() >= closesAt.getTime());
+  const openReturn = hasOpenReturn(order);
+  const base = { delivered, paymentReceived, returnWindowClosesAt: closesAt, returnWindowClosed, openReturn };
+
+  const status = order.status || '';
+  if (
+    status === 'CANCELLED' ||
+    status === 'REFUNDED' ||
+    status === 'RTO_INITIATED' ||
+    status === 'RTO_DELIVERED' ||
+    resolveCourierStage(order) === 'rto'
+  ) {
+    return { ...base, state: 'NOT_A_SALE', pending: [] };
+  }
+
+  const pending: string[] = [];
+  if (!delivered) pending.push('Not delivered yet');
+  if (!paymentRecorded) pending.push('Payment not received in bank (no UTR yet)');
+  else if (!paymentReceived) pending.push('Payment recorded but the bank UTR is missing');
+  if (openReturn) pending.push('Return in progress');
+  if (delivered && !returnWindowClosed) {
+    pending.push(
+      closesAt
+        ? `Return window open until ${closesAt.toISOString().slice(0, 10)}`
+        : 'Delivery date not recorded yet'
+    );
+  }
+  return { ...base, state: pending.length === 0 ? 'CLOSED' : 'OPEN', pending };
 }
 
 const RETURN_ORDER_STATUSES = new Set([
@@ -355,7 +440,8 @@ export function classifyOrderTab(order: OrderTabSnapshot): OperationalTab {
   }
 
   if (stage === 'delivered' || order.status === 'DELIVERED') {
-    return 'delivered';
+    // Delivered, paid into the bank and past the return window: done.
+    return accountsStatus(order).state === 'CLOSED' ? 'closed' : 'delivered';
   }
 
   const status = order.status || '';

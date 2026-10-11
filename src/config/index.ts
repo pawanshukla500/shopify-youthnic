@@ -199,6 +199,27 @@ export const config = {
     apiUrl: optional('PHONEPE_API_URL', 'https://api.phonepe.com/apis/hermes'),
     env: optional('PHONEPE_ENV', 'PRODUCTION'),
     verifyEnabled: optional('PHONEPE_VERIFY_ENABLED', 'false') === 'true',
+    // Payment Gateway v2 (OAuth) credentials, issued by PhonePe to the
+    // merchant. Used for the settlement APIs (settlement UTR per order).
+    clientId: optional('PHONEPE_CLIENT_ID', ''),
+    clientSecret: optional('PHONEPE_CLIENT_SECRET', ''),
+    clientVersion: optional('PHONEPE_CLIENT_VERSION', '1'),
+  },
+
+  // Easebuzz payment gateway: Payout (settlement) API credentials.
+  easebuzz: {
+    key: optional('EASEBUZZ_KEY', ''),
+    salt: optional('EASEBUZZ_SALT', ''),
+    apiUrl: optional('EASEBUZZ_DASHBOARD_URL', 'https://dashboard.easebuzz.in'),
+  },
+
+  // Monthly accounts closing report (Excel), emailed on the 8th of each month
+  // for the previous month's orders. Recipients can also be set on the
+  // Payments & Accounts page, which overrides this list.
+  accounts: {
+    reportRecipients: optional('ACCOUNTS_REPORT_EMAILS', ''),
+    reportCron: optional('CRON_ACCOUNTS_REPORT', '0 9 8 * *'),
+    reportDayOfMonth: parseInt(optional('ACCOUNTS_REPORT_DAY', '8'), 10),
   },
 
   // Resend Email API
@@ -238,6 +259,10 @@ export const config = {
     // Backfill POD / signature / QC / sorter images into Firebase Storage.
     // Every 30 minutes by default; rows already populated are skipped (idempotent).
     delhiveryDocFetch: optional('CRON_DELHIVERY_DOC_FETCH', '*/30 * * * *'),
+    // Delhivery shipping-cost estimates, a few spaced calls per run (rate limit).
+    shippingCostEstimate: optional('CRON_SHIPPING_COST_ESTIMATE', '*/15 * * * *'),
+    // Pull PhonePe / Easebuzz settlements (when credentials are set), daily.
+    gatewaySettlementSync: optional('CRON_GATEWAY_SETTLEMENT_SYNC', '30 7 * * *'),
   },
 
   // Tracking sync resilience — prevents Delhivery 429 fallback during large backlogs.

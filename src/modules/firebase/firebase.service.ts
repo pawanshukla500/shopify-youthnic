@@ -308,6 +308,38 @@ export class FirebaseService {
   }
 
   /**
+   * Upload sensitive account evidence as a private Firebase Storage object.
+   * Never return or persist a public URL for payout screenshots.
+   */
+  public async uploadPrivateBuffer(
+    destinationPath: string,
+    buffer: Buffer,
+    contentType: string
+  ): Promise<{ path: string; bucket: string }> {
+    if (!/^orders\/\d+\/refund-proof-[a-f0-9-]+\.(png|jpg|webp)$/i.test(destinationPath)) {
+      throw new Error('Invalid private refund-evidence storage path.');
+    }
+    const bucket = this.getStorageBucket();
+    await bucket.file(destinationPath).save(buffer, {
+      metadata: { contentType },
+      public: false,
+      resumable: false,
+    });
+    logger.info('Uploaded private account-trail evidence', { destinationPath, bucket: bucket.name });
+    return { path: destinationPath, bucket: bucket.name };
+  }
+
+  /** Create a short-lived read URL for an authenticated account-trail request. */
+  public async createPrivateDownloadUrl(destinationPath: string): Promise<string> {
+    if (!/^orders\/\d+\/refund-proof-[a-f0-9-]+\.(png|jpg|webp)$/i.test(destinationPath)) {
+      throw new Error('Invalid private refund-evidence storage path.');
+    }
+    const file = this.getStorageBucket().file(destinationPath);
+    const [url] = await file.getSignedUrl({ action: 'read', expires: Date.now() + 5 * 60 * 1000 });
+    return url;
+  }
+
+  /**
    * Probe Firebase Cloud Storage bucket health and connectivity
    */
   public async checkStorageHealth(): Promise<{

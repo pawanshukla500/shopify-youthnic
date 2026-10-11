@@ -1308,6 +1308,55 @@ class DelhiveryService {
   }
 
   /**
+   * Delhivery's own rate-card charge for one leg, from the live API only.
+   * GET /api/kinko/v1/invoice/charges/.json (ss = Delivered | RTO | DTO).
+   *
+   * Throws when the API is not configured or returns no amount. It never
+   * falls back to calculateRateCardMatrix (an approximation): this number is
+   * written into the accounts report as the shipping cost until the actual
+   * billed charge from the wallet ledger replaces it.
+   */
+  async fetchLiveShippingRate(params: {
+    mode: 'E' | 'S';
+    chargeableWeightGrams: number;
+    originPincode: string;
+    destinationPincode: string;
+    shipmentStatus: 'Delivered' | 'RTO' | 'DTO';
+    paymentType: 'Pre-paid' | 'COD';
+    codAmount?: number;
+  }): Promise<{ total: number; zone?: string; chargedWeightGrams?: number; raw: any }> {
+    if (!config.delhivery.apiToken) {
+      throw new Error('DELHIVERY_API_TOKEN is not configured');
+    }
+    const response = await withRetry(
+      () =>
+        this.client.get('/api/kinko/v1/invoice/charges/.json', {
+          params: {
+            md: params.mode,
+            cgm: params.chargeableWeightGrams,
+            o_pin: params.originPincode,
+            d_pin: params.destinationPincode,
+            ss: params.shipmentStatus,
+            pt: params.paymentType,
+            ...(params.paymentType === 'COD' && params.codAmount ? { cod: params.codAmount } : {}),
+          },
+        }),
+      { attempts: 2, baseDelayMs: 2000 }
+    );
+    const raw = Array.isArray(response.data) ? response.data[0] : response.data;
+    const total = Number(raw?.total_amount);
+    if (!raw || !Number.isFinite(total) || total <= 0) {
+      throw new Error('Delhivery rate API returned no amount');
+    }
+    return {
+      total: Math.round(total * 100) / 100,
+      zone: raw.zone || undefined,
+      chargedWeightGrams: Number(raw.charged_weight) || undefined,
+      raw,
+    };
+  }
+
+  /**
    * Helper to estimate Delhivery logistics charges for a given order.
    * Uses warehouse origin pincode and customer destination pincode.
    */

@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import type { AuthenticatedRequest } from '../middleware/auth.middleware';
 import axios from 'axios';
 import orderService from '../modules/orders/order.service';
 import { classifyOrderTab, isPrepaidOrder } from '../modules/orders/order-tabs';
@@ -7,6 +8,9 @@ import trackingService from '../modules/tracking/tracking.service';
 import shopifyService from '../modules/shopify/shopify.service';
 import paymentService from '../modules/payments/payment.service';
 import delhiveryService from '../modules/delhivery/delhivery.service';
+import { readSpreadsheet } from '../modules/accounts/spreadsheet';
+import { importDelhiveryRemittance, recordPaymentReceived } from '../modules/accounts/reconciliation.service';
+import { getOrderAccountTrail, presentAccountTrailEvent, recordAccountTrailEvent, recordManualRefund, type RefundMode } from '../modules/accounts/account-trail.service';
 import { config } from '../config';
 import prisma from '../database/prisma';
 import logger from '../utils/logger';
@@ -117,7 +121,8 @@ router.get('/dashboard/stats', async (_req: Request, res: Response): Promise<voi
 
     // Delivery & Dispatches — same queues as the Orders page tabs.
     const tabOf = (order: (typeof allOrders)[number]) => classifyOrderTab(order);
-    const deliveredOrders = allOrders.filter((o) => tabOf(o) === 'delivered');
+    // "Payment Received" orders are delivered orders that also closed for accounts.
+    const deliveredOrders = allOrders.filter((o) => tabOf(o) === 'delivered' || tabOf(o) === 'closed');
     const deliveredCount = deliveredOrders.length;
     const transitOrders = allOrders.filter((o) => tabOf(o) === 'transit');
     const activeShipments = transitOrders.length;
@@ -793,6 +798,62 @@ router.get('/orders/:id', async (req: Request, res: Response): Promise<void> => 
     res.json({ order });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// Account trail is accessible only through this authenticated API mount.
+router.get('/orders/:id/account-trail', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const orderId = parseInt(req.params.id, 10);
+    if (!Number.isInteger(orderId) || orderId <= 0) {
+      res.status(400).json({ error: 'Invalid order ID.' });
+      return;
+    }
+    const order = await prisma.order.findUnique({ where: { id: orderId }, select: { id: true } });
+    if (!order) {
+      res.status(404).json({ error: 'Order not found' });
+      return;
+    }
+    res.json({ events: await getOrderAccountTrail(orderId) });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Record an already-sent manual payout. This only records the payout; it does not
+// initiate a bank/UPI transfer or trigger an additional Shopify refund.
+router.post('/orders/:id/refunds/manual', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user?.uid) {
+      res.status(401).json({ error: 'Authentication required to record a manual refund.' });
+      return;
+    }
+    const orderId = parseInt(req.params.id, 10);
+    const body = req.body || {};
+    const returnId = body.returnId === undefined || body.returnId === null || body.returnId === ''
+      ? undefined
+      : Number(body.returnId);
+    const evidence = body.evidence && typeof body.evidence === 'object'
+      ? {
+          fileName: String(body.evidence.fileName || ''),
+          contentType: String(body.evidence.contentType || ''),
+          contentBase64: String(body.evidence.contentBase64 || ''),
+        }
+      : undefined;
+    const event = await recordManualRefund({
+      orderId,
+      returnId,
+      amount: Number(body.amount),
+      refundMode: String(body.refundMode || '') as RefundMode,
+      accountUsed: String(body.accountUsed || ''),
+      externalReference: body.externalReference == null ? undefined : String(body.externalReference),
+      note: body.note == null ? undefined : String(body.note),
+      evidence,
+      actor: req.user,
+    });
+    res.status(201).json({ event: await presentAccountTrailEvent(event) });
+  } catch (error: any) {
+    res.status(400).json({ error: error.message });
   }
 });
 
@@ -1475,7 +1536,7 @@ router.post('/delhivery/pickup', async (req: Request, res: Response): Promise<vo
 });
 
 // Confirm COD order (adds COD_CONFIRMED tag on Shopify & DB, moves order to dispatch queue)
-router.post('/orders/:id/confirm-cod', async (req: Request, res: Response): Promise<void> => {
+router.post('/orders/:id/confirm-cod', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const orderId = parseInt(req.params.id, 10);
     const order = await prisma.order.findUnique({
@@ -1510,7 +1571,25 @@ router.post('/orders/:id/confirm-cod', async (req: Request, res: Response): Prom
       include: { items: true, shipment: true },
     });
 
-    logger.info('COD order confirmed and moved to dispatch queue', { orderId, orderName: order.shopifyOrderName });
+    // Snapshot the Firebase actor so future account changes do not erase who approved COD.
+    await recordAccountTrailEvent({
+      orderId,
+      eventType: 'COD_APPROVED',
+      actorType: 'USER',
+      actor: req.user,
+      source: 'OMS_UI',
+      status: 'COMPLETED',
+      note: 'COD order approved for dispatch.',
+      metadata: { previousStatus: order.status },
+    }).catch((auditError: any) => {
+      logger.error('COD approval succeeded but account-trail event could not be written', {
+        orderId,
+        actorUid: req.user?.uid,
+        error: auditError.message,
+      });
+    });
+
+    logger.info('COD order confirmed and moved to dispatch queue', { orderId, orderName: order.shopifyOrderName, approvedBy: req.user?.email });
     res.json({
       success: true,
       message: `Order ${order.shopifyOrderName} confirmed! Moved to Dispatch queue.`,
@@ -1601,7 +1680,10 @@ router.post('/orders/:id/cancel', async (req: Request, res: Response): Promise<v
   }
 });
 
-// Delete order (with trigger confirmation for test/deleted orders)
+// Delete order (with trigger confirmation for test/deleted orders).
+// Orders with financial audit history are never deleted: the trail is the
+// permanent record. The check and the deletion run in one transaction so a
+// trail event inserted between them cannot leave a partial deletion behind.
 router.delete('/orders/:id', async (req: Request, res: Response): Promise<void> => {
   try {
     const orderId = parseInt(req.params.id, 10);
@@ -1613,19 +1695,42 @@ router.delete('/orders/:id', async (req: Request, res: Response): Promise<void> 
       res.status(404).json({ error: 'Order not found' });
       return;
     }
+    const waybillNumber = order.shipment?.waybillNumber || null;
+    const shipmentLive = Boolean(waybillNumber) && order.shipment!.status !== 'CANCELLED';
 
-    if (order.shipment?.waybillNumber && order.shipment.status !== 'CANCELLED') {
+    try {
+      await prisma.$transaction(async (tx) => {
+        const trailCount = await tx.accountTrailEvent.count({ where: { orderId } });
+        if (trailCount > 0) {
+          throw Object.assign(
+            new Error('This order has financial audit history and cannot be deleted.'),
+            { code: 'ACCOUNT_TRAIL_PRESENT' }
+          );
+        }
+        await tx.orderItem.deleteMany({ where: { orderId } });
+        if (order.shipment) {
+          await tx.shipment.delete({ where: { id: order.shipment.id } });
+        }
+        await tx.notification.deleteMany({ where: { orderId } });
+        await tx.order.delete({ where: { id: orderId } });
+      });
+    } catch (txError: any) {
+      if (txError?.code === 'ACCOUNT_TRAIL_PRESENT') {
+        res.status(409).json({ error: 'This order has financial audit history and cannot be deleted.' });
+        return;
+      }
+      if (txError?.code === 'P2003') {
+        res.status(409).json({ error: 'This order still has linked records and cannot be deleted.' });
+        return;
+      }
+      throw txError;
+    }
+
+    if (shipmentLive && waybillNumber) {
       try {
-        await delhiveryService.cancelShipment(order.shipment.waybillNumber);
+        await delhiveryService.cancelShipment(waybillNumber);
       } catch (e) {}
     }
-
-    await prisma.orderItem.deleteMany({ where: { orderId } });
-    if (order.shipment) {
-      await prisma.shipment.delete({ where: { id: order.shipment.id } });
-    }
-    await prisma.notification.deleteMany({ where: { orderId } });
-    await prisma.order.delete({ where: { id: orderId } });
 
     res.json({ success: true, message: `Order ${order.shopifyOrderName} deleted.` });
   } catch (error: any) {
@@ -1748,7 +1853,7 @@ router.get('/returns', async (req: Request, res: Response): Promise<void> => {
 
 // Create a return for an order (with reverse tracking and Shopify trigger)
 // ONLY sends return email to user if return is created from our side
-router.post('/orders/:id/returns', async (req: Request, res: Response): Promise<void> => {
+router.post('/orders/:id/returns', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const orderId = parseInt(req.params.id, 10);
     const { returnReason, items, returnWaybillNumber, carrierName, triggerShopify } = req.body;
@@ -1762,6 +1867,29 @@ router.post('/orders/:id/returns', async (req: Request, res: Response): Promise<
       returnWaybillNumber,
       carrier: carrierName,
       triggerShopify: triggerShopify !== false,
+    });
+
+    await recordAccountTrailEvent({
+      orderId,
+      returnId: result.returnId,
+      eventType: 'RETURN_CREATED',
+      actorType: 'USER',
+      actor: req.user,
+      source: 'OMS_UI',
+      status: 'COMPLETED',
+      note: `Return created by ${req.user?.email || req.user?.name || 'authenticated user'}.`,
+      metadata: {
+        returnReason,
+        returnWaybill: result.returnWaybill,
+        items: items.map((item: any) => ({ orderItemId: item.orderItemId, quantity: item.quantity })),
+      },
+    }).catch((auditError: any) => {
+      logger.error('Return was created but account-trail event could not be written', {
+        orderId,
+        returnId: result.returnId,
+        actorUid: req.user?.uid,
+        error: auditError.message,
+      });
     });
 
     // Auto-send Return Initiated Email to customer from Youthnic Returns <returns@youthnic.com>
@@ -1843,11 +1971,11 @@ router.patch('/returns/:id/reason', async (req: Request, res: Response): Promise
 });
 
 // Process direct refund for an order via Shopify
-router.post('/orders/:id/refund', async (req: Request, res: Response): Promise<void> => {
+router.post('/orders/:id/refund', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const orderId = parseInt(req.params.id, 10);
     const { amount, reason } = req.body;
-    const result = await returnService.refundOrder(orderId, amount ? parseFloat(amount) : undefined, reason);
+    const result = await returnService.refundOrder(orderId, amount ? parseFloat(amount) : undefined, reason, req.user);
 
     // Send Refund Processed Email from Youthnic Refunds <refunds@youthnic.com>
     // only when money went back (a COD order has no online payment to refund).
@@ -1921,7 +2049,7 @@ router.post('/orders/:id/refund', async (req: Request, res: Response): Promise<v
  *
  * Body: { waybillNumber, qcStatus: 'APPROVED'|'REJECTED'|'PARTIAL', qcRemark? }
  */
-router.post('/returns/scan', async (req: Request, res: Response): Promise<void> => {
+router.post('/returns/scan', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const { waybillNumber, qcStatus, qcRemark } = req.body;
 
@@ -1933,7 +2061,8 @@ router.post('/returns/scan', async (req: Request, res: Response): Promise<void> 
     const result = await returnService.scanReturn(
       waybillNumber,
       qcStatus || 'APPROVED',
-      qcRemark
+      qcRemark,
+      req.user
     );
 
     // If refund was processed (item received, no issue, QC approved) -> dispatch email from refunds@youthnic.com with refund ID
@@ -2016,14 +2145,15 @@ router.post('/returns/scan', async (req: Request, res: Response): Promise<void> 
 });
 
 // Process refund for a return
-router.post('/returns/:id/refund', async (req: Request, res: Response): Promise<void> => {
+router.post('/returns/:id/refund', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const returnId = parseInt(req.params.id, 10);
     const { partial } = req.body;
     // Without an explicit flag, the QC result stored on the return decides.
     const result = await returnService.processRefund(
       returnId,
-      typeof partial === 'boolean' ? partial : undefined
+      typeof partial === 'boolean' ? partial : undefined,
+      req.user
     );
     if (!result.success) {
       res.status(409).json({ success: false, refundAmount: result.refundAmount, error: result.error || 'Refund not processed' });
@@ -2473,23 +2603,16 @@ router.post('/cod/remittance', async (req: Request, res: Response): Promise<void
         },
       });
 
+      // Same money fields as the remittance upload on Payments & Accounts.
+      // The remittance reference is not the customer's payment reference, so
+      // paymentReference is left alone.
       if (shipment.order) {
-        const currentTags = shipment.order.tags || '';
-        const tagSet = new Set(currentTags.split(',').map((t) => t.trim()).filter(Boolean));
-        tagSet.add('COD_REMITTED');
-        tagSet.add(`Remittance-${remittanceRef}`);
-        tagSet.add('Paid');
-
-        await prisma.order.update({
-          where: { id: shipment.order.id },
-          data: {
-            financialStatus: 'paid',
-            paymentVerified: true,
-            paymentVerificationSource: 'delhivery_cod_remittance',
-            paymentVerifiedAt: when,
-            paymentReference: String(remittanceRef),
-            tags: Array.from(tagSet).join(', '),
-          },
+        await recordPaymentReceived(shipment.order.id, {
+          receivedAt: when,
+          amount: remittedAmount,
+          utr: req.body?.utr ? String(req.body.utr) : null,
+          ref: String(remittanceRef),
+          source: 'DELHIVERY_REMITTANCE',
         });
       }
 
@@ -2502,126 +2625,28 @@ router.post('/cod/remittance', async (req: Request, res: Response): Promise<void
   }
 });
 
-// Import Delhivery Remittances CSV (Downloaded directly from Delhivery ONE > Finances > Remittances)
+// Import a Delhivery remittance export (Delhivery ONE > Finances > Remittance).
+// Kept for older callers; Payments & Accounts uploads use /api/accounts/import.
 router.post('/cod/remittance/import', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { csvContent } = req.body || {};
+    const { csvContent, fileName, utr, remittanceRef, remittedAt } = req.body || {};
     if (!csvContent || typeof csvContent !== 'string') {
       res.status(400).json({ error: 'csvContent is required' });
       return;
     }
-
-    const lines = csvContent
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter(Boolean);
-
-    if (lines.length < 2) {
-      res.status(400).json({ error: 'CSV file contains no data rows' });
-      return;
-    }
-
-    // Split headers
-    const delimiter = lines[0].includes('\t') ? '\t' : lines[0].includes(';') ? ';' : ',';
-    const cleanCell = (c: string) => c.replace(/^["']|["']$/g, '').trim();
-    const headers = lines[0].split(delimiter).map(cleanCell);
-
-    const findCol = (pattern: RegExp) => headers.findIndex((h) => pattern.test(h));
-    const wbnIdx = findCol(/waybill|awb|lrn|tracking/i);
-    const refIdx = findCol(/remittance.*(?:id|no|num|ref)|crn|utr|batch/i);
-    const amtIdx = findCol(/remitted.*amount|cod.*amount|net.*amount|amount|credit/i);
-    const dateIdx = findCol(/date|processed|remitted.*at/i);
-    const orderIdx = findCol(/order.*(?:id|no|name|ref)|client.*order/i);
-
-    if (wbnIdx === -1 && orderIdx === -1) {
-      res.status(400).json({
-        error: 'Could not detect Waybill or Order ID column in CSV. Expected headers: Waybill, Remittance ID, Amount.',
-        headers,
-      });
-      return;
-    }
-
-    let updatedCount = 0;
-    const notFound: string[] = [];
-    let totalRemitted = 0;
-
-    for (let i = 1; i < lines.length; i++) {
-      const parts = lines[i].split(delimiter).map(cleanCell);
-      const waybill = wbnIdx !== -1 ? parts[wbnIdx] : '';
-      const orderRef = orderIdx !== -1 ? parts[orderIdx] : '';
-      const ref = refIdx !== -1 && parts[refIdx] ? parts[refIdx] : 'DELHIVERY-REMITTANCE';
-      const rawAmt = amtIdx !== -1 ? parseFloat(parts[amtIdx].replace(/[^0-9.]/g, '')) : NaN;
-      const rawDate = dateIdx !== -1 && parts[dateIdx] ? new Date(parts[dateIdx]) : new Date();
-      const when = Number.isNaN(rawDate.getTime()) ? new Date() : rawDate;
-
-      const identifier = waybill || orderRef;
-      if (!identifier) continue;
-
-      const shipment = await prisma.shipment.findFirst({
-        where: {
-          OR: [
-            ...(waybill ? [{ waybillNumber: waybill }] : []),
-            ...(orderRef
-              ? [
-                  { order: { shopifyOrderName: orderRef } },
-                  { order: { shopifyOrderName: `#${orderRef}` } },
-                  { order: { shopifyOrderName: orderRef.replace(/^#/, '') } },
-                ]
-              : []),
-          ],
-        },
-        include: { order: true },
-      });
-
-      if (!shipment) {
-        notFound.push(identifier);
-        continue;
-      }
-
-      const amountToCredit = !isNaN(rawAmt) && rawAmt > 0 ? rawAmt : (shipment.codAmount || shipment.order?.totalAmount || 0);
-
-      await prisma.shipment.update({
-        where: { id: shipment.id },
-        data: {
-          codCollected: true,
-          codCollectedAt: shipment.codCollectedAt || when,
-          codRemitted: true,
-          codRemittedAt: when,
-          codRemittanceRef: ref,
-          codRemittedAmount: amountToCredit,
-        },
-      });
-
-      if (shipment.order) {
-        const currentTags = shipment.order.tags || '';
-        const tagSet = new Set(currentTags.split(',').map((t) => t.trim()).filter(Boolean));
-        tagSet.add('COD_REMITTED');
-        tagSet.add(`Remittance-${ref}`);
-        tagSet.add('Paid');
-
-        await prisma.order.update({
-          where: { id: shipment.order.id },
-          data: {
-            financialStatus: 'paid',
-            paymentVerified: true,
-            paymentVerificationSource: 'delhivery_cod_remittance',
-            paymentVerifiedAt: when,
-            paymentReference: ref,
-            tags: Array.from(tagSet).join(', '),
-          },
-        });
-      }
-
-      updatedCount++;
-      totalRemitted += amountToCredit;
-    }
-
+    const sheets = await readSpreadsheet(fileName || 'remittance.csv', Buffer.from(csvContent, 'utf8'));
+    const result = await importDelhiveryRemittance(
+      fileName || 'remittance.csv',
+      sheets,
+      { utr, remittanceRef, remittedAt },
+      (req as any).user?.email
+    );
     res.json({
       success: true,
-      message: `Processed remittance: ${updatedCount} shipments marked remitted, totaling ₹${totalRemitted.toFixed(2)}.`,
-      updated: updatedCount,
-      notFound,
-      totalAmount: totalRemitted,
+      message: `Processed remittance: ${result.matchedCount} shipments marked remitted.`,
+      updated: result.matchedCount,
+      notFound: result.unmatched,
+      notes: result.notes,
     });
   } catch (error: any) {
     res.status(500).json({ error: error.message });

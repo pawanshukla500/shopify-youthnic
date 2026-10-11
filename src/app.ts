@@ -5,6 +5,7 @@ import morgan from 'morgan';
 import { config } from './config';
 import logger from './utils/logger';
 import apiRoutes from './routes/api';
+import accountsRoutes from './routes/accounts';
 import webhookRoutes from './routes/webhooks';
 import delhiveryWebhookRoutes from './routes/delhivery-webhooks';
 import scheduler from './jobs/scheduler';
@@ -108,6 +109,7 @@ app.use(
 app.use('/webhooks', webhookRoutes);
 app.use('/webhooks', delhiveryWebhookRoutes);
 app.use('/', delhiveryWebhookRoutes);
+app.use('/api/accounts', requireAuth, accountsRoutes);
 app.use('/api', requireAuth, apiRoutes);
 
 // Static frontend build for production

@@ -4,6 +4,7 @@ import shopifyService from '../shopify/shopify.service';
 import delhiveryService from '../delhivery/delhivery.service';
 import notificationEngine from '../notifications/notification.service';
 import paymentService from '../payments/payment.service';
+import { recordAccountTrailEvent } from '../accounts/account-trail.service';
 import logger from '../../utils/logger';
 import { Order } from '@prisma/client';
 import { ShopifyOrderWebhook } from '../../types';
@@ -51,6 +52,10 @@ export const ORDER_TABS = {
   ready: ['DISPATCHED'],
   transit: ['SHIPPED', 'IN_TRANSIT', 'OUT_FOR_DELIVERY', 'FAILED_DELIVERY'],
   delivered: ['DELIVERED'],
+  // "Payment Received" has no status of its own: classifyOrderTab moves a
+  // DELIVERED order here once it is paid into the bank and past the return
+  // window, so the coarse status fallback lists nothing for it.
+  closed: [],
   return: [
     'RTO_INITIATED',
     'RTO_DELIVERED',
@@ -1182,6 +1187,10 @@ class OrderService {
           },
         },
         returns: { select: { returnStatus: true } },
+        deliveredAt: true,
+        paymentReceivedAt: true,
+        paymentReceivedUtr: true,
+        accountsClosedAt: true,
       },
     });
     const byStatus: Record<string, number> = {};
@@ -1192,6 +1201,7 @@ class OrderService {
       ready: 0,
       transit: 0,
       delivered: 0,
+      closed: 0,
       return: 0,
       cancel: 0,
     };
@@ -1426,6 +1436,34 @@ class OrderService {
         orderId: order.id,
         refundId: refundResult.refundId,
         error: dbErr.message,
+      });
+    }
+
+    try {
+      await recordAccountTrailEvent({
+        orderId: order.id,
+        eventType: 'REFUND_AUTOMATIC',
+        actorType: 'SYSTEM',
+        actor: { name: 'OMS automation', role: 'SYSTEM' },
+        source: 'RTO_AUTO_REFUND',
+        status: refundResult.moneyMoved ? 'COMPLETED' : 'NO_MONEY_MOVED',
+        amount: refundResult.moneyMoved ? refundedAmount : 0,
+        currency: order.currency || 'INR',
+        refundMode: refundResult.moneyMoved ? 'ORIGINAL_PAYMENT_METHOD' : null,
+        accountUsed: refundResult.moneyMoved
+          ? order.paymentProvider || order.paymentGateway || 'Shopify original payment method'
+          : null,
+        externalReference: refundResult.refundId,
+        note: refundResult.moneyMoved
+          ? 'Automatically refunded after Delhivery confirmed RTO delivery.'
+          : 'Shopify refund record created, but no captured payment moved; review for manual payout.',
+        metadata: { moneyMoved: refundResult.moneyMoved, alreadyRefunded: refundResult.alreadyRefunded },
+      });
+    } catch (auditError: any) {
+      logger.error('RTO refund succeeded but account-trail event could not be written', {
+        orderId: order.id,
+        refundId: refundResult.refundId,
+        error: auditError.message,
       });
     }
 

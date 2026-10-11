@@ -136,6 +136,14 @@ jobs:
           META_LLM_MODEL: ${{ vars.META_LLM_MODEL }}
           META_LLM_FALLBACK_MODEL: ${{ vars.META_LLM_FALLBACK_MODEL }}
           META_LLM_BASE_URL: ${{ vars.META_LLM_BASE_URL }}
+          # Payments & Accounts (all optional; empty = feature off / set on the page)
+          ACCOUNTS_REPORT_EMAILS: ${{ vars.ACCOUNTS_REPORT_EMAILS }}
+          PHONEPE_CLIENT_ID: ${{ vars.PHONEPE_CLIENT_ID }}
+          PHONEPE_CLIENT_VERSION: ${{ vars.PHONEPE_CLIENT_VERSION || '1' }}
+          PHONEPE_CLIENT_SECRET: ${{ secrets.PHONEPE_CLIENT_SECRET }}
+          PHONEPE_MERCHANT_ID: ${{ vars.PHONEPE_MERCHANT_ID }}
+          EASEBUZZ_KEY: ${{ vars.EASEBUZZ_KEY }}
+          EASEBUZZ_SALT: ${{ secrets.EASEBUZZ_SALT }}
         run: |
           cat <<EOF > /tmp/hostinger.env
           NODE_ENV=production
@@ -176,6 +184,13 @@ jobs:
           META_LLM_MODEL=${META_LLM_MODEL}
           META_LLM_FALLBACK_MODEL=${META_LLM_FALLBACK_MODEL}
           META_LLM_BASE_URL=${META_LLM_BASE_URL}
+          ACCOUNTS_REPORT_EMAILS=${ACCOUNTS_REPORT_EMAILS}
+          PHONEPE_CLIENT_ID=${PHONEPE_CLIENT_ID}
+          PHONEPE_CLIENT_VERSION=${PHONEPE_CLIENT_VERSION}
+          PHONEPE_CLIENT_SECRET=${PHONEPE_CLIENT_SECRET}
+          PHONEPE_MERCHANT_ID=${PHONEPE_MERCHANT_ID}
+          EASEBUZZ_KEY=${EASEBUZZ_KEY}
+          EASEBUZZ_SALT=${EASEBUZZ_SALT}
           EOF
 
           if [ -n "$FIREBASE_SERVICE_ACCOUNT_JSON" ]; then

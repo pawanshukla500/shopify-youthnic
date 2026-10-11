@@ -6,6 +6,11 @@ import returnService from '../modules/returns/return.service';
 import shopifyService from '../modules/shopify/shopify.service';
 import delhiveryDocumentFetcher from '../modules/delhivery/delhivery-document-fetcher.service';
 import delhiveryService from '../modules/delhivery/delhivery.service';
+import { runAccountsMaintenance } from '../modules/accounts/accounts.service';
+import { backfillMissingRefundTrailEvents } from '../modules/accounts/account-trail.service';
+import { sendDueMonthlyReport } from '../modules/accounts/accounts-report.service';
+import { estimatePendingShippingCosts } from '../modules/accounts/shipping-cost.service';
+import { syncGatewaySettlements } from '../modules/accounts/gateway-settlement.service';
 import logger from '../utils/logger';
 
 /**
@@ -64,11 +69,76 @@ class Scheduler {
           logger.error('[CRON] Retry failed operations error', { error: error.message });
         }
         try {
+          // A PROCESSED return whose trail write was lost is retried above
+          // never (it is not FAILED); recreate its audit entry instead.
+          const backfilled = await backfillMissingRefundTrailEvents();
+          if (backfilled > 0) {
+            logger.info('[CRON] Backfilled missing refund trail events', { backfilled });
+          }
+        } catch (error: any) {
+          logger.error('[CRON] Refund trail backfill error', { error: error.message });
+        }
+        try {
           await orderService.retryFailedRtoRefunds();
         } catch (error: any) {
           logger.error('[CRON] Retry failed RTO refunds error', { error: error.message });
         }
+        // Accounts: fill delivery dates, close orders that reached Payment
+        // Received, and send last month's report if the 8th was missed.
+        try {
+          await runAccountsMaintenance();
+        } catch (error: any) {
+          logger.error('[CRON] Accounts closing failed', { error: error.message });
+        }
+        try {
+          await sendDueMonthlyReport();
+        } catch (error: any) {
+          logger.error('[CRON] Monthly accounts report catch-up failed', { error: error.message });
+        }
       })
+    );
+
+    // 5. Monthly accounts closing report: last month's orders, emailed on the 8th (IST).
+    this.jobs.push(
+      cron.schedule(
+        config.accounts.reportCron,
+        async () => {
+          logger.info('[CRON] Sending monthly accounts report...');
+          try {
+            const month = await sendDueMonthlyReport();
+            logger.info('[CRON] Monthly accounts report', { month: month || 'already sent or no recipients' });
+          } catch (error: any) {
+            logger.error('[CRON] Monthly accounts report failed', { error: error.message });
+          }
+        },
+        { timezone: 'Asia/Kolkata' }
+      )
+    );
+
+    // 6. Shipping-cost estimates from Delhivery's rate API, a few per run (rate limit).
+    this.jobs.push(
+      cron.schedule(config.cron.shippingCostEstimate, async () => {
+        try {
+          await estimatePendingShippingCosts();
+        } catch (error: any) {
+          logger.error('[CRON] Shipping cost estimates failed', { error: error.message });
+        }
+      })
+    );
+
+    // 7. Gateway settlement UTRs (PhonePe / Easebuzz), when their API keys are set.
+    this.jobs.push(
+      cron.schedule(
+        config.cron.gatewaySettlementSync,
+        async () => {
+          try {
+            await syncGatewaySettlements();
+          } catch (error: any) {
+            logger.error('[CRON] Gateway settlement sync failed', { error: error.message });
+          }
+        },
+        { timezone: 'Asia/Kolkata' }
+      )
     );
 
     // 4. Delhivery document backfill (EPOD / signature / QC / sorter → Firebase Storage)
@@ -89,6 +159,9 @@ class Scheduler {
       trackingSync: config.cron.trackingSync,
       retryFailed: config.cron.retryFailed,
       delhiveryDocFetch: config.cron.delhiveryDocFetch || '*/30 * * * *',
+      accountsReport: `${config.accounts.reportCron} (IST)`,
+      shippingCostEstimate: config.cron.shippingCostEstimate,
+      gatewaySettlementSync: `${config.cron.gatewaySettlementSync} (IST)`,
     });
   }
 

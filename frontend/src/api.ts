@@ -1271,3 +1271,108 @@ export async function syncBulkExternalFulfillments(orderIds?: number[]): Promise
   const response = await api.post('/api/orders/sync-external', { orderIds })
   return response.data
 }
+
+// ─── Payments & Accounts ────────────────────────────────
+
+export type AccountsImportKind = 'DELHIVERY_REMITTANCE' | 'DELHIVERY_CHARGES' | 'PG_SETTLEMENT'
+
+export interface AccountsImportResult {
+  importId?: number
+  kind: AccountsImportKind
+  fileName: string
+  rowCount: number
+  matchedCount: number
+  unmatched: string[]
+  columns: Record<string, string | undefined>
+  notes: string[]
+  closedNow?: number
+}
+
+export interface AccountsImportRecord {
+  id: number
+  kind: AccountsImportKind
+  fileName: string
+  rowCount: number
+  matchedCount: number
+  unmatched: string[] | null
+  summary: { columns?: Record<string, string | undefined>; notes?: string[] } | null
+  uploadedBy: string | null
+  createdAt: string
+}
+
+export interface AccountsOverview {
+  month: string
+  label: string
+  summary: Array<{ label: string; value: number | string; note?: string }>
+  openOrders: Array<{ orderNo: string; paymentMode: 'COD' | 'Prepaid'; orderValue: number; pending: string }>
+  recipients: string[]
+  reportSentAt: { sentAt: string; to: string[] } | null
+  reportDay: number
+  imports: AccountsImportRecord[]
+  connectors: {
+    delhiveryRateApi: boolean
+    phonepeSettlementApi: boolean
+    easebuzzPayoutApi: boolean
+    email: boolean
+  }
+}
+
+export async function getAccountsOverview(month: string): Promise<AccountsOverview> {
+  const response = await api.get('/api/accounts/overview', { params: { month } })
+  return response.data
+}
+
+/** Download the monthly closing report (.xlsx) straight to the user's downloads. */
+export async function downloadAccountsReport(month: string): Promise<void> {
+  const response = await api.get('/api/accounts/report', { params: { month }, responseType: 'blob' })
+  const url = window.URL.createObjectURL(new Blob([response.data]))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `Youthnic-Accounts-${month}.xlsx`
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.URL.revokeObjectURL(url)
+}
+
+export async function emailAccountsReport(month: string): Promise<{ success: boolean; sentTo: string[]; fileName: string }> {
+  const response = await api.post('/api/accounts/report/email', { month })
+  return response.data
+}
+
+export async function saveAccountsRecipients(recipients: string): Promise<{ recipients: string[] }> {
+  const response = await api.put('/api/accounts/settings', { recipients })
+  return response.data
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result).replace(/^data:[^,]*,/, ''))
+    reader.onerror = () => reject(reader.error || new Error('Could not read the file'))
+    reader.readAsDataURL(file)
+  })
+}
+
+export async function importAccountsFile(
+  kind: AccountsImportKind,
+  file: File,
+  defaults?: { utr?: string; remittanceRef?: string; remittedAt?: string }
+): Promise<AccountsImportResult> {
+  const contentBase64 = await fileToBase64(file)
+  const response = await api.post('/api/accounts/import', { kind, fileName: file.name, contentBase64, defaults })
+  return response.data
+}
+
+export async function markPaymentReceived(
+  orderId: number,
+  payload: { utr: string; amount?: number; receivedAt?: string; ref?: string }
+): Promise<{ success: boolean; closedNow: number }> {
+  const response = await api.post(`/api/accounts/orders/${orderId}/payment-received`, payload)
+  return response.data
+}
+
+export async function runAccountsNow(): Promise<{ deliveredBackfilled: number; closed: number; shippingEstimates: number }> {
+  const response = await api.post('/api/accounts/run')
+  return response.data
+}

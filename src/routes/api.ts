@@ -13,6 +13,7 @@ import { importDelhiveryRemittance, recordPaymentReceived } from '../modules/acc
 import { getOrderAccountTrail, presentAccountTrailEvent, recordAccountTrailEvent, recordManualRefund, type RefundMode } from '../modules/accounts/account-trail.service';
 import { config } from '../config';
 import prisma from '../database/prisma';
+import logger from '../utils/logger';
 import kwikengageService, { KwikEngageTriggerType } from '../modules/whatsapp/kwikengage.service';
 import gokwikService from '../modules/payments/gokwik.service';
 import productService from '../modules/products/product.service';

@@ -383,24 +383,26 @@ export async function sendOrderWhatsAppTrigger(
   return response.data
 }
 
-// ─── Kapso AI WhatsApp Configuration & Status ────────────
-export async function getKapsoStatus(): Promise<import('./types').KapsoStatusData> {
-  const response = await api.get<import('./types').KapsoStatusData>('/api/settings/whatsapp/status')
+// ─── KwikEngage WhatsApp Configuration & Status ────────────
+export async function getKwikEngageStatus(): Promise<import('./types').KwikEngageStatusData> {
+  const response = await api.get<import('./types').KwikEngageStatusData>('/api/settings/whatsapp/status')
   return response.data
 }
 
-export async function updateKapsoConfig(payload: {
+export async function updateKwikEngageConfig(payload: {
   apiKey: string
-  phoneNumberId?: string
+  merchantId?: string
   senderPhone?: string
+  wabaId?: string
 }): Promise<{
   success: boolean
   message: string
-  ping: import('./types').KapsoStatusData
+  ping: import('./types').KwikEngageStatusData
 }> {
   const response = await api.post('/api/settings/whatsapp/config', payload)
   return response.data
 }
+
 
 // ─── Shopify Products & Listings API (A-to-Z Management) ─
 export async function getProducts(params?: {

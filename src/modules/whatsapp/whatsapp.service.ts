@@ -1,87 +1,26 @@
-import axios, { AxiosInstance } from 'axios';
 import { config } from '../../config';
 import prisma from '../../database/prisma';
 import logger from '../../utils/logger';
 import { NotificationType } from '@prisma/client';
 import { NotificationPayload } from '../../types';
+import kwikengageService, { KwikEngageService } from './kwikengage.service';
 
 /**
- * KwiKenage WhatsApp Service
- * Sends template and text messages to customers via KwiKenage WhatsApp API.
- *
- * Typical KwiKenage API flow:
- * - POST /send-message with API key in header
- * - Supports template messages and plain text
+ * KwikEngage WhatsApp Service (Unified Client)
+ * Sends template and session messages to customers via official KwikEngage WhatsApp API:
+ * https://api.kwikengage.ai/send-message/v2
  */
 class KwiKenageService {
-  private client: AxiosInstance;
-
-  constructor() {
-    this.client = axios.create({
-      baseURL: config.kwikenage.apiUrl,
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      timeout: 30000,
-    });
-
-    // Authenticate per request so a missing key surfaces as an actionable error
-    // at the call site rather than as an opaque 401 from KwiKenage.
-    this.client.interceptors.request.use((requestConfig) => {
-      if (!config.kwikenage.apiKey) {
-        throw new Error(
-          'KWIKENAGE_API_KEY is not set. Add your KwiKenage API key to your environment to send WhatsApp messages.'
-        );
-      }
-      requestConfig.headers['Authorization'] = `Bearer ${config.kwikenage.apiKey}`;
-      return requestConfig;
-    });
-  }
-
   /**
    * Send a template message to a customer.
-   * Template must be pre-approved in KwiKenage dashboard.
    */
   async sendTemplateMessage(
     phoneNumber: string,
     templateName: string,
-    parameters: string[]
+    parameters: string[],
+    fallbackText?: string
   ): Promise<{ success: boolean; messageId?: string; error?: string }> {
-    try {
-      // KwiKenage API format for template messages
-      const payload = {
-        phone: phoneNumber,
-        template_name: templateName,
-        parameters: parameters,
-        // Some KwiKenage versions use "body_parameters" instead
-        body_parameters: parameters,
-      };
-
-      const response = await this.client.post('/send-template', payload);
-
-      const messageId =
-        response.data?.message_id ||
-        response.data?.id ||
-        response.data?.data?.id;
-
-      logger.info('WhatsApp template message sent', {
-        phoneNumber,
-        templateName,
-        messageId,
-      });
-
-      return { success: true, messageId };
-    } catch (error: any) {
-      logger.error('Failed to send WhatsApp template message', {
-        phoneNumber,
-        templateName,
-        error: error.response?.data || error.message,
-      });
-      return {
-        success: false,
-        error: error.response?.data?.message || error.message,
-      };
-    }
+    return kwikengageService.sendTemplateMessage(phoneNumber, templateName, parameters, fallbackText);
   }
 
   /**
@@ -91,43 +30,11 @@ class KwiKenageService {
     phoneNumber: string,
     message: string
   ): Promise<{ success: boolean; messageId?: string; error?: string }> {
-    try {
-      const payload = {
-        phone: phoneNumber,
-        message: message,
-      };
-
-      const response = await this.client.post('/send-message', payload);
-
-      const messageId =
-        response.data?.message_id ||
-        response.data?.id ||
-        response.data?.data?.id;
-
-      logger.info('WhatsApp text message sent', {
-        phoneNumber,
-        messageId,
-      });
-
-      return { success: true, messageId };
-    } catch (error: any) {
-      logger.error('Failed to send WhatsApp text message', {
-        phoneNumber,
-        error: error.response?.data || error.message,
-      });
-      return {
-        success: false,
-        error: error.response?.data?.message || error.message,
-      };
-    }
+    return kwikengageService.sendTextMessage(phoneNumber, message);
   }
 
   /**
    * Send a notification based on the notification type.
-   * This is the main entry point called by the notification engine.
-   *
-   * It picks the appropriate template, fills in parameters, sends the message,
-   * and records the result in the database.
    */
   async sendNotification(
     phoneNumber: string,
@@ -144,7 +51,7 @@ class KwiKenageService {
         orderId: orderId || null,
         returnId: returnId || null,
         type,
-        recipient: phoneNumber,
+        recipient: kwikengageService.normalizePhoneNumber(phoneNumber) || phoneNumber,
         templateName,
         messageBody: fallbackMessage,
         status: 'PENDING',
@@ -154,9 +61,9 @@ class KwiKenageService {
     let result: { success: boolean; messageId?: string; error?: string };
 
     if (templateName) {
-      result = await this.sendTemplateMessage(phoneNumber, templateName, parameters);
+      result = await kwikengageService.sendTemplateMessage(phoneNumber, templateName, parameters, fallbackMessage);
     } else {
-      result = await this.sendTextMessage(phoneNumber, fallbackMessage);
+      result = await kwikengageService.sendTextMessage(phoneNumber, fallbackMessage);
     }
 
     // Update notification record
@@ -172,13 +79,13 @@ class KwiKenageService {
   }
 
   /**
-   * Map notification type + payload to the right KwiKenage template and parameters.
+   * Map notification type + payload to the right KwikEngage template and parameters.
    */
   private buildTemplatePayload(
     type: NotificationType,
     payload: NotificationPayload
   ): { templateName: string | null; parameters: string[]; fallbackMessage: string } {
-    const t = config.kwikenage.templates;
+    const t = config.kwikengage.templates;
 
     switch (type) {
       case 'ORDER_CONFIRMED':
@@ -190,7 +97,7 @@ class KwiKenageService {
 
       case 'ORDER_SHIPPED':
         return {
-          templateName: t.orderShipped,
+          templateName: t.orderDispatched,
           parameters: [payload.customerName, payload.orderNumber, payload.trackingNumber || 'N/A'],
           fallbackMessage: `Hi ${payload.customerName}, your order ${payload.orderNumber} has been shipped! Track your package with AWB: ${payload.trackingNumber || 'N/A'}`,
         };
@@ -225,7 +132,7 @@ class KwiKenageService {
 
       case 'NDR_ALERT':
         return {
-          templateName: t.ndr,
+          templateName: t.ndrAttempt,
           parameters: [payload.customerName, payload.orderNumber, payload.customMessage || ''],
           fallbackMessage: `Hi ${payload.customerName}, delivery attempt failed for order ${payload.orderNumber}. ${payload.customMessage || 'Please provide an alternate delivery time or address.'}`,
         };
@@ -245,20 +152,16 @@ class KwiKenageService {
         };
 
       case 'CUSTOM':
-        return {
-          templateName: null,
-          parameters: [],
-          fallbackMessage: payload.customMessage || '',
-        };
-
       default:
         return {
           templateName: null,
           parameters: [],
-          fallbackMessage: '',
+          fallbackMessage: payload.customMessage || `Hi ${payload.customerName}, update regarding your order ${payload.orderNumber}.`,
         };
     }
   }
 }
 
-export default new KwiKenageService();
+export { KwikEngageService };
+export const kwikenageService = new KwiKenageService();
+export default kwikenageService;

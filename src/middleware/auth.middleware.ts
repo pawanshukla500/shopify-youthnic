@@ -25,14 +25,16 @@ export async function requireAuth(
 ): Promise<void> {
   // Public API endpoints that do not require user authentication:
   // - /health: Required by Docker container healthcheck & Traefik ping
-  // - /webhooks/whatsapp: Inbound provider webhook (Kapso / Meta Cloud API).
-  //   Must stay public — external couriers cannot present a Firebase user token.
-  //   Verification (hub.challenge) and payload handling live in routes/api.ts.
+  // - /webhooks/whatsapp: Inbound provider webhook (KwikEngage / Meta Cloud API).
+  // - /webhooks/gokwik: Inbound GoKwik payment & refund webhooks.
+  //   Must stay public — external webhook dispatchers cannot present a Firebase user token.
   if (
     req.path === '/health' ||
     req.path === '/health/' ||
     req.path === '/webhooks/whatsapp' ||
-    req.path.startsWith('/webhooks/whatsapp/')
+    req.path.startsWith('/webhooks/whatsapp/') ||
+    req.path === '/webhooks/gokwik' ||
+    req.path.startsWith('/webhooks/gokwik/')
   ) {
     return next();
   }

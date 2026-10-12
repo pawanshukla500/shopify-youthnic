@@ -75,7 +75,7 @@ export function OrderDetail() {
   // RTO Refund State
   const [isRefundingRto, setIsRefundingRto] = useState(false)
 
-  // Kapso WhatsApp Modal State
+  // KwikEngage WhatsApp Modal State
   const [moreOpen, setMoreOpen] = useState(false)
   const [morePos, setMorePos] = useState<{ top: number; left: number } | null>(null)
   const moreRef = useRef<HTMLDivElement>(null)
@@ -317,7 +317,7 @@ export function OrderDetail() {
     }
   }
 
-  // Kapso WhatsApp Trigger Handler
+  // KwikEngage WhatsApp Trigger Handler
   const handleSendWhatsApp = async () => {
     if (!order) return
     setIsSendingWhatsApp(true)
@@ -326,7 +326,7 @@ export function OrderDetail() {
         trigger: whatsAppTrigger,
         customText: whatsAppCustomText,
       })
-      toast.toast('success', `WhatsApp notification sent to ${order.customerPhone} via Kapso!`)
+      toast.toast('success', `WhatsApp notification sent to ${order.customerPhone} via KwikEngage!`)
       setShowWhatsAppModal(false)
       setWhatsAppCustomText('')
       await queryClient.invalidateQueries({ queryKey: ['order', id] })
@@ -1692,7 +1692,7 @@ export function OrderDetail() {
       </div>
     )}
 
-    {/* ─── Kapso AI WhatsApp Trigger Modal ─── */}
+    {/* ─── KwikEngage WhatsApp Trigger Modal ─── */}
     {showWhatsAppModal && order && (
       <div className="modal-backdrop" onClick={() => !isSendingWhatsApp && setShowWhatsAppModal(false)}>
         <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '540px' }}>
@@ -1702,7 +1702,7 @@ export function OrderDetail() {
                 <Icon name="message" size={20} />
               </div>
               <div>
-                <h3 className="modal-title">Send WhatsApp via Kapso</h3>
+                <h3 className="modal-title">Send WhatsApp via KwikEngage</h3>
                 <p className="modal-desc">Trigger critical automated notification to customer</p>
               </div>
             </div>
@@ -1789,7 +1789,7 @@ export function OrderDetail() {
 
             <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: '8px', padding: '10px 12px', fontSize: '11px', color: '#065f46', display: 'flex', alignItems: 'center', gap: '8px' }}>
               <Icon name="check" size={16} />
-              <span>Sent via Kapso AI WhatsApp Cloud & synced with OMS Notification history.</span>
+              <span>Sent via KwikEngage Official WhatsApp Cloud & synced with OMS Notification history.</span>
             </div>
           </div>
 
@@ -1810,7 +1810,7 @@ export function OrderDetail() {
               onClick={handleSendWhatsApp}
             >
               <Icon name="message" size={14} />
-              {isSendingWhatsApp ? 'Sending via Kapso…' : 'Send WhatsApp Message'}
+              {isSendingWhatsApp ? 'Sending via KwikEngage…' : 'Send WhatsApp Message'}
             </button>
           </div>
         </div>

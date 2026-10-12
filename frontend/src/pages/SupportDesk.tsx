@@ -257,10 +257,10 @@ export function SupportDesk() {
             <span>Delhivery: {diag?.delhivery?.status === 'ok' ? `Live (${diag.delhivery.latencyMs}ms)` : 'Error'}</span>
           </div>
 
-          {/* Kapso Diagnostic */}
-          <div className="status-badge" style={{ background: '#f0fdf4', borderColor: '#bbf7d0', color: '#15803d' }} title={diag?.kapso?.message}>
+          {/* KwikEngage WhatsApp Diagnostic */}
+          <div className="status-badge" style={{ background: '#f0fdf4', borderColor: '#bbf7d0', color: '#15803d' }} title={diag?.kwikengage?.message || diag?.whatsapp?.message}>
             <span className="status-dot" style={{ background: '#22c55e' }} />
-            <span>Kapso WhatsApp: {diag?.kapso?.status === 'ok' ? 'Live Connected' : 'Simulated'}</span>
+            <span>KwikEngage WhatsApp: {(diag?.kwikengage?.status === 'ok' || diag?.whatsapp?.status === 'ok') ? 'Live Connected' : 'Simulated'}</span>
           </div>
 
           {/* Firebase RTDB Diagnostic */}

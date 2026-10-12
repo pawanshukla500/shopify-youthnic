@@ -13,8 +13,8 @@ import { importDelhiveryRemittance, recordPaymentReceived } from '../modules/acc
 import { getOrderAccountTrail, presentAccountTrailEvent, recordAccountTrailEvent, recordManualRefund, type RefundMode } from '../modules/accounts/account-trail.service';
 import { config } from '../config';
 import prisma from '../database/prisma';
-import logger from '../utils/logger';
-import kapsoService, { KapsoTriggerType } from '../modules/whatsapp/kapso.service';
+import kwikengageService, { KwikEngageTriggerType } from '../modules/whatsapp/kwikengage.service';
+import gokwikService from '../modules/payments/gokwik.service';
 import productService from '../modules/products/product.service';
 import resendService, { EmailTemplateType } from '../modules/email/resend.service';
 import emailLogService from '../modules/email/email-log.service';
@@ -3325,11 +3325,13 @@ router.get('/settings/system-status', async (_req: Request, res: Response): Prom
         },
       },
       whatsapp: {
-        provider: 'Kapso AI WhatsApp Platform (REST API)',
-        status: config.kapso.apiKey ? 'CONNECTED' : 'DISCONNECTED',
-        apiUrl: config.kapso.apiUrl,
-        senderPhone: config.kapso.senderPhone,
-        authStatus: config.kapso.apiKey ? 'Bearer Token Active' : 'Bearer ${env:KAPSO_API_KEY} (Configured)',
+        provider: 'KwikEngage WhatsApp Platform (Official GoKwik Messaging API)',
+        status: config.kwikengage.apiKey ? 'CONNECTED' : 'DISCONNECTED',
+        apiUrl: config.kwikengage.apiUrl,
+        merchantId: config.kwikengage.merchantId,
+        senderPhone: config.kwikengage.senderPhone,
+        wabaId: config.kwikengage.wabaId,
+        authStatus: config.kwikengage.apiKey ? 'API Key Active' : 'API Key ${env:KWIKENGAGE_API_KEY} (Configured)',
         activeTemplates: [
           'youthnic_order_confirmed',
           'youthnic_cod_confirmation',
@@ -3340,11 +3342,13 @@ router.get('/settings/system-status', async (_req: Request, res: Response): Prom
           'youthnic_rto_alert',
         ],
       },
-      kapso: {
-        status: config.kapso.apiKey ? 'LIVE' : 'DISCONNECTED',
-        apiEndpoint: config.kapso.apiUrl,
-        authHeader: 'Authorization: Bearer ${env:KAPSO_API_KEY}',
-        senderNumber: config.kapso.senderPhone,
+      kwikengage: {
+        status: config.kwikengage.apiKey ? 'LIVE' : 'DISCONNECTED',
+        apiEndpoint: config.kwikengage.apiUrl,
+        merchantId: config.kwikengage.merchantId,
+        authHeader: 'Authorization: ${env:KWIKENGAGE_API_KEY}',
+        senderNumber: config.kwikengage.senderPhone,
+        wabaId: config.kwikengage.wabaId,
         criticalTriggers: [
           { name: 'COD Confirmation Request', code: 'COD_CONFIRMATION', action: 'WhatsApp 1-click verify & tag sync' },
           { name: 'Delhivery Dispatched & Tracking Link', code: 'ORDER_SHIPPED', action: 'Instant AWB click-to-track' },
@@ -3371,7 +3375,8 @@ router.get('/settings/system-status', async (_req: Request, res: Response): Prom
       webhooks: [
         { name: 'Shopify Orders (create/paid/updated/cancelled + refunds/create)', path: '/webhooks/shopify', method: 'POST', active: true, latency: '8ms' },
         { name: 'Delhivery Scan-Push', path: '/webhooks/delhivery', method: 'POST', active: true, latency: '15ms' },
-        { name: 'WhatsApp Inbound (Kapso/Meta)', path: '/api/webhooks/whatsapp', method: 'GET+POST', active: true, latency: '12ms' },
+        { name: 'WhatsApp Inbound (KwikEngage/Meta)', path: '/api/webhooks/whatsapp', method: 'GET+POST', active: true, latency: '12ms' },
+        { name: 'GoKwik Payments & Refunds', path: '/api/webhooks/gokwik', method: 'POST', active: true, latency: '10ms' },
       ],
     });
   } catch (error: any) {
@@ -3419,17 +3424,17 @@ router.post('/settings/ping', async (_req: Request, res: Response): Promise<void
     results.delhivery = { status: 'error', latencyMs: Date.now() - delhiveryStart, message: err.message };
   }
 
-  // 4. Test Kapso WhatsApp REST API
-  const kapsoStart = Date.now();
+  // 4. Test KwikEngage WhatsApp REST API
+  const kwikengageStart = Date.now();
   try {
-    const kapsoRes = await kapsoService.ping();
-    results.kapso = {
-      status: kapsoRes.status === 'ok' ? 'ok' : 'error',
-      latencyMs: kapsoRes.latencyMs,
-      message: kapsoRes.message,
+    const kwikengageRes = await kwikengageService.ping();
+    results.kwikengage = {
+      status: kwikengageRes.status === 'ok' ? 'ok' : 'error',
+      latencyMs: kwikengageRes.latencyMs,
+      message: kwikengageRes.message,
     };
   } catch (err: any) {
-    results.kapso = { status: 'error', latencyMs: Date.now() - kapsoStart, message: err.message };
+    results.kwikengage = { status: 'error', latencyMs: Date.now() - kwikengageStart, message: err.message };
   }
 
   // 5. Test Firebase Cloud Storage
@@ -3697,7 +3702,7 @@ router.delete('/settings/users/:id', async (req: Request, res: Response): Promis
   }
 });
 
-// ─── Kapso Critical WhatsApp Trigger Endpoints ───────────────
+// ─── KwikEngage Critical WhatsApp Trigger Endpoints ───────────────
 
 // POST /api/settings/whatsapp/test — Send test WhatsApp notification
 router.post('/settings/whatsapp/test', async (req: Request, res: Response): Promise<void> => {
@@ -3721,8 +3726,8 @@ router.post('/settings/whatsapp/test', async (req: Request, res: Response): Prom
       customerPincode: '395002',
     };
 
-    const result = await kapsoService.sendCriticalTrigger(
-      (trigger as KapsoTriggerType) || 'COD_CONFIRMATION',
+    const result = await kwikengageService.sendCriticalTrigger(
+      (trigger as KwikEngageTriggerType) || 'COD_CONFIRMATION',
       testOrder,
       {
         waybillNumber: '1410293849182',
@@ -3754,15 +3759,15 @@ router.post('/orders/:id/whatsapp-trigger', async (req: Request, res: Response):
       return;
     }
 
-    const resolvedTrigger: KapsoTriggerType =
-      (trigger as KapsoTriggerType) ||
+    const resolvedTrigger: KwikEngageTriggerType =
+      (trigger as KwikEngageTriggerType) ||
       (order.paymentMethod === 'COD' && !order.tags?.includes('COD_Confirmed')
         ? 'COD_CONFIRMATION'
         : order.shipment?.waybillNumber
         ? 'ORDER_SHIPPED'
         : 'ORDER_CONFIRMED');
 
-    const result = await kapsoService.sendCriticalTrigger(resolvedTrigger, order, {
+    const result = await kwikengageService.sendCriticalTrigger(resolvedTrigger, order, {
       waybillNumber: order.shipment?.waybillNumber || undefined,
       courierName: 'Delhivery',
       ndrReason: order.shipment?.trackingStatus || undefined,
@@ -3775,16 +3780,16 @@ router.post('/orders/:id/whatsapp-trigger', async (req: Request, res: Response):
   }
 });
 
-// ─── Kapso AI WhatsApp Configuration & Status ────────────
+// ─── KwikEngage AI WhatsApp Configuration & Status ────────────
 router.post('/settings/whatsapp/config', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { apiKey, phoneNumberId, senderPhone } = req.body;
+    const { apiKey, merchantId, senderPhone, wabaId } = req.body;
     if (!apiKey || typeof apiKey !== 'string') {
-      res.status(400).json({ success: false, error: 'KAPSO_API_KEY is required' });
+      res.status(400).json({ success: false, error: 'KWIKENGAGE_API_KEY is required' });
       return;
     }
-    const result = await kapsoService.updateCredentials(apiKey, phoneNumberId, senderPhone);
-    const pingStatus = await kapsoService.ping();
+    const result = await kwikengageService.updateCredentials(apiKey, merchantId, senderPhone, wabaId);
+    const pingStatus = await kwikengageService.ping();
     res.json({
       success: true,
       message: result.message,
@@ -3797,11 +3802,11 @@ router.post('/settings/whatsapp/config', async (req: Request, res: Response): Pr
 
 router.get('/settings/whatsapp/status', async (_req: Request, res: Response): Promise<void> => {
   try {
-    const pingStatus = await kapsoService.ping();
+    const pingStatus = await kwikengageService.ping();
     res.json({
       success: true,
       ...pingStatus,
-      apiUrl: config.kapso.apiUrl,
+      apiUrl: config.kwikengage.apiUrl,
     });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
@@ -3810,8 +3815,16 @@ router.get('/settings/whatsapp/status', async (_req: Request, res: Response): Pr
 
 router.get('/settings/whatsapp/usage', async (_req: Request, res: Response): Promise<void> => {
   try {
-    const usage = await kapsoService.getUsage();
-    res.json(usage);
+    const pingStatus = await kwikengageService.ping();
+    res.json({
+      success: true,
+      provider: 'KWIKENGAGE_API',
+      apiUrl: config.kwikengage.apiUrl,
+      merchantId: config.kwikengage.merchantId,
+      senderPhone: config.kwikengage.senderPhone,
+      wabaId: config.kwikengage.wabaId,
+      status: pingStatus.status,
+    });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -4407,7 +4420,7 @@ router.post('/settings/resend/test', async (req: Request, res: Response): Promis
 
 // ─── Support & Inbound Customer Communications Desk ──────────────
 
-// GET /api/support/diagnostics — Real-time connectivity probe for Delhivery, Kapso, Firebase RTDB, Resend
+// GET /api/support/diagnostics — Real-time connectivity probe for Delhivery, KwikEngage, Firebase RTDB, Resend
 router.get('/support/diagnostics', async (_req: Request, res: Response): Promise<void> => {
   try {
     // 1. Delhivery Live Probe
@@ -4437,8 +4450,8 @@ router.get('/support/diagnostics', async (_req: Request, res: Response): Promise
       }
     }
 
-    // 2. Kapso WhatsApp Probe
-    const kapsoStatus = await kapsoService.ping();
+    // 2. KwikEngage WhatsApp Probe
+    const kwikengageStatus = await kwikengageService.ping();
 
     // 3. Firebase RTDB Probe
     const firebaseStatus = await firebaseService.ping();
@@ -4457,7 +4470,8 @@ router.get('/support/diagnostics', async (_req: Request, res: Response): Promise
         tokenConfigured: Boolean(token),
         message: delhiveryMessage,
       },
-      kapso: kapsoStatus,
+      kwikengage: kwikengageStatus,
+      whatsapp: kwikengageStatus,
       firebase: {
         ...firebaseStatus,
         project: 'shopify-134b9',
@@ -5011,7 +5025,7 @@ router.get('/webhooks/whatsapp', (req: Request, res: Response): void => {
   res.status(200).json({ received: true });
 });
 
-// POST /api/webhooks/whatsapp — Inbound WhatsApp messages webhook from Kapso / Meta
+// POST /api/webhooks/whatsapp — Inbound WhatsApp messages webhook from KwikEngage / Meta
 // Public (exempted in requireAuth). Always 200 fast so providers don't retry-storm.
 router.post('/webhooks/whatsapp', async (req: Request, res: Response): Promise<void> => {
   try {
@@ -5034,7 +5048,7 @@ router.post('/webhooks/whatsapp', async (req: Request, res: Response): Promise<v
       return;
     }
 
-    // Extract sender phone and message text (supporting Kapso or WhatsApp Cloud webhook payload)
+    // Extract sender phone and message text (supporting KwikEngage or WhatsApp Cloud webhook payload)
     const senderPhone =
       payload.sender ||
       payload.from ||
@@ -5072,6 +5086,93 @@ router.post('/webhooks/whatsapp', async (req: Request, res: Response): Promise<v
     logger.error('WhatsApp webhook processing error', { error: error.message });
     // Still 200 — provider retries would duplicate CRM agent work; cron/backfill catches up.
     res.status(200).json({ received: true, error: 'processing_error' });
+  }
+});
+
+// POST /api/webhooks/gokwik — Inbound GoKwik payment & refund webhooks
+// Public (exempted in requireAuth). Synchronously returns 200 to acknowledge webhook.
+router.post('/webhooks/gokwik', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const parsed = gokwikService.processWebhook(req.body);
+    logger.info('Received GoKwik webhook', {
+      event: parsed.event,
+      entity: parsed.entity,
+      merchantOrderId: parsed.merchantOrderId,
+      paymentId: parsed.paymentId,
+      refundId: parsed.refundId,
+      amount: parsed.amount,
+      isPayment: parsed.isPayment,
+      isRefund: parsed.isRefund,
+    });
+
+    if (parsed.isPayment && parsed.merchantOrderId) {
+      const order = await prisma.order.findFirst({
+        where: {
+          OR: [
+            { shopifyOrderName: parsed.merchantOrderId },
+            { gokwikPaymentId: parsed.paymentId || undefined },
+            { paymentProviderPaymentId: parsed.paymentId || undefined },
+          ],
+        },
+      });
+
+      if (order) {
+        await prisma.order.update({
+          where: { id: order.id },
+          data: {
+            paymentVerified: true,
+            paymentProviderPaymentId: parsed.paymentId || order.paymentProviderPaymentId,
+            gokwikPaymentId: parsed.paymentId || order.gokwikPaymentId,
+          },
+        });
+        logger.info('GoKwik payment verified via webhook', {
+          orderId: order.id,
+          orderName: order.shopifyOrderName,
+          paymentId: parsed.paymentId,
+        });
+      }
+    }
+
+    if (parsed.isRefund && parsed.merchantOrderId) {
+      const returnRecord = await prisma.return.findFirst({
+        where: {
+          order: {
+            OR: [
+              { shopifyOrderName: parsed.merchantOrderId },
+              { gokwikPaymentId: parsed.paymentId || undefined },
+            ],
+          },
+        },
+        include: { order: true },
+      });
+
+      if (returnRecord) {
+        if (parsed.event === 'refund.successful') {
+          await prisma.return.update({
+            where: { id: returnRecord.id },
+            data: {
+              refundStatus: 'PROCESSED',
+              returnStatus: 'REFUNDED',
+              refundAmount: parsed.amount ?? returnRecord.refundAmount,
+              refundProcessedAt: new Date(),
+            },
+          });
+        } else if (parsed.event === 'refund.failure') {
+          await prisma.return.update({
+            where: { id: returnRecord.id },
+            data: {
+              refundStatus: 'FAILED',
+              errorMessage: `GoKwik refund failed: ${parsed.event}`,
+            },
+          });
+        }
+      }
+    }
+
+    res.status(200).json({ success: true, event: parsed.event });
+  } catch (error: any) {
+    logger.error('GoKwik webhook processing error', { error: error.message });
+    res.status(200).json({ success: false, error: error.message });
   }
 });
 

@@ -675,11 +675,13 @@ export interface SystemStatusData {
     senderPhone: string
     activeTemplates: string[]
   }
-  kapso?: {
+  kwikengage?: {
     status: string
     apiEndpoint?: string
+    merchantId?: string
     authHeader: string
     senderNumber: string
+    wabaId?: string
     criticalTriggers: Array<{ name: string; code: string; action: string }>
   }
   webhooks: WebhookEndpoint[]
@@ -691,26 +693,17 @@ export interface PingResults {
   results: Record<string, { status: 'ok' | 'error'; latencyMs: number; message?: string }>
 }
 
-export interface KapsoConnectedNumber {
-  id?: string
-  phone_number_id?: string
-  display_phone_number?: string
-  verified_name?: string
-  quality_rating?: string
-  status?: string
-}
-
-export interface KapsoStatusData {
+export interface KwikEngageStatusData {
   success: boolean
   status: 'ok' | 'unauthorized' | 'error'
   latencyMs: number
-  apiEndpoint?: string
-  senderPhone: string
-  apiKeyConfigured: boolean
-  phoneNumberIdConfigured: boolean
-  connectedNumbers: KapsoConnectedNumber[]
-  message?: string
   apiUrl?: string
+  merchantId?: string
+  senderPhone: string
+  wabaId?: string
+  apiKeyConfigured: boolean
+  merchantIdConfigured: boolean
+  message?: string
 }
 
 export interface ShopifyProductImage {
@@ -1048,20 +1041,21 @@ export interface SupportDiagnosticsData {
     tokenConfigured: boolean
     message: string
   }
-  kapso: {
+  kwikengage?: {
     status: 'ok' | 'error' | 'unauthorized'
     latencyMs: number
-    apiEndpoint?: string
+    apiUrl?: string
+    merchantId?: string
     senderPhone: string
+    wabaId?: string
     apiKeyConfigured: boolean
-    phoneNumberIdConfigured: boolean
-    connectedNumbers: Array<{
-      id: string
-      display_name: string
-      display_phone_number: string
-      status: string
-    }>
-    message: string
+    merchantIdConfigured?: boolean
+    message?: string
+  }
+  whatsapp?: {
+    status: 'ok' | 'error' | 'unauthorized'
+    latencyMs: number
+    message?: string
   }
   firebase: {
     status: 'ok' | 'error' | 'auth_required'

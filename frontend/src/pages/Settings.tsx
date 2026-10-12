@@ -14,8 +14,8 @@ import {
   createDelhiveryWarehouse,
   updateDelhiveryWarehouse,
   testWhatsAppNotification,
-  getKapsoStatus,
-  updateKapsoConfig,
+  getKwikEngageStatus,
+  updateKwikEngageConfig,
   getResendStatus,
   updateResendConfig,
   testResendEmail,
@@ -58,11 +58,12 @@ export function Settings() {
   const [testTrigger, setTestTrigger] = useState('COD_CONFIRMATION')
   const [testCustomMsg, setTestCustomMsg] = useState('')
 
-  // Kapso Configuration Modal state
-  const [isKapsoConfigModalOpen, setIsKapsoConfigModalOpen] = useState(false)
-  const [kapsoApiKey, setKapsoApiKey] = useState('')
-  const [kapsoPhoneNumberId, setKapsoPhoneNumberId] = useState('')
-  const [kapsoSenderPhone, setKapsoSenderPhone] = useState('+91 88661 54721')
+  // KwikEngage Configuration Modal state
+  const [isKwikEngageConfigModalOpen, setIsKwikEngageConfigModalOpen] = useState(false)
+  const [kwikEngageApiKey, setKwikEngageApiKey] = useState('')
+  const [kwikEngageMerchantId, setKwikEngageMerchantId] = useState('')
+  const [kwikEngageSenderPhone, setKwikEngageSenderPhone] = useState('+91 79849 84563')
+  const [kwikEngageWabaId, setKwikEngageWabaId] = useState('1173075567986214')
 
   // Resend Configuration Modal state
   const [isResendModalOpen, setIsResendModalOpen] = useState(false)
@@ -122,9 +123,9 @@ export function Settings() {
     staleTime: 10_000,
   })
 
-  const kapsoQuery = useQuery({
-    queryKey: ['kapso-status'],
-    queryFn: getKapsoStatus,
+  const kwikEngageQuery = useQuery({
+    queryKey: ['kwikengage-status'],
+    queryFn: getKwikEngageStatus,
     staleTime: 15_000,
   })
 
@@ -141,13 +142,13 @@ export function Settings() {
       const dbMs = data.results.database?.latencyMs ?? 0
       const shopifyMs = data.results.shopify?.latencyMs ?? 0
       const delhiveryMs = data.results.delhivery?.latencyMs ?? 0
-      const kapsoMs = data.results.kapso?.latencyMs ?? 0
+      const kwikEngageMs = data.results.kwikengage?.latencyMs ?? data.results.whatsapp?.latencyMs ?? 0
       toast.toast(
         'success',
-        `Live Ping Success! DB: ${dbMs}ms · Shopify: ${shopifyMs}ms · Delhivery: ${delhiveryMs}ms · Kapso: ${kapsoMs}ms`
+        `Live Ping Success! DB: ${dbMs}ms · Shopify: ${shopifyMs}ms · Delhivery: ${delhiveryMs}ms · KwikEngage: ${kwikEngageMs}ms`
       )
       queryClient.invalidateQueries({ queryKey: ['system-status'] })
-      queryClient.invalidateQueries({ queryKey: ['kapso-status'] })
+      queryClient.invalidateQueries({ queryKey: ['kwikengage-status'] })
       queryClient.invalidateQueries({ queryKey: ['resend-status'] })
     },
     onError: (err) => {
@@ -155,16 +156,16 @@ export function Settings() {
     },
   })
 
-  const updateKapsoMutation = useMutation({
-    mutationFn: updateKapsoConfig,
+  const updateKwikEngageMutation = useMutation({
+    mutationFn: updateKwikEngageConfig,
     onSuccess: (data) => {
-      toast.toast('success', data.message || 'Kapso configuration updated & verified!')
-      queryClient.invalidateQueries({ queryKey: ['kapso-status'] })
+      toast.toast('success', data.message || 'KwikEngage configuration updated & verified!')
+      queryClient.invalidateQueries({ queryKey: ['kwikengage-status'] })
       queryClient.invalidateQueries({ queryKey: ['system-status'] })
-      setIsKapsoConfigModalOpen(false)
+      setIsKwikEngageConfigModalOpen(false)
     },
     onError: (err) => {
-      toast.toast('error', `Failed to update Kapso credentials: ${err instanceof Error ? err.message : 'Unknown error'}`)
+      toast.toast('error', `Failed to update KwikEngage credentials: ${err instanceof Error ? err.message : 'Unknown error'}`)
     },
   })
 
@@ -1004,7 +1005,7 @@ export function Settings() {
                 <Panel>
                   <PanelHeading
                     eyebrow="Automated Customer Communications"
-                    title="Kapso AI WhatsApp Platform (Cloud REST API)"
+                    title="KwikEngage WhatsApp Platform (Official GoKwik Messaging API)"
                     action={
                       <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                         <button
@@ -1012,12 +1013,18 @@ export function Settings() {
                           className="btn-table-action"
                           style={{ background: '#eff6ff', borderColor: '#bfdbfe', color: '#2563eb' }}
                           onClick={() => {
-                            if (kapsoQuery.data?.senderPhone) {
-                              setKapsoSenderPhone(kapsoQuery.data.senderPhone)
+                            if (kwikEngageQuery.data?.senderPhone) {
+                              setKwikEngageSenderPhone(kwikEngageQuery.data.senderPhone)
                             }
-                            setIsKapsoConfigModalOpen(true)
+                            if (kwikEngageQuery.data?.merchantId) {
+                              setKwikEngageMerchantId(kwikEngageQuery.data.merchantId)
+                            }
+                            if (kwikEngageQuery.data?.wabaId) {
+                              setKwikEngageWabaId(kwikEngageQuery.data.wabaId)
+                            }
+                            setIsKwikEngageConfigModalOpen(true)
                           }}
-                          title="Configure Kapso API Key and Sender Number"
+                          title="Configure KwikEngage API Key, Merchant ID, and Sender Number"
                         >
                           <Icon name="key" size={13} />
                           <span>Configure API</span>
@@ -1038,11 +1045,11 @@ export function Settings() {
                   <div style={{ fontSize: '12px', display: 'grid', gap: '10px', color: '#475569' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '8px', borderBottom: '1px solid var(--line)' }}>
                       <span style={{ color: '#64748b' }}>Platform Status:</span>
-                      {kapsoQuery.data?.status === 'ok' ? (
+                      {kwikEngageQuery.data?.status === 'ok' ? (
                         <span className="status-badge status-success">
-                          <span className="status-dot" /> LIVE CONNECTED ({kapsoQuery.data.latencyMs}ms)
+                          <span className="status-dot" /> LIVE CONNECTED ({kwikEngageQuery.data.latencyMs}ms)
                         </span>
-                      ) : kapsoQuery.data?.apiKeyConfigured ? (
+                      ) : kwikEngageQuery.data?.apiKeyConfigured ? (
                         <span className="status-badge status-warning">
                           <span className="status-dot" /> CREDENTIALS CONFIGURED
                         </span>
@@ -1053,31 +1060,35 @@ export function Settings() {
                       )}
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '8px', borderBottom: '1px solid var(--line)' }}>
-                      <span style={{ color: '#64748b' }}>API Base URL:</span>
+                      <span style={{ color: '#64748b' }}>API Endpoint:</span>
                       <code style={{ fontSize: '10.5px', background: 'var(--line-subtle)', padding: '2px 6px', borderRadius: '4px', color: '#2563eb' }}>
-                        https://api.kapso.ai
+                        https://api.kwikengage.ai/send-message/v2
                       </code>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '8px', borderBottom: '1px solid var(--line)' }}>
                       <span style={{ color: '#64748b' }}>Authorization:</span>
                       <strong style={{ color: 'var(--ink)', fontSize: '11px' }}>
-                        {kapsoQuery.data?.apiKeyConfigured ? 'Bearer [CONFIGURED]' : 'Bearer ${env:KAPSO_API_KEY}'}
+                        {kwikEngageQuery.data?.apiKeyConfigured ? 'Bearer [CONFIGURED]' : 'Bearer ${env:KWIKENGAGE_API_KEY}'}
+                      </strong>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '8px', borderBottom: '1px solid var(--line)' }}>
+                      <span style={{ color: '#64748b' }}>Merchant ID:</span>
+                      <strong style={{ color: 'var(--ink)' }}>
+                        {kwikEngageQuery.data?.merchantId || 'youthnic'}
                       </strong>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '8px', borderBottom: '1px solid var(--line)' }}>
                       <span style={{ color: '#64748b' }}>Registered Sender:</span>
                       <strong style={{ color: 'var(--ink)' }}>
-                        {kapsoQuery.data?.senderPhone || '+91 88661 54721'}
+                        {kwikEngageQuery.data?.senderPhone || '+91 79849 84563'}
                       </strong>
                     </div>
-                    {kapsoQuery.data?.connectedNumbers && kapsoQuery.data.connectedNumbers.length > 0 && (
-                      <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '8px', borderBottom: '1px solid var(--line)' }}>
-                        <span style={{ color: '#64748b' }}>Connected WhatsApp:</span>
-                        <span style={{ color: '#059669', fontWeight: 700, fontSize: '11.5px' }}>
-                          {kapsoQuery.data.connectedNumbers[0]?.verified_name || 'Verified'} ({kapsoQuery.data.connectedNumbers[0]?.display_phone_number || kapsoQuery.data.connectedNumbers[0]?.id})
-                        </span>
-                      </div>
-                    )}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '8px', borderBottom: '1px solid var(--line)' }}>
+                      <span style={{ color: '#64748b' }}>WABA Account ID:</span>
+                      <strong style={{ color: 'var(--ink)' }}>
+                        {kwikEngageQuery.data?.wabaId || '1173075567986214'}
+                      </strong>
+                    </div>
                     <div>
                       <span style={{ color: '#64748b', fontSize: '11px', display: 'block', marginBottom: '6px' }}>Critical Trigger Automations:</span>
                       <div style={{ display: 'grid', gap: '5px' }}>
@@ -1452,7 +1463,7 @@ export function Settings() {
       )}
 
       {/* ─────────────────────────────────────────────────────────────
-          KAPSO WHATSAPP TEST MODAL
+          KWIKENGAGE WHATSAPP TEST MODAL
           ───────────────────────────────────────────────────────────── */}
       {isWhatsAppTestModalOpen && (
         <div
@@ -1485,10 +1496,10 @@ export function Settings() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 800, color: 'var(--ink)' }}>
-                  Test Kapso WhatsApp Trigger
+                  Test KwikEngage WhatsApp Trigger
                 </h3>
                 <p style={{ margin: '4px 0 0', fontSize: '11.5px', color: '#64748b' }}>
-                  Send a live or test trigger to any phone number via Kapso WhatsApp platform.
+                  Send a live or test trigger to any phone number via official KwikEngage WhatsApp messaging API.
                 </p>
               </div>
               <button
@@ -1549,9 +1560,9 @@ export function Settings() {
               )}
 
               <div style={{ background: 'var(--canvas)', border: '1px solid var(--line)', borderRadius: '8px', padding: '12px', fontSize: '11px', color: '#475569' }}>
-                <div style={{ fontWeight: 700, color: 'var(--ink)', marginBottom: '4px' }}>📡 Kapso WhatsApp REST API:</div>
-                <div>Configured endpoint: <code>https://api.kapso.ai</code></div>
-                <div style={{ marginTop: '2px' }}>Bearer Token: <code>&#36;{'{env:KAPSO_API_KEY}'}</code></div>
+                <div style={{ fontWeight: 700, color: 'var(--ink)', marginBottom: '4px' }}>📡 KwikEngage WhatsApp REST API:</div>
+                <div>Configured endpoint: <code>https://api.kwikengage.ai/send-message/v2</code></div>
+                <div style={{ marginTop: '2px' }}>Bearer Token: <code>&#36;{'{env:KWIKENGAGE_API_KEY}'}</code></div>
               </div>
 
               <div style={{ display: 'flex', gap: '10px', marginTop: '10px', justifyContent: 'flex-end' }}>
@@ -1577,9 +1588,9 @@ export function Settings() {
       )}
 
       {/* ─────────────────────────────────────────────────────────────
-          KAPSO WHATSAPP CONFIGURATION MODAL
+          KWIKENGAGE WHATSAPP CONFIGURATION MODAL
           ───────────────────────────────────────────────────────────── */}
-      {isKapsoConfigModalOpen && (
+      {isKwikEngageConfigModalOpen && (
         <div
           style={{
             position: 'fixed',
@@ -1592,7 +1603,7 @@ export function Settings() {
             justifyContent: 'center',
             padding: '20px',
           }}
-          onClick={() => setIsKapsoConfigModalOpen(false)}
+          onClick={() => setIsKwikEngageConfigModalOpen(false)}
         >
           <div
             style={{
@@ -1610,16 +1621,16 @@ export function Settings() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 800, color: 'var(--ink)' }}>
-                  Configure Kapso AI WhatsApp REST API
+                  Configure KwikEngage WhatsApp REST API
                 </h3>
                 <p style={{ margin: '4px 0 0', fontSize: '11.5px', color: '#64748b' }}>
-                  Update live credentials for automated COD confirmation and Delhivery tracking WhatsApp triggers.
+                  Update live credentials for official GoKwik KwikEngage WhatsApp triggers (COD verification, shipping updates, NDR alerts).
                 </p>
               </div>
               <button
                 type="button"
                 style={{ background: 'transparent', border: 0, color: '#64748b', cursor: 'pointer', padding: '4px' }}
-                onClick={() => setIsKapsoConfigModalOpen(false)}
+                onClick={() => setIsKwikEngageConfigModalOpen(false)}
               >
                 <Icon name="close" size={18} />
               </button>
@@ -1628,70 +1639,83 @@ export function Settings() {
             <form
               onSubmit={(e) => {
                 e.preventDefault()
-                updateKapsoMutation.mutate({
-                  apiKey: kapsoApiKey.trim(),
-                  phoneNumberId: kapsoPhoneNumberId.trim() || undefined,
-                  senderPhone: kapsoSenderPhone.trim() || undefined,
+                updateKwikEngageMutation.mutate({
+                  apiKey: kwikEngageApiKey.trim(),
+                  merchantId: kwikEngageMerchantId.trim() || undefined,
+                  senderPhone: kwikEngageSenderPhone.trim() || undefined,
+                  wabaId: kwikEngageWabaId.trim() || undefined,
                 })
               }}
               style={{ display: 'grid', gap: '14px' }}
             >
               <div className="form-field">
-                <label className="field-label">Kapso API Key (Bearer Token)</label>
+                <label className="field-label">KwikEngage API Key (Bearer Token)</label>
                 <input
                   type="password"
-                  placeholder="Enter your Kapso API key (e.g. kps_live_...)"
-                  value={kapsoApiKey}
-                  onChange={(e) => setKapsoApiKey(e.target.value)}
+                  placeholder="Enter your KwikEngage API key (e.g. kwik_...)"
+                  value={kwikEngageApiKey}
+                  onChange={(e) => setKwikEngageApiKey(e.target.value)}
                 />
                 <span style={{ fontSize: '10.5px', color: '#64748b', marginTop: '3px' }}>
-                  Supplied in Authorization header: <code>Bearer [YOUR_KEY]</code> and <code>X-API-Key</code>.
+                  Supplied in Authorization header: <code>Bearer [YOUR_KEY]</code> and <code>x-api-key</code>.
+                </span>
+              </div>
+
+              <div className="form-field">
+                <label className="field-label">Merchant ID</label>
+                <input
+                  placeholder="e.g. youthnic or your GoKwik Merchant ID"
+                  value={kwikEngageMerchantId}
+                  onChange={(e) => setKwikEngageMerchantId(e.target.value)}
+                />
+                <span style={{ fontSize: '10.5px', color: '#64748b', marginTop: '3px' }}>
+                  GoKwik / KwikEngage assigned Merchant identifier.
                 </span>
               </div>
 
               <div className="form-field">
                 <label className="field-label">WhatsApp Sender Phone Number</label>
                 <input
-                  placeholder="e.g. +91 88661 54721"
-                  value={kapsoSenderPhone}
-                  onChange={(e) => setKapsoSenderPhone(e.target.value)}
+                  placeholder="e.g. +91 79849 84563"
+                  value={kwikEngageSenderPhone}
+                  onChange={(e) => setKwikEngageSenderPhone(e.target.value)}
                 />
                 <span style={{ fontSize: '10.5px', color: '#64748b', marginTop: '3px' }}>
-                  Display phone number for outbound notifications.
+                  Official display phone number registered in KwikEngage.
                 </span>
               </div>
 
               <div className="form-field">
-                <label className="field-label">Meta Phone Number ID (Optional)</label>
+                <label className="field-label">WABA Account ID (Optional)</label>
                 <input
-                  placeholder="Leave empty to auto-discover via Kapso Platform API"
-                  value={kapsoPhoneNumberId}
-                  onChange={(e) => setKapsoPhoneNumberId(e.target.value)}
+                  placeholder="e.g. 1173075567986214"
+                  value={kwikEngageWabaId}
+                  onChange={(e) => setKwikEngageWabaId(e.target.value)}
                 />
                 <span style={{ fontSize: '10.5px', color: '#64748b', marginTop: '3px' }}>
-                  Kapso will automatically query <code>/platform/v1/whatsapp/phone_numbers</code> if omitted.
+                  Meta WhatsApp Business Account ID registered under GoKwik.
                 </span>
               </div>
 
               <div style={{ background: 'var(--canvas)', border: '1px solid var(--line)', borderRadius: '8px', padding: '12px', fontSize: '11px', color: '#475569' }}>
                 <div style={{ fontWeight: 700, color: 'var(--ink)', marginBottom: '4px' }}>🔐 Persistence & MCP Sync:</div>
-                <div>Updating these values immediately updates the active runtime service and persists <code>KAPSO_API_KEY</code> and <code>KAPSO_PHONE_NUMBER_ID</code> to your local <code>.env</code> file.</div>
+                <div>Updating these values immediately updates the active runtime service and persists <code>KWIKENGAGE_API_KEY</code>, <code>KWIKENGAGE_MERCHANT_ID</code>, <code>KWIKENGAGE_SENDER_PHONE</code>, and <code>KWIKENGAGE_WABA_ID</code> to your local <code>.env</code> file.</div>
               </div>
 
               <div style={{ display: 'flex', gap: '10px', marginTop: '10px', justifyContent: 'flex-end' }}>
                 <button
                   type="button"
                   className="button button-secondary"
-                  onClick={() => setIsKapsoConfigModalOpen(false)}
+                  onClick={() => setIsKwikEngageConfigModalOpen(false)}
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   className="button button-primary"
-                  disabled={updateKapsoMutation.isPending}
+                  disabled={updateKwikEngageMutation.isPending}
                 >
-                  {updateKapsoMutation.isPending ? 'Verifying & Saving…' : 'Save & Verify Kapso Connection'}
+                  {updateKwikEngageMutation.isPending ? 'Verifying & Saving…' : 'Save & Verify KwikEngage Connection'}
                 </button>
               </div>
             </form>

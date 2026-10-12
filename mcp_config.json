@@ -1,9 +1,11 @@
 {
   "mcpServers": {
-    "kapso": {
-      "url": "https://api.kapso.ai/mcp",
+    "kwikengage": {
+      "url": "https://api.kwikengage.ai/send-message/v2",
       "headers": {
-        "Authorization": "Bearer ${env:KAPSO_API_KEY}"
+        "Authorization": "Bearer ${env:KWIKENGAGE_API_KEY}",
+        "x-api-key": "${env:KWIKENGAGE_API_KEY}",
+        "x-merchant-id": "${env:KWIKENGAGE_MERCHANT_ID}"
       }
     }
   }

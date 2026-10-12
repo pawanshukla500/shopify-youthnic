@@ -140,41 +140,31 @@ export const config = {
     },
   },
 
-  // KwiKenage (WhatsApp)
-  kwikenage: {
-    apiUrl: optional('KWIKENAGE_API_URL', 'https://api.kwikenage.com'),
-    // Not required at boot; WhatsApp sends fail with a clear error when unset.
-    apiKey: optional('KWIKENAGE_API_KEY', ''),
-    senderPhone: optional('KWIKENAGE_SENDER_PHONE', ''),
+  // KwikEngage WhatsApp Platform (Official GoKwik Customer Engagement API)
+  // Base URL: https://api.kwikengage.ai/send-message/v2
+  kwikengage: {
+    apiUrl: optional('KWIKENGAGE_API_URL', optional('KWIKENAGE_API_URL', 'https://api.kwikengage.ai/send-message/v2')),
+    apiKey: optional('KWIKENGAGE_API_KEY', optional('KWIKENAGE_API_KEY', '')),
+    merchantId: optional('KWIKENGAGE_MERCHANT_ID', optional('KWIKENAGE_MERCHANT_ID', optional('GOKWIK_MERCHANT_ID', ''))),
+    senderPhone: optional('KWIKENGAGE_SENDER_PHONE', optional('KWIKENAGE_SENDER_PHONE', '+91 79849 84563')),
+    wabaId: optional('KWIKENGAGE_WABA_ID', '1173075567986214'),
+    enabled: optional('KWIKENGAGE_ENABLED', 'true') === 'true',
     templates: {
-      orderConfirmed: optional('KWIKENAGE_TEMPLATE_ORDER_CONFIRMED', 'order_confirmed'),
-      orderShipped: optional('KWIKENAGE_TEMPLATE_ORDER_SHIPPED', 'order_shipped'),
-      outForDelivery: optional('KWIKENAGE_TEMPLATE_OUT_FOR_DELIVERY', 'out_for_delivery'),
-      delivered: optional('KWIKENAGE_TEMPLATE_DELIVERED', 'order_delivered'),
-      returnInitiated: optional('KWIKENAGE_TEMPLATE_RETURN_INITIATED', 'return_initiated'),
-      refundProcessed: optional('KWIKENAGE_TEMPLATE_REFUND_PROCESSED', 'refund_processed'),
-      ndr: optional('KWIKENAGE_TEMPLATE_NDR', 'ndr_attempt'),
+      orderConfirmed: optional('KWIKENGAGE_TEMPLATE_ORDER_CONFIRMED', optional('KWIKENAGE_TEMPLATE_ORDER_CONFIRMED', 'youthnic_order_confirmed')),
+      codConfirmation: optional('KWIKENGAGE_TEMPLATE_COD_CONFIRMATION', 'youthnic_cod_confirmation'),
+      orderDispatched: optional('KWIKENGAGE_TEMPLATE_ORDER_SHIPPED', optional('KWIKENAGE_TEMPLATE_ORDER_SHIPPED', 'youthnic_order_dispatched')),
+      outForDelivery: optional('KWIKENGAGE_TEMPLATE_OUT_FOR_DELIVERY', optional('KWIKENAGE_TEMPLATE_OUT_FOR_DELIVERY', 'youthnic_out_for_delivery')),
+      delivered: optional('KWIKENGAGE_TEMPLATE_DELIVERED', optional('KWIKENAGE_TEMPLATE_DELIVERED', 'youthnic_order_delivered')),
+      ndrAttempt: optional('KWIKENGAGE_TEMPLATE_NDR', optional('KWIKENAGE_TEMPLATE_NDR', 'youthnic_ndr_reschedule')),
+      rtoInitiated: optional('KWIKENGAGE_TEMPLATE_RTO', 'youthnic_rto_alert'),
+      returnInitiated: optional('KWIKENGAGE_TEMPLATE_RETURN', optional('KWIKENAGE_TEMPLATE_RETURN_INITIATED', 'youthnic_return_update')),
+      refundProcessed: optional('KWIKENGAGE_TEMPLATE_REFUND', optional('KWIKENAGE_TEMPLATE_REFUND_PROCESSED', 'youthnic_refund_processed')),
     },
   },
 
-  // Kapso AI WhatsApp Platform (REST API)
-  kapso: {
-    apiUrl: optional('KAPSO_API_URL', 'https://api.kapso.ai'),
-    apiKey: optional('KAPSO_API_KEY', ''),
-    phoneNumberId: optional('KAPSO_PHONE_NUMBER_ID', ''),
-    senderPhone: optional('KAPSO_SENDER_PHONE', '+91 88661 54721'),
-    enabled: optional('KAPSO_ENABLED', 'true') === 'true',
-    templates: {
-      orderConfirmed: optional('KAPSO_TEMPLATE_ORDER_CONFIRMED', 'youthnic_order_confirmed'),
-      codConfirmation: optional('KAPSO_TEMPLATE_COD_CONFIRMATION', 'youthnic_cod_confirmation'),
-      orderDispatched: optional('KAPSO_TEMPLATE_ORDER_SHIPPED', 'youthnic_order_dispatched'),
-      outForDelivery: optional('KAPSO_TEMPLATE_OUT_FOR_DELIVERY', 'youthnic_out_for_delivery'),
-      delivered: optional('KAPSO_TEMPLATE_DELIVERED', 'youthnic_order_delivered'),
-      ndrAttempt: optional('KAPSO_TEMPLATE_NDR', 'youthnic_ndr_reschedule'),
-      rtoInitiated: optional('KAPSO_TEMPLATE_RTO', 'youthnic_rto_alert'),
-      returnInitiated: optional('KAPSO_TEMPLATE_RETURN', 'youthnic_return_update'),
-      refundProcessed: optional('KAPSO_TEMPLATE_REFUND', 'youthnic_refund_processed'),
-    },
+  // Alias for backward compatibility
+  get kwikenage() {
+    return this.kwikengage;
   },
 
   // GoKwik (primary payment gateway)
@@ -291,3 +281,5 @@ export const config = {
   // Logging
   logLevel: optional('LOG_LEVEL', 'info'),
 };
+
+export default config;

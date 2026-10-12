@@ -97,7 +97,8 @@
 - AWB tracking numbers use a clean monospace font stack (`JetBrains Mono`, `SF Mono`, `Menlo`, `Consolas`).
 
 ### G. Database Schema & Deployment (Commit `3829719`, revised)
-- `deploy.yml` runs `npx prisma db push` **after** tests and both builds pass, and before the container is replaced, so a red build never changes the production schema under the running release.
+- `deploy.yml` runs `npx prisma db push` **on the VPS** (via SSH + `docker compose run`) after the Docker image is built and before the container is started, so a red build never changes the production schema under the running release. The migration runs on the VPS itself, not the CI runner, so the database at `200.141.1.119:5433` is always reachable (fixes P1001 connectivity error).
+- `prisma` is a production dependency (not devDependency) so the CLI is available in the production Docker image for the migration step.
 - Additive changes (new nullable or defaulted columns, indexes, tables) apply on every push to `main`.
 - A change Prisma flags as data loss (dropping a column/table, adding a unique constraint) stops the deploy. Re-run the workflow manually (`workflow_dispatch`) with **allow_data_loss** checked once that change is intended. Prefer additive schema changes.
 

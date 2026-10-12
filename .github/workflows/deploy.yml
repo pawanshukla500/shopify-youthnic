@@ -52,24 +52,6 @@ jobs:
       - name: Build Vite React Frontend
         run: cd frontend && npm run build
 
-      - name: Apply Prisma schema to production database
-        # Without this step, the generated Prisma client references new columns
-        # (Shipment.epodStoragePath, Return.qcStoragePath, TrackingLog.waybill, ...)
-        # that the running database does not yet have. Result: every page that
-        # touches those tables throws "column does not exist".
-        #
-        # Runs only after tests and both builds pass, so a red build never
-        # changes the production schema under the still-running old release.
-        # Additive changes (new nullable columns, new indexes, new tables) apply
-        # on every push. A change Prisma flags as data loss (dropping a column or
-        # table, adding a unique constraint) stops the deploy here instead of
-        # silently deleting data; re-run this workflow manually with
-        # allow_data_loss checked once that change is intended.
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          DATA_LOSS_FLAG: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_data_loss && '--accept-data-loss' || '' }}
-        run: npx prisma db push --skip-generate $DATA_LOSS_FLAG
-
   deploy:
     name: Deploy to Hostinger VPS
     needs: build
@@ -216,34 +198,46 @@ jobs:
           HOSTINGER_PORT: ${{ secrets.HOSTINGER_SSH_PORT || 22 }}
           APP_DOMAIN: ${{ vars.APP_DOMAIN || 'shopify.youthnic.shop' }}
           FALLBACK_DOMAIN: ${{ vars.FALLBACK_DOMAIN || 'shopify.srv1845788.hstgr.cloud' }}
+          DATA_LOSS_FLAG: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_data_loss && '--accept-data-loss' || '' }}
         run: |
-          ssh -p "$HOSTINGER_PORT" -i ~/.ssh/id_ed25519 "${HOSTINGER_USER}@${HOSTINGER_HOST}" 'bash -s' <<'EOF'
+          ssh -p "$HOSTINGER_PORT" -i ~/.ssh/id_ed25519 "${HOSTINGER_USER}@${HOSTINGER_HOST}" "DATA_LOSS_FLAG='$DATA_LOSS_FLAG' bash -s" <<'EOF'
           set -euo pipefail
 
-          echo ">>> [1/7] Preparing directory structure in /opt/shopify/Shopify..."
+          echo ">>> [1/8] Preparing directory structure in /opt/shopify/Shopify..."
           mkdir -p /opt/shopify/Shopify/logs
           find /opt/shopify/Shopify -mindepth 1 -maxdepth 1 ! -name 'logs' -exec rm -rf {} +
           cd /opt/shopify
           tar -xzf shopify-source.tar.gz -C Shopify
           cd Shopify
 
-          echo ">>> [2/7] Installing production configuration..."
+          echo ">>> [2/8] Installing production configuration..."
           mv /opt/shopify/hostinger.env .env
           chmod 600 .env
           ln -sf docker-compose.production.yml docker-compose.yml
 
-          echo ">>> [3/7] Deploying Docker container Shopify under project shopify..."
-          docker compose -p shopify -f docker-compose.production.yml --env-file .env up -d --build --remove-orphans
+          echo ">>> [3/8] Building Docker image for Shopify..."
+          docker compose -p shopify -f docker-compose.production.yml --env-file .env build
 
-          echo ">>> [4/7] Linking to /docker/shopify for Hostinger hPanel Docker Manager..."
+          echo ">>> [4/8] Applying Prisma schema to production database..."
+          # Runs on the VPS itself (not the CI runner) so the database at
+          # 200.141.1.119:5433 is always reachable. The built image includes
+          # the prisma CLI (prisma is a production dependency).
+          # Additive changes apply on every push. A change Prisma flags as data
+          # loss stops the deploy here; re-run with allow_data_loss checked.
+          docker compose -p shopify -f docker-compose.production.yml --env-file .env run --rm --no-deps shopify npx prisma db push --skip-generate $DATA_LOSS_FLAG
+
+          echo ">>> [5/8] Starting Docker container Shopify under project shopify..."
+          docker compose -p shopify -f docker-compose.production.yml --env-file .env up -d --remove-orphans
+
+          echo ">>> [6/8] Linking to /docker/shopify for Hostinger hPanel Docker Manager..."
           mkdir -p /docker
           ln -sfn /opt/shopify/Shopify /docker/shopify
 
-          echo ">>> [5/7] Verifying Shopify container is running..."
+          echo ">>> [7/8] Verifying Shopify container is running..."
           sleep 10
           docker ps --filter "name=Shopify"
 
-          echo ">>> [6/7] Checking internal health endpoint..."
+          echo ">>> [8/8] Checking internal health endpoint..."
           healthy=0
           for i in {1..20}; do
             if curl -fsS http://127.0.0.1:3000/api/health >/dev/null 2>&1; then
@@ -261,7 +255,7 @@ jobs:
             exit 1
           fi
 
-          echo ">>> [7/7] Verifying Traefik reverse proxy routing..."
+          echo ">>> Verifying Traefik reverse proxy routing..."
           for domain in "shopify.youthnic.shop" "shopify.srv1845788.hstgr.cloud"; do
             echo "Testing routing for https://$domain/api/health..."
             curl -k -fsS "https://$domain/api/health" || echo "Note: DNS for $domain may take a moment to propagate or resolve."

@@ -1132,23 +1132,6 @@ a { color: inherit; text-decoration: none; }
   .bulk-btn-meta { display: none; }
 }
 
-/* ─── UI UX Max Pro: Order Lifecycle Stepper ─────────────────── */
-.order-stepper-card { background: #ffffff; border: 1px solid var(--line); border-radius: 12px; padding: 20px 24px; margin-bottom: 22px; box-shadow: 0 2px 6px rgba(23, 35, 48, 0.03); }
-.order-stepper-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
-.order-stepper-header h3 { margin: 0; font-size: 13px; font-weight: 750; color: #1e293b; letter-spacing: -0.01em; }
-.order-stepper-progress { display: flex; align-items: center; justify-content: space-between; position: relative; }
-.order-stepper-track-bg { position: absolute; top: 16px; left: 32px; right: 32px; height: 3px; background: #e2e8f0; z-index: 1; }
-.order-stepper-track-fill { position: absolute; top: 16px; left: 32px; height: 3px; background: linear-gradient(90deg, #2f6df6, #10b981); z-index: 2; transition: width .4s ease; }
-.order-step-node { position: relative; z-index: 3; display: flex; flex-direction: column; align-items: center; text-align: center; width: 110px; }
-.order-step-circle { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 800; background: #ffffff; border: 2.5px solid #cbd5e1; color: #94a3b8; transition: all .2s ease; }
-.order-step-node.completed .order-step-circle { background: #10b981; border-color: #10b981; color: #ffffff; box-shadow: 0 2px 8px rgba(16, 185, 129, 0.35); }
-.order-step-node.active .order-step-circle { background: #2f6df6; border-color: #2f6df6; color: #ffffff; box-shadow: 0 0 0 4px rgba(47, 109, 246, 0.2); animation: pulseStep 2s infinite; }
-.order-step-title { font-size: 11px; font-weight: 750; color: #64748b; margin-top: 8px; line-height: 1.25; }
-.order-step-node.completed .order-step-title { color: #0f172a; }
-.order-step-node.active .order-step-title { color: #1d4ed8; }
-.order-step-subtitle { font-size: 9.5px; color: #94a3b8; margin-top: 2px; }
-@keyframes pulseStep { 0%, 100% { box-shadow: 0 0 0 4px rgba(47, 109, 246, 0.2); } 50% { box-shadow: 0 0 0 7px rgba(47, 109, 246, 0.35); } }
-
 /* ─── UI UX Max Pro: Order Items Data Table ─────────────────── */
 .order-items-table { width: 100%; border-collapse: separate; border-spacing: 0; }
 .order-items-table th { background: #f8fafc; color: #64748b; font-size: 9.5px; font-weight: 750; text-transform: uppercase; letter-spacing: 0.08em; padding: 10px 14px; border-bottom: 1px solid #e2e8f0; text-align: left; }
@@ -2609,27 +2592,6 @@ code {
 [data-theme="dark"] .tab-badge {
   background: rgba(255, 255, 255, 0.1);
   color: #cbd5e1;
-}
-
-/* Dark mode stepper */
-.app-shell.theme-dark .order-stepper-card,
-[data-theme="dark"] .order-stepper-card {
-  background: #0f172a;
-  border-color: rgba(255, 255, 255, 0.08);
-}
-.app-shell.theme-dark .order-stepper-track-bg,
-[data-theme="dark"] .order-stepper-track-bg {
-  background: rgba(255, 255, 255, 0.12);
-}
-.app-shell.theme-dark .order-step-circle,
-[data-theme="dark"] .order-step-circle {
-  background: #1e293b;
-  border-color: rgba(255, 255, 255, 0.2);
-  color: #94a3b8;
-}
-.app-shell.theme-dark .order-step-node.completed .order-step-title,
-[data-theme="dark"] .order-step-node.completed .order-step-title {
-  color: #f8fafc;
 }
 
 /* ── Responsive: remove desktop-only floor, collapse sidebar, stack grids ── */

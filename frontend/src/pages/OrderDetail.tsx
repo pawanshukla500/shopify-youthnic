@@ -731,8 +731,8 @@ export function OrderDetail() {
                   value={
                     <span style={{ fontSize: '14px', fontWeight: 700, color: '#0f172a' }}>
                       {isReturnOrder
-                        ? (order.tags?.includes('Return Dispatched') ? 'Return Dispatched' : (order.shipment.trackingStatus ?? labelize(order.status)))
-                        : (order.shipment.trackingStatus ?? 'Awaiting carrier scan')}
+                        ? (order.shipment.trackingStatus ?? labelize(order.status))
+                        : (order.shipment.trackingStatus ?? (order.shipment?.status || order.status ? labelize(order.shipment?.status ?? order.status) : 'Awaiting carrier scan'))}
                     </span>
                   }
                   icon="truck"
@@ -1870,9 +1870,13 @@ function OrderLifecycleStepper({
   }, [isReturnOrder, order, returnAwb])
 
   const forwardStage = useMemo(() => {
-    if (order.status === 'DELIVERED') return 5
-    if (order.status === 'OUT_FOR_DELIVERY' || order.status === 'IN_TRANSIT' || (order.shipment?.trackingLogs?.length ?? 0) > 1) return 4
-    if (order.shipment?.waybillNumber || order.status === 'DISPATCHED') return 3
+    const shipStatus = order.shipment?.status
+    if (order.status === 'DELIVERED' || shipStatus === 'DELIVERED') return 5
+    if (order.status === 'OUT_FOR_DELIVERY' || shipStatus === 'OUT_FOR_DELIVERY' ||
+        order.status === 'IN_TRANSIT' || shipStatus === 'IN_TRANSIT' ||
+        (order.shipment?.trackingLogs?.length ?? 0) > 1) return 4
+    if (order.shipment?.waybillNumber || order.status === 'DISPATCHED' ||
+        shipStatus === 'CREATED' || shipStatus === 'PICKED_UP') return 3
     if (order.paymentVerified || order.paymentMethod === 'PREPAID') return 2
     return 1
   }, [order])
@@ -1970,9 +1974,7 @@ function OrderLifecycleStepper({
         <span style={{ fontSize: '11px', color: '#64748b' }}>
           Stage <strong>{stage}</strong> of 5 · Current Status:{' '}
           <strong style={{ color: isReturnOrder ? '#6d28d9' : '#1e3a8a' }}>
-            {isReturnOrder
-              ? (order.tags?.includes('Return Dispatched') ? 'Return Dispatched' : labelize(order.status))
-              : labelize(order.status)}
+            {steps[stage - 1]?.title ?? labelize(order.status)}
           </strong>
           {isReturnOrder && returnAwb && (
             <span style={{ marginLeft: '6px' }}>

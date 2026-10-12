@@ -1,0 +1,42 @@
+{
+  "previewPort": 3000,
+  "healthPath": "/",
+  "startCommand": "docker compose -f docker-compose.base44.yml up -d",
+  "secrets": [
+    {
+      "name": "SHOPIFY_SHOP_DOMAIN",
+      "description": "Shopify store domain (e.g. your-store.myshopify.com) from Shopify Admin > Settings > Domains",
+      "requiredAtBoot": true
+    },
+    {
+      "name": "SHOPIFY_CLIENT_ID",
+      "description": "Shopify Dev Dashboard app Client ID — App settings > Credentials",
+      "requiredAtBoot": false
+    },
+    {
+      "name": "SHOPIFY_CLIENT_SECRET",
+      "description": "Shopify Dev Dashboard app Client Secret — App settings > Credentials",
+      "requiredAtBoot": false
+    },
+    {
+      "name": "DELHIVERY_API_TOKEN",
+      "description": "Delhivery B2C API token from the Delhivery client dashboard",
+      "requiredAtBoot": false
+    },
+    {
+      "name": "DELHIVERY_PICKUP_LOCATION",
+      "description": "Registered warehouse/pickup-location name in Delhivery (case and space sensitive)",
+      "requiredAtBoot": true
+    },
+    {
+      "name": "KWIKENAGE_API_KEY",
+      "description": "KwiKenage WhatsApp API key from the KwiKenage dashboard",
+      "requiredAtBoot": false
+    },
+    {
+      "name": "KWIKENAGE_SENDER_PHONE",
+      "description": "KwiKenage sender phone number in E.164 format (e.g. 919999999999)",
+      "requiredAtBoot": false
+    }
+  ]
+}

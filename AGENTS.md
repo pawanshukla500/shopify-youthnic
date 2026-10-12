@@ -184,7 +184,20 @@
 
 ---
 
-## 5. Development & Testing Commands
+## 5. Base44 Dev Environment (docker-compose.base44.yml)
+
+- **Stack**: PostgreSQL 16 (`db`), Express+tsx watch (`api`), Vite dev server (`web` on port 3000).
+- **Node version**: Node 22 required — `firebase-admin@14` needs `>=22`. Node 20 causes EBADENGINE warnings.
+- **Prisma on Alpine**: The API container must `apk add --no-cache openssl libc6-compat` before running Prisma commands, or the schema engine fails with "Error load…".
+- **No migration files**: The project uses `prisma db push` (not `migrate dev`). Migrations are gitignored. The compose startup runs `npx prisma db push --accept-data-loss` automatically.
+- **Vite proxy**: `frontend/vite.config.ts` reads `VITE_PROXY_TARGET` (defaults to `http://localhost:3000`). In compose it points to `http://api:3000`. The proxy also sets `X-Forwarded-Proto: https` to prevent the backend's HTTP→HTTPS redirect from firing behind the preview proxy.
+- **Cron disabled**: `.env.base44-defaults` sets `CRON_ENABLED=false` so background jobs don't hit unconfigured external APIs during dev.
+- **Secrets**: External credentials (Shopify, Delhivery, KwiKenage) are delivered via `/run/base44/app.env` (platform-managed). `.env.base44-defaults` holds only non-secret placeholders for required-at-boot vars.
+- **Verify**: `curl http://localhost:3000/api/health` → `{"status":"ok"}`. The frontend shows a Firebase Auth login page without a session.
+
+---
+
+## 6. Development & Testing Commands
 
 ```bash
 # 1. Run all Vitest unit tests (279 tests across 33 test files)

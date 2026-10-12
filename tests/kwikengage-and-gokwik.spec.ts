@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import axios from 'axios';
 
 vi.mock('../src/utils/logger', () => ({
   default: {
@@ -9,31 +10,13 @@ vi.mock('../src/utils/logger', () => ({
   },
 }));
 
-const { clientPost, axiosGet } = vi.hoisted(() => ({
-  clientPost: vi.fn(),
-  axiosGet: vi.fn(),
-}));
-
-vi.mock('axios', () => {
-  const client = {
-    post: (...args: any[]) => clientPost(...args),
-    get: (...args: any[]) => axiosGet(...args),
-  };
-  return {
-    default: {
-      create: vi.fn(() => client),
-      get: (...args: any[]) => axiosGet(...args),
-      post: (...args: any[]) => clientPost(...args),
-    },
-  };
-});
-
 import { kwikengageService } from '../src/modules/whatsapp/kwikengage.service';
 import gokwikService from '../src/modules/payments/gokwik.service';
 import { config } from '../src/config';
 
 describe('KwikEngage Service (Official WhatsApp API)', () => {
   const originalConfig = { ...config.kwikengage };
+  const clientPost = vi.fn();
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -42,6 +25,10 @@ describe('KwikEngage Service (Official WhatsApp API)', () => {
     config.kwikengage.apiUrl = 'https://api.kwikengage.ai/send-message/v2';
     config.kwikengage.senderPhone = '+91 79849 84563';
     config.kwikengage.wabaId = '1173075567986214';
+
+    (kwikengageService as any).client = {
+      post: clientPost,
+    };
   });
 
   afterEach(() => {
@@ -171,16 +158,17 @@ describe('KwikEngage Service (Official WhatsApp API)', () => {
 
   describe('Diagnostic Ping', () => {
     it('returns ok status and latency when endpoint responds', async () => {
-      axiosGet.mockResolvedValueOnce({
+      const getSpy = vi.spyOn(axios, 'get').mockResolvedValueOnce({
         status: 200,
         data: { status: 'healthy' },
-      });
+      } as any);
 
       const ping = await kwikengageService.ping();
       expect(ping.status).toBe('ok');
       expect(ping.latencyMs).toBeGreaterThanOrEqual(0);
       expect(ping.apiKeyConfigured).toBe(true);
       expect(ping.merchantIdConfigured).toBe(true);
+      getSpy.mockRestore();
     });
 
     it('handles simulated state when API key is empty', async () => {
@@ -196,6 +184,7 @@ describe('KwikEngage Service (Official WhatsApp API)', () => {
 
 describe('GoKwik Payment & Integrated Refund API', () => {
   const origGkConfig = { ...config.gokwik };
+  const gkPost = vi.fn();
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -207,8 +196,9 @@ describe('GoKwik Payment & Integrated Refund API', () => {
     config.gokwik.statusPath = '';
     config.gokwik.refundPath = '/v3/orders/update';
 
-    // Re-initialize gokwikService client with updated credentials
-    (gokwikService as any).initClient();
+    (gokwikService as any).client = {
+      post: gkPost,
+    };
   });
 
   afterEach(() => {
@@ -218,7 +208,7 @@ describe('GoKwik Payment & Integrated Refund API', () => {
 
   describe('Order & Payment Status Verification (/v3/orders/fetch)', () => {
     it('fetches order details using merchant_order_id via POST /v3/orders/fetch', async () => {
-      clientPost.mockResolvedValueOnce({
+      gkPost.mockResolvedValueOnce({
         status: 200,
         data: {
           success: true,
@@ -239,14 +229,14 @@ describe('GoKwik Payment & Integrated Refund API', () => {
       expect(res.success).toBe(true);
       expect(res.data?.merchant_order_id).toBe('YOUTH-1001');
       expect(res.data?.payment_status).toBe('PAID');
-      expect(clientPost).toHaveBeenCalledWith(
+      expect(gkPost).toHaveBeenCalledWith(
         '/v3/orders/fetch',
         { merchant_order_id: 'YOUTH-1001' }
       );
     });
 
     it('verifies paid order status correctly via verifyPayment', async () => {
-      clientPost.mockResolvedValueOnce({
+      gkPost.mockResolvedValueOnce({
         status: 200,
         data: {
           success: true,
@@ -268,7 +258,7 @@ describe('GoKwik Payment & Integrated Refund API', () => {
     });
 
     it('identifies uncaptured or failed payments correctly', async () => {
-      clientPost.mockResolvedValueOnce({
+      gkPost.mockResolvedValueOnce({
         status: 200,
         data: {
           success: true,
@@ -287,7 +277,7 @@ describe('GoKwik Payment & Integrated Refund API', () => {
 
   describe('Integrated Refund API (/v3/orders/update)', () => {
     it('posts refund amount and note to GoKwik update order endpoint', async () => {
-      clientPost.mockResolvedValueOnce({
+      gkPost.mockResolvedValueOnce({
         status: 200,
         data: {
           success: true,
@@ -309,7 +299,7 @@ describe('GoKwik Payment & Integrated Refund API', () => {
       expect(res.success).toBe(true);
       expect(res.refundId).toBe('rfnd_gk_555');
       expect(res.message).toContain('Refund request initiated successfully');
-      expect(clientPost).toHaveBeenCalledWith(
+      expect(gkPost).toHaveBeenCalledWith(
         '/v3/orders/update',
         {
           merchant_order_id: 'YOUTH-1001',
@@ -321,7 +311,7 @@ describe('GoKwik Payment & Integrated Refund API', () => {
     });
 
     it('handles refund failures and captures error message', async () => {
-      clientPost.mockRejectedValueOnce({
+      gkPost.mockRejectedValueOnce({
         response: {
           status: 400,
           data: { error: 'Order cannot be refunded after 30 days' },

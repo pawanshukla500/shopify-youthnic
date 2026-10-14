@@ -413,11 +413,24 @@ export async function importDelhiveryRemittance(
 
 type Leg = 'forward' | 'rto';
 
+export interface WalletTransactionEntry {
+  txnId: string;
+  date: string;
+  type: 'debit' | 'credit';
+  amount: number;
+  description: string;
+  status: string;
+  zone?: string;
+  weight?: number;
+  closureDate?: string;
+  orderRef?: string;
+}
+
 /**
- * Billed shipping cost per AWB and leg. Delhivery debits an estimate at
- * manifest, refunds and re-debits on weight correction, and debits the final
- * charge after delivery / RTO / DTO, so the charge for a leg is its LATEST
- * debit, not the sum of debits. Credits (refunds) are not costs.
+ * Billed shipping cost per AWB and leg from Delhivery Wallet Ledger / Invoice Backup.
+ * Parses both Deductions (wallet debits) and Refunds (wallet credits e.g. "Not Picked"),
+ * preserves the exact line-by-line wallet ledger with Txn IDs and timestamps,
+ * computes net freight cost = debits - credits, and saves walletTransactions on Shipment.
  */
 export async function importDelhiveryCharges(
   fileName: string,
@@ -447,14 +460,14 @@ export async function importDelhiveryCharges(
     ]),
     rtoAmount: pickColumn(headers, [/rto (charge|charges|freight|amount)/]),
     type: pickColumn(headers, [/transaction type|^type$|dr cr|debit credit|^nature$/]),
-    // Only free-text description columns decide the leg. A "Status" column
-    // (e.g. RTO) describes the parcel, not which leg a row's amount is for.
     description: pickColumn(headers, [/description|narration|remarks/]),
     date: pickColumn(headers, [/date time|^date$|transaction date|date/]),
     weight: pickColumn(headers, [/charged weight|chargeable weight|billed weight/, /weight/]),
     zone: pickColumn(headers, [/zone/]),
     status: pickColumn(headers, [/shipment status|^status$|status/]),
     transaction: pickColumn(headers, [/txn id|transaction id|txn/]),
+    closureDate: pickColumn(headers, [/closure date|closure/]),
+    client: pickColumn(headers, [/client|client order/]),
   };
 
   const notes: string[] = [];
@@ -474,82 +487,116 @@ export async function importDelhiveryCharges(
     );
   }
 
-  // Cancelled AWBs where Delhivery refunded the full freight ("Not Picked")
-  const notPickedAwbs = new Set<string>();
-
-  // Latest debit per AWB and leg.
-  const latest = new Map<
-    string,
-    {
-      awb: string;
-      leg: Leg;
-      amount: number;
-      at: number;
-      order: number;
-      weight?: number;
-      zone?: string;
-      status?: string;
-    }
-  >();
+  // Collect all transactions grouped by AWB
+  const awbTransactions = new Map<string, (WalletTransactionEntry & { leg: 'forward' | 'rto' })[]>();
   let rowCount = 0;
-  let order = 0;
-  for (const { sheet, row } of rowsOf(usable)) {
-    const awb = (row[columns.awb] || '').trim();
-    if (!awb) continue;
 
-    const typeText = `${columns.type ? row[columns.type] : ''} ${sheet.name}`;
-    const isCredit = /refund|credit|reversal|\bcr\b/i.test(typeText) && !/debit|deduction/i.test(typeText);
+  const safeStr = (v: any) => String(v ?? '').trim();
 
-    if (isCredit) {
-      const rowStatusText = `${row[columns.status || ''] || ''} ${row[columns.description || ''] || ''}`;
-      if (/not picked/i.test(rowStatusText)) {
-        notPickedAwbs.add(awb);
-      }
-      continue;
-    }
+  for (const sheet of usable) {
+    const isRefundSheet = /^refunds?$/i.test(sheet.name.trim());
+    for (const row of sheet.rows) {
+      let awb = safeStr(columns.awb ? row[columns.awb] : row['AWB'] || row['awb']);
+      const rawTxnId = safeStr(columns.transaction ? row[columns.transaction] : row['Txn ID'] || row['txn id']);
+      const rawDate = safeStr(columns.date ? row[columns.date] : row['Date & Time'] || row['date']);
+      const rawAmount = columns.amount ? row[columns.amount] : row['Miles'] || row['amount'] || '';
+      let amount = parseAmount(rawAmount) ?? 0;
 
-    rowCount++;
-    const text = `${columns.description ? row[columns.description] : ''} ${typeText}`;
-    const at = (columns.date && parseDateLoose(row[columns.date])?.getTime()) || 0;
-    let weight = columns.weight ? parseAmount(row[columns.weight]) ?? undefined : undefined;
-    let zone = columns.zone ? row[columns.zone] || undefined : undefined;
-    let status = columns.status ? row[columns.status] || undefined : undefined;
+      const rawType = safeStr(
+        columns.type ? row[columns.type] : row['Type'] || (isRefundSheet ? 'credit' : 'debit')
+      ).toLowerCase();
+      const type: 'debit' | 'credit' = /credit|refund/i.test(rawType) || isRefundSheet ? 'credit' : 'debit';
+      const status = safeStr(columns.status ? row[columns.status] : row['Status'] || 'success');
+      const rawShipmentStatus = safeStr(row['Shipment status'] || row['shipment status']);
+      const rawDesc = safeStr(columns.description ? row[columns.description] : row['Description']);
+      const closureDate = safeStr(columns.closureDate ? row[columns.closureDate] : row['Closure date']);
+      let zone = safeStr(columns.zone ? row[columns.zone] : row['Zone']);
+      let weight = columns.weight ? parseAmount(row[columns.weight]) ?? undefined : undefined;
+      let orderRef = safeStr(columns.client ? row[columns.client] : row['Client']);
 
-    // JSON fallback in description column (Delhivery wallet ledger JSON payload)
-    if (columns.description && row[columns.description]) {
-      try {
-        const descTrimmed = row[columns.description].trim();
-        if (descTrimmed.startsWith('{') && descTrimmed.endsWith('}')) {
-          const parsedDesc = JSON.parse(descTrimmed);
-          if (!zone && parsedDesc.zn) zone = parsedDesc.zn;
-          if (!weight && parsedDesc.wt) weight = Number(parsedDesc.wt);
-          if (!status && parsedDesc.st) status = parsedDesc.st;
+      // Delhivery JSON payload embedded inside Description
+      let parsedJson: any = null;
+      if (rawDesc.startsWith('{') && rawDesc.endsWith('}')) {
+        try {
+          parsedJson = JSON.parse(rawDesc);
+          if (!awb && parsedJson.wbn) awb = String(parsedJson.wbn).trim();
+          if (!zone && parsedJson.zn) zone = String(parsedJson.zn).trim();
+          if (!weight && parsedJson.wt) weight = Number(parsedJson.wt);
+          if (parsedJson.client && !orderRef) orderRef = String(parsedJson.client).trim();
+          if (parsedJson.rs && !amount) amount = Number(parsedJson.rs);
+        } catch {
+          // ignore json parse error
         }
-      } catch {
-        // Non-JSON description, ignore
       }
-    }
 
-    const legs: Array<{ leg: Leg; amount: number }> = [];
-    const total = parseAmount(row[columns.amount]);
-    const rto = columns.rtoAmount ? parseAmount(row[columns.rtoAmount]) : null;
-    if (rto && rto > 0) {
-      legs.push({ leg: 'rto', amount: Math.abs(rto) });
-      if (total && Math.abs(total) > Math.abs(rto)) legs.push({ leg: 'forward', amount: Math.abs(total) - Math.abs(rto) });
-    } else if (total) {
-      // Reverse pickups have their own AWB and are recognised by matching a
-      // Return below, never from row text.
-      const leg: Leg = /\brto\b|return to origin/i.test(text) ? 'rto' : 'forward';
-      legs.push({ leg, amount: Math.abs(total) });
-    }
+      if (!awb) continue;
+      if (type === 'debit') rowCount++;
 
-    for (const { leg, amount } of legs) {
-      const key = `${awb}|${leg}`;
-      order++;
-      const prev = latest.get(key);
-      if (!prev || at > prev.at || (at === prev.at && order > prev.order)) {
-        latest.set(key, { awb, leg, amount, at, order, weight, zone, status });
+      let humanDesc = '';
+      if (type === 'credit') {
+        const creditReason = rawShipmentStatus || parsedJson?.st || 'Refund';
+        humanDesc = /not picked/i.test(creditReason)
+          ? 'Shipment Not Picked (Full Freight Refund)'
+          : `Freight Credit / Refund (${creditReason})`;
+      } else {
+        const manifestStatus = rawShipmentStatus || parsedJson?.st || 'Manifested';
+        humanDesc = `Shipment ${manifestStatus}${zone ? ` (Zone ${zone})` : ''}`;
       }
+
+      // Check RTO column or text
+      const rtoVal = columns.rtoAmount ? parseAmount(row[columns.rtoAmount]) : null;
+      if (rtoVal && rtoVal > 0 && Math.abs(amount) > Math.abs(rtoVal)) {
+        // Split row with both Forward and RTO columns
+        const forwardPart = Math.abs(amount) - Math.abs(rtoVal);
+        const rtoPart = Math.abs(rtoVal);
+
+        if (!awbTransactions.has(awb)) awbTransactions.set(awb, []);
+        awbTransactions.get(awb)!.push({
+          txnId: rawTxnId || `TXN-FWD-${Date.now()}-${Math.random().toString(36).substring(7)}`,
+          date: rawDate,
+          type,
+          amount: forwardPart,
+          description: humanDesc,
+          status: rawShipmentStatus || status,
+          leg: 'forward',
+          zone: zone || undefined,
+          weight: weight || undefined,
+          closureDate: closureDate || undefined,
+          orderRef: orderRef || undefined,
+        });
+        awbTransactions.get(awb)!.push({
+          txnId: rawTxnId ? `${rawTxnId}-RTO` : `TXN-RTO-${Date.now()}-${Math.random().toString(36).substring(7)}`,
+          date: rawDate,
+          type,
+          amount: rtoPart,
+          description: `RTO Charge${zone ? ` (Zone ${zone})` : ''}`,
+          status: rawShipmentStatus || status,
+          leg: 'rto',
+          zone: zone || undefined,
+          weight: weight || undefined,
+          closureDate: closureDate || undefined,
+          orderRef: orderRef || undefined,
+        });
+        continue;
+      }
+
+      const isRto = /\brto\b|return to origin/i.test(`${rawDesc} ${rawShipmentStatus}`);
+      const entry: WalletTransactionEntry & { leg: 'forward' | 'rto' } = {
+        txnId: rawTxnId || `TXN-${Date.now()}-${Math.random().toString(36).substring(7)}`,
+        date: rawDate,
+        type,
+        amount: Math.abs(amount),
+        description: humanDesc,
+        status: rawShipmentStatus || status,
+        leg: isRto ? 'rto' : 'forward',
+        zone: zone || undefined,
+        weight: weight || undefined,
+        closureDate: closureDate || undefined,
+        orderRef: orderRef || undefined,
+      };
+
+      if (!awbTransactions.has(awb)) awbTransactions.set(awb, []);
+      awbTransactions.get(awb)!.push(entry);
     }
   }
 
@@ -558,66 +605,171 @@ export async function importDelhiveryCharges(
   const matchedAwbs = new Set<string>();
   const unmatchedAwbs = new Set<string>();
 
-  for (const charge of latest.values()) {
-    let amount = Math.round(charge.amount * 100) / 100;
-    if (notPickedAwbs.has(charge.awb)) {
-      amount = 0;
+  for (const [awb, txns] of awbTransactions.entries()) {
+    // Deduplicate by txnId and type
+    const seenTxnKeys = new Set<string>();
+    const dedupedTxns: (WalletTransactionEntry & { leg: 'forward' | 'rto' })[] = [];
+    for (const t of txns) {
+      const key = `${t.txnId}_${t.type}`;
+      if (!seenTxnKeys.has(key)) {
+        seenTxnKeys.add(key);
+        dedupedTxns.push(t);
+      }
     }
 
-    // A reverse-pickup AWB belongs to a Return, whatever the row text says.
-    const reverse = await prisma.return.findFirst({ where: { returnWaybillNumber: charge.awb } });
+    // Sort chronologically (earliest first)
+    dedupedTxns.sort((a, b) => {
+      const timeA = parseDateLoose(a.date)?.getTime() || 0;
+      const timeB = parseDateLoose(b.date)?.getTime() || 0;
+      return timeA - timeB;
+    });
+
+    const debits = dedupedTxns.filter((t) => t.type === 'debit');
+    const credits = dedupedTxns.filter((t) => t.type === 'credit');
+    const totalDebited = Math.round(debits.reduce((s, t) => s + t.amount, 0) * 100) / 100;
+    const totalCredited = Math.round(credits.reduce((s, t) => s + t.amount, 0) * 100) / 100;
+    const netBilledCost = Math.max(0, Math.round((totalDebited - totalCredited) * 100) / 100);
+
+    const isNotPicked = credits.some(
+      (c) => /not picked/i.test(c.description) || /not picked/i.test(c.status)
+    );
+
+    // Leg-wise breakdown
+    const forwardDebits = dedupedTxns.filter((t) => t.type === 'debit' && t.leg === 'forward');
+    const forwardCredits = dedupedTxns.filter((t) => t.type === 'credit' && t.leg === 'forward');
+    const forwardNet = Math.max(
+      0,
+      Math.round(
+        (forwardDebits.reduce((s, t) => s + t.amount, 0) -
+          forwardCredits.reduce((s, t) => s + t.amount, 0)) *
+          100
+      ) / 100
+    );
+
+    const rtoDebits = dedupedTxns.filter((t) => t.type === 'debit' && t.leg === 'rto');
+    const rtoCredits = dedupedTxns.filter((t) => t.type === 'credit' && t.leg === 'rto');
+    const rtoNet = Math.max(
+      0,
+      Math.round(
+        (rtoDebits.reduce((s, t) => s + t.amount, 0) -
+          rtoCredits.reduce((s, t) => s + t.amount, 0)) *
+          100
+      ) / 100
+    );
+
+    const forwardCharge = isNotPicked || netBilledCost === 0 ? 0 : forwardNet;
+
+    // Pick best zone and weight
+    const lastWithZone = [...dedupedTxns].reverse().find((t) => t.zone);
+    const zone = lastWithZone?.zone;
+    const lastWithWeight = [...dedupedTxns].reverse().find((t) => t.weight);
+    const weight = lastWithWeight?.weight;
+    const orderRef = dedupedTxns.find((t) => t.orderRef)?.orderRef;
+
+    const billingStatus =
+      isNotPicked || netBilledCost === 0
+        ? 'REFUNDED'
+        : credits.length > 0
+          ? 'PARTIALLY_REFUNDED'
+          : 'BILLED';
+
+    // 1. Check Reverse Pickups (Return model)
+    const reverse = await prisma.return.findFirst({ where: { returnWaybillNumber: awb } });
     if (reverse) {
       await prisma.return.update({
         where: { id: reverse.id },
-        data: { shippingCharge: amount, shippingCostSource: 'ACTUAL' },
+        data: { shippingCharge: netBilledCost, shippingCostSource: 'ACTUAL' },
       });
-      matchedAwbs.add(charge.awb);
-      totalFreightBilled += amount;
+      matchedAwbs.add(awb);
+      totalFreightBilled += netBilledCost;
       matchedOrders.push({
         orderId: reverse.orderId,
-        waybillNumber: charge.awb,
-        amount,
-        status: 'Reverse Pickup Billed',
-        city: charge.zone ? `Zone ${charge.zone}` : undefined,
+        waybillNumber: awb,
+        amount: netBilledCost,
+        status: isNotPicked ? 'Reverse Pickup Cancelled (₹0.00)' : 'Reverse Pickup Billed',
+        city: zone ? `Zone ${zone}` : undefined,
       });
       continue;
     }
 
-    const shipment = await prisma.shipment.findFirst({
-      where: { waybillNumber: charge.awb },
+    // 2. Check Forward Shipment
+    let shipment = await prisma.shipment.findFirst({
+      where: { waybillNumber: awb },
       include: { order: true },
     });
+
+    // Fallback: search order by client reference if shipment not found by AWB
+    if (!shipment && orderRef) {
+      const order = await findOrderByReference(orderRef);
+      if (order?.shipment) {
+        shipment = await prisma.shipment.findUnique({
+          where: { id: order.shipment.id },
+          include: { order: true },
+        });
+        if (shipment && !shipment.waybillNumber) {
+          await prisma.shipment.update({
+            where: { id: shipment.id },
+            data: { waybillNumber: awb },
+          });
+        }
+      }
+    }
+
     if (!shipment) {
-      unmatchedAwbs.add(charge.awb);
+      unmatchedAwbs.add(awb);
       continue;
     }
+
+    const hasRtoLeg = rtoDebits.length > 0;
+    const hasForwardLeg = forwardDebits.length > 0;
 
     await prisma.shipment.update({
       where: { id: shipment.id },
       data: {
-        // Each leg records its own source: an upload that only bills the RTO
-        // leg leaves the forward estimate marked as an estimate.
-        ...(charge.leg === 'rto'
-          ? { rtoCharge: amount, rtoChargeSource: 'ACTUAL' }
-          : { forwardCharge: amount, shippingCostSource: 'ACTUAL' }),
+        walletTransactions: dedupedTxns as any,
+        totalDebited,
+        totalCredited,
+        netBilledCost,
+        ...(hasForwardLeg || isNotPicked ? { forwardCharge, shippingCostSource: 'ACTUAL' } : {}),
+        ...(hasRtoLeg ? { rtoCharge: rtoNet, rtoChargeSource: 'ACTUAL' } : {}),
         shippingCostUpdatedAt: new Date(),
-        ...(charge.weight ? { billedWeightGrams: charge.weight < 50 ? charge.weight * 1000 : charge.weight } : {}),
-        ...(charge.zone ? { chargedZone: charge.zone } : {}),
+        ...(weight ? { billedWeightGrams: weight < 50 ? weight * 1000 : weight } : {}),
+        ...(zone ? { chargedZone: zone } : {}),
+        billingStatus,
+        lastBilledAt: new Date(),
       },
     });
-    matchedAwbs.add(charge.awb);
-    totalFreightBilled += amount;
+
+    if (shipment.orderId) {
+      await prisma.order.update({
+        where: { id: shipment.orderId },
+        data: {
+          actualShippingCost: netBilledCost,
+          shippingAudited: true,
+        },
+      });
+    }
+
+    matchedAwbs.add(awb);
+    totalFreightBilled += netBilledCost;
     matchedOrders.push({
       orderId: shipment.order?.id,
       shopifyOrderName: shipment.order?.shopifyOrderName,
-      waybillNumber: charge.awb,
-      amount,
-      status: charge.leg === 'rto' ? 'RTO Leg Billed' : 'Freight Debited',
-      city: shipment.order?.customerCity || (charge.zone ? `Zone ${charge.zone}` : undefined),
+      waybillNumber: awb,
+      amount: netBilledCost,
+      status:
+        isNotPicked || netBilledCost === 0
+          ? 'Refunded (₹0.00 Net)'
+          : credits.length > 0
+            ? `Billed (₹${netBilledCost} after credit)`
+            : `Freight Debited (₹${netBilledCost})`,
+      city: shipment.order?.customerCity || (zone ? `Zone ${zone}` : undefined),
     });
   }
 
-  for (const awb of unmatchedAwbs) if (!matchedAwbs.has(awb)) unmatched.push(awb);
+  for (const awb of unmatchedAwbs) {
+    if (!matchedAwbs.has(awb)) unmatched.push(awb);
+  }
 
   const cleanFileName = fileName.replace(/\.[^/.]+$/, '');
   return saveImport(

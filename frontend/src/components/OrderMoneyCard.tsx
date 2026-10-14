@@ -126,7 +126,14 @@ export function OrderMoneyCard({ order, onChanged }: { order: Order; onChanged: 
 
       <Row label="Shipping cost">
         <div className="money-legs">
-          <div>Forward: {costLabel(shipment?.forwardCharge, shipment?.shippingCostSource)}</div>
+          <div>
+            Forward: {costLabel(shipment?.forwardCharge, shipment?.shippingCostSource)}
+            {shipment?.shippingCostSource === 'ACTUAL' && (
+              <span style={{ marginLeft: '6px', fontSize: '11px', color: '#059669', fontWeight: 700 }}>
+                (Wallet Ledger Reconciled)
+              </span>
+            )}
+          </div>
           {(shipment?.rtoCharge !== null && shipment?.rtoCharge !== undefined) || order.status.startsWith('RTO') ? (
             <div>RTO: {costLabel(shipment?.rtoCharge, shipment?.rtoChargeSource)}</div>
           ) : null}
@@ -136,6 +143,211 @@ export function OrderMoneyCard({ order, onChanged }: { order: Order; onChanged: 
           {totalShipping !== null && legs.length > 1 && <div><strong>Total: {formatMoney(totalShipping)}</strong></div>}
         </div>
       </Row>
+
+      {/* ─── Delhivery Shipping Fee Ledger (WalletReport Actual Billed Debits & Refunds) ─── */}
+      {shipment?.walletTransactions && shipment.walletTransactions.length > 0 ? (
+        <div
+          style={{
+            marginTop: '12px',
+            marginBottom: '4px',
+            padding: '12px 14px',
+            background: '#f8fafc',
+            border: '1px solid #e2e8f0',
+            borderRadius: '9px',
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: '8px',
+              marginBottom: '10px',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '12.5px', fontWeight: 750, color: '#0f172a' }}>
+                📦 Delhivery Shipping Fee Ledger
+              </span>
+              <span
+                style={{
+                  fontSize: '10px',
+                  padding: '2px 8px',
+                  borderRadius: '999px',
+                  fontWeight: 750,
+                  background:
+                    shipment.billingStatus === 'REFUNDED' || (shipment.netBilledCost ?? 0) === 0
+                      ? '#ecfdf5'
+                      : '#eff6ff',
+                  color:
+                    shipment.billingStatus === 'REFUNDED' || (shipment.netBilledCost ?? 0) === 0
+                      ? '#059669'
+                      : '#2563eb',
+                  border:
+                    shipment.billingStatus === 'REFUNDED' || (shipment.netBilledCost ?? 0) === 0
+                      ? '1px solid #a7f3d0'
+                      : '1px solid #bfdbfe',
+                }}
+              >
+                {shipment.billingStatus === 'REFUNDED' || (shipment.netBilledCost ?? 0) === 0
+                  ? 'Full Freight Refunded (Not Picked)'
+                  : 'Actual Wallet Billed'}
+              </span>
+            </div>
+
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                fontSize: '11px',
+                background: '#ffffff',
+                padding: '4px 10px',
+                borderRadius: '6px',
+                border: '1px solid #e2e8f0',
+              }}
+            >
+              <span>
+                Debited: <strong style={{ color: '#e11d48' }}>-{formatMoney(shipment.totalDebited ?? 0)}</strong>
+              </span>
+              <span>
+                Refunded: <strong style={{ color: '#16a34a' }}>+{formatMoney(shipment.totalCredited ?? 0)}</strong>
+              </span>
+              <span>
+                Net Freight:{' '}
+                <strong
+                  style={{
+                    color:
+                      (shipment.netBilledCost ?? 0) === 0 ? '#16a34a' : '#0f172a',
+                  }}
+                >
+                  {formatMoney(shipment.netBilledCost ?? 0)}
+                </strong>
+              </span>
+            </div>
+          </div>
+
+          <div
+            style={{
+              overflowX: 'auto',
+              border: '1px solid #e2e8f0',
+              borderRadius: '7px',
+              background: '#ffffff',
+            }}
+          >
+            <table
+              style={{
+                width: '100%',
+                fontSize: '11px',
+                borderCollapse: 'collapse',
+                textAlign: 'left',
+              }}
+            >
+              <thead>
+                <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#475569' }}>
+                  <th style={{ padding: '7px 10px', fontWeight: 650 }}>Date & Time</th>
+                  <th style={{ padding: '7px 10px', fontWeight: 650 }}>Txn ID</th>
+                  <th style={{ padding: '7px 10px', fontWeight: 650 }}>Type</th>
+                  <th style={{ padding: '7px 10px', fontWeight: 650 }}>Description / Status</th>
+                  <th style={{ padding: '7px 10px', fontWeight: 650 }}>Zone & Weight</th>
+                  <th style={{ padding: '7px 10px', fontWeight: 650, textAlign: 'right' }}>Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {shipment.walletTransactions.map((tx, idx) => (
+                  <tr
+                    key={tx.txnId || idx}
+                    style={{
+                      borderBottom:
+                        idx < shipment.walletTransactions!.length - 1
+                          ? '1px solid #f1f5f9'
+                          : 'none',
+                    }}
+                  >
+                    <td style={{ padding: '7px 10px', whiteSpace: 'nowrap', color: '#334155' }}>
+                      {tx.date}
+                    </td>
+                    <td style={{ padding: '7px 10px', fontFamily: 'monospace', fontSize: '11px' }}>
+                      <span
+                        onClick={() => {
+                          navigator.clipboard.writeText(tx.txnId)
+                          toast.toast('success', `Txn ID ${tx.txnId} copied!`)
+                        }}
+                        title="Click to copy Txn ID"
+                        style={{
+                          background: '#f1f5f9',
+                          padding: '2px 5px',
+                          borderRadius: '4px',
+                          border: '1px solid #e2e8f0',
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                        }}
+                      >
+                        <code>{tx.txnId}</code>
+                        <span style={{ fontSize: '9px', opacity: 0.6 }}>📋</span>
+                      </span>
+                    </td>
+                    <td style={{ padding: '7px 10px' }}>
+                      <span
+                        style={{
+                          display: 'inline-block',
+                          padding: '1.5px 7px',
+                          borderRadius: '4px',
+                          fontSize: '9.5px',
+                          fontWeight: 750,
+                          textTransform: 'uppercase',
+                          background: tx.type === 'credit' ? '#dcfce7' : '#ffe4e6',
+                          color: tx.type === 'credit' ? '#15803d' : '#be123c',
+                        }}
+                      >
+                        {tx.type}
+                      </span>
+                    </td>
+                    <td style={{ padding: '7px 10px', color: '#1e293b', fontWeight: 550 }}>
+                      {tx.description}
+                    </td>
+                    <td style={{ padding: '7px 10px', color: '#64748b' }}>
+                      {tx.zone ? `Zone ${tx.zone}` : ''}
+                      {tx.weight ? ` · ${tx.weight}g` : ''}
+                      {tx.status && !tx.description.includes(tx.status) ? ` · ${tx.status}` : ''}
+                    </td>
+                    <td
+                      style={{
+                        padding: '7px 10px',
+                        textAlign: 'right',
+                        fontWeight: 750,
+                        color: tx.type === 'credit' ? '#16a34a' : '#e11d48',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {tx.type === 'credit' ? `+${formatMoney(tx.amount)}` : `-${formatMoney(tx.amount)}`}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : shipment?.waybillNumber ? (
+        <div
+          style={{
+            marginTop: '8px',
+            padding: '7px 10px',
+            background: '#f8fafc',
+            border: '1px solid #f1f5f9',
+            borderRadius: '6px',
+            fontSize: '11px',
+            color: '#64748b',
+          }}
+        >
+          ℹ️ <strong>Delhivery Shipping Fee Ledger:</strong> Showing estimated rate (
+          {formatMoney(shipment.forwardCharge ?? 0)}). Upload your monthly Delhivery Wallet Report
+          in <em>Accounts & Remittances</em> to reconcile exact debits & refunds per AWB.
+        </div>
+      ) : null}
 
       {status.state === 'OPEN' && (
         <Row label="Waiting for">

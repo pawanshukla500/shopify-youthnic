@@ -200,6 +200,10 @@ model Shipment {
   billingStatus       String?   @default("ESTIMATED") // ESTIMATED, MANIFESTED, BILLED, AUDITED, WEIGHT_MISMATCH, REBILLED
   lastBilledAt        DateTime?
 
+  // Detailed wallet ledger transactions from Delhivery WalletReport (Debits & Refunds)
+  // Array of { txnId, date, type: 'debit' | 'credit', amount: number, description: string, status: string, zone?: string, weight?: number, closureDate?: string }
+  walletTransactions  Json?
+
   // Shipping cost per leg, GST included. ESTIMATE comes from Delhivery's
   // rate API; ACTUAL replaces it when the wallet ledger / invoice backup that
   // lists this AWB is uploaded. Null = not known yet.

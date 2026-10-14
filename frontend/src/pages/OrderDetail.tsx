@@ -761,6 +761,46 @@ export function OrderDetail() {
                     }
                   />
                 )}
+
+                <StatCard
+                  title="Shipping Fee Ledger"
+                  value={
+                    <span
+                      style={{
+                        fontSize: '16px',
+                        fontWeight: 800,
+                        color:
+                          order.shipment.shippingCostSource === 'ACTUAL'
+                            ? (order.shipment.netBilledCost ?? 0) === 0
+                              ? '#059669'
+                              : '#1e293b'
+                            : '#64748b',
+                      }}
+                    >
+                      {formatMoney(
+                        order.shipment.shippingCostSource === 'ACTUAL'
+                          ? (order.shipment.netBilledCost ?? order.shipment.forwardCharge ?? 0)
+                          : (order.shipment.forwardCharge ?? 0),
+                        order.currency
+                      )}
+                    </span>
+                  }
+                  icon="dollar"
+                  accentColor={
+                    order.shipment.shippingCostSource === 'ACTUAL'
+                      ? (order.shipment.netBilledCost ?? 0) === 0
+                        ? '#10b981'
+                        : '#2563eb'
+                      : '#94a3b8'
+                  }
+                  subtext={
+                    order.shipment.shippingCostSource === 'ACTUAL'
+                      ? order.shipment.billingStatus === 'REFUNDED' || (order.shipment.netBilledCost ?? 0) === 0
+                        ? `Refunded: +${formatMoney(order.shipment.totalCredited ?? 0)} · Full freight refund`
+                        : `Debited: ${formatMoney(order.shipment.totalDebited ?? 0)} · Wallet reconciled`
+                      : 'Estimated rate card cost · Wallet report pending'
+                  }
+                />
               </div>
 
               {/* Shipping Logistics Actions (Document downloads available in More Actions menu) */}

@@ -106,7 +106,7 @@ export interface Shipment {
   weightMismatch?: boolean
   mismatchDetails?: string | null
   billingStatus?: string | null
-  lastBilledAt?: string | null
+  walletTransactions?: WalletTransactionEntry[] | null
   /** Shipping cost per leg incl. GST; ESTIMATE until the Delhivery ledger is uploaded (ACTUAL). */
   forwardCharge?: number | null
   rtoCharge?: number | null
@@ -118,9 +118,19 @@ export interface Shipment {
   trackingLogs?: TrackingLog[]
 }
 
-// NOTE: Delhivery wallet/ledger types removed 2026-09-28 — no wallet API
-// exists (manual CSV removed as not useful). AwbChargesAudit kept as a stub
-// so ShippingEstimate.actualAudit typing stays valid (always null now).
+export interface WalletTransactionEntry {
+  txnId: string
+  date: string
+  type: 'debit' | 'credit'
+  amount: number
+  description: string
+  status: string
+  zone?: string
+  weight?: number
+  closureDate?: string
+  orderRef?: string
+}
+
 export interface AwbChargesAudit {
   waybill: string
   hasLedgerRecords: boolean

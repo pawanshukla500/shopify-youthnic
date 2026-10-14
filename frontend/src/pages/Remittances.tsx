@@ -1,4 +1,4 @@
-import { useState, useMemo, Fragment } from 'react'
+import { useState, useMemo, useRef, Fragment } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   apiError,
@@ -73,6 +73,183 @@ interface UploadConfig {
   where: string
   badgeText?: string
   withRemittanceFields?: boolean
+}
+
+// ─── Prominent Drag & Drop File Zone ─────────────────────────────────────────
+
+function DropZoneUpload({
+  file,
+  onFileSelect,
+  accept = '.xlsx,.csv,.tsv,.txt,.zip',
+  hint = 'Supports direct .ZIP (e.g. R3359352026101200000.zip), .XLSX, or .CSV',
+  title = 'Click here to choose file or drag & drop it here',
+}: {
+  file: File | null
+  onFileSelect: (file: File | null) => void
+  accept?: string
+  hint?: string
+  title?: string
+}) {
+  const [isDragging, setIsDragging] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragging(true)
+  }
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragging(false)
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragging(false)
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      onFileSelect(e.dataTransfer.files[0])
+    }
+  }
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
+  }
+
+  return (
+    <div style={{ width: '100%' }}>
+      <input
+        ref={inputRef}
+        type="file"
+        accept={accept}
+        style={{ display: 'none' }}
+        onChange={(e) => onFileSelect(e.target.files?.[0] || null)}
+      />
+
+      {!file ? (
+        <div
+          onClick={() => inputRef.current?.click()}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          style={{
+            border: isDragging ? '2px dashed #2563eb' : '2px dashed #3b82f6',
+            background: isDragging ? '#eff6ff' : 'var(--bg-subtle, #f0f7ff)',
+            borderRadius: '10px',
+            padding: '24px 16px',
+            textAlign: 'center',
+            cursor: 'pointer',
+            transition: 'all 0.2s ease',
+          }}
+        >
+          <div
+            style={{
+              width: '48px',
+              height: '48px',
+              borderRadius: '50%',
+              background: isDragging ? '#dbeafe' : '#dbeafe',
+              color: '#2563eb',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              margin: '0 auto 10px',
+            }}
+          >
+            <Icon name="download" size={24} />
+          </div>
+
+          <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--ink, #0f172a)', marginBottom: '4px' }}>
+            {title}
+          </div>
+          <div style={{ fontSize: '12px', color: 'var(--muted, #64748b)', marginBottom: '12px' }}>
+            {hint}
+          </div>
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: '#2563eb',
+              color: '#ffffff',
+              fontSize: '12px',
+              fontWeight: 700,
+              padding: '7px 18px',
+              borderRadius: '6px',
+              boxShadow: '0 2px 4px rgba(37,99,235,0.2)',
+            }}
+          >
+            <Icon name="download" size={13} />
+            Browse File to Upload
+          </span>
+        </div>
+      ) : (
+        <div
+          style={{
+            border: '2px solid #16a34a',
+            background: '#f0fdf4',
+            borderRadius: '10px',
+            padding: '16px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '12px',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div
+              style={{
+                width: '42px',
+                height: '42px',
+                borderRadius: '8px',
+                background: '#dcfce7',
+                color: '#16a34a',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <Icon name="check" size={24} />
+            </div>
+            <div>
+              <div style={{ fontSize: '14px', fontWeight: 700, color: '#166534', wordBreak: 'break-all' }}>
+                {file.name}
+              </div>
+              <div style={{ fontSize: '12px', color: '#15803d', marginTop: '2px' }}>
+                Size: {formatFileSize(file.size)} · Ready to upload &amp; reconcile
+              </div>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              onFileSelect(null)
+              if (inputRef.current) inputRef.current.value = ''
+            }}
+            style={{
+              background: '#ffffff',
+              border: '1px solid #bbf7d0',
+              color: '#dc2626',
+              fontSize: '12px',
+              fontWeight: 600,
+              padding: '6px 14px',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            Change File
+          </button>
+        </div>
+      )}
+    </div>
+  )
 }
 
 // ─── Single-Click Zero-Fuss Upload Card ──────────────────────────────────────
@@ -197,21 +374,16 @@ function UniversalUploadCard({
         </span>
       </div>
 
-      {/* File Drop / Select Area */}
-      <div>
-        <input
-          type="file"
-          accept=".xlsx,.csv,.tsv,.txt,.zip"
-          onChange={(event) => {
-            setFile(event.target.files?.[0] || null)
-            setResult(null)
-            setDuplicateError(null)
-          }}
-        />
-        <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#2563eb' }}>
-          ⚡ <strong>Direct ZIP, Excel (.xlsx), or CSV supported.</strong> No manual typing needed; order IDs, UTR, and amounts are auto-extracted.
-        </p>
-      </div>
+      {/* Prominent Drag & Drop File Zone */}
+      <DropZoneUpload
+        file={file}
+        onFileSelect={(selected) => {
+          setFile(selected)
+          setResult(null)
+          setDuplicateError(null)
+        }}
+        hint="Direct .zip (e.g. R3359352026101200000.zip), .xlsx, or .csv supported."
+      />
 
       {/* Duplicate Error Banner (When Operator attempts duplicate upload) */}
       {duplicateError && (
@@ -307,14 +479,27 @@ function UniversalUploadCard({
         </div>
       )}
 
+      {/* Prominent Action Button */}
       <Button
         className="button-primary"
         loading={mutation.isPending}
         disabled={!file || mutation.isPending}
         onClick={() => mutation.mutate()}
+        style={{
+          width: '100%',
+          padding: '12px',
+          fontSize: '14px',
+          fontWeight: 700,
+          background: file ? '#16a34a' : undefined,
+          borderColor: file ? '#15803d' : undefined,
+          color: '#ffffff',
+          boxShadow: file ? '0 4px 6px -1px rgba(22, 163, 74, 0.25)' : undefined,
+        }}
       >
-        <Icon name="download" size={14} />
-        Upload &amp; Reconcile {config.providerName}
+        <Icon name={file ? 'check' : 'download'} size={15} />
+        {file
+          ? `Upload & Reconcile ${file.name}`
+          : `Select or Drop File Above to Reconcile`}
       </Button>
 
       {/* Upload Outcome Snapshot */}
@@ -909,15 +1094,18 @@ function RemittancesContent() {
             </div>
           </div>
 
-          {/* Provider Navigation Tabs */}
+          {/* Provider Navigation Tabs with High Contrast Design */}
           <div
             style={{
               display: 'flex',
-              gap: '6px',
-              borderBottom: '2px solid var(--line)',
-              paddingBottom: '2px',
+              gap: '8px',
+              padding: '6px',
+              background: 'var(--bg-subtle, #f1f5f9)',
+              borderRadius: '12px',
+              border: '1px solid var(--line, #e2e8f0)',
               marginBottom: '20px',
               overflowX: 'auto',
+              flexWrap: 'wrap',
             }}
           >
             {CARRIER_TABS.map((tab) => {
@@ -931,28 +1119,31 @@ function RemittancesContent() {
                     display: 'inline-flex',
                     alignItems: 'center',
                     gap: '8px',
-                    padding: '10px 16px',
-                    borderRadius: '8px 8px 0 0',
-                    border: 'none',
-                    background: isActive ? 'var(--primary)' : 'transparent',
-                    color: isActive ? '#ffffff' : 'var(--ink)',
+                    padding: '9px 18px',
+                    borderRadius: '8px',
+                    border: isActive ? '1px solid #1d4ed8' : '1px solid #cbd5e1',
+                    background: isActive ? '#2563eb' : '#ffffff',
+                    color: isActive ? '#ffffff' : '#334155',
                     fontSize: '13px',
-                    fontWeight: isActive ? 700 : 500,
+                    fontWeight: isActive ? 700 : 600,
                     cursor: 'pointer',
+                    boxShadow: isActive
+                      ? '0 2px 4px rgba(37, 99, 235, 0.25)'
+                      : '0 1px 2px rgba(0, 0, 0, 0.05)',
                     transition: 'all 0.15s ease',
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  <Icon name={tab.icon} size={15} />
+                  <Icon name={tab.icon} size={16} />
                   <span>{tab.label}</span>
                   <span
                     style={{
-                      background: isActive ? 'rgba(255,255,255,0.25)' : 'var(--bg-subtle, #f1f5f9)',
-                      color: isActive ? '#ffffff' : 'var(--muted)',
-                      padding: '1px 6px',
+                      background: isActive ? 'rgba(255,255,255,0.25)' : '#e2e8f0',
+                      color: isActive ? '#ffffff' : '#475569',
+                      padding: '2px 7px',
                       borderRadius: '10px',
                       fontSize: '11px',
-                      fontWeight: 600,
+                      fontWeight: 700,
                     }}
                   >
                     {tab.count}
@@ -965,7 +1156,7 @@ function RemittancesContent() {
           {/* 1. DELHIVERY TAB */}
           {activeTab === 'DELHIVERY' && (
             <div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '14px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px' }}>
                 <UniversalUploadCard
                   config={{
                     kind: 'DELHIVERY_REMITTANCE',

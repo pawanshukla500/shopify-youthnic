@@ -86,22 +86,31 @@ export async function findOrderByReference(reference: string) {
   const raw = (reference || '').trim();
   if (!raw) return null;
   const bare = raw.replace(/^#/, '');
-  const matches = await prisma.order.findMany({
+  const baseOrderName = bare.replace(/[-.]\d+$/, '');
+  const matches = (await prisma.order.findMany({
     where: {
       OR: [
         { shopifyOrderName: `#${bare}` },
         { shopifyOrderName: bare },
+        ...(baseOrderName !== bare
+          ? [
+              { shopifyOrderName: `#${baseOrderName}` },
+              { shopifyOrderName: baseOrderName },
+            ]
+          : []),
         { shopifyOrderId: bare },
         { gokwikPaymentId: bare },
         { paymentProviderPaymentId: bare },
         { gatewayTransactionId: bare },
         { paymentAuthorizationKey: bare },
         { paymentReference: bare },
+        { shipment: { waybillNumber: bare } },
+        { shipment: { waybillNumber: raw } },
       ],
     },
     include: { shipment: true },
     take: 2,
-  });
+  })) || [];
   if (matches.length > 1) {
     logger.warn('Reference matches more than one order, not attaching it', { reference: raw });
     return null;
@@ -258,7 +267,7 @@ export async function importDelhiveryRemittance(
     }
     seenInBatch.add(trackingKey);
 
-    const shipment = await prisma.shipment.findFirst({
+    let shipment: any = await prisma.shipment.findFirst({
       where: {
         OR: [
           ...(awb ? [{ waybillNumber: awb }] : []),
@@ -266,13 +275,44 @@ export async function importDelhiveryRemittance(
             ? [
                 { order: { shopifyOrderName: `#${orderRef.replace(/^#/, '')}` } },
                 { order: { shopifyOrderName: orderRef.replace(/^#/, '') } },
+                { order: { shopifyOrderName: `#${orderRef.replace(/^#/, '').replace(/[-.]\d+$/, '')}` } },
+                { order: { shopifyOrderName: orderRef.replace(/^#/, '').replace(/[-.]\d+$/, '') } },
               ]
             : []),
         ],
       },
       include: { order: true },
     });
+
+    let order: any = shipment?.order;
+
     if (!shipment) {
+      // Fallback: search order directly via findOrderByReference
+      order = await findOrderByReference(orderRef || awb);
+      if (order) {
+        if (order.shipment) {
+          shipment = order.shipment as any;
+        } else {
+          try {
+            shipment = (await prisma.shipment.create({
+              data: {
+                orderId: order.id,
+                waybillNumber: awb || `MANUAL-${order.shopifyOrderName}`,
+                courier: 'Delhivery',
+                paymentMode: 'COD',
+                status: 'DELIVERED',
+                codAmount: order.totalAmount,
+              },
+            })) as any;
+          } catch {
+            // If another process created the shipment concurrently
+            shipment = await prisma.shipment.findFirst({ where: { orderId: order.id } });
+          }
+        }
+      }
+    }
+
+    if (!shipment && !order) {
       unmatched.push(awb || orderRef);
       continue;
     }
@@ -280,7 +320,7 @@ export async function importDelhiveryRemittance(
     // STRICT IDEMPOTENCY / DUPLICATE GUARD:
     // If this shipment's COD remittance was already recorded and remitted,
     // do NOT re-credit or double-count the same tracking ID.
-    if (shipment.codRemitted && shipment.codRemittedAmount && shipment.codRemittedAmount > 0) {
+    if (shipment?.codRemitted && shipment.codRemittedAmount && shipment.codRemittedAmount > 0) {
       skippedDuplicates.push(awb || orderRef);
       continue;
     }
@@ -289,40 +329,43 @@ export async function importDelhiveryRemittance(
     const ref = (columns.remittance && row[columns.remittance]) || defaultRef || null;
     const remittedAt = (columns.date && parseDateLoose(row[columns.date])) || fallbackDate;
     const fileAmount = columns.amount ? parseAmount(row[columns.amount]) : null;
-    const amount: number = fileAmount || shipment.codAmount || shipment.order?.totalAmount || 0;
+    const amount: number = fileAmount || shipment?.codAmount || order?.totalAmount || 0;
     if (!utr) missingUtr++;
     totalAmountRemitted += amount;
 
+    const currentOrder = order || shipment?.order;
     matchedOrders.push({
-      orderId: shipment.order?.id,
-      shopifyOrderName: shipment.order?.shopifyOrderName,
-      waybillNumber: shipment.waybillNumber || awb,
+      orderId: currentOrder?.id,
+      shopifyOrderName: currentOrder?.shopifyOrderName,
+      waybillNumber: shipment?.waybillNumber || awb,
       amount,
       utr,
       status: 'DELIVERED',
       city: row['City'] || row['city'],
     });
 
-    await prisma.shipment.update({
-      where: { id: shipment.id },
-      data: {
-        codCollected: true,
-        codCollectedAt: shipment.codCollectedAt || remittedAt,
-        codRemitted: true,
-        codRemittedAt: remittedAt,
-        codRemittanceRef: ref || utr || 'DELHIVERY-REMITTANCE',
-        codRemittedAmount: amount,
-        ...(shipment.status !== 'DELIVERED' ? { status: 'DELIVERED' } : {}),
-      },
-    });
-    if (shipment.order) {
-      await recordPaymentReceived(shipment.order.id, {
+    if (shipment) {
+      await prisma.shipment.update({
+        where: { id: shipment.id },
+        data: {
+          codCollected: true,
+          codCollectedAt: shipment.codCollectedAt || remittedAt,
+          codRemitted: true,
+          codRemittedAt: remittedAt,
+          codRemittanceRef: ref || utr || 'DELHIVERY-REMITTANCE',
+          codRemittedAmount: amount,
+          ...(shipment.status !== 'DELIVERED' ? { status: 'DELIVERED' } : {}),
+        },
+      });
+    }
+    if (currentOrder) {
+      await recordPaymentReceived(currentOrder.id, {
         receivedAt: remittedAt,
         amount,
         utr,
         ref,
         source: 'DELHIVERY_REMITTANCE',
-        deliveredAt: shipment.order.deliveredAt || remittedAt,
+        deliveredAt: currentOrder.deliveredAt || remittedAt,
       });
     }
     matchedCount++;
@@ -598,7 +641,8 @@ export async function importDelhiveryCharges(
 
 // ─── Gateway settlement (PhonePe / Easebuzz / GoKwik) ──────
 
-const SETTLED_STATES = /^(success|successful|settled|processed|completed|paid|credited)$/i;
+const SETTLED_STATES = /(success|settled|processed|completed|paid|credited|captured)/i;
+const UNSETTLED_STATES = /(pending|failed|cancelled|canceled|rejected|declined|reversed|dropped)/i;
 
 export async function importGatewaySettlement(
   fileName: string,
@@ -668,9 +712,12 @@ export async function importGatewaySettlement(
     const txn = columns.transaction ? row[columns.transaction] : '';
     if (!orderRef && !txn) continue;
     rowCount++;
-    if (columns.status && row[columns.status] && !SETTLED_STATES.test(row[columns.status].trim())) {
-      skippedState++;
-      continue;
+    if (columns.status && row[columns.status]) {
+      const statusText = row[columns.status].trim();
+      if (UNSETTLED_STATES.test(statusText) || !SETTLED_STATES.test(statusText)) {
+        skippedState++;
+        continue;
+      }
     }
 
     const order = (orderRef && (await findOrderByReference(orderRef))) || (txn && (await findOrderByReference(txn))) || null;
@@ -678,7 +725,11 @@ export async function importGatewaySettlement(
       unmatched.push(orderRef || txn);
       continue;
     }
-    if (order.paymentMethod === 'COD') {
+    const isC2P =
+      Boolean((order as any).gokwikPaymentId) ||
+      /c2p|prepaid|converted/i.test((order as any).tags || '') ||
+      kind === 'GOKWIK_SETTLEMENT';
+    if (order.paymentMethod === 'COD' && !isC2P) {
       codRows++;
       continue;
     }

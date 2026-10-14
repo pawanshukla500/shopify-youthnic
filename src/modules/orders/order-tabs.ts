@@ -40,6 +40,7 @@ export interface OrderTabShipment {
   trackingUpdatedAt?: Date | string | null;
   courier?: string | null;
   errorMessage?: string | null;
+  codRemitted?: boolean | null;
 }
 
 export interface OrderTabSnapshot {
@@ -54,6 +55,7 @@ export interface OrderTabSnapshot {
   deliveredAt?: Date | string | null;
   paymentReceivedAt?: Date | string | null;
   paymentReceivedUtr?: string | null;
+  paymentVerified?: boolean | null;
   accountsClosedAt?: Date | string | null;
 }
 
@@ -440,7 +442,15 @@ export function classifyOrderTab(order: OrderTabSnapshot): OperationalTab {
   }
 
   if (stage === 'delivered' || order.status === 'DELIVERED') {
-    // Delivered, paid into the bank and past the return window: done.
+    // Delivered and bank payment received (via UTR, Delhivery remittance, or verified settlement):
+    // Move immediately to "Payment Received" (closed) tab.
+    const paymentRecorded = Boolean(toDate(order.paymentReceivedAt));
+    const paymentReceived =
+      paymentRecorded &&
+      Boolean((order.paymentReceivedUtr || '').trim() || order.paymentVerified || order.shipment?.codRemitted);
+    if (paymentReceived && !hasOpenReturn(order)) {
+      return 'closed';
+    }
     return accountsStatus(order).state === 'CLOSED' ? 'closed' : 'delivered';
   }
 

@@ -10,7 +10,7 @@ vi.mock('../src/utils/logger', () => ({
 const { prismaStub } = vi.hoisted(() => ({
   prismaStub: {
     order: { findMany: vi.fn(), update: vi.fn() },
-    shipment: { findFirst: vi.fn(), update: vi.fn() },
+    shipment: { findFirst: vi.fn(), update: vi.fn(), create: vi.fn() },
     return: { findFirst: vi.fn(), update: vi.fn() },
     reconciliationImport: { create: vi.fn() },
   },
@@ -31,6 +31,7 @@ function sheet(name: string, grid: string[][]) {
 
 beforeEach(() => {
   for (const group of Object.values(prismaStub)) for (const fn of Object.values(group)) (fn as any).mockReset();
+  prismaStub.order.findMany.mockResolvedValue([]);
   prismaStub.order.update.mockResolvedValue({});
   prismaStub.shipment.update.mockResolvedValue({});
   prismaStub.return.update.mockResolvedValue({});

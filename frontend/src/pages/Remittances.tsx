@@ -81,8 +81,8 @@ function DropZoneUpload({
   file,
   onFileSelect,
   accept = '.xlsx,.csv,.tsv,.txt,.zip',
-  hint = 'Supports direct .ZIP (e.g. R3359352026101200000.zip), .XLSX, or .CSV',
-  title = 'Click here to choose file or drag & drop it here',
+  hint = 'Direct .ZIP, .XLSX, or .CSV',
+  title = 'Click to choose file or drag & drop here',
 }: {
   file: File | null
   onFileSelect: (file: File | null) => void
@@ -137,74 +137,84 @@ function DropZoneUpload({
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
           style={{
-            border: isDragging ? '2px dashed #2563eb' : '2px dashed #3b82f6',
+            border: isDragging ? '2px dashed #2563eb' : '1px dashed #3b82f6',
             background: isDragging ? '#eff6ff' : 'var(--bg-subtle, #f0f7ff)',
-            borderRadius: '10px',
-            padding: '24px 16px',
-            textAlign: 'center',
+            borderRadius: '8px',
+            padding: '8px 12px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '10px',
             cursor: 'pointer',
-            transition: 'all 0.2s ease',
+            transition: 'all 0.15s ease',
           }}
         >
-          <div
-            style={{
-              width: '48px',
-              height: '48px',
-              borderRadius: '50%',
-              background: isDragging ? '#dbeafe' : '#dbeafe',
-              color: '#2563eb',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              margin: '0 auto 10px',
-            }}
-          >
-            <Icon name="download" size={24} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+            <div
+              style={{
+                width: '32px',
+                height: '32px',
+                borderRadius: '6px',
+                background: '#dbeafe',
+                color: '#2563eb',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <Icon name="download" size={16} />
+            </div>
+
+            <div style={{ minWidth: 0, overflow: 'hidden' }}>
+              <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--ink, #0f172a)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {title}
+              </div>
+              <div style={{ fontSize: '11px', color: 'var(--muted, #64748b)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {hint}
+              </div>
+            </div>
           </div>
 
-          <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--ink, #0f172a)', marginBottom: '4px' }}>
-            {title}
-          </div>
-          <div style={{ fontSize: '12px', color: 'var(--muted, #64748b)', marginBottom: '12px' }}>
-            {hint}
-          </div>
           <span
             style={{
               display: 'inline-flex',
               alignItems: 'center',
-              gap: '6px',
+              gap: '4px',
               background: '#2563eb',
               color: '#ffffff',
-              fontSize: '12px',
+              fontSize: '11px',
               fontWeight: 700,
-              padding: '7px 18px',
-              borderRadius: '6px',
-              boxShadow: '0 2px 4px rgba(37,99,235,0.2)',
+              padding: '5px 12px',
+              borderRadius: '5px',
+              whiteSpace: 'nowrap',
+              flexShrink: 0,
+              boxShadow: '0 1px 2px rgba(37,99,235,0.2)',
             }}
           >
-            <Icon name="download" size={13} />
-            Browse File to Upload
+            <Icon name="download" size={12} />
+            Browse
           </span>
         </div>
       ) : (
         <div
           style={{
-            border: '2px solid #16a34a',
+            border: '1px solid #16a34a',
             background: '#f0fdf4',
-            borderRadius: '10px',
-            padding: '16px',
+            borderRadius: '8px',
+            padding: '8px 12px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            gap: '12px',
+            gap: '10px',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
             <div
               style={{
-                width: '42px',
-                height: '42px',
-                borderRadius: '8px',
+                width: '32px',
+                height: '32px',
+                borderRadius: '6px',
                 background: '#dcfce7',
                 color: '#16a34a',
                 display: 'flex',
@@ -213,14 +223,14 @@ function DropZoneUpload({
                 flexShrink: 0,
               }}
             >
-              <Icon name="check" size={24} />
+              <Icon name="check" size={16} />
             </div>
-            <div>
-              <div style={{ fontSize: '14px', fontWeight: 700, color: '#166534', wordBreak: 'break-all' }}>
+            <div style={{ minWidth: 0, overflow: 'hidden' }}>
+              <div style={{ fontSize: '12px', fontWeight: 700, color: '#166534', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {file.name}
               </div>
-              <div style={{ fontSize: '12px', color: '#15803d', marginTop: '2px' }}>
-                Size: {formatFileSize(file.size)} · Ready to upload &amp; reconcile
+              <div style={{ fontSize: '11px', color: '#15803d' }}>
+                {formatFileSize(file.size)} · Ready to upload
               </div>
             </div>
           </div>
@@ -236,15 +246,16 @@ function DropZoneUpload({
               background: '#ffffff',
               border: '1px solid #bbf7d0',
               color: '#dc2626',
-              fontSize: '12px',
+              fontSize: '11px',
               fontWeight: 600,
-              padding: '6px 14px',
-              borderRadius: '6px',
+              padding: '4px 10px',
+              borderRadius: '5px',
               cursor: 'pointer',
               whiteSpace: 'nowrap',
+              flexShrink: 0,
             }}
           >
-            Change File
+            Change
           </button>
         </div>
       )}
@@ -309,27 +320,27 @@ function UniversalUploadCard({
   })
 
   return (
-    <Panel style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+    <Panel style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '12px 14px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700 }}>{config.title}</h3>
+            <h3 style={{ margin: 0, fontSize: '13px', fontWeight: 700 }}>{config.title}</h3>
             {config.badgeText && (
               <span
                 style={{
                   background: '#dbeafe',
                   color: '#1d4ed8',
-                  fontSize: '10px',
+                  fontSize: '9px',
                   fontWeight: 700,
-                  padding: '2px 6px',
-                  borderRadius: '4px',
+                  padding: '1px 5px',
+                  borderRadius: '3px',
                 }}
               >
                 {config.badgeText}
               </span>
             )}
           </div>
-          <p style={{ margin: '4px 0 0', fontSize: '12px', color: 'var(--muted)' }}>{config.what}</p>
+          <p style={{ margin: '2px 0 0', fontSize: '11px', color: 'var(--muted)' }}>{config.what}</p>
         </div>
         <button
           type="button"
@@ -338,9 +349,9 @@ function UniversalUploadCard({
           style={{
             display: 'inline-flex',
             alignItems: 'center',
-            gap: '4px',
-            fontSize: '11px',
-            padding: '4px 8px',
+            gap: '3px',
+            fontSize: '10px',
+            padding: '2px 6px',
             borderRadius: '4px',
             border: '1px solid var(--line)',
             background: 'var(--bg-subtle, #f8fafc)',
@@ -349,28 +360,31 @@ function UniversalUploadCard({
             whiteSpace: 'nowrap',
           }}
         >
-          <Icon name="download" size={12} />
+          <Icon name="download" size={11} />
           Template
         </button>
       </div>
 
       <div
         style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: '8px',
           background: 'var(--bg-subtle, #f8fafc)',
           border: '1px solid var(--line)',
-          borderRadius: '6px',
-          padding: '8px 10px',
-          fontSize: '11px',
+          borderRadius: '5px',
+          padding: '4px 8px',
+          fontSize: '10px',
           color: 'var(--muted)',
         }}
       >
-        <strong>Source:</strong> {config.where}
-      </div>
-
-      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: '#047857' }}>
-        <Icon name="shield" size={13} />
-        <span>
-          <strong>Duplicate Guard Active:</strong> Already-uploaded files and duplicate tracking IDs are blocked.
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <strong>Where:</strong> {config.where}
+        </span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', color: '#047857', flexShrink: 0 }}>
+          <Icon name="shield" size={11} />
+          <span>Dedup Active</span>
         </span>
       </div>
 
@@ -382,7 +396,7 @@ function UniversalUploadCard({
           setResult(null)
           setDuplicateError(null)
         }}
-        hint="Direct .zip (e.g. R3359352026101200000.zip), .xlsx, or .csv supported."
+        hint="Direct .zip, .xlsx, or .csv supported."
       />
 
       {/* Duplicate Error Banner (When Operator attempts duplicate upload) */}
@@ -479,7 +493,7 @@ function UniversalUploadCard({
         </div>
       )}
 
-      {/* Prominent Action Button */}
+      {/* Action Button */}
       <Button
         className="button-primary"
         loading={mutation.isPending}
@@ -487,19 +501,19 @@ function UniversalUploadCard({
         onClick={() => mutation.mutate()}
         style={{
           width: '100%',
-          padding: '12px',
-          fontSize: '14px',
+          padding: '8px 12px',
+          fontSize: '12px',
           fontWeight: 700,
           background: file ? '#16a34a' : undefined,
           borderColor: file ? '#15803d' : undefined,
           color: '#ffffff',
-          boxShadow: file ? '0 4px 6px -1px rgba(22, 163, 74, 0.25)' : undefined,
+          boxShadow: file ? '0 2px 4px rgba(22, 163, 74, 0.25)' : undefined,
         }}
       >
-        <Icon name={file ? 'check' : 'download'} size={15} />
+        <Icon name={file ? 'check' : 'download'} size={13} />
         {file
           ? `Upload & Reconcile ${file.name}`
-          : `Select or Drop File Above to Reconcile`}
+          : `Select File Above to Reconcile`}
       </Button>
 
       {/* Upload Outcome Snapshot */}
@@ -918,7 +932,7 @@ function RemittancesContent() {
   const [activeTab, setActiveTab] = useState<CarrierTab>('DELHIVERY')
   const [otherCarrierType, setOtherCarrierType] = useState<AccountsImportKind>('AMAZON_SHIPPING')
 
-  const [delhiverySubTab, setDelhiverySubTab] = useState<'REMITTANCE' | 'CHARGES'>('REMITTANCE')
+  const [delhiverySubTab, setDelhiverySubTab] = useState<'BOTH' | 'REMITTANCE' | 'CHARGES'>('BOTH')
 
   const [filterMode, setFilterMode] = useState<'month' | 'range'>('month')
   const [month, setMonth] = useState(defaultMonth)
@@ -1182,15 +1196,48 @@ function RemittancesContent() {
               <div
                 style={{
                   display: 'flex',
-                  gap: '8px',
-                  marginBottom: '16px',
+                  gap: '6px',
+                  marginBottom: '14px',
                   background: 'var(--bg-subtle, #f1f5f9)',
-                  padding: '4px',
-                  borderRadius: '10px',
+                  padding: '3px',
+                  borderRadius: '8px',
                   width: 'fit-content',
                   flexWrap: 'wrap',
                 }}
               >
+                <button
+                  type="button"
+                  onClick={() => setDelhiverySubTab('BOTH')}
+                  style={{
+                    border: 'none',
+                    background: delhiverySubTab === 'BOTH' ? '#2563eb' : 'transparent',
+                    color: delhiverySubTab === 'BOTH' ? '#ffffff' : 'var(--ink)',
+                    fontSize: '12px',
+                    fontWeight: delhiverySubTab === 'BOTH' ? 700 : 600,
+                    padding: '6px 14px',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  <span>📊 All Delhivery History (Both)</span>
+                  <span
+                    style={{
+                      background: delhiverySubTab === 'BOTH' ? 'rgba(255,255,255,0.25)' : '#cbd5e1',
+                      color: delhiverySubTab === 'BOTH' ? '#ffffff' : '#334155',
+                      fontSize: '10px',
+                      fontWeight: 700,
+                      padding: '1px 6px',
+                      borderRadius: '999px',
+                    }}
+                  >
+                    {delhiveryRemittanceImports.length + delhiveryChargesImports.length}
+                  </span>
+                </button>
+
                 <button
                   type="button"
                   onClick={() => setDelhiverySubTab('REMITTANCE')}
@@ -1198,25 +1245,25 @@ function RemittancesContent() {
                     border: 'none',
                     background: delhiverySubTab === 'REMITTANCE' ? '#2563eb' : 'transparent',
                     color: delhiverySubTab === 'REMITTANCE' ? '#ffffff' : 'var(--ink)',
-                    fontSize: '13px',
+                    fontSize: '12px',
                     fontWeight: delhiverySubTab === 'REMITTANCE' ? 700 : 600,
-                    padding: '8px 18px',
-                    borderRadius: '8px',
+                    padding: '6px 14px',
+                    borderRadius: '6px',
                     cursor: 'pointer',
                     display: 'inline-flex',
                     alignItems: 'center',
-                    gap: '8px',
+                    gap: '6px',
                     transition: 'all 0.15s ease',
                   }}
                 >
-                  <span>💰 COD Remittances (Payments Received)</span>
+                  <span>💰 COD Remittances</span>
                   <span
                     style={{
                       background: delhiverySubTab === 'REMITTANCE' ? 'rgba(255,255,255,0.25)' : '#cbd5e1',
                       color: delhiverySubTab === 'REMITTANCE' ? '#ffffff' : '#334155',
-                      fontSize: '11px',
+                      fontSize: '10px',
                       fontWeight: 700,
-                      padding: '1px 7px',
+                      padding: '1px 6px',
                       borderRadius: '999px',
                     }}
                   >
@@ -1231,25 +1278,25 @@ function RemittancesContent() {
                     border: 'none',
                     background: delhiverySubTab === 'CHARGES' ? '#2563eb' : 'transparent',
                     color: delhiverySubTab === 'CHARGES' ? '#ffffff' : 'var(--ink)',
-                    fontSize: '13px',
+                    fontSize: '12px',
                     fontWeight: delhiverySubTab === 'CHARGES' ? 700 : 600,
-                    padding: '8px 18px',
-                    borderRadius: '8px',
+                    padding: '6px 14px',
+                    borderRadius: '6px',
                     cursor: 'pointer',
                     display: 'inline-flex',
                     alignItems: 'center',
-                    gap: '8px',
+                    gap: '6px',
                     transition: 'all 0.15s ease',
                   }}
                 >
-                  <span>📦 Shipping Charges &amp; Wallet Ledger (Freight Costs)</span>
+                  <span>📦 Wallet Charges Ledger</span>
                   <span
                     style={{
                       background: delhiverySubTab === 'CHARGES' ? 'rgba(255,255,255,0.25)' : '#cbd5e1',
                       color: delhiverySubTab === 'CHARGES' ? '#ffffff' : '#334155',
-                      fontSize: '11px',
+                      fontSize: '10px',
                       fontWeight: 700,
-                      padding: '1px 7px',
+                      padding: '1px 6px',
                       borderRadius: '999px',
                     }}
                   >
@@ -1258,27 +1305,102 @@ function RemittancesContent() {
                 </button>
               </div>
 
-              {delhiverySubTab === 'REMITTANCE' && (
-                <div>
-                  <div style={{ maxWidth: '640px', marginBottom: '14px' }}>
-                    <UniversalUploadCard
-                      config={{
-                        kind: 'DELHIVERY_REMITTANCE',
-                        title: 'Delhivery COD Remittance (ZIP or CSV/XLSX)',
-                        providerName: 'Delhivery Remittance',
-                        templateKey: 'delhivery-remittance',
-                        badgeText: 'Auto-Extracts ZIP',
-                        what: 'Matches delivered COD orders by Waybill / Order No and writes Bank Transaction ID (UTR), marking orders as Payment Received.',
-                        where: 'Delhivery ONE → Finances → Remittance → click remittance number → Download AWB list (.zip, .xlsx or .csv).',
-                        withRemittanceFields: true,
-                      }}
-                      onDone={refresh}
-                    />
-                  </div>
+              {/* Compact Upload Cards Grid */}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns:
+                    delhiverySubTab === 'BOTH'
+                      ? 'repeat(auto-fit, minmax(320px, 1fr))'
+                      : 'minmax(320px, 640px)',
+                  gap: '14px',
+                  marginBottom: '16px',
+                }}
+              >
+                {(delhiverySubTab === 'BOTH' || delhiverySubTab === 'REMITTANCE') && (
+                  <UniversalUploadCard
+                    config={{
+                      kind: 'DELHIVERY_REMITTANCE',
+                      title: 'Delhivery COD Remittance (ZIP or CSV)',
+                      providerName: 'Delhivery Remittance',
+                      templateKey: 'delhivery-remittance',
+                      badgeText: 'Auto-Extracts ZIP',
+                      what: 'Matches delivered COD orders by Waybill / Order No and writes Bank UTR.',
+                      where: 'Delhivery ONE → Finances → Remittance → Download AWB list (.zip or .csv).',
+                      withRemittanceFields: true,
+                    }}
+                    onDone={refresh}
+                  />
+                )}
 
+                {(delhiverySubTab === 'BOTH' || delhiverySubTab === 'CHARGES') && (
+                  <UniversalUploadCard
+                    config={{
+                      kind: 'DELHIVERY_CHARGES',
+                      title: 'Delhivery Shipping Charges Ledger (WalletReport)',
+                      providerName: 'Delhivery Ledger',
+                      templateKey: 'delhivery-charges',
+                      badgeText: 'Monthly Ledger',
+                      what: 'Replaces freight rate estimates with exact billed shipping charges (Forward & RTO).',
+                      where: 'Delhivery ONE → Finances → Wallet → Transactions → Download Ledger (.xlsx).',
+                    }}
+                    onDone={refresh}
+                  />
+                )}
+              </div>
+
+              {/* Informational Workflow Banner (shown in BOTH or CHARGES) */}
+              {(delhiverySubTab === 'BOTH' || delhiverySubTab === 'CHARGES') && (
+                <div
+                  style={{
+                    background: 'linear-gradient(to right, #eff6ff, #f8fafc)',
+                    border: '1px solid #bfdbfe',
+                    borderRadius: '8px',
+                    padding: '12px 16px',
+                    marginBottom: '16px',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                    <span style={{ fontSize: '15px' }}>💡</span>
+                    <h4 style={{ margin: 0, fontSize: '12px', fontWeight: 700, color: '#1e40af' }}>
+                      Delhivery Wallet Charges Reconciliation Guide:
+                    </h4>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '8px', fontSize: '11px', color: '#1e3a8a' }}>
+                    <div style={{ background: '#ffffff', padding: '8px 10px', borderRadius: '6px', border: '1px solid #dbeafe' }}>
+                      <strong>1 Mile = ₹1.00 INR</strong>
+                      <div style={{ color: '#475569', marginTop: '2px' }}>
+                        Miles column corresponds 1-to-1 in Rupees.
+                      </div>
+                    </div>
+                    <div style={{ background: '#ffffff', padding: '8px 10px', borderRadius: '6px', border: '1px solid #dbeafe' }}>
+                      <strong>Multi-Sheet Dedup</strong>
+                      <div style={{ color: '#475569', marginTop: '2px' }}>
+                        Deductions and duplicate AWB Deductions are de-duplicated automatically.
+                      </div>
+                    </div>
+                    <div style={{ background: '#ffffff', padding: '8px 10px', borderRadius: '6px', border: '1px solid #dbeafe' }}>
+                      <strong>Actual Cost vs Estimate</strong>
+                      <div style={{ color: '#475569', marginTop: '2px' }}>
+                        Sets order shipping cost source to ACTUAL with final machine weight.
+                      </div>
+                    </div>
+                    <div style={{ background: '#ffffff', padding: '8px 10px', borderRadius: '6px', border: '1px solid #dbeafe' }}>
+                      <strong>"Not Picked" Zero-Cost</strong>
+                      <div style={{ color: '#475569', marginTop: '2px' }}>
+                        Refunded Not Picked parcels automatically zero out freight cost.
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Table 1: COD Remittances History */}
+              {(delhiverySubTab === 'BOTH' || delhiverySubTab === 'REMITTANCE') && (
+                <div style={{ marginBottom: delhiverySubTab === 'BOTH' ? '24px' : '0' }}>
                   <CarrierRemittanceTable
-                    title="Delhivery 2-Day Remittances"
-                    subtitle="Your bank account is credited 2 days post daily remittance · Delhivery ONE Synchronized"
+                    title="Delhivery 2-Day Remittances (COD Payments Received)"
+                    subtitle="Bank account credited 2 days post daily remittance · Matches delivered COD orders into Payment Received"
                     carrierBadge="Delhivery ONE"
                     emptyMessage="No Delhivery COD remittances uploaded yet. Upload your first remittance ZIP or CSV file above."
                     imports={delhiveryRemittanceImports}
@@ -1287,74 +1409,17 @@ function RemittancesContent() {
                 </div>
               )}
 
-              {delhiverySubTab === 'CHARGES' && (
+              {/* Table 2: Wallet Charges Ledger History */}
+              {(delhiverySubTab === 'BOTH' || delhiverySubTab === 'CHARGES') && (
                 <div>
-                  <div style={{ maxWidth: '640px', marginBottom: '16px' }}>
-                    <UniversalUploadCard
-                      config={{
-                        kind: 'DELHIVERY_CHARGES',
-                        title: 'Delhivery Shipping Charges Ledger (WalletReport .xlsx / .csv)',
-                        providerName: 'Delhivery Ledger',
-                        templateKey: 'delhivery-charges',
-                        badgeText: 'Monthly Ledger',
-                        what: 'Replaces freight rate estimates with exact billed shipping charges (Forward, RTO, Reverse pickup) from Delhivery wallet ledger.',
-                        where: 'Delhivery ONE → Finances → Wallet → Transactions → Download Ledger (e.g. WalletReport-...xlsx).',
-                      }}
-                      onDone={refresh}
-                    />
-                  </div>
-
-                  {/* Informational Workflow Banner */}
-                  <div
-                    style={{
-                      background: 'linear-gradient(to right, #eff6ff, #f8fafc)',
-                      border: '1px solid #bfdbfe',
-                      borderRadius: '10px',
-                      padding: '16px 20px',
-                      marginBottom: '20px',
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                      <span style={{ fontSize: '18px' }}>💡</span>
-                      <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: '#1e40af' }}>
-                        How Delhivery Monthly Wallet Ledger Reconciles Actual Order Costs:
-                      </h4>
-                    </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '12px', fontSize: '12px', color: '#1e3a8a' }}>
-                      <div style={{ background: '#ffffff', padding: '10px 14px', borderRadius: '8px', border: '1px solid #dbeafe' }}>
-                        <strong>1. 1 "Mile" = ₹1.00 INR</strong>
-                        <div style={{ color: '#475569', marginTop: '3px' }}>
-                          Delhivery records wallet debits and credits under the <code>Miles</code> column, which corresponds 1-to-1 in Rupees.
-                        </div>
-                      </div>
-                      <div style={{ background: '#ffffff', padding: '10px 14px', borderRadius: '8px', border: '1px solid #dbeafe' }}>
-                        <strong>2. Multi-Sheet Deduplication</strong>
-                        <div style={{ color: '#475569', marginTop: '3px' }}>
-                          Files containing both <code>Deductions</code> and duplicate <code>AWB Deductions</code> are filtered automatically so no row is double-counted.
-                        </div>
-                      </div>
-                      <div style={{ background: '#ffffff', padding: '10px 14px', borderRadius: '8px', border: '1px solid #dbeafe' }}>
-                        <strong>3. Actual Cost vs Rate API</strong>
-                        <div style={{ color: '#475569', marginTop: '3px' }}>
-                          Updates order shipment's <code>forwardCharge</code> and sets source to <code>ACTUAL</code>, recording final machine weight &amp; zone.
-                        </div>
-                      </div>
-                      <div style={{ background: '#ffffff', padding: '10px 14px', borderRadius: '8px', border: '1px solid #dbeafe' }}>
-                        <strong>4. Cancelled / "Not Picked" Credits</strong>
-                        <div style={{ color: '#475569', marginTop: '3px' }}>
-                          Parcels refunded under <code>Refunds</code> with status <em>Not Picked</em> automatically zero out freight so cancelled orders have zero cost.
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
                   <CarrierRemittanceTable
-                    title="Delhivery Shipping Charges & Wallet Ledger"
+                    title="Delhivery Shipping Charges & Wallet Ledger (Freight Costs)"
                     subtitle="Exact billed freight debited from Delhivery wallet per order · Replaces rate estimates with actual costs"
                     carrierBadge="Wallet Ledger"
                     refColumnLabel="WALLET STATEMENT / FILE"
                     amountColumnLabel="TOTAL BILLED FREIGHT"
                     hideUtrActions={true}
+                    hideUtrColumn={true}
                     emptyMessage="No Delhivery shipping charges ledger uploaded yet. Upload your monthly WalletReport (.xlsx or .csv) above."
                     imports={delhiveryChargesImports}
                     onRefresh={refresh}

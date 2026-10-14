@@ -84,7 +84,8 @@ describe('Payment Received tab', () => {
     });
     expect(classifyOrderTab(closed)).toBe('closed');
     expect(classifyOrderTab({ ...closed, paymentReceivedAt: null })).toBe('delivered');
-    expect(classifyOrderTab({ ...closed, deliveredAt: new Date(realNow - DAY) })).toBe('delivered');
+    expect(classifyOrderTab({ ...closed, paymentReceivedUtr: null })).toBe('delivered');
+    expect(classifyOrderTab({ ...closed, deliveredAt: new Date(realNow - DAY) })).toBe('closed');
   });
 
   it('keeps an order with an open return in the Return tab', () => {

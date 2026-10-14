@@ -21,6 +21,16 @@ import { ParsedSheet, parseAmount, parseDateLoose, pickColumn } from './spreadsh
 
 export type ImportKind = 'DELHIVERY_REMITTANCE' | 'DELHIVERY_CHARGES' | 'PG_SETTLEMENT';
 
+export interface MatchedOrderSummary {
+  orderId?: number;
+  shopifyOrderName?: string;
+  waybillNumber?: string;
+  amount?: number;
+  utr?: string | null;
+  status?: string;
+  city?: string;
+}
+
 export interface ImportResult {
   importId?: number;
   kind: ImportKind;
@@ -28,6 +38,13 @@ export interface ImportResult {
   rowCount: number;
   matchedCount: number;
   unmatched: string[];
+  skippedDuplicates?: string[];
+  remittanceNumber?: string | null;
+  remittanceDate?: string | null;
+  bankTransactionId?: string | null;
+  state?: 'Completed' | 'Pending';
+  totalRemittance?: number;
+  matchedOrders?: MatchedOrderSummary[];
   /** Which header was used for each field, so a wrong guess is visible. */
   columns: Record<string, string | undefined>;
   notes: string[];
@@ -93,7 +110,18 @@ async function saveImport(result: ImportResult, uploadedBy?: string): Promise<Im
         rowCount: result.rowCount,
         matchedCount: result.matchedCount,
         unmatched: result.unmatched.slice(0, 500),
-        summary: { columns: result.columns, notes: result.notes } as any,
+        summary: {
+          columns: result.columns,
+          notes: result.notes,
+          skippedDuplicates: (result.skippedDuplicates || []).slice(0, 500),
+          alreadyRemittedCount: result.skippedDuplicates?.length || 0,
+          remittanceNumber: result.remittanceNumber || null,
+          remittanceDate: result.remittanceDate || null,
+          bankTransactionId: result.bankTransactionId || null,
+          state: result.state || (result.bankTransactionId ? 'Completed' : 'Pending'),
+          totalRemittance: result.totalRemittance ?? null,
+          matchedOrders: (result.matchedOrders || []).slice(0, 500),
+        } as any,
         uploadedBy: uploadedBy || null,
       },
     });
@@ -118,6 +146,7 @@ export async function recordPaymentReceived(
     ref?: string | null;
     source: string;
     gatewayFee?: number | null;
+    deliveredAt?: Date | null;
   }
 ): Promise<void> {
   await prisma.order.update({
@@ -129,6 +158,7 @@ export async function recordPaymentReceived(
       paymentReceivedRef: payment.ref || null,
       paymentReceivedSource: payment.source,
       ...(payment.gatewayFee !== undefined && payment.gatewayFee !== null ? { gatewayFee: payment.gatewayFee } : {}),
+      ...(payment.deliveredAt ? { deliveredAt: payment.deliveredAt, status: 'DELIVERED' } : {}),
       paymentVerified: true,
       paymentVerifiedAt: payment.receivedAt,
     },
@@ -161,6 +191,8 @@ export async function importDelhiveryRemittance(
 
   const notes: string[] = [];
   const unmatched: string[] = [];
+  const skippedDuplicates: string[] = [];
+  const seenInBatch = new Set<string>();
   let rowCount = 0;
   let matchedCount = 0;
   let missingUtr = 0;
@@ -173,6 +205,7 @@ export async function importDelhiveryRemittance(
         rowCount: 0,
         matchedCount: 0,
         unmatched: [],
+        skippedDuplicates: [],
         columns,
         notes: [`No Waybill / AWB or Order Number column found. Columns in the file: ${headers.join(', ')}`],
       },
@@ -180,7 +213,15 @@ export async function importDelhiveryRemittance(
     );
   }
 
-  const fallbackDate = parseDateLoose(defaults.remittedAt || '') || new Date();
+  const refFromFileName = fileName.match(/\b(R\d{6,})\b/i)?.[1];
+  const dateFromFileName = refFromFileName?.match(/(\d{4})(\d{2})(\d{2})/);
+  const inferredDate = dateFromFileName
+    ? parseDateLoose(`${dateFromFileName[1]}-${dateFromFileName[2]}-${dateFromFileName[3]}`)
+    : null;
+
+  const fallbackDate = parseDateLoose(defaults.remittedAt || '') || inferredDate || new Date();
+  const defaultRef = defaults.remittanceRef || refFromFileName || null;
+
   // A UTR typed on the form belongs to one remittance. A file covering
   // several remittances (several remittance numbers) must not borrow it.
   const remittanceRefsInFile = new Set(
@@ -192,11 +233,22 @@ export async function importDelhiveryRemittance(
       `The file covers ${remittanceRefsInFile.size} remittances, so the UTR typed on the form was not applied. Upload each remittance's AWB list with its own UTR.`
     );
   }
+
+  let totalAmountRemitted = 0;
+  const matchedOrders: MatchedOrderSummary[] = [];
+
   for (const { row } of rowsOf(sheets)) {
-    const awb = columns.awb ? row[columns.awb] : '';
-    const orderRef = columns.order ? row[columns.order] : '';
+    const awb = (columns.awb ? row[columns.awb] : '').trim();
+    const orderRef = (columns.order ? row[columns.order] : '').trim();
     if (!awb && !orderRef) continue;
     rowCount++;
+
+    const trackingKey = awb || orderRef;
+    if (seenInBatch.has(trackingKey)) {
+      skippedDuplicates.push(`${trackingKey} (duplicate row in file)`);
+      continue;
+    }
+    seenInBatch.add(trackingKey);
 
     const shipment = await prisma.shipment.findFirst({
       where: {
@@ -217,12 +269,31 @@ export async function importDelhiveryRemittance(
       continue;
     }
 
+    // STRICT IDEMPOTENCY / DUPLICATE GUARD:
+    // If this shipment's COD remittance was already recorded and remitted,
+    // do NOT re-credit or double-count the same tracking ID.
+    if (shipment.codRemitted && shipment.codRemittedAmount && shipment.codRemittedAmount > 0) {
+      skippedDuplicates.push(awb || orderRef);
+      continue;
+    }
+
     const utr = (columns.utr && row[columns.utr]) || defaultUtr || null;
-    const ref = (columns.remittance && row[columns.remittance]) || defaults.remittanceRef || null;
+    const ref = (columns.remittance && row[columns.remittance]) || defaultRef || null;
     const remittedAt = (columns.date && parseDateLoose(row[columns.date])) || fallbackDate;
     const fileAmount = columns.amount ? parseAmount(row[columns.amount]) : null;
     const amount: number = fileAmount || shipment.codAmount || shipment.order?.totalAmount || 0;
     if (!utr) missingUtr++;
+    totalAmountRemitted += amount;
+
+    matchedOrders.push({
+      orderId: shipment.order?.id,
+      shopifyOrderName: shipment.order?.shopifyOrderName,
+      waybillNumber: shipment.waybillNumber || awb,
+      amount,
+      utr,
+      status: 'DELIVERED',
+      city: row['City'] || row['city'],
+    });
 
     await prisma.shipment.update({
       where: { id: shipment.id },
@@ -233,6 +304,7 @@ export async function importDelhiveryRemittance(
         codRemittedAt: remittedAt,
         codRemittanceRef: ref || utr || 'DELHIVERY-REMITTANCE',
         codRemittedAmount: amount,
+        ...(shipment.status !== 'DELIVERED' ? { status: 'DELIVERED' } : {}),
       },
     });
     if (shipment.order) {
@@ -242,9 +314,16 @@ export async function importDelhiveryRemittance(
         utr,
         ref,
         source: 'DELHIVERY_REMITTANCE',
+        deliveredAt: shipment.order.deliveredAt || remittedAt,
       });
     }
     matchedCount++;
+  }
+
+  if (skippedDuplicates.length > 0) {
+    notes.push(
+      `${skippedDuplicates.length} tracking ID(s) were skipped because they have already been remitted previously or appeared more than once in the file (duplicate upload prevented).`
+    );
   }
 
   if (missingUtr > 0) {
@@ -252,8 +331,29 @@ export async function importDelhiveryRemittance(
       `${missingUtr} matched row(s) had no UTR. Enter the remittance's Bank Transaction ID in the UTR box and upload the file again to fill it.`
     );
   }
+
+  const inferredRemittanceNum =
+    defaultRef || (columns.remittance ? Array.from(remittanceRefsInFile)[0] : null) || null;
+  const state: 'Completed' | 'Pending' =
+    defaultUtr || matchedOrders.some((o) => o.utr) ? 'Completed' : 'Pending';
+
   return saveImport(
-    { kind: 'DELHIVERY_REMITTANCE', fileName, rowCount, matchedCount, unmatched, columns, notes },
+    {
+      kind: 'DELHIVERY_REMITTANCE',
+      fileName,
+      rowCount,
+      matchedCount,
+      unmatched,
+      skippedDuplicates,
+      remittanceNumber: inferredRemittanceNum,
+      remittanceDate: fallbackDate ? fallbackDate.toISOString() : null,
+      bankTransactionId: defaultUtr || null,
+      state,
+      totalRemittance: Math.round(totalAmountRemitted * 100) / 100,
+      matchedOrders,
+      columns,
+      notes,
+    },
     uploadedBy
   );
 }

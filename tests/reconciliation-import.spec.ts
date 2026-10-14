@@ -87,6 +87,83 @@ describe('Delhivery COD remittance', () => {
     expect(result.matchedCount).toBe(0);
     expect(result.notes[0]).toMatch(/No Waybill \/ AWB or Order Number column/);
   });
+
+  it('skips duplicate AWBs already remitted in database and duplicate rows within the same batch', async () => {
+    prismaStub.shipment.findFirst.mockImplementation(async ({ where }: any) => {
+      const match = where.OR.find((c: any) => c.waybillNumber);
+      if (!match) return null;
+      if (match.waybillNumber === '30100810011111') {
+        return {
+          id: 5,
+          codAmount: 799,
+          codRemitted: true,
+          codRemittedAmount: 799,
+          order: { id: 50, totalAmount: 799 },
+        };
+      }
+      if (match.waybillNumber === '30100810022222') {
+        return {
+          id: 6,
+          codAmount: 1200,
+          codRemitted: false,
+          codRemittedAmount: null,
+          order: { id: 60, totalAmount: 1200 },
+        };
+      }
+      return null;
+    });
+
+    const result = await importDelhiveryRemittance('remit_dupes.csv', [
+      sheet('remit', [
+        ['Waybill Number', 'COD Amount', 'Remittance Number', 'Bank Transaction ID'],
+        ['30100810011111', '799.00', 'RMT-1', 'UTR-1'],
+        ['30100810022222', '1200.00', 'RMT-1', 'UTR-1'],
+        ['30100810022222', '1200.00', 'RMT-1', 'UTR-1'],
+      ]),
+    ]);
+
+    expect(result.matchedCount).toBe(1);
+    expect(result.skippedDuplicates).toEqual([
+      '30100810011111',
+      '30100810022222 (duplicate row in file)',
+    ]);
+    expect(prismaStub.shipment.update).toHaveBeenCalledTimes(1);
+    expect(prismaStub.shipment.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 6 },
+        data: expect.objectContaining({ codRemittedAmount: 1200 }),
+      })
+    );
+  });
+
+  it('infers remittance number and processed date from Delhivery zip filename like R3359352026101200000.zip', async () => {
+    prismaStub.shipment.findFirst.mockResolvedValue({
+      id: 7,
+      codAmount: 719.1,
+      order: { id: 70, totalAmount: 719.1, shopifyOrderName: '#26YOU5840' },
+    });
+
+    const result = await importDelhiveryRemittance('R3359352026101200000.zip', [
+      sheet('transactions', [
+        ['Description', 'Payment Mode', 'COD Amount', 'Waybill Number', 'Order Number'],
+        ['package', 'COD', '719.10', '30100810010975', '26YOU5840'],
+      ]),
+    ]);
+
+    expect(result.matchedCount).toBe(1);
+    expect(result.remittanceNumber).toBe('R3359352026101200000');
+    expect(result.totalRemittance).toBe(719.1);
+    expect(result.state).toBe('Pending');
+    expect(prismaStub.shipment.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 7 },
+        data: expect.objectContaining({
+          codRemittanceRef: 'R3359352026101200000',
+          codRemittedAmount: 719.1,
+        }),
+      })
+    );
+  });
 });
 
 describe('Delhivery charges (wallet ledger)', () => {

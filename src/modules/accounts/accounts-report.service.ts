@@ -130,8 +130,13 @@ function sum(values: Array<number | null | undefined>): number {
 }
 
 /** Build every row of the report from orders loaded with shipment and returns. */
-export function buildReportData(month: string, orders: any[], now: Date = new Date()): ReportData {
-  const { label } = monthRange(month);
+export function buildReportData(monthOrLabel: string, orders: any[], now: Date = new Date()): ReportData {
+  let label = monthOrLabel;
+  try {
+    label = monthRange(monthOrLabel).label;
+  } catch {
+    label = monthOrLabel;
+  }
   const rows: ReportOrderRow[] = [];
   const cod: ReportData['cod'] = [];
   const prepaid: ReportData['prepaid'] = [];
@@ -218,14 +223,16 @@ export function buildReportData(month: string, orders: any[], now: Date = new Da
         orderNo: row.orderNo,
         awb: shipment.waybillNumber,
         deliveredOn: row.deliveredOn,
+        orderValue: row.orderValue,
         codAmount: money(shipment.codAmount || order.totalAmount),
+        shippingCharge: totalShipping,
         remittedAmount: money(shipment.codRemittedAmount),
         difference: remitted ? money((shipment.codRemittedAmount || 0) - (shipment.codAmount || order.totalAmount || 0)) : null,
         remittanceRef: shipment.codRemittanceRef || '',
         utr: order.paymentReceivedUtr || '',
-        remittedOn: istDay(shipment.codRemittedAt),
+        remittedOn: istDay(shipment.codRemittedAt || order.paymentReceivedAt),
         status: remitted
-          ? 'Remitted'
+          ? 'Remitted (In Bank)'
           : row.accountsStatus === 'Not a sale'
             ? 'Not a sale'
             : shipment.codCollected || order.deliveredAt
@@ -301,7 +308,7 @@ export function buildReportData(month: string, orders: any[], now: Date = new Da
     { label: 'Refunds (₹)', value: sum(rows.map((r) => r.refundAmount)) },
   ];
 
-  return { month, label, generatedAt: now, orders: rows, cod, prepaid, shipping, returns: returnRows, summary };
+  return { month: monthOrLabel, label, generatedAt: now, orders: rows, cod, prepaid, shipping, returns: returnRows, summary };
 }
 
 function notASaleReason(order: { status?: string }): string {
@@ -429,19 +436,21 @@ export async function renderWorkbook(data: ReportData): Promise<Buffer> {
     workbook,
     'COD Remittance',
     [
-      { header: 'Order No', key: 'orderNo', width: 14 },
-      { header: 'AWB', key: 'awb', width: 16 },
-      { header: 'Delivered On', key: 'deliveredOn', width: 13, type: 'date' },
-      { header: 'COD Amount (₹)', key: 'codAmount', width: 13, type: 'money' },
-      { header: 'Remitted Amount (₹)', key: 'remittedAmount', width: 13, type: 'money' },
-      { header: 'Difference (₹)', key: 'difference', width: 12, type: 'money' },
-      { header: 'Remittance No', key: 'remittanceRef', width: 20 },
-      { header: 'Bank UTR', key: 'utr', width: 22 },
-      { header: 'Remitted On', key: 'remittedOn', width: 13, type: 'date' },
-      { header: 'Status', key: 'status', width: 28 },
+      { header: 'Order ID', key: 'orderNo', width: 14 },
+      { header: 'Delhivery AWB / Tracking ID', key: 'awb', width: 18 },
+      { header: 'Delivered Date', key: 'deliveredOn', width: 13, type: 'date' },
+      { header: 'Order Value (₹)', key: 'orderValue', width: 14, type: 'money' },
+      { header: 'COD Amount Collected (₹)', key: 'codAmount', width: 16, type: 'money' },
+      { header: 'Delhivery Shipping Charged (₹)', key: 'shippingCharge', width: 22, type: 'money' },
+      { header: 'Net Remitted Amount (₹)', key: 'remittedAmount', width: 16, type: 'money' },
+      { header: 'Difference / Deductions (₹)', key: 'difference', width: 15, type: 'money' },
+      { header: 'Remittance Number', key: 'remittanceRef', width: 22 },
+      { header: 'Remittance Processed Date', key: 'remittedOn', width: 15, type: 'date' },
+      { header: 'Bank\'s Transaction ID / UTR', key: 'utr', width: 24 },
+      { header: 'Remittance Status', key: 'status', width: 26 },
     ],
     data.cod,
-    ['codAmount', 'remittedAmount', 'difference']
+    ['orderValue', 'codAmount', 'shippingCharge', 'remittedAmount', 'difference']
   );
 
   addTable(
@@ -511,6 +520,26 @@ export async function generateMonthlyReport(month: string, now: Date = new Date(
   const data = buildReportData(month, orders, now);
   const buffer = await renderWorkbook(data);
   return { data, buffer, fileName: `Youthnic-Accounts-${month}.xlsx` };
+}
+
+/** Load orders by custom date range and build the report. */
+export async function generateDateRangeReport(
+  startDateStr: string,
+  endDateStr: string,
+  now: Date = new Date()
+): Promise<{ data: ReportData; buffer: Buffer; fileName: string }> {
+  const start = new Date(`${startDateStr}T00:00:00.000Z`);
+  const end = new Date(`${endDateStr}T23:59:59.999Z`);
+  const label = `${startDateStr} to ${endDateStr}`;
+  const orders = await prisma.order.findMany({
+    where: { shopifyCreatedAt: { gte: start, lte: end } },
+    include: { shipment: true, returns: true },
+    orderBy: { shopifyCreatedAt: 'asc' },
+  });
+  const data = buildReportData(label, orders, now);
+  data.label = label;
+  const buffer = await renderWorkbook(data);
+  return { data, buffer, fileName: `Youthnic-Accounts-${startDateStr}_to_${endDateStr}.xlsx` };
 }
 
 // ─── Emailing ───────────────────────────────────────────────

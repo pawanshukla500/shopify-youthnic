@@ -4,6 +4,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import ExcelJS from 'exceljs';
+import JSZip from 'jszip';
 import {
   gridToSheet,
   normalizeHeader,
@@ -127,5 +128,24 @@ describe('readSpreadsheet', () => {
     const sheets = await readSpreadsheet('r.csv', Buffer.from('AWB,Amount\n1,2\n'));
     expect(sheets[0].rows).toEqual([{ AWB: '1', Amount: '2' }]);
     await expect(readSpreadsheet('old.xls', Buffer.from([0xd0, 0xcf, 0x11, 0xe0]))).rejects.toThrow(/save it as \.xlsx or \.csv/);
+  });
+
+  it('reads a .zip archive directly, extracting CSV files inside it', async () => {
+    const zip = new JSZip();
+    zip.file(
+      'remittance_transactions_export_abc123.csv',
+      'Description,Payment Mode,COD Amount,Waybill Number,Order Number\npackage,COD,719.10,30100810010975,26YOU5840\n'
+    );
+    const buffer = await zip.generateAsync({ type: 'nodebuffer' });
+    const sheets = await readSpreadsheet('R3359352026101200000.zip', buffer);
+    expect(sheets).toHaveLength(1);
+    expect(sheets[0].headers).toEqual(['Description', 'Payment Mode', 'COD Amount', 'Waybill Number', 'Order Number']);
+    expect(sheets[0].rows[0]).toEqual({
+      Description: 'package',
+      'Payment Mode': 'COD',
+      'COD Amount': '719.10',
+      'Waybill Number': '30100810010975',
+      'Order Number': '26YOU5840',
+    });
   });
 });

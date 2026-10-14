@@ -27,6 +27,7 @@ const operationsNav: NavItem[] = [
 
 const financeNav: NavItem[] = [
   { to: '/accounts', label: 'Payments & Accounts', icon: 'dollar' },
+  { to: '/remittance', label: 'Remittance Upload & Logs', icon: 'download' },
   { to: '/tools', label: 'Rate & Serviceability', icon: 'tool' },
 ]
 

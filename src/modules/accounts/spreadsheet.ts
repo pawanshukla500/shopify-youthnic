@@ -8,6 +8,7 @@
  * "utr_no" all resolve without per-vendor code.
  */
 import ExcelJS from 'exceljs';
+import JSZip from 'jszip';
 
 export interface ParsedSheet {
   name: string;
@@ -206,39 +207,103 @@ function cellText(value: ExcelJS.CellValue): string {
   return String(value);
 }
 
+async function readZipArchive(content: Buffer): Promise<ParsedSheet[]> {
+  const zip = await JSZip.loadAsync(content);
+  const sheets: ParsedSheet[] = [];
+
+  for (const [entryPath, file] of Object.entries(zip.files)) {
+    if (file.dir || entryPath.startsWith('__MACOSX/') || /(^|\/)\.[^/]+/.test(entryPath)) {
+      continue;
+    }
+    const lower = entryPath.toLowerCase();
+    if (lower.endsWith('.csv') || lower.endsWith('.tsv') || lower.endsWith('.txt')) {
+      const text = await file.async('text');
+      const baseName = entryPath.split('/').pop() || entryPath;
+      const parsed = gridToSheet(baseName, parseDelimited(text));
+      if (parsed.headers.length > 0) {
+        sheets.push(parsed);
+      }
+    } else if (lower.endsWith('.xlsx')) {
+      const buf = await file.async('nodebuffer');
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.load(buf as any);
+      workbook.eachSheet((worksheet) => {
+        const grid: string[][] = [];
+        const width = worksheet.columnCount;
+        worksheet.eachRow({ includeEmpty: false }, (row) => {
+          const cells: string[] = [];
+          for (let c = 1; c <= width; c++) {
+            const cell = row.getCell(c);
+            const mergedCopy = cell.isMerged && cell.master && cell.master.address !== cell.address;
+            cells.push(mergedCopy ? '' : cellText(cell.value).trim());
+          }
+          grid.push(cells);
+        });
+        const parsed = gridToSheet(worksheet.name, grid);
+        if (parsed.headers.length > 0) {
+          sheets.push(parsed);
+        }
+      });
+    }
+  }
+  return sheets;
+}
+
 /**
- * Read an uploaded report. .xlsx and .csv/.tsv/.txt are supported; an old
+ * Read an uploaded report. .xlsx, .zip, and .csv/.tsv/.txt are supported; an old
  * binary .xls must be re-saved as .xlsx or .csv first.
  */
 export async function readSpreadsheet(fileName: string, content: Buffer): Promise<ParsedSheet[]> {
-  const isZip = content.length > 3 && content[0] === 0x50 && content[1] === 0x4b; // "PK" = .xlsx
-  if (/\.xls$/i.test(fileName) && !isZip) {
+  const isZipMagic = content.length > 3 && content[0] === 0x50 && content[1] === 0x4b; // "PK"
+  if (/\.xls$/i.test(fileName) && !isZipMagic) {
     throw new Error('Old .xls files cannot be read. Open the file and save it as .xlsx or .csv, then upload again.');
   }
-  if (isZip || /\.xlsx$/i.test(fileName)) {
-    const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(content as any);
-    const sheets: ParsedSheet[] = [];
-    workbook.eachSheet((worksheet) => {
-      const grid: string[][] = [];
-      // Read once: exceljs recomputes columnCount by walking every row, so
-      // using it in the loop condition made large ledgers take minutes.
-      const width = worksheet.columnCount;
-      worksheet.eachRow({ includeEmpty: false }, (row) => {
-        const cells: string[] = [];
-        for (let c = 1; c <= width; c++) {
-          const cell = row.getCell(c);
-          // Every cell of a merged range repeats the master's text; only the
-          // master keeps it, so a merged title row is not mistaken for a header.
-          const mergedCopy = cell.isMerged && cell.master && cell.master.address !== cell.address;
-          cells.push(mergedCopy ? '' : cellText(cell.value).trim());
-        }
-        grid.push(cells);
-      });
-      sheets.push(gridToSheet(worksheet.name, grid));
-    });
-    return sheets.filter((sheet) => sheet.headers.length > 0);
+
+  // 1. Direct ZIP archive (e.g. R3359352026101200000.zip downloaded from Delhivery ONE)
+  if (/\.zip$/i.test(fileName)) {
+    const sheets = await readZipArchive(content);
+    if (!sheets.length) {
+      throw new Error('The uploaded zip archive contains no CSV or Excel spreadsheets.');
+    }
+    return sheets;
   }
+
+  // 2. Excel OpenXML (.xlsx)
+  if (/\.xlsx$/i.test(fileName) || (isZipMagic && !/\.(csv|tsv|txt)$/i.test(fileName))) {
+    try {
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.load(content as any);
+      const sheets: ParsedSheet[] = [];
+      workbook.eachSheet((worksheet) => {
+        const grid: string[][] = [];
+        // Read once: exceljs recomputes columnCount by walking every row, so
+        // using it in the loop condition made large ledgers take minutes.
+        const width = worksheet.columnCount;
+        worksheet.eachRow({ includeEmpty: false }, (row) => {
+          const cells: string[] = [];
+          for (let c = 1; c <= width; c++) {
+            const cell = row.getCell(c);
+            // Every cell of a merged range repeats the master's text; only the
+            // master keeps it, so a merged title row is not mistaken for a header.
+            const mergedCopy = cell.isMerged && cell.master && cell.master.address !== cell.address;
+            cells.push(mergedCopy ? '' : cellText(cell.value).trim());
+          }
+          grid.push(cells);
+        });
+        sheets.push(gridToSheet(worksheet.name, grid));
+      });
+      const valid = sheets.filter((sheet) => sheet.headers.length > 0);
+      if (valid.length > 0) return valid;
+    } catch {
+      // If ExcelJS failed on a generic zip container, try JSZip archive extraction fallback
+      if (isZipMagic) {
+        const zipSheets = await readZipArchive(content).catch(() => []);
+        if (zipSheets.length > 0) return zipSheets;
+      }
+    }
+  }
+
+  // 3. Delimited text (.csv, .tsv, .txt)
   const sheet = gridToSheet(fileName, parseDelimited(content.toString('utf8')));
   return sheet.headers.length > 0 ? [sheet] : [];
 }

@@ -1278,6 +1278,16 @@ export async function syncBulkExternalFulfillments(orderIds?: number[]): Promise
 
 export type AccountsImportKind = 'DELHIVERY_REMITTANCE' | 'DELHIVERY_CHARGES' | 'PG_SETTLEMENT'
 
+export interface MatchedOrderSummary {
+  orderId?: number
+  shopifyOrderName?: string
+  waybillNumber?: string
+  amount?: number
+  utr?: string | null
+  status?: string
+  city?: string
+}
+
 export interface AccountsImportResult {
   importId?: number
   kind: AccountsImportKind
@@ -1285,6 +1295,13 @@ export interface AccountsImportResult {
   rowCount: number
   matchedCount: number
   unmatched: string[]
+  skippedDuplicates?: string[]
+  remittanceNumber?: string | null
+  remittanceDate?: string | null
+  bankTransactionId?: string | null
+  state?: 'Completed' | 'Pending'
+  totalRemittance?: number
+  matchedOrders?: MatchedOrderSummary[]
   columns: Record<string, string | undefined>
   notes: string[]
   closedNow?: number
@@ -1297,7 +1314,18 @@ export interface AccountsImportRecord {
   rowCount: number
   matchedCount: number
   unmatched: string[] | null
-  summary: { columns?: Record<string, string | undefined>; notes?: string[] } | null
+  summary: {
+    columns?: Record<string, string | undefined>
+    notes?: string[]
+    skippedDuplicates?: string[]
+    alreadyRemittedCount?: number
+    remittanceNumber?: string | null
+    remittanceDate?: string | null
+    bankTransactionId?: string | null
+    state?: 'Completed' | 'Pending'
+    totalRemittance?: number | null
+    matchedOrders?: MatchedOrderSummary[]
+  } | null
   uploadedBy: string | null
   createdAt: string
 }
@@ -1319,18 +1347,34 @@ export interface AccountsOverview {
   }
 }
 
-export async function getAccountsOverview(month: string): Promise<AccountsOverview> {
-  const response = await api.get('/api/accounts/overview', { params: { month } })
+export async function getAccountsOverview(params?: string | { month?: string; startDate?: string; endDate?: string }): Promise<AccountsOverview> {
+  const queryParams = typeof params === 'string' ? { month: params } : params || {}
+  const response = await api.get('/api/accounts/overview', { params: queryParams })
   return response.data
 }
 
-/** Download the monthly closing report (.xlsx) straight to the user's downloads. */
-export async function downloadAccountsReport(month: string): Promise<void> {
-  const response = await api.get('/api/accounts/report', { params: { month }, responseType: 'blob' })
+/** Download the closing & reconciliation report (.xlsx) with date-range filter straight to downloads. */
+export async function downloadAccountsReport(params?: string | { month?: string; startDate?: string; endDate?: string }): Promise<void> {
+  const queryParams = typeof params === 'string' ? { month: params } : params || {}
+  const response = await api.get('/api/accounts/report', { params: queryParams, responseType: 'blob' })
   const url = window.URL.createObjectURL(new Blob([response.data]))
   const link = document.createElement('a')
   link.href = url
-  link.download = `Youthnic-Accounts-${month}.xlsx`
+  const nameSuffix = queryParams.startDate && queryParams.endDate ? `${queryParams.startDate}_to_${queryParams.endDate}` : queryParams.month || 'report'
+  link.download = `Youthnic-Reconciliation-Report-${nameSuffix}.xlsx`
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.URL.revokeObjectURL(url)
+}
+
+/** Download a sample template file for Delhivery Remittance, Charges or GoKwik settlement. */
+export async function downloadAccountsTemplate(type: 'delhivery-remittance' | 'delhivery-charges' | 'gokwik-settlement'): Promise<void> {
+  const response = await api.get(`/api/accounts/template/${type}`, { responseType: 'blob' })
+  const url = window.URL.createObjectURL(new Blob([response.data]))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `${type.replace(/-/g, '_')}_sample_template.csv`
   document.body.appendChild(link)
   link.click()
   link.remove()
@@ -1376,5 +1420,13 @@ export async function markPaymentReceived(
 
 export async function runAccountsNow(): Promise<{ deliveredBackfilled: number; closed: number; shippingEstimates: number }> {
   const response = await api.post('/api/accounts/run')
+  return response.data
+}
+
+export async function updateRemittanceUtr(
+  importId: number,
+  utr: string
+): Promise<{ success: boolean; closedNow: number }> {
+  const response = await api.patch(`/api/accounts/remittance/${importId}/utr`, { utr })
   return response.data
 }

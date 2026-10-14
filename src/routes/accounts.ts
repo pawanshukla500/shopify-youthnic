@@ -32,6 +32,7 @@ import {
 import {
   buildReportData,
   emailMonthlyReport,
+  generateDateRangeReport,
   generateMonthlyReport,
   getReportRecipients,
   monthRange,
@@ -56,17 +57,34 @@ function requestedMonth(value: unknown): string {
 
 router.get('/overview', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const month = requestedMonth(req.query.month);
-    const { start, end } = monthRange(month);
+    const { startDate, endDate } = req.query;
+    let start: Date;
+    let end: Date;
+    let month: string;
+    let label: string;
+
+    if (startDate && endDate) {
+      start = new Date(`${String(startDate)}T00:00:00.000Z`);
+      end = new Date(`${String(endDate)}T23:59:59.999Z`);
+      month = String(startDate).slice(0, 7);
+      label = `${String(startDate)} to ${String(endDate)}`;
+    } else {
+      month = requestedMonth(req.query.month);
+      const range = monthRange(month);
+      start = range.start;
+      end = range.end;
+      label = range.label;
+    }
+
     const orders = await prisma.order.findMany({
-      where: { shopifyCreatedAt: { gte: start, lt: end } },
+      where: { shopifyCreatedAt: { gte: start, lte: end } },
       include: { shipment: true, returns: true },
     });
-    const data = buildReportData(month, orders);
+    const data = buildReportData(label, orders);
     const [recipients, sentAt, imports] = await Promise.all([
       getReportRecipients(),
       reportSentAt(month),
-      prisma.reconciliationImport.findMany({ orderBy: { createdAt: 'desc' }, take: 15 }),
+      prisma.reconciliationImport.findMany({ orderBy: { createdAt: 'desc' }, take: 25 }),
     ]);
     res.json({
       month,
@@ -99,14 +117,65 @@ router.get('/overview', async (req: AuthenticatedRequest, res: Response): Promis
 
 router.get('/report', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const month = requestedMonth(req.query.month);
-    const { buffer, fileName } = await generateMonthlyReport(month);
+    const { startDate, endDate } = req.query;
+    let buffer: Buffer;
+    let fileName: string;
+
+    if (startDate && endDate) {
+      const result = await generateDateRangeReport(String(startDate), String(endDate));
+      buffer = result.buffer;
+      fileName = result.fileName;
+    } else {
+      const month = requestedMonth(req.query.month);
+      const result = await generateMonthlyReport(month);
+      buffer = result.buffer;
+      fileName = result.fileName;
+    }
+
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
     res.send(buffer);
   } catch (error: any) {
     res.status(400).json({ error: error.message });
   }
+});
+
+router.get('/template/:type', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const { type } = req.params;
+  if (type === 'delhivery-remittance') {
+    const csv = [
+      'Waybill Number,Client Order ID,COD Amount,Remittance Number,Bank Transaction ID,Remittance Processed Date',
+      '30100810011111,#26YOU5913,719.10,R3359352026101300001,AXISP00847547449,13-10-2026',
+      '30100810011112,#26YOU5914,1499.00,R3359352026101300001,AXISP00847547449,13-10-2026',
+    ].join('\r\n');
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="delhivery_remittance_sample_template.csv"');
+    res.send(csv);
+    return;
+  }
+  if (type === 'delhivery-charges') {
+    const csv = [
+      'Waybill Number,Transaction Type,Amount (incl. GST),Description,Date,Charged Weight (gm),Zone',
+      '30100810011111,Debit,78.40,Forward Freight,10-10-2026,500,D',
+      '30100810011112,Debit,92.50,Forward Freight,10-10-2026,600,B',
+    ].join('\r\n');
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="delhivery_charges_ledger_sample_template.csv"');
+    res.send(csv);
+    return;
+  }
+  if (type === 'gokwik-settlement') {
+    const csv = [
+      'Order ID,Merchant Transaction ID,Settlement UTR,Amount Settled,Total Charges,Total Tax,Settlement Date,Status',
+      '#26YOU6010,gokwik_txn_101,UTIBR52026101000123,1038.60,11.80,2.12,11-10-2026,Success',
+      '#26YOU6013,gokwik_txn_102,UTIBR52026101000123,565.40,6.71,1.21,11-10-2026,Success',
+    ].join('\r\n');
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="gokwik_settlement_sample_template.csv"');
+    res.send(csv);
+    return;
+  }
+  res.status(404).json({ error: 'Template type not found' });
 });
 
 router.post('/report/email', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
@@ -178,6 +247,64 @@ router.post('/import', async (req: AuthenticatedRequest, res: Response): Promise
 router.get('/imports', async (_req: AuthenticatedRequest, res: Response): Promise<void> => {
   const imports = await prisma.reconciliationImport.findMany({ orderBy: { createdAt: 'desc' }, take: 50 });
   res.json(imports);
+});
+
+router.patch('/remittance/:importId/utr', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const importId = parseInt(req.params.importId, 10);
+    const utr = String(req.body?.utr || '').trim();
+    if (!utr) {
+      res.status(400).json({ error: 'utr is required' });
+      return;
+    }
+
+    const row = await prisma.reconciliationImport.findUnique({ where: { id: importId } });
+    if (!row) {
+      res.status(404).json({ error: 'Import record not found' });
+      return;
+    }
+
+    const summary = ((row.summary as any) || {}) as Record<string, any>;
+    summary.bankTransactionId = utr;
+    summary.state = 'Completed';
+
+    const remittanceNum = summary.remittanceNumber;
+    const orderIds: number[] = Array.isArray(summary.matchedOrders)
+      ? summary.matchedOrders.map((o: any) => o.orderId).filter(Boolean)
+      : [];
+
+    if (orderIds.length > 0) {
+      await prisma.order.updateMany({
+        where: { id: { in: orderIds } },
+        data: {
+          paymentReceivedUtr: utr,
+          paymentVerified: true,
+        },
+      });
+    } else if (remittanceNum) {
+      await prisma.order.updateMany({
+        where: { paymentReceivedRef: remittanceNum },
+        data: {
+          paymentReceivedUtr: utr,
+          paymentVerified: true,
+        },
+      });
+    }
+
+    if (Array.isArray(summary.matchedOrders)) {
+      summary.matchedOrders = summary.matchedOrders.map((o: any) => ({ ...o, utr }));
+    }
+
+    const updated = await prisma.reconciliationImport.update({
+      where: { id: importId },
+      data: { summary },
+    });
+
+    const maintenance = await runAccountsMaintenance().catch(() => ({ closed: 0 }));
+    res.json({ success: true, import: updated, closedNow: maintenance?.closed ?? 0 });
+  } catch (error: any) {
+    res.status(400).json({ error: error.message });
+  }
 });
 
 router.post('/orders/:id/payment-received', async (req: AuthenticatedRequest, res: Response): Promise<void> => {

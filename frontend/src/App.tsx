@@ -17,6 +17,7 @@ import { Products } from './pages/Products'
 import { Communications } from './pages/Communications'
 import { SupportDesk } from './pages/SupportDesk'
 import { Accounts } from './pages/Accounts'
+import { Remittances } from './pages/Remittances'
 import type { ReactNode } from 'react'
 
 const queryClient = new QueryClient({
@@ -70,6 +71,8 @@ export function App() {
                   <Route path="/ledger" element={<Navigate to="/tools" replace />} />
                   <Route path="/tools" element={<Tools />} />
                   <Route path="/accounts" element={<Accounts />} />
+                  <Route path="/remittance" element={<Remittances />} />
+                  <Route path="/remittances" element={<Navigate to="/remittance" replace />} />
                   <Route path="/communications" element={<Communications />} />
                   <Route path="/support" element={<SupportDesk />} />
                   <Route path="/settings" element={<Settings />} />

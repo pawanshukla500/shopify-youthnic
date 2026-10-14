@@ -18,6 +18,7 @@ import { Communications } from './pages/Communications'
 import { SupportDesk } from './pages/SupportDesk'
 import { Accounts } from './pages/Accounts'
 import { Remittances } from './pages/Remittances'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import type { ReactNode } from 'react'
 
 const queryClient = new QueryClient({
@@ -46,20 +47,21 @@ function RequireAuth({ children }: { children: ReactNode }) {
 
 export function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <ThemeProvider>
-        <ToastProvider>
-          <AuthProvider>
-            <BrowserRouter>
-              <Routes>
-                <Route path="/login" element={<Login />} />
-                <Route
-                  element={
-                    <RequireAuth>
-                      <Layout />
-                    </RequireAuth>
-                  }
-                >
+    <ErrorBoundary fallbackTitle="Youthnic OMS Application Error">
+      <QueryClientProvider client={queryClient}>
+        <ThemeProvider>
+          <ToastProvider>
+            <AuthProvider>
+              <BrowserRouter>
+                <Routes>
+                  <Route path="/login" element={<Login />} />
+                  <Route
+                    element={
+                      <RequireAuth>
+                        <Layout />
+                      </RequireAuth>
+                    }
+                  >
                   <Route path="/" element={<Dashboard />} />
                   <Route path="/orders" element={<Orders />} />
                   <Route path="/orders/:id" element={<OrderDetail />} />
@@ -83,6 +85,7 @@ export function App() {
         </ToastProvider>
       </ThemeProvider>
     </QueryClientProvider>
+    </ErrorBoundary>
   )
 }
 

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, Fragment } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   apiError,
@@ -23,6 +23,7 @@ import {
   useDocumentTitle,
   useToast,
 } from '../components/UI'
+import { ErrorBoundary } from '../components/ErrorBoundary'
 import { formatDate, formatMoney } from '../lib'
 
 function defaultMonth(): string {
@@ -30,6 +31,20 @@ function defaultMonth(): string {
   const year = ist.getUTCMonth() === 0 ? ist.getUTCFullYear() - 1 : ist.getUTCFullYear()
   const month = ist.getUTCMonth() === 0 ? 12 : ist.getUTCMonth()
   return `${year}-${String(month).padStart(2, '0')}`
+}
+
+function parseSummary(summary: unknown): Record<string, any> {
+  if (!summary) return {}
+  if (typeof summary === 'object') return summary as Record<string, any>
+  if (typeof summary === 'string') {
+    try {
+      const parsed = JSON.parse(summary)
+      return typeof parsed === 'object' && parsed !== null ? parsed : {}
+    } catch {
+      return {}
+    }
+  }
+  return {}
 }
 
 const UPLOADS: Array<{
@@ -198,12 +213,12 @@ function RemittanceUploadCard({
                 · <strong>{result.skippedDuplicates.length}</strong> duplicate tracking ID(s) skipped
               </span>
             )}
-            {result.unmatched.length > 0 && (
+            {result.unmatched && result.unmatched.length > 0 && (
               <span style={{ color: '#dc2626' }}>· <strong>{result.unmatched.length}</strong> not found</span>
             )}
           </div>
 
-          {result.notes.map((note) => (
+          {Array.isArray(result.notes) && result.notes.map((note) => (
             <div key={note} style={{ color: '#b45309', marginTop: '6px', fontSize: '11px', background: '#fef3c7', padding: '4px 8px', borderRadius: '4px' }}>
               {note}
             </div>
@@ -220,7 +235,7 @@ function RemittanceUploadCard({
             </details>
           )}
 
-          {result.unmatched.length > 0 && (
+          {result.unmatched && result.unmatched.length > 0 && (
             <details style={{ marginTop: '6px' }}>
               <summary style={{ cursor: 'pointer', color: '#dc2626', fontSize: '11px' }}>
                 View {result.unmatched.length} unmatched references
@@ -250,22 +265,27 @@ function DelhiveryRemittanceLogTable({
   const [editingUtrId, setEditingUtrId] = useState<number | null>(null)
   const [editingUtrValue, setEditingUtrValue] = useState('')
 
+  const safeImports = useMemo(() => (Array.isArray(imports) ? imports : []), [imports])
+
   const remittanceImports = useMemo(() => {
-    return imports.filter((imp) => imp.kind === 'DELHIVERY_REMITTANCE')
-  }, [imports])
+    return safeImports.filter((imp) => imp && imp.kind === 'DELHIVERY_REMITTANCE')
+  }, [safeImports])
 
   const filtered = useMemo(() => {
+    const query = search.trim().toLowerCase()
     return remittanceImports.filter((row) => {
-      const summary = row.summary || {}
-      const ref = summary.remittanceNumber || row.fileName
-      const utr = summary.bankTransactionId || ''
+      if (!row) return false
+      const s = parseSummary(row.summary)
+      const fileName = String(row.fileName || '')
+      const ref = String(s.remittanceNumber || fileName)
+      const utr = String(s.bankTransactionId || '')
       const matchesSearch =
-        !search ||
-        ref.toLowerCase().includes(search.toLowerCase()) ||
-        utr.toLowerCase().includes(search.toLowerCase()) ||
-        row.fileName.toLowerCase().includes(search.toLowerCase())
+        !query ||
+        ref.toLowerCase().includes(query) ||
+        utr.toLowerCase().includes(query) ||
+        fileName.toLowerCase().includes(query)
 
-      const state = summary.state || (utr ? 'Completed' : 'Pending')
+      const state = String(s.state || (utr ? 'Completed' : 'Pending'))
       const matchesState = stateFilter === 'ALL' || state === stateFilter
       return matchesSearch && matchesState
     })
@@ -286,9 +306,10 @@ function DelhiveryRemittanceLogTable({
     if (!isoOrCreated) return '—'
     try {
       const d = new Date(isoOrCreated)
+      if (Number.isNaN(d.getTime())) return String(isoOrCreated)
       return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
     } catch {
-      return isoOrCreated
+      return String(isoOrCreated)
     }
   }
 
@@ -377,19 +398,20 @@ function DelhiveryRemittanceLogTable({
             </thead>
             <tbody>
               {filtered.map((row) => {
-                const s = row.summary || {}
-                const ref = s.remittanceNumber || row.fileName.replace(/\.zip|\.csv|\.xlsx/i, '')
+                const s = parseSummary(row.summary)
+                const fileName = String(row.fileName || '')
+                const ref = String(s.remittanceNumber || (fileName ? fileName.replace(/\.zip|\.csv|\.xlsx/i, '') : `Batch-${row.id}`))
                 const date = s.remittanceDate || row.createdAt
-                const utr = s.bankTransactionId
+                const utr = s.bankTransactionId ? String(s.bankTransactionId) : ''
                 const isCompleted = s.state === 'Completed' || Boolean(utr)
                 const total = s.totalRemittance ?? (row.matchedCount > 0 ? '—' : 0)
                 const isExpanded = expandedId === row.id
                 const isEditingThisUtr = editingUtrId === row.id
+                const matchedOrders = Array.isArray(s.matchedOrders) ? s.matchedOrders : []
 
                 return (
-                  <>
+                  <Fragment key={row.id}>
                     <tr
-                      key={row.id}
                       style={{
                         background: isExpanded ? 'var(--bg-subtle, #f8fafc)' : undefined,
                         cursor: 'pointer',
@@ -403,7 +425,7 @@ function DelhiveryRemittanceLogTable({
                         <span style={{ fontFamily: 'var(--mono, monospace)', fontWeight: 700, color: '#2563eb' }}>
                           {ref}
                         </span>
-                        {row.fileName.endsWith('.zip') && (
+                        {fileName.toLowerCase().endsWith('.zip') && (
                           <span style={{ marginLeft: '6px', fontSize: '10px', background: '#dbeafe', color: '#1e40af', padding: '1px 5px', borderRadius: '4px' }}>
                             ZIP
                           </span>
@@ -485,7 +507,7 @@ function DelhiveryRemittanceLogTable({
                       <td>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                           <span style={{ fontWeight: 700, color: '#047857' }}>{row.matchedCount} orders</span>
-                          {s.skippedDuplicates && s.skippedDuplicates.length > 0 && (
+                          {Array.isArray(s.skippedDuplicates) && s.skippedDuplicates.length > 0 && (
                             <span
                               style={{
                                 background: '#fef3c7',
@@ -534,14 +556,14 @@ function DelhiveryRemittanceLogTable({
                           <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '8px', padding: '12px' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
                               <h4 style={{ margin: 0, fontSize: '13px', fontWeight: 700 }}>
-                                Orders in Remittance Batch {ref} ({s.matchedOrders?.length || row.matchedCount} items)
+                                Orders in Remittance Batch {ref} ({matchedOrders.length || row.matchedCount} items)
                               </h4>
                               <span style={{ fontSize: '11px', color: 'var(--muted)' }}>
                                 Uploaded: {formatDate(row.createdAt)} by {row.uploadedBy || 'system'}
                               </span>
                             </div>
 
-                            {s.matchedOrders && s.matchedOrders.length > 0 ? (
+                            {matchedOrders.length > 0 ? (
                               <div style={{ maxHeight: '280px', overflowY: 'auto' }}>
                                 <table style={{ width: '100%', fontSize: '11px', borderCollapse: 'collapse' }}>
                                   <thead>
@@ -555,22 +577,28 @@ function DelhiveryRemittanceLogTable({
                                     </tr>
                                   </thead>
                                   <tbody>
-                                    {s.matchedOrders.map((o, idx) => (
-                                      <tr key={idx} style={{ borderBottom: '1px solid var(--line)' }}>
-                                        <td style={{ padding: '6px 8px', fontWeight: 700 }}>
-                                          <a href={`/orders?search=${encodeURIComponent(o.shopifyOrderName?.replace(/^#/, '') || '')}`} style={{ color: '#2563eb', textDecoration: 'none' }}>
-                                            {o.shopifyOrderName || '—'}
-                                          </a>
-                                        </td>
-                                        <td style={{ padding: '6px 8px', fontFamily: 'monospace' }}>{o.waybillNumber || '—'}</td>
-                                        <td style={{ padding: '6px 8px' }}>{o.city || '—'}</td>
-                                        <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 600 }}>{o.amount ? formatMoney(o.amount) : '—'}</td>
-                                        <td style={{ padding: '6px 8px', color: '#15803d', fontWeight: 600 }}>{o.status || 'DELIVERED'}</td>
-                                        <td style={{ padding: '6px 8px', fontFamily: 'monospace', color: utr ? '#15803d' : 'var(--muted)' }}>
-                                          {o.utr || utr || 'Pending'}
-                                        </td>
-                                      </tr>
-                                    ))}
+                                    {matchedOrders.map((o: any, idx: number) => {
+                                      const orderName = String(o?.shopifyOrderName || '')
+                                      const searchParam = orderName.replace(/^#/, '')
+                                      return (
+                                        <tr key={idx} style={{ borderBottom: '1px solid var(--line)' }}>
+                                          <td style={{ padding: '6px 8px', fontWeight: 700 }}>
+                                            <a href={`/orders?search=${encodeURIComponent(searchParam)}`} style={{ color: '#2563eb', textDecoration: 'none' }}>
+                                              {orderName || '—'}
+                                            </a>
+                                          </td>
+                                          <td style={{ padding: '6px 8px', fontFamily: 'monospace' }}>{o?.waybillNumber || '—'}</td>
+                                          <td style={{ padding: '6px 8px' }}>{o?.city || '—'}</td>
+                                          <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 600 }}>
+                                            {typeof o?.amount === 'number' ? formatMoney(o.amount) : (o?.amount || '—')}
+                                          </td>
+                                          <td style={{ padding: '6px 8px', color: '#15803d', fontWeight: 600 }}>{o?.status || 'DELIVERED'}</td>
+                                          <td style={{ padding: '6px 8px', fontFamily: 'monospace', color: utr ? '#15803d' : 'var(--muted)' }}>
+                                            {o?.utr || utr || 'Pending'}
+                                          </td>
+                                        </tr>
+                                      )
+                                    })}
                                   </tbody>
                                 </table>
                               </div>
@@ -583,7 +611,7 @@ function DelhiveryRemittanceLogTable({
                         </td>
                       </tr>
                     )}
-                  </>
+                  </Fragment>
                 )
               })}
             </tbody>
@@ -594,7 +622,7 @@ function DelhiveryRemittanceLogTable({
   )
 }
 
-export function Remittances() {
+function RemittancesContent() {
   useDocumentTitle('Remittance Upload & Logs')
   const toast = useToast()
   const queryClient = useQueryClient()
@@ -627,7 +655,13 @@ export function Remittances() {
   })
 
   const data = overview.data
-  const value = (label: string) => data?.summary.find((s) => s.label === label)?.value ?? 0
+  const value = (label: string) => {
+    if (!data || !Array.isArray(data.summary)) return 0
+    const item = data.summary.find((s) => s.label === label)
+    return item?.value ?? 0
+  }
+
+  const rawImports = Array.isArray(data?.imports) ? data.imports : []
 
   return (
     <>
@@ -754,15 +788,15 @@ export function Remittances() {
           </div>
 
           {/* Delhivery ONE Synchronized Remittance Log Table */}
-          <DelhiveryRemittanceLogTable imports={data.imports} onRefresh={refresh} />
+          <DelhiveryRemittanceLogTable imports={rawImports} onRefresh={refresh} />
 
           {/* Complete System Upload & Deduplication History */}
           <Panel className="table-panel" style={{ marginTop: '24px' }}>
             <PanelHeading
               eyebrow="System Logs"
-              title={`All Upload Files History & Audit Logs (${data.imports.length})`}
+              title={`All Upload Files History & Audit Logs (${rawImports.length})`}
             />
-            {data.imports.length === 0 ? (
+            {rawImports.length === 0 ? (
               <p style={{ fontSize: '13px', color: 'var(--muted)', padding: '16px' }}>No files uploaded yet.</p>
             ) : (
               <div className="table-wrap">
@@ -780,8 +814,17 @@ export function Remittances() {
                     </tr>
                   </thead>
                   <tbody>
-                    {data.imports.map((row) => {
-                      const skippedCount = row.summary?.skippedDuplicates?.length || row.summary?.alreadyRemittedCount || 0
+                    {rawImports.map((row) => {
+                      const s = parseSummary(row.summary)
+                      const skippedCount = Array.isArray(s.skippedDuplicates)
+                        ? s.skippedDuplicates.length
+                        : (Number(s.alreadyRemittedCount) || 0)
+                      const unmatchedList = Array.isArray(row.unmatched)
+                        ? row.unmatched
+                        : typeof row.unmatched === 'string'
+                        ? (() => { try { return JSON.parse(row.unmatched) } catch { return [] } })()
+                        : []
+
                       return (
                         <tr key={row.id}>
                           <td>{formatDate(row.createdAt)}</td>
@@ -813,8 +856,8 @@ export function Remittances() {
                             )}
                           </td>
                           <td>
-                            {row.unmatched && row.unmatched.length > 0 ? (
-                              <span style={{ color: '#dc2626', fontWeight: 600 }}>{row.unmatched.length}</span>
+                            {unmatchedList.length > 0 ? (
+                              <span style={{ color: '#dc2626', fontWeight: 600 }}>{unmatchedList.length}</span>
                             ) : (
                               <span style={{ color: 'var(--muted)', fontSize: '11px' }}>0</span>
                             )}
@@ -831,5 +874,13 @@ export function Remittances() {
         </>
       )}
     </>
+  )
+}
+
+export function Remittances() {
+  return (
+    <ErrorBoundary fallbackTitle="Unable to load Remittance Logs">
+      <RemittancesContent />
+    </ErrorBoundary>
   )
 }

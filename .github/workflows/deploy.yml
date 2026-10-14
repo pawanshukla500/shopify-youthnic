@@ -189,10 +189,18 @@ jobs:
               --exclude='./.git' \
               -czf /tmp/shopify-source.tar.gz .
 
-          ssh -p "$HOSTINGER_PORT" -i ~/.ssh/id_ed25519 "${HOSTINGER_USER}@${HOSTINGER_HOST}" "mkdir -p /opt/shopify"
-          scp -P "$HOSTINGER_PORT" -i ~/.ssh/id_ed25519 /tmp/hostinger.env "${HOSTINGER_USER}@${HOSTINGER_HOST}:/opt/shopify/hostinger.env"
-          scp -P "$HOSTINGER_PORT" -i ~/.ssh/id_ed25519 /tmp/shopify-source.tar.gz "${HOSTINGER_USER}@${HOSTINGER_HOST}:/opt/shopify/shopify-source.tar.gz"
-          scp -P "$HOSTINGER_PORT" -i ~/.ssh/id_ed25519 scripts/deploy-hostinger.sh "${HOSTINGER_USER}@${HOSTINGER_HOST}:/opt/shopify/deploy.sh"
+          SSH_OPTS="-o ConnectTimeout=25 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o StrictHostKeyChecking=accept-new"
+
+          echo "Connecting to Hostinger VPS and uploading artifacts..."
+          for i in {1..3}; do
+            ssh -p "$HOSTINGER_PORT" -i ~/.ssh/id_ed25519 $SSH_OPTS "${HOSTINGER_USER}@${HOSTINGER_HOST}" "mkdir -p /opt/shopify" && break || sleep 5
+          done
+
+          for i in {1..3}; do
+            scp -P "$HOSTINGER_PORT" -i ~/.ssh/id_ed25519 $SSH_OPTS /tmp/hostinger.env "${HOSTINGER_USER}@${HOSTINGER_HOST}:/opt/shopify/hostinger.env" && \
+            scp -P "$HOSTINGER_PORT" -i ~/.ssh/id_ed25519 $SSH_OPTS /tmp/shopify-source.tar.gz "${HOSTINGER_USER}@${HOSTINGER_HOST}:/opt/shopify/shopify-source.tar.gz" && \
+            scp -P "$HOSTINGER_PORT" -i ~/.ssh/id_ed25519 $SSH_OPTS scripts/deploy-hostinger.sh "${HOSTINGER_USER}@${HOSTINGER_HOST}:/opt/shopify/deploy.sh" && break || sleep 5
+          done
 
       - name: Execute Remote Hostinger VPS Deployment
         env:
@@ -201,5 +209,7 @@ jobs:
           HOSTINGER_PORT: ${{ secrets.HOSTINGER_SSH_PORT || 22 }}
           DATA_LOSS_FLAG: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_data_loss && '--accept-data-loss' || '' }}
         run: |
-          ssh -p "$HOSTINGER_PORT" -i ~/.ssh/id_ed25519 "${HOSTINGER_USER}@${HOSTINGER_HOST}" "DATA_LOSS_FLAG='$DATA_LOSS_FLAG' bash /opt/shopify/deploy.sh"
+          SSH_OPTS="-o ConnectTimeout=25 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o StrictHostKeyChecking=accept-new"
+          ssh -p "$HOSTINGER_PORT" -i ~/.ssh/id_ed25519 $SSH_OPTS "${HOSTINGER_USER}@${HOSTINGER_HOST}" "DATA_LOSS_FLAG='$DATA_LOSS_FLAG' bash /opt/shopify/deploy.sh"
+
 

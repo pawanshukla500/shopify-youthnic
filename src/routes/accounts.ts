@@ -17,6 +17,7 @@ import type { AuthenticatedRequest } from '../middleware/auth.middleware';
 import { readSpreadsheet, parseDateLoose } from '../modules/accounts/spreadsheet';
 import {
   ImportKind,
+  importCarrierRemittance,
   importDelhiveryCharges,
   importDelhiveryRemittance,
   importGatewaySettlement,
@@ -47,7 +48,16 @@ const router = Router();
 // The file arrives base64-encoded in JSON (express.json limit 10 MB; base64
 // adds a third), so 7 MB of file is the most that fits.
 const MAX_UPLOAD_BYTES = 7 * 1024 * 1024;
-const IMPORT_KINDS: ImportKind[] = ['DELHIVERY_REMITTANCE', 'DELHIVERY_CHARGES', 'PG_SETTLEMENT'];
+const IMPORT_KINDS: ImportKind[] = [
+  'DELHIVERY_REMITTANCE',
+  'DELHIVERY_CHARGES',
+  'PG_SETTLEMENT',
+  'GOKWIK_SETTLEMENT',
+  'PHONEPE_SETTLEMENT',
+  'AMAZON_SHIPPING',
+  'EKART_SHIPPING',
+  'GENERIC_CARRIER',
+];
 
 function requestedMonth(value: unknown): string {
   const month = typeof value === 'string' && value ? value : previousMonth();
@@ -175,6 +185,28 @@ router.get('/template/:type', async (req: AuthenticatedRequest, res: Response): 
     res.send(csv);
     return;
   }
+  if (type === 'phonepe-settlement') {
+    const csv = [
+      'Order ID,Payment ID,Merchant Order ID,Amount,Fee,Tax,Settlement Date,UTR',
+      '#26YOU6020,T26101014523,26YOU6020,899.00,16.18,2.91,11-10-2026,AXISCN002938475',
+      '#26YOU6021,T26101014524,26YOU6021,1249.00,22.48,4.05,11-10-2026,AXISCN002938475',
+    ].join('\r\n');
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="phonepe_settlement_sample_template.csv"');
+    res.send(csv);
+    return;
+  }
+  if (type === 'carrier-remittance') {
+    const csv = [
+      'Waybill Number,Client Order ID,COD Amount,Remittance Number,Bank Transaction ID,Remittance Processed Date',
+      'AMZIN00192837,#26YOU5920,850.00,AMZREM20261012,HDFCN00892718,12-10-2026',
+      'AMZIN00192838,#26YOU5921,1150.00,AMZREM20261012,HDFCN00892718,12-10-2026',
+    ].join('\r\n');
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="carrier_remittance_sample_template.csv"');
+    res.send(csv);
+    return;
+  }
   res.status(404).json({ error: 'Template type not found' });
 });
 
@@ -205,7 +237,7 @@ router.put('/settings', async (req: AuthenticatedRequest, res: Response): Promis
 
 router.post('/import', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const { kind, fileName, contentBase64, defaults } = req.body || {};
+    const { kind, fileName, contentBase64, defaults, force } = req.body || {};
     if (!IMPORT_KINDS.includes(kind)) {
       res.status(400).json({ error: `kind must be one of ${IMPORT_KINDS.join(', ')}` });
       return;
@@ -214,24 +246,92 @@ router.post('/import', async (req: AuthenticatedRequest, res: Response): Promise
       res.status(400).json({ error: 'fileName and contentBase64 are required' });
       return;
     }
+
+    const cleanFileName = String(fileName).trim();
+
+    // Strict duplicate check unless explicitly overridden with force: true
+    if (!force) {
+      // 1. Exact file name match
+      let existing = await prisma.reconciliationImport.findFirst({
+        where: { fileName: cleanFileName },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      // 2. Remittance batch number match in file name (e.g. R3359352026101200000)
+      if (!existing) {
+        const refMatch = cleanFileName.match(/\b(R\d{6,})\b/i);
+        if (refMatch) {
+          existing = await prisma.reconciliationImport.findFirst({
+            where: {
+              OR: [
+                { fileName: { contains: refMatch[1] } },
+                { remittanceNumber: refMatch[1] },
+              ],
+            },
+            orderBy: { createdAt: 'desc' },
+          });
+        }
+      }
+
+      // 3. User provided remittanceRef match
+      if (!existing && defaults?.remittanceRef) {
+        const ref = String(defaults.remittanceRef).trim();
+        existing = await prisma.reconciliationImport.findFirst({
+          where: {
+            OR: [
+              { remittanceNumber: ref },
+              { fileName: { contains: ref } },
+            ],
+          },
+          orderBy: { createdAt: 'desc' },
+        });
+      }
+
+      if (existing) {
+        const uploadDate = new Date(existing.createdAt).toLocaleDateString('en-IN', {
+          day: 'numeric',
+          month: 'short',
+          year: 'numeric',
+        });
+        res.status(409).json({
+          error: `Duplicate File: "${cleanFileName}" was already uploaded on ${uploadDate} with ${existing.matchedCount} orders matched. Duplicate uploads are blocked to prevent double-counting.`,
+          code: 'DUPLICATE_FILE_ALREADY_UPLOADED',
+          existingImport: {
+            id: existing.id,
+            fileName: existing.fileName,
+            createdAt: existing.createdAt,
+            matchedCount: existing.matchedCount,
+            totalRemittance: existing.totalRemittance,
+            bankTransactionId: existing.bankTransactionId,
+            remittanceNumber: existing.remittanceNumber,
+          },
+        });
+        return;
+      }
+    }
+
     const content = Buffer.from(contentBase64, 'base64');
     if (content.length > MAX_UPLOAD_BYTES) {
       res.status(413).json({ error: 'File is larger than 7 MB. Split it by date range and upload the parts.' });
       return;
     }
 
-    const sheets = await readSpreadsheet(String(fileName), content);
+    const sheets = await readSpreadsheet(cleanFileName, content);
     if (!sheets.length) {
       res.status(400).json({ error: 'The file has no rows that could be read.' });
       return;
     }
     const by = req.user?.email;
-    const result =
-      kind === 'DELHIVERY_REMITTANCE'
-        ? await importDelhiveryRemittance(String(fileName), sheets, defaults || {}, by)
-        : kind === 'DELHIVERY_CHARGES'
-          ? await importDelhiveryCharges(String(fileName), sheets, by)
-          : await importGatewaySettlement(String(fileName), sheets, by);
+    let result;
+    if (kind === 'DELHIVERY_REMITTANCE') {
+      result = await importDelhiveryRemittance(cleanFileName, sheets, defaults || {}, by);
+    } else if (kind === 'DELHIVERY_CHARGES') {
+      result = await importDelhiveryCharges(cleanFileName, sheets, by);
+    } else if (kind === 'GOKWIK_SETTLEMENT' || kind === 'PHONEPE_SETTLEMENT' || kind === 'PG_SETTLEMENT') {
+      result = await importGatewaySettlement(cleanFileName, sheets, by, kind);
+    } else {
+      result = await importCarrierRemittance(kind, cleanFileName, sheets, defaults || {}, by);
+    }
 
     // Newly paid orders may now be past their return window.
     const maintenance = await runAccountsMaintenance().catch((error) => {

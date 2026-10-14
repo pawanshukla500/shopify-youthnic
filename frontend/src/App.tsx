@@ -72,7 +72,7 @@ export function App() {
                   <Route path="/tracking" element={<Tracking />} />
                   <Route path="/ledger" element={<Navigate to="/tools" replace />} />
                   <Route path="/tools" element={<Tools />} />
-                  <Route path="/accounts" element={<Accounts />} />
+                  <Route path="/accounts" element={<Navigate to="/remittance" replace />} />
                   <Route path="/remittance" element={<Remittances />} />
                   <Route path="/remittances" element={<Navigate to="/remittance" replace />} />
                   <Route path="/communications" element={<Communications />} />

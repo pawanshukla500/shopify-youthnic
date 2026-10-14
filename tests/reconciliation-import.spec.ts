@@ -18,6 +18,7 @@ const { prismaStub } = vi.hoisted(() => ({
 vi.mock('../src/database/prisma', () => ({ default: prismaStub }));
 
 import {
+  importCarrierRemittance,
   importDelhiveryCharges,
   importDelhiveryRemittance,
   importGatewaySettlement,
@@ -311,3 +312,66 @@ describe('review fixes', () => {
     expect(prismaStub.shipment.update.mock.calls[0][0].data.rtoCharge).toBeUndefined();
   });
 });
+
+describe('Carrier Remittance (Amazon Shipping / Ekart / Generic)', () => {
+  it('marks matched waybills as remitted and captures UTR and amount', async () => {
+    prismaStub.shipment.findFirst.mockImplementation(async ({ where }: any) =>
+      where.OR.some((c: any) => c.waybillNumber === 'AMZ1001')
+        ? { id: 10, codAmount: 950, codRemitted: false, order: { id: 60, totalAmount: 950, shopifyOrderName: '#26YOU5920' } }
+        : null
+    );
+
+    const result = await importCarrierRemittance(
+      'AMAZON_SHIPPING',
+      'amazon_remit.csv',
+      [
+        sheet('amazon', [
+          ['Waybill Number', 'COD Amount', 'Remittance Number', 'UTR Number', 'Payment Date'],
+          ['AMZ1001', '950.00', 'AMZ-REM-01', 'HDFCN99281726', '12-10-2026'],
+          ['AMZ9999', '500.00', 'AMZ-REM-01', 'HDFCN99281726', '12-10-2026'],
+        ]),
+      ]
+    );
+
+    expect(result.matchedCount).toBe(1);
+    expect(result.unmatched).toEqual(['AMZ9999']);
+    expect(result.totalRemittance).toBe(950);
+    expect(prismaStub.shipment.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 10 },
+        data: expect.objectContaining({
+          codRemitted: true,
+          codRemittedAmount: 950,
+          codRemittanceRef: 'AMZ-REM-01',
+          status: 'DELIVERED',
+        }),
+      })
+    );
+  });
+
+  it('skips duplicate tracking IDs if already remitted', async () => {
+    prismaStub.shipment.findFirst.mockResolvedValue({
+      id: 11,
+      codAmount: 600,
+      codRemitted: true,
+      codRemittedAmount: 600,
+      order: { id: 61, totalAmount: 600 },
+    });
+
+    const result = await importCarrierRemittance(
+      'EKART_SHIPPING',
+      'ekart_remit.csv',
+      [
+        sheet('ekart', [
+          ['Waybill Number', 'COD Amount', 'Remittance Number'],
+          ['EKART1001', '600.00', 'EKART-BATCH-1'],
+        ]),
+      ]
+    );
+
+    expect(result.matchedCount).toBe(0);
+    expect(result.skippedDuplicates).toEqual(['EKART1001']);
+    expect(prismaStub.shipment.update).not.toHaveBeenCalled();
+  });
+});
+

@@ -1274,9 +1274,15 @@ export async function syncBulkExternalFulfillments(orderIds?: number[]): Promise
   return response.data
 }
 
-// ─── Payments & Accounts ────────────────────────────────
-
-export type AccountsImportKind = 'DELHIVERY_REMITTANCE' | 'DELHIVERY_CHARGES' | 'PG_SETTLEMENT'
+export type AccountsImportKind =
+  | 'DELHIVERY_REMITTANCE'
+  | 'DELHIVERY_CHARGES'
+  | 'PG_SETTLEMENT'
+  | 'GOKWIK_SETTLEMENT'
+  | 'PHONEPE_SETTLEMENT'
+  | 'AMAZON_SHIPPING'
+  | 'EKART_SHIPPING'
+  | 'GENERIC_CARRIER'
 
 export interface MatchedOrderSummary {
   orderId?: number
@@ -1368,8 +1374,10 @@ export async function downloadAccountsReport(params?: string | { month?: string;
   window.URL.revokeObjectURL(url)
 }
 
-/** Download a sample template file for Delhivery Remittance, Charges or GoKwik settlement. */
-export async function downloadAccountsTemplate(type: 'delhivery-remittance' | 'delhivery-charges' | 'gokwik-settlement'): Promise<void> {
+/** Download a sample template file for Delhivery Remittance, Charges, GoKwik, PhonePe, or partner carriers. */
+export async function downloadAccountsTemplate(
+  type: 'delhivery-remittance' | 'delhivery-charges' | 'gokwik-settlement' | 'phonepe-settlement' | 'carrier-remittance'
+): Promise<void> {
   const response = await api.get(`/api/accounts/template/${type}`, { responseType: 'blob' })
   const url = window.URL.createObjectURL(new Blob([response.data]))
   const link = document.createElement('a')
@@ -1403,10 +1411,11 @@ function fileToBase64(file: File): Promise<string> {
 export async function importAccountsFile(
   kind: AccountsImportKind,
   file: File,
-  defaults?: { utr?: string; remittanceRef?: string; remittedAt?: string }
+  defaults?: { utr?: string; remittanceRef?: string; remittedAt?: string },
+  force?: boolean
 ): Promise<AccountsImportResult> {
   const contentBase64 = await fileToBase64(file)
-  const response = await api.post('/api/accounts/import', { kind, fileName: file.name, contentBase64, defaults })
+  const response = await api.post('/api/accounts/import', { kind, fileName: file.name, contentBase64, defaults, force })
   return response.data
 }
 

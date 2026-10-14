@@ -19,7 +19,15 @@ import prisma from '../../database/prisma';
 import logger from '../../utils/logger';
 import { ParsedSheet, parseAmount, parseDateLoose, pickColumn } from './spreadsheet';
 
-export type ImportKind = 'DELHIVERY_REMITTANCE' | 'DELHIVERY_CHARGES' | 'PG_SETTLEMENT';
+export type ImportKind =
+  | 'DELHIVERY_REMITTANCE'
+  | 'DELHIVERY_CHARGES'
+  | 'PG_SETTLEMENT'
+  | 'GOKWIK_SETTLEMENT'
+  | 'PHONEPE_SETTLEMENT'
+  | 'AMAZON_SHIPPING'
+  | 'EKART_SHIPPING'
+  | 'GENERIC_CARRIER';
 
 export interface MatchedOrderSummary {
   orderId?: number;
@@ -499,7 +507,8 @@ const SETTLED_STATES = /^(success|successful|settled|processed|completed|paid|cr
 export async function importGatewaySettlement(
   fileName: string,
   sheets: ParsedSheet[],
-  uploadedBy?: string
+  uploadedBy?: string,
+  kind: ImportKind = 'PG_SETTLEMENT'
 ): Promise<ImportResult> {
   const headers = sheets.flatMap((s) => s.headers);
   const columns = {
@@ -529,7 +538,7 @@ export async function importGatewaySettlement(
   if (!columns.order && !columns.transaction) {
     return saveImport(
       {
-        kind: 'PG_SETTLEMENT',
+        kind,
         fileName,
         rowCount: 0,
         matchedCount: 0,
@@ -543,7 +552,7 @@ export async function importGatewaySettlement(
 
   // One settlement can list an order more than once (split payments,
   // refund adjustments), so amounts and fees are summed per order.
-  const perOrder = new Map<number, { amount: number; fee: number; utr?: string; at: Date; ref?: string }>();
+  const perOrder = new Map<number, { orderName?: string; city?: string; amount: number; fee: number; utr?: string; at: Date; ref?: string }>();
   let rowCount = 0;
   let skippedState = 0;
   let codRows = 0;
@@ -567,7 +576,13 @@ export async function importGatewaySettlement(
       continue;
     }
 
-    const entry = perOrder.get(order.id) || { amount: 0, fee: 0, at: new Date(0) };
+    const entry = perOrder.get(order.id) || {
+      orderName: order.shopifyOrderName,
+      city: order.city || undefined,
+      amount: 0,
+      fee: 0,
+      at: new Date(0),
+    };
     entry.amount += (columns.amount && parseAmount(row[columns.amount])) || 0;
     entry.fee += Math.abs((columns.fee && parseAmount(row[columns.fee])) || 0) + Math.abs((columns.tax && parseAmount(row[columns.tax])) || 0);
     const utr = columns.utr ? row[columns.utr] : '';
@@ -579,14 +594,38 @@ export async function importGatewaySettlement(
   }
 
   let missingUtr = 0;
+  let totalSettled = 0;
+  let primaryUtr: string | null = null;
+  const matchedOrders: MatchedOrderSummary[] = [];
+
   for (const [orderId, entry] of perOrder) {
     if (!entry.utr) missingUtr++;
+    if (!primaryUtr && entry.utr) primaryUtr = entry.utr;
+    const amount = Math.round(entry.amount * 100) / 100 || null;
+    if (amount) totalSettled += amount;
+
+    matchedOrders.push({
+      orderId,
+      shopifyOrderName: entry.orderName,
+      amount: amount || 0,
+      utr: entry.utr || null,
+      status: 'DELIVERED',
+      city: entry.city,
+    });
+
+    const sourceLabel =
+      kind === 'GOKWIK_SETTLEMENT'
+        ? 'GOKWIK_SETTLEMENT'
+        : kind === 'PHONEPE_SETTLEMENT'
+          ? 'PHONEPE_SETTLEMENT'
+          : 'PG_SETTLEMENT_REPORT';
+
     await recordPaymentReceived(orderId, {
       receivedAt: entry.at.getTime() > 0 ? entry.at : new Date(),
-      amount: Math.round(entry.amount * 100) / 100 || null,
+      amount,
       utr: entry.utr || null,
       ref: entry.ref || null,
-      source: 'PG_SETTLEMENT_REPORT',
+      source: sourceLabel,
       gatewayFee: Math.round(entry.fee * 100) / 100,
     });
   }
@@ -594,8 +633,184 @@ export async function importGatewaySettlement(
   if (skippedState) notes.push(`${skippedState} row(s) were not settled yet (status column) and were skipped.`);
   if (codRows) notes.push(`${codRows} row(s) matched COD orders and were skipped; COD money comes from the Delhivery remittance.`);
   if (missingUtr) notes.push(`${missingUtr} order(s) were matched but the file has no UTR for them.`);
+
   return saveImport(
-    { kind: 'PG_SETTLEMENT', fileName, rowCount, matchedCount: perOrder.size, unmatched, columns, notes },
+    {
+      kind,
+      fileName,
+      rowCount,
+      matchedCount: perOrder.size,
+      unmatched,
+      columns,
+      notes,
+      totalRemittance: Math.round(totalSettled * 100) / 100,
+      bankTransactionId: primaryUtr,
+      state: primaryUtr ? 'Completed' : 'Pending',
+      matchedOrders,
+    },
     uploadedBy
   );
 }
+
+// ─── Partner Carrier Remittance (Amazon Shipping / Ekart / Generic) ─────
+
+export async function importCarrierRemittance(
+  carrierKind: ImportKind,
+  fileName: string,
+  sheets: ParsedSheet[],
+  defaults: RemittanceDefaults = {},
+  uploadedBy?: string
+): Promise<ImportResult> {
+  const headers = sheets.flatMap((s) => s.headers);
+  const columns = {
+    awb: pickColumn(headers, AWB_COLUMN),
+    order: pickColumn(headers, ORDER_COLUMN),
+    utr: pickColumn(headers, [/^utr( no| number)?$/, /bank transaction id|bank txn|utr|bank ref|transaction ref/]),
+    remittance: pickColumn(headers, [/remittance (number|no|id|ref)/, /\bcrn\b|batch (id|no)/]),
+    amount: pickColumn(headers, [
+      /remitted amount|remittance amount/,
+      /amount payable/,
+      /^cod amount$|cod amount/,
+      /net amount/,
+      /^amount$|amount/,
+    ]),
+    date: pickColumn(headers, [/remittance (processed )?date|processed date|remitted (on|at|date)/, /payment date|^date$|date/]),
+  };
+
+  const notes: string[] = [];
+  const unmatched: string[] = [];
+  const skippedDuplicates: string[] = [];
+  const seenInBatch = new Set<string>();
+  let rowCount = 0;
+  let matchedCount = 0;
+  let missingUtr = 0;
+
+  if (!columns.awb && !columns.order) {
+    return saveImport(
+      {
+        kind: carrierKind,
+        fileName,
+        rowCount: 0,
+        matchedCount: 0,
+        unmatched: [],
+        skippedDuplicates: [],
+        columns,
+        notes: [`No Waybill / AWB or Order Number column found. Columns in the file: ${headers.join(', ')}`],
+      },
+      uploadedBy
+    );
+  }
+
+  const fallbackDate = parseDateLoose(defaults.remittedAt || '') || new Date();
+  const defaultUtr = defaults.utr;
+  const defaultRef = defaults.remittanceRef || fileName.replace(/\.zip|\.csv|\.xlsx/i, '');
+
+  let totalAmountRemitted = 0;
+  const matchedOrders: MatchedOrderSummary[] = [];
+
+  for (const { row } of rowsOf(sheets)) {
+    const awb = (columns.awb ? row[columns.awb] : '').trim();
+    const orderRef = (columns.order ? row[columns.order] : '').trim();
+    if (!awb && !orderRef) continue;
+    rowCount++;
+
+    const trackingKey = awb || orderRef;
+    if (seenInBatch.has(trackingKey)) {
+      skippedDuplicates.push(`${trackingKey} (duplicate row in file)`);
+      continue;
+    }
+    seenInBatch.add(trackingKey);
+
+    const shipment = await prisma.shipment.findFirst({
+      where: {
+        OR: [
+          ...(awb ? [{ waybillNumber: awb }] : []),
+          ...(orderRef
+            ? [
+                { order: { shopifyOrderName: `#${orderRef.replace(/^#/, '')}` } },
+                { order: { shopifyOrderName: orderRef.replace(/^#/, '') } },
+              ]
+            : []),
+        ],
+      },
+      include: { order: true },
+    });
+    if (!shipment) {
+      unmatched.push(awb || orderRef);
+      continue;
+    }
+
+    if (shipment.codRemitted && shipment.codRemittedAmount && shipment.codRemittedAmount > 0) {
+      skippedDuplicates.push(awb || orderRef);
+      continue;
+    }
+
+    const utr = (columns.utr && row[columns.utr]) || defaultUtr || null;
+    const ref = (columns.remittance && row[columns.remittance]) || defaultRef || null;
+    const remittedAt = (columns.date && parseDateLoose(row[columns.date])) || fallbackDate;
+    const fileAmount = columns.amount ? parseAmount(row[columns.amount]) : null;
+    const amount: number = fileAmount || shipment.codAmount || shipment.order?.totalAmount || 0;
+    if (!utr) missingUtr++;
+    totalAmountRemitted += amount;
+
+    matchedOrders.push({
+      orderId: shipment.order?.id,
+      shopifyOrderName: shipment.order?.shopifyOrderName,
+      waybillNumber: shipment.waybillNumber || awb,
+      amount,
+      utr,
+      status: 'DELIVERED',
+      city: row['City'] || row['city'],
+    });
+
+    await prisma.shipment.update({
+      where: { id: shipment.id },
+      data: {
+        codCollected: true,
+        codCollectedAt: shipment.codCollectedAt || remittedAt,
+        codRemitted: true,
+        codRemittedAt: remittedAt,
+        codRemittanceRef: ref || utr || `${carrierKind}-REMITTANCE`,
+        codRemittedAmount: amount,
+        ...(shipment.status !== 'DELIVERED' ? { status: 'DELIVERED' } : {}),
+      },
+    });
+    if (shipment.order) {
+      await recordPaymentReceived(shipment.order.id, {
+        receivedAt: remittedAt,
+        amount,
+        utr,
+        ref,
+        source: `${carrierKind}_REMITTANCE`,
+        deliveredAt: shipment.order.deliveredAt || remittedAt,
+      });
+    }
+    matchedCount++;
+  }
+
+  if (missingUtr) notes.push(`${missingUtr} order(s) had no UTR in the file.`);
+  if (skippedDuplicates.length > 0) {
+    notes.push(`${skippedDuplicates.length} tracking ID(s) were skipped because they were already remitted or duplicated.`);
+  }
+
+  return saveImport(
+    {
+      kind: carrierKind,
+      fileName,
+      rowCount,
+      matchedCount,
+      unmatched,
+      skippedDuplicates,
+      remittanceNumber: defaultRef,
+      remittanceDate: fallbackDate.toISOString().slice(0, 10),
+      bankTransactionId: defaultUtr || null,
+      state: defaultUtr ? 'Completed' : 'Pending',
+      totalRemittance: Math.round(totalAmountRemitted * 100) / 100,
+      matchedOrders,
+      columns,
+      notes,
+    },
+    uploadedBy
+  );
+}
+

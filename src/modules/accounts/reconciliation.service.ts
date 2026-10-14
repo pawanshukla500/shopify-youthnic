@@ -552,7 +552,18 @@ export async function importGatewaySettlement(
 
   // One settlement can list an order more than once (split payments,
   // refund adjustments), so amounts and fees are summed per order.
-  const perOrder = new Map<number, { orderName?: string; city?: string; amount: number; fee: number; utr?: string; at: Date; ref?: string }>();
+  const perOrder = new Map<
+    number,
+    {
+      orderName?: string;
+      city?: string;
+      amount: number;
+      fee: number;
+      utr: string;
+      at: Date;
+      ref: string;
+    }
+  >();
   let rowCount = 0;
   let skippedState = 0;
   let codRows = 0;
@@ -578,10 +589,12 @@ export async function importGatewaySettlement(
 
     const entry = perOrder.get(order.id) || {
       orderName: order.shopifyOrderName,
-      city: order.city || undefined,
+      city: (order as any).city || row['City'] || row['city'] || undefined,
       amount: 0,
       fee: 0,
       at: new Date(0),
+      utr: '',
+      ref: '',
     };
     entry.amount += (columns.amount && parseAmount(row[columns.amount])) || 0;
     entry.fee += Math.abs((columns.fee && parseAmount(row[columns.fee])) || 0) + Math.abs((columns.tax && parseAmount(row[columns.tax])) || 0);

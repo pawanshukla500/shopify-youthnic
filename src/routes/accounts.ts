@@ -263,10 +263,7 @@ router.post('/import', async (req: AuthenticatedRequest, res: Response): Promise
         if (refMatch) {
           existing = await prisma.reconciliationImport.findFirst({
             where: {
-              OR: [
-                { fileName: { contains: refMatch[1] } },
-                { remittanceNumber: refMatch[1] },
-              ],
+              fileName: { contains: refMatch[1] },
             },
             orderBy: { createdAt: 'desc' },
           });
@@ -278,10 +275,7 @@ router.post('/import', async (req: AuthenticatedRequest, res: Response): Promise
         const ref = String(defaults.remittanceRef).trim();
         existing = await prisma.reconciliationImport.findFirst({
           where: {
-            OR: [
-              { remittanceNumber: ref },
-              { fileName: { contains: ref } },
-            ],
+            fileName: { contains: ref },
           },
           orderBy: { createdAt: 'desc' },
         });
@@ -293,6 +287,10 @@ router.post('/import', async (req: AuthenticatedRequest, res: Response): Promise
           month: 'short',
           year: 'numeric',
         });
+        const summaryData =
+          existing.summary && typeof existing.summary === 'object'
+            ? (existing.summary as Record<string, any>)
+            : {};
         res.status(409).json({
           error: `Duplicate File: "${cleanFileName}" was already uploaded on ${uploadDate} with ${existing.matchedCount} orders matched. Duplicate uploads are blocked to prevent double-counting.`,
           code: 'DUPLICATE_FILE_ALREADY_UPLOADED',
@@ -301,9 +299,9 @@ router.post('/import', async (req: AuthenticatedRequest, res: Response): Promise
             fileName: existing.fileName,
             createdAt: existing.createdAt,
             matchedCount: existing.matchedCount,
-            totalRemittance: existing.totalRemittance,
-            bankTransactionId: existing.bankTransactionId,
-            remittanceNumber: existing.remittanceNumber,
+            totalRemittance: summaryData.totalRemittance ?? null,
+            bankTransactionId: summaryData.bankTransactionId ?? null,
+            remittanceNumber: summaryData.remittanceNumber ?? null,
           },
         });
         return;

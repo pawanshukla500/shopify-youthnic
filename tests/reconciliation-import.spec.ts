@@ -226,6 +226,104 @@ describe('Delhivery charges (wallet ledger)', () => {
       ])
     );
   });
+
+  it('filters out duplicate sheets, extracts JSON metadata, zeroes out Not Picked parcels, and tallies totalRemittance', async () => {
+    prismaStub.return.findFirst.mockResolvedValue(null);
+    prismaStub.shipment.findFirst.mockImplementation(async ({ where }: any) => {
+      if (where.waybillNumber === '30100810010242') {
+        return { id: 101, order: { id: 501, shopifyOrderName: '#26YOU5901', customerCity: 'Surat' } };
+      }
+      if (where.waybillNumber === '30100810009704') {
+        return { id: 102, order: { id: 502, shopifyOrderName: '#26YOU5902', customerCity: 'Mumbai' } };
+      }
+      return null;
+    });
+
+    const deductions = sheet('Deductions', [
+      ['Date & Time', 'Miles', 'AWB', 'Txn ID', 'Type', 'Description', 'Status', 'Zone'],
+      [
+        '2026-09-28 11:25:41',
+        '92.88',
+        '30100810010242',
+        'MTX1',
+        'debit',
+        '{"zn": "B", "rs": 92.88, "st": "Manifested", "wt": 0.5}',
+        'success',
+        'B',
+      ],
+      [
+        '2026-09-26 15:33:24',
+        '89.94',
+        '30100810009704',
+        'MTX2',
+        'debit',
+        '{"st": "Manifested"}',
+        'success',
+        'B',
+      ],
+    ]);
+    // Duplicate sheet exported by Delhivery ONE
+    const duplicateAwbDeductions = sheet('AWB Deductions', [
+      ['Date & Time', 'Miles', 'AWB', 'Txn ID', 'Type', 'Description', 'Status', 'Zone'],
+      ['2026-09-28 11:25:41', '92.88', '30100810010242', 'MTX1', 'debit', '', 'success', 'B'],
+    ]);
+    // Refund sheet with cancelled parcel "Not Picked"
+    const refunds = sheet('Refunds', [
+      ['Date & Time', 'Miles', 'AWB', 'Txn ID', 'Type', 'Description', 'Status'],
+      ['2026-09-26 15:33:24', '89.94', '30100810009704', 'MTX2', 'credit', '{"st": "Not Picked"}', 'success'],
+    ]);
+    const duplicateAwbRefunds = sheet('AWB Refunds', [
+      ['Date & Time', 'Miles', 'AWB', 'Txn ID', 'Type', 'Description', 'Status'],
+      ['2026-09-26 15:33:24', '89.94', '30100810009704', 'MTX2', 'credit', '', 'success'],
+    ]);
+
+    const result = await importDelhiveryCharges('WalletReport-10_14_2026.xlsx', [
+      deductions,
+      duplicateAwbDeductions,
+      refunds,
+      duplicateAwbRefunds,
+    ]);
+
+    expect(result.rowCount).toBe(2); // Only rows from Deductions counted, duplicate AWB Deductions ignored!
+    expect(result.matchedCount).toBe(2);
+    expect(result.totalRemittance).toBe(92.88); // 92.88 + 0 (refunded) = 92.88
+
+    // 30100810010242 billed at 92.88
+    const normalShipment = prismaStub.shipment.update.mock.calls.find((c: any[]) => c[0].where.id === 101);
+    expect(normalShipment[0].data).toMatchObject({
+      forwardCharge: 92.88,
+      shippingCostSource: 'ACTUAL',
+      chargedZone: 'B',
+      billedWeightGrams: 500,
+    });
+
+    // 30100810009704 was refunded because Not Picked -> forwardCharge is 0
+    const cancelledShipment = prismaStub.shipment.update.mock.calls.find((c: any[]) => c[0].where.id === 102);
+    expect(cancelledShipment[0].data).toMatchObject({
+      forwardCharge: 0,
+      shippingCostSource: 'ACTUAL',
+    });
+
+    expect(result.matchedOrders).toHaveLength(2);
+    expect(result.matchedOrders).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          orderId: 501,
+          shopifyOrderName: '#26YOU5901',
+          waybillNumber: '30100810010242',
+          amount: 92.88,
+          city: 'Surat',
+        }),
+        expect.objectContaining({
+          orderId: 502,
+          shopifyOrderName: '#26YOU5902',
+          waybillNumber: '30100810009704',
+          amount: 0,
+          city: 'Mumbai',
+        }),
+      ])
+    );
+  });
 });
 
 describe('Gateway settlement report', () => {

@@ -555,6 +555,10 @@ function CarrierRemittanceTable({
   carrierBadge,
   imports,
   onRefresh,
+  refColumnLabel,
+  amountColumnLabel,
+  hideUtrActions = false,
+  hideUtrColumn = false,
 }: {
   title: string
   subtitle: string
@@ -562,6 +566,10 @@ function CarrierRemittanceTable({
   carrierBadge: string
   imports: AccountsImportRecord[]
   onRefresh: () => void
+  refColumnLabel?: string
+  amountColumnLabel?: string
+  hideUtrActions?: boolean
+  hideUtrColumn?: boolean
 }) {
   const toast = useToast()
   const [search, setSearch] = useState('')
@@ -682,13 +690,13 @@ function CarrierRemittanceTable({
             <thead>
               <tr>
                 <th style={{ width: '40px' }}></th>
-                <th>REMITTANCE / BATCH NO</th>
+                <th>{refColumnLabel || 'REMITTANCE / BATCH NO'}</th>
                 <th>DATE</th>
-                <th>BANK'S TRANSACTION ID / UTR</th>
+                {!hideUtrColumn && <th>BANK'S TRANSACTION ID / UTR</th>}
                 <th>STATE</th>
-                <th style={{ textAlign: 'right' }}>TOTAL AMOUNT</th>
+                <th style={{ textAlign: 'right' }}>{amountColumnLabel || 'TOTAL AMOUNT'}</th>
                 <th>MATCHED ORDERS</th>
-                <th>ACTIONS</th>
+                {!hideUtrActions && <th>ACTIONS</th>}
               </tr>
             </thead>
             <tbody>
@@ -736,44 +744,50 @@ function CarrierRemittanceTable({
                         )}
                       </td>
                       <td style={{ whiteSpace: 'nowrap' }}>{formatRemittanceDate(date)}</td>
-                      <td onClick={(e) => e.stopPropagation()}>
-                        {isEditingThisUtr ? (
-                          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                            <input
-                              type="text"
-                              value={editingUtrValue}
-                              placeholder="e.g. AXISP00847034515"
-                              onChange={(e) => setEditingUtrValue(e.target.value)}
-                              style={{ fontSize: '11px', padding: '3px 6px', width: '160px', fontFamily: 'monospace' }}
-                              autoFocus
-                            />
-                            <Button
-                              className="button-primary"
-                              style={{ padding: '3px 8px', fontSize: '11px' }}
-                              loading={utrMutation.isPending}
-                              disabled={!editingUtrValue.trim() || utrMutation.isPending}
-                              onClick={() => utrMutation.mutate({ id: row.id, utr: editingUtrValue.trim() })}
-                            >
-                              Save
-                            </Button>
-                            <Button
-                              className="button-secondary"
-                              style={{ padding: '3px 8px', fontSize: '11px' }}
-                              onClick={() => setEditingUtrId(null)}
-                            >
-                              Cancel
-                            </Button>
-                          </div>
-                        ) : utr ? (
-                          <span style={{ fontFamily: 'var(--mono, monospace)', fontSize: '12px', fontWeight: 600 }}>
-                            {utr}
-                          </span>
-                        ) : (
-                          <span style={{ color: '#b45309', fontSize: '11px', fontStyle: 'italic' }}>
-                            Awaiting Bank UTR
-                          </span>
-                        )}
-                      </td>
+                      {!hideUtrColumn && (
+                        <td onClick={(e) => e.stopPropagation()}>
+                          {isEditingThisUtr ? (
+                            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                              <input
+                                type="text"
+                                value={editingUtrValue}
+                                placeholder="e.g. AXISP00847034515"
+                                onChange={(e) => setEditingUtrValue(e.target.value)}
+                                style={{ fontSize: '11px', padding: '3px 6px', width: '160px', fontFamily: 'monospace' }}
+                                autoFocus
+                              />
+                              <Button
+                                className="button-primary"
+                                style={{ padding: '3px 8px', fontSize: '11px' }}
+                                loading={utrMutation.isPending}
+                                disabled={!editingUtrValue.trim() || utrMutation.isPending}
+                                onClick={() => utrMutation.mutate({ id: row.id, utr: editingUtrValue.trim() })}
+                              >
+                                Save
+                              </Button>
+                              <Button
+                                className="button-secondary"
+                                style={{ padding: '3px 8px', fontSize: '11px' }}
+                                onClick={() => setEditingUtrId(null)}
+                              >
+                                Cancel
+                              </Button>
+                            </div>
+                          ) : utr ? (
+                            <span style={{ fontFamily: 'var(--mono, monospace)', fontSize: '12px', fontWeight: 600 }}>
+                              {utr}
+                            </span>
+                          ) : hideUtrActions ? (
+                            <span style={{ color: 'var(--muted)', fontSize: '11px' }}>
+                              Auto-Debited
+                            </span>
+                          ) : (
+                            <span style={{ color: '#b45309', fontSize: '11px', fontStyle: 'italic' }}>
+                              Awaiting Bank UTR
+                            </span>
+                          )}
+                        </td>
+                      )}
                       <td>
                         <span
                           style={{
@@ -806,34 +820,36 @@ function CarrierRemittanceTable({
                         <span style={{ fontWeight: 700, color: '#047857' }}>{row.matchedCount}</span> orders
                         {isExpanded && <span style={{ fontSize: '11px', color: 'var(--muted)', marginLeft: '4px' }}>(expanded)</span>}
                       </td>
-                      <td onClick={(e) => e.stopPropagation()}>
-                        {!isEditingThisUtr && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setEditingUtrId(row.id)
-                              setEditingUtrValue(utr)
-                            }}
-                            style={{
-                              border: '1px solid var(--line)',
-                              background: 'var(--panel)',
-                              fontSize: '11px',
-                              padding: '2px 8px',
-                              borderRadius: '4px',
-                              cursor: 'pointer',
-                              color: 'var(--ink)',
-                            }}
-                          >
-                            {utr ? 'Edit UTR' : '+ Add UTR'}
-                          </button>
-                        )}
-                      </td>
+                      {!hideUtrActions && (
+                        <td onClick={(e) => e.stopPropagation()}>
+                          {!isEditingThisUtr && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingUtrId(row.id)
+                                setEditingUtrValue(utr)
+                              }}
+                              style={{
+                                border: '1px solid var(--line)',
+                                background: 'var(--panel)',
+                                fontSize: '11px',
+                                padding: '2px 8px',
+                                borderRadius: '4px',
+                                cursor: 'pointer',
+                                color: 'var(--ink)',
+                              }}
+                            >
+                              {utr ? 'Edit UTR' : '+ Add UTR'}
+                            </button>
+                          )}
+                        </td>
+                      )}
                     </tr>
 
                     {/* Order Drilldown Snapshot */}
                     {isExpanded && (
                       <tr key={`${row.id}-details`} style={{ background: 'var(--bg-subtle, #f8fafc)' }}>
-                        <td colSpan={8} style={{ padding: '12px 20px' }}>
+                        <td colSpan={hideUtrActions || hideUtrColumn ? 7 : 8} style={{ padding: '12px 20px' }}>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                               <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--ink)' }}>
@@ -902,6 +918,8 @@ function RemittancesContent() {
   const [activeTab, setActiveTab] = useState<CarrierTab>('DELHIVERY')
   const [otherCarrierType, setOtherCarrierType] = useState<AccountsImportKind>('AMAZON_SHIPPING')
 
+  const [delhiverySubTab, setDelhiverySubTab] = useState<'REMITTANCE' | 'CHARGES'>('REMITTANCE')
+
   const [filterMode, setFilterMode] = useState<'month' | 'range'>('month')
   const [month, setMonth] = useState(defaultMonth)
   const [startDate, setStartDate] = useState(() => {
@@ -940,8 +958,12 @@ function RemittancesContent() {
   const rawImports = Array.isArray(data?.imports) ? data.imports : []
 
   // Split imports by provider
-  const delhiveryImports = useMemo(() => {
+  const delhiveryRemittanceImports = useMemo(() => {
     return rawImports.filter((imp) => imp && imp.kind === 'DELHIVERY_REMITTANCE')
+  }, [rawImports])
+
+  const delhiveryChargesImports = useMemo(() => {
+    return rawImports.filter((imp) => imp && imp.kind === 'DELHIVERY_CHARGES')
   }, [rawImports])
 
   const gokwikImports = useMemo(() => {
@@ -971,7 +993,7 @@ function RemittancesContent() {
   }, [rawImports])
 
   const CARRIER_TABS: Array<{ id: CarrierTab; label: string; icon: IconName; count: number }> = [
-    { id: 'DELHIVERY', label: 'Delhivery', icon: 'truck', count: delhiveryImports.length },
+    { id: 'DELHIVERY', label: 'Delhivery', icon: 'truck', count: delhiveryRemittanceImports.length + delhiveryChargesImports.length },
     { id: 'GOKWIK', label: 'GoKwik', icon: 'zap', count: gokwikImports.length },
     { id: 'PHONEPE', label: 'PhonePe', icon: 'creditCard', count: phonepeImports.length },
     { id: 'OTHER', label: 'Other Carriers', icon: 'package', count: otherImports.length },
@@ -1156,41 +1178,189 @@ function RemittancesContent() {
           {/* 1. DELHIVERY TAB */}
           {activeTab === 'DELHIVERY' && (
             <div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px' }}>
-                <UniversalUploadCard
-                  config={{
-                    kind: 'DELHIVERY_REMITTANCE',
-                    title: 'Delhivery COD Remittance (ZIP or CSV/XLSX)',
-                    providerName: 'Delhivery Remittance',
-                    templateKey: 'delhivery-remittance',
-                    badgeText: 'Auto-Extracts ZIP',
-                    what: 'Matches delivered COD orders by Waybill / Order No and writes Bank Transaction ID (UTR), marking orders as Payment Received.',
-                    where: 'Delhivery ONE → Finances → Remittance → click remittance number → Download AWB list (.zip, .xlsx or .csv).',
-                    withRemittanceFields: true,
+              {/* Sub-tab Navigation */}
+              <div
+                style={{
+                  display: 'flex',
+                  gap: '8px',
+                  marginBottom: '16px',
+                  background: 'var(--bg-subtle, #f1f5f9)',
+                  padding: '4px',
+                  borderRadius: '10px',
+                  width: 'fit-content',
+                  flexWrap: 'wrap',
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => setDelhiverySubTab('REMITTANCE')}
+                  style={{
+                    border: 'none',
+                    background: delhiverySubTab === 'REMITTANCE' ? '#2563eb' : 'transparent',
+                    color: delhiverySubTab === 'REMITTANCE' ? '#ffffff' : 'var(--ink)',
+                    fontSize: '13px',
+                    fontWeight: delhiverySubTab === 'REMITTANCE' ? 700 : 600,
+                    padding: '8px 18px',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    transition: 'all 0.15s ease',
                   }}
-                  onDone={refresh}
-                />
-                <UniversalUploadCard
-                  config={{
-                    kind: 'DELHIVERY_CHARGES',
-                    title: 'Delhivery Shipping Charges Ledger',
-                    providerName: 'Delhivery Ledger',
-                    templateKey: 'delhivery-charges',
-                    what: 'Replaces freight estimates with exact billed shipping charges (Forward, RTO, Reverse pickup) from Delhivery wallet ledger.',
-                    where: 'Delhivery ONE → Finances → Wallet → Transactions → Download Ledger (or invoice AWB-wise backup).',
+                >
+                  <span>💰 COD Remittances (Payments Received)</span>
+                  <span
+                    style={{
+                      background: delhiverySubTab === 'REMITTANCE' ? 'rgba(255,255,255,0.25)' : '#cbd5e1',
+                      color: delhiverySubTab === 'REMITTANCE' ? '#ffffff' : '#334155',
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      padding: '1px 7px',
+                      borderRadius: '999px',
+                    }}
+                  >
+                    {delhiveryRemittanceImports.length}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setDelhiverySubTab('CHARGES')}
+                  style={{
+                    border: 'none',
+                    background: delhiverySubTab === 'CHARGES' ? '#2563eb' : 'transparent',
+                    color: delhiverySubTab === 'CHARGES' ? '#ffffff' : 'var(--ink)',
+                    fontSize: '13px',
+                    fontWeight: delhiverySubTab === 'CHARGES' ? 700 : 600,
+                    padding: '8px 18px',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    transition: 'all 0.15s ease',
                   }}
-                  onDone={refresh}
-                />
+                >
+                  <span>📦 Shipping Charges &amp; Wallet Ledger (Freight Costs)</span>
+                  <span
+                    style={{
+                      background: delhiverySubTab === 'CHARGES' ? 'rgba(255,255,255,0.25)' : '#cbd5e1',
+                      color: delhiverySubTab === 'CHARGES' ? '#ffffff' : '#334155',
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      padding: '1px 7px',
+                      borderRadius: '999px',
+                    }}
+                  >
+                    {delhiveryChargesImports.length}
+                  </span>
+                </button>
               </div>
 
-              <CarrierRemittanceTable
-                title="Delhivery 2-Day Remittances"
-                subtitle="Your bank account is credited 2 days post daily remittance · Delhivery ONE Synchronized"
-                carrierBadge="Delhivery ONE"
-                emptyMessage="No Delhivery COD remittances uploaded yet. Upload your first remittance ZIP or CSV file above."
-                imports={delhiveryImports}
-                onRefresh={refresh}
-              />
+              {delhiverySubTab === 'REMITTANCE' && (
+                <div>
+                  <div style={{ maxWidth: '640px', marginBottom: '14px' }}>
+                    <UniversalUploadCard
+                      config={{
+                        kind: 'DELHIVERY_REMITTANCE',
+                        title: 'Delhivery COD Remittance (ZIP or CSV/XLSX)',
+                        providerName: 'Delhivery Remittance',
+                        templateKey: 'delhivery-remittance',
+                        badgeText: 'Auto-Extracts ZIP',
+                        what: 'Matches delivered COD orders by Waybill / Order No and writes Bank Transaction ID (UTR), marking orders as Payment Received.',
+                        where: 'Delhivery ONE → Finances → Remittance → click remittance number → Download AWB list (.zip, .xlsx or .csv).',
+                        withRemittanceFields: true,
+                      }}
+                      onDone={refresh}
+                    />
+                  </div>
+
+                  <CarrierRemittanceTable
+                    title="Delhivery 2-Day Remittances"
+                    subtitle="Your bank account is credited 2 days post daily remittance · Delhivery ONE Synchronized"
+                    carrierBadge="Delhivery ONE"
+                    emptyMessage="No Delhivery COD remittances uploaded yet. Upload your first remittance ZIP or CSV file above."
+                    imports={delhiveryRemittanceImports}
+                    onRefresh={refresh}
+                  />
+                </div>
+              )}
+
+              {delhiverySubTab === 'CHARGES' && (
+                <div>
+                  <div style={{ maxWidth: '640px', marginBottom: '16px' }}>
+                    <UniversalUploadCard
+                      config={{
+                        kind: 'DELHIVERY_CHARGES',
+                        title: 'Delhivery Shipping Charges Ledger (WalletReport .xlsx / .csv)',
+                        providerName: 'Delhivery Ledger',
+                        templateKey: 'delhivery-charges',
+                        badgeText: 'Monthly Ledger',
+                        what: 'Replaces freight rate estimates with exact billed shipping charges (Forward, RTO, Reverse pickup) from Delhivery wallet ledger.',
+                        where: 'Delhivery ONE → Finances → Wallet → Transactions → Download Ledger (e.g. WalletReport-...xlsx).',
+                      }}
+                      onDone={refresh}
+                    />
+                  </div>
+
+                  {/* Informational Workflow Banner */}
+                  <div
+                    style={{
+                      background: 'linear-gradient(to right, #eff6ff, #f8fafc)',
+                      border: '1px solid #bfdbfe',
+                      borderRadius: '10px',
+                      padding: '16px 20px',
+                      marginBottom: '20px',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                      <span style={{ fontSize: '18px' }}>💡</span>
+                      <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: '#1e40af' }}>
+                        How Delhivery Monthly Wallet Ledger Reconciles Actual Order Costs:
+                      </h4>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '12px', fontSize: '12px', color: '#1e3a8a' }}>
+                      <div style={{ background: '#ffffff', padding: '10px 14px', borderRadius: '8px', border: '1px solid #dbeafe' }}>
+                        <strong>1. 1 "Mile" = ₹1.00 INR</strong>
+                        <div style={{ color: '#475569', marginTop: '3px' }}>
+                          Delhivery records wallet debits and credits under the <code>Miles</code> column, which corresponds 1-to-1 in Rupees.
+                        </div>
+                      </div>
+                      <div style={{ background: '#ffffff', padding: '10px 14px', borderRadius: '8px', border: '1px solid #dbeafe' }}>
+                        <strong>2. Multi-Sheet Deduplication</strong>
+                        <div style={{ color: '#475569', marginTop: '3px' }}>
+                          Files containing both <code>Deductions</code> and duplicate <code>AWB Deductions</code> are filtered automatically so no row is double-counted.
+                        </div>
+                      </div>
+                      <div style={{ background: '#ffffff', padding: '10px 14px', borderRadius: '8px', border: '1px solid #dbeafe' }}>
+                        <strong>3. Actual Cost vs Rate API</strong>
+                        <div style={{ color: '#475569', marginTop: '3px' }}>
+                          Updates order shipment's <code>forwardCharge</code> and sets source to <code>ACTUAL</code>, recording final machine weight &amp; zone.
+                        </div>
+                      </div>
+                      <div style={{ background: '#ffffff', padding: '10px 14px', borderRadius: '8px', border: '1px solid #dbeafe' }}>
+                        <strong>4. Cancelled / "Not Picked" Credits</strong>
+                        <div style={{ color: '#475569', marginTop: '3px' }}>
+                          Parcels refunded under <code>Refunds</code> with status <em>Not Picked</em> automatically zero out freight so cancelled orders have zero cost.
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <CarrierRemittanceTable
+                    title="Delhivery Shipping Charges & Wallet Ledger"
+                    subtitle="Exact billed freight debited from Delhivery wallet per order · Replaces rate estimates with actual costs"
+                    carrierBadge="Wallet Ledger"
+                    refColumnLabel="WALLET STATEMENT / FILE"
+                    amountColumnLabel="TOTAL BILLED FREIGHT"
+                    hideUtrActions={true}
+                    emptyMessage="No Delhivery shipping charges ledger uploaded yet. Upload your monthly WalletReport (.xlsx or .csv) above."
+                    imports={delhiveryChargesImports}
+                    onRefresh={refresh}
+                  />
+                </div>
+              )}
             </div>
           )}
 

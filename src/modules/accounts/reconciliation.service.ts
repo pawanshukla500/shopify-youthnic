@@ -381,7 +381,17 @@ export async function importDelhiveryCharges(
   sheets: ParsedSheet[],
   uploadedBy?: string
 ): Promise<ImportResult> {
-  const usable = sheets.filter((sheet) => !/summary/i.test(sheet.name));
+  const hasDeductions = sheets.some((s) => /^deductions$/i.test(s.name.trim()));
+  const hasRefunds = sheets.some((s) => /^refunds$/i.test(s.name.trim()));
+
+  const usable = sheets.filter((sheet) => {
+    const name = sheet.name.trim();
+    if (/summary|recharge/i.test(name)) return false;
+    if (hasDeductions && /^awb\s+deductions$/i.test(name)) return false;
+    if (hasRefunds && /^awb\s+refunds$/i.test(name)) return false;
+    return true;
+  });
+
   const headers = usable.flatMap((s) => s.headers);
   const columns = {
     awb: pickColumn(headers, AWB_COLUMN),
@@ -400,6 +410,8 @@ export async function importDelhiveryCharges(
     date: pickColumn(headers, [/date time|^date$|transaction date|date/]),
     weight: pickColumn(headers, [/charged weight|chargeable weight|billed weight/, /weight/]),
     zone: pickColumn(headers, [/zone/]),
+    status: pickColumn(headers, [/shipment status|^status$|status/]),
+    transaction: pickColumn(headers, [/txn id|transaction id|txn/]),
   };
 
   const notes: string[] = [];
@@ -419,21 +431,61 @@ export async function importDelhiveryCharges(
     );
   }
 
+  // Cancelled AWBs where Delhivery refunded the full freight ("Not Picked")
+  const notPickedAwbs = new Set<string>();
+
   // Latest debit per AWB and leg.
-  const latest = new Map<string, { awb: string; leg: Leg; amount: number; at: number; order: number; weight?: number; zone?: string }>();
+  const latest = new Map<
+    string,
+    {
+      awb: string;
+      leg: Leg;
+      amount: number;
+      at: number;
+      order: number;
+      weight?: number;
+      zone?: string;
+      status?: string;
+    }
+  >();
   let rowCount = 0;
   let order = 0;
   for (const { sheet, row } of rowsOf(usable)) {
     const awb = (row[columns.awb] || '').trim();
     if (!awb) continue;
-    rowCount++;
-    const typeText = `${columns.type ? row[columns.type] : ''} ${sheet.name}`;
-    if (/refund|credit|reversal|\bcr\b/i.test(typeText) && !/debit|deduction/i.test(typeText)) continue;
 
+    const typeText = `${columns.type ? row[columns.type] : ''} ${sheet.name}`;
+    const isCredit = /refund|credit|reversal|\bcr\b/i.test(typeText) && !/debit|deduction/i.test(typeText);
+
+    if (isCredit) {
+      const rowStatusText = `${row[columns.status || ''] || ''} ${row[columns.description || ''] || ''}`;
+      if (/not picked/i.test(rowStatusText)) {
+        notPickedAwbs.add(awb);
+      }
+      continue;
+    }
+
+    rowCount++;
     const text = `${columns.description ? row[columns.description] : ''} ${typeText}`;
     const at = (columns.date && parseDateLoose(row[columns.date])?.getTime()) || 0;
-    const weight = columns.weight ? parseAmount(row[columns.weight]) ?? undefined : undefined;
-    const zone = columns.zone ? row[columns.zone] || undefined : undefined;
+    let weight = columns.weight ? parseAmount(row[columns.weight]) ?? undefined : undefined;
+    let zone = columns.zone ? row[columns.zone] || undefined : undefined;
+    let status = columns.status ? row[columns.status] || undefined : undefined;
+
+    // JSON fallback in description column (Delhivery wallet ledger JSON payload)
+    if (columns.description && row[columns.description]) {
+      try {
+        const descTrimmed = row[columns.description].trim();
+        if (descTrimmed.startsWith('{') && descTrimmed.endsWith('}')) {
+          const parsedDesc = JSON.parse(descTrimmed);
+          if (!zone && parsedDesc.zn) zone = parsedDesc.zn;
+          if (!weight && parsedDesc.wt) weight = Number(parsedDesc.wt);
+          if (!status && parsedDesc.st) status = parsedDesc.st;
+        }
+      } catch {
+        // Non-JSON description, ignore
+      }
+    }
 
     const legs: Array<{ leg: Leg; amount: number }> = [];
     const total = parseAmount(row[columns.amount]);
@@ -453,15 +505,22 @@ export async function importDelhiveryCharges(
       order++;
       const prev = latest.get(key);
       if (!prev || at > prev.at || (at === prev.at && order > prev.order)) {
-        latest.set(key, { awb, leg, amount, at, order, weight, zone });
+        latest.set(key, { awb, leg, amount, at, order, weight, zone, status });
       }
     }
   }
 
+  let totalFreightBilled = 0;
+  const matchedOrders: MatchedOrderSummary[] = [];
   const matchedAwbs = new Set<string>();
   const unmatchedAwbs = new Set<string>();
+
   for (const charge of latest.values()) {
-    const amount = Math.round(charge.amount * 100) / 100;
+    let amount = Math.round(charge.amount * 100) / 100;
+    if (notPickedAwbs.has(charge.awb)) {
+      amount = 0;
+    }
+
     // A reverse-pickup AWB belongs to a Return, whatever the row text says.
     const reverse = await prisma.return.findFirst({ where: { returnWaybillNumber: charge.awb } });
     if (reverse) {
@@ -470,13 +529,26 @@ export async function importDelhiveryCharges(
         data: { shippingCharge: amount, shippingCostSource: 'ACTUAL' },
       });
       matchedAwbs.add(charge.awb);
+      totalFreightBilled += amount;
+      matchedOrders.push({
+        orderId: reverse.orderId,
+        waybillNumber: charge.awb,
+        amount,
+        status: 'Reverse Pickup Billed',
+        city: charge.zone ? `Zone ${charge.zone}` : undefined,
+      });
       continue;
     }
-    const shipment = await prisma.shipment.findFirst({ where: { waybillNumber: charge.awb } });
+
+    const shipment = await prisma.shipment.findFirst({
+      where: { waybillNumber: charge.awb },
+      include: { order: true },
+    });
     if (!shipment) {
       unmatchedAwbs.add(charge.awb);
       continue;
     }
+
     await prisma.shipment.update({
       where: { id: shipment.id },
       data: {
@@ -491,11 +563,35 @@ export async function importDelhiveryCharges(
       },
     });
     matchedAwbs.add(charge.awb);
+    totalFreightBilled += amount;
+    matchedOrders.push({
+      orderId: shipment.order?.id,
+      shopifyOrderName: shipment.order?.shopifyOrderName,
+      waybillNumber: charge.awb,
+      amount,
+      status: charge.leg === 'rto' ? 'RTO Leg Billed' : 'Freight Debited',
+      city: shipment.order?.customerCity || (charge.zone ? `Zone ${charge.zone}` : undefined),
+    });
   }
+
   for (const awb of unmatchedAwbs) if (!matchedAwbs.has(awb)) unmatched.push(awb);
 
+  const cleanFileName = fileName.replace(/\.[^/.]+$/, '');
   return saveImport(
-    { kind: 'DELHIVERY_CHARGES', fileName, rowCount, matchedCount: matchedAwbs.size, unmatched, columns, notes },
+    {
+      kind: 'DELHIVERY_CHARGES',
+      fileName,
+      rowCount,
+      matchedCount: matchedAwbs.size,
+      unmatched,
+      columns,
+      notes,
+      state: 'Completed',
+      totalRemittance: Math.round(totalFreightBilled * 100) / 100,
+      remittanceNumber: cleanFileName,
+      remittanceDate: new Date().toISOString(),
+      matchedOrders,
+    },
     uploadedBy
   );
 }

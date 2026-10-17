@@ -245,6 +245,59 @@ describe('Velocity Shipping Integration', () => {
       expect(service.verifyWebhookSignature(payload, undefined as any, secret)).toBe(false);
     });
 
+    it('submits NDR re-attempt action successfully', async () => {
+      mockAxios.post.mockResolvedValueOnce({
+        data: { status: 'SUCCESS', message: 'Reattempt scheduled' },
+      });
+
+      const res = await service.submitNdrAction({
+        awb: 'VEL123456789IN',
+        action: 'reattempt',
+        remarks: 'Customer requested evening delivery',
+      });
+
+      expect(res.success).toBe(true);
+      expect(mockAxios.post).toHaveBeenCalledWith('/custom/api/v1/ndr-action', expect.objectContaining({
+        awb: 'VEL123456789IN',
+        action: 'REATTEMPT',
+      }));
+    });
+
+    it('submits order update request successfully', async () => {
+      mockAxios.post.mockResolvedValueOnce({
+        data: { status: 'SUCCESS', message: 'Address updated' },
+      });
+
+      const res = await service.updateOrder({
+        awb: 'VEL123456789IN',
+        address: 'New Flat 102, Star Residency',
+        city: 'Mumbai',
+        pincode: '400050',
+      });
+
+      expect(res.success).toBe(true);
+      expect(mockAxios.post).toHaveBeenCalledWith('/custom/api/v1/update-order', expect.objectContaining({
+        awb: 'VEL123456789IN',
+        shipping_address: 'New Flat 102, Star Residency',
+      }));
+    });
+
+    it('lists warehouses and stores', async () => {
+      mockAxios.get.mockResolvedValueOnce({
+        data: { status: 'SUCCESS', payload: { warehouses: [{ id: 'wh-1', name: 'Surat Center' }] } },
+      });
+      const whList = await service.listWarehouses();
+      expect(whList).toHaveLength(1);
+      expect(whList[0].name).toBe('Surat Center');
+
+      mockAxios.get.mockResolvedValueOnce({
+        data: { status: 'SUCCESS', payload: { stores: [{ id: 'st-1', name: 'Youthnic Main' }] } },
+      });
+      const stList = await service.listStores();
+      expect(stList).toHaveLength(1);
+      expect(stList[0].name).toBe('Youthnic Main');
+    });
+
     it('pings serviceability to check live connection', async () => {
       mockAxios.post.mockResolvedValueOnce({
         data: {

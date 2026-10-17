@@ -613,6 +613,223 @@ export class VelocityService {
     }
   }
 
+  /**
+   * List registered warehouses
+   * GET /custom/api/v1/warehouse
+   */
+  async listWarehouses(): Promise<any[]> {
+    try {
+      const response = await this.client.get('/custom/api/v1/warehouse');
+      const data = response.data;
+      return data?.payload?.warehouses || data?.data || (Array.isArray(data) ? data : []);
+    } catch (error: any) {
+      logger.warn('Failed to list Velocity warehouses', { error: error.message });
+      return [];
+    }
+  }
+
+  /**
+   * List connected stores
+   * GET /custom/api/v1/store
+   */
+  async listStores(): Promise<any[]> {
+    try {
+      const response = await this.client.get('/custom/api/v1/store');
+      const data = response.data;
+      return data?.payload?.stores || data?.data || (Array.isArray(data) ? data : []);
+    } catch (error: any) {
+      logger.warn('Failed to list Velocity stores', { error: error.message });
+      return [];
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // 9. NDR ACTIONS (Non-Delivery Report Management)
+  // ═══════════════════════════════════════════════════════════
+
+  /**
+   * Submit NDR action: Re-attempt delivery or initiate RTO
+   * POST /custom/api/v1/ndr-action
+   */
+  async submitNdrAction(params: {
+    awb: string;
+    action: 'reattempt' | 'rto';
+    deferredDate?: string;
+    remarks?: string;
+    phone?: string;
+    address?: string;
+  }): Promise<{ success: boolean; message: string; raw?: any }> {
+    const payload = {
+      awb: params.awb.trim(),
+      action: params.action === 'rto' ? 'RTO' : 'REATTEMPT',
+      deferred_date: params.deferredDate,
+      remarks: params.remarks || (params.action === 'rto' ? 'Customer rejected delivery' : 'Customer requested reattempt'),
+      shipping_phone: params.phone ? params.phone.replace(/\D/g, '').slice(-10) : undefined,
+      shipping_address: params.address,
+    };
+
+    try {
+      const response = await this.client.post('/custom/api/v1/ndr-action', payload);
+      const data = response.data;
+      return {
+        success: data?.status === 'SUCCESS' || data?.success === true,
+        message: data?.message || 'NDR action submitted successfully',
+        raw: data,
+      };
+    } catch (error: any) {
+      const msg = error.response?.data?.message || error.message;
+      logger.error('Failed to submit Velocity NDR action', { awb: params.awb, error: msg });
+      throw new Error(`Velocity NDR action failed: ${msg}`);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // 10. UPDATE ORDER DETAILS
+  // ═══════════════════════════════════════════════════════════
+
+  /**
+   * Update address, phone, or details on an active order
+   * POST /custom/api/v1/update-order
+   */
+  async updateOrder(params: {
+    orderId?: string;
+    awb?: string;
+    phone?: string;
+    address?: string;
+    city?: string;
+    state?: string;
+    pincode?: string;
+  }): Promise<{ success: boolean; message: string; raw?: any }> {
+    const payload: any = {
+      order_id: params.orderId,
+      awb: params.awb,
+    };
+    if (params.phone) payload.shipping_phone = params.phone.replace(/\D/g, '').slice(-10);
+    if (params.address) payload.shipping_address = params.address;
+    if (params.city) payload.shipping_city = params.city;
+    if (params.state) payload.shipping_state = params.state;
+    if (params.pincode) payload.shipping_pincode = params.pincode.trim();
+
+    try {
+      const response = await this.client.post('/custom/api/v1/update-order', payload);
+      const data = response.data;
+      return {
+        success: data?.status === 'SUCCESS' || data?.success === true,
+        message: data?.message || 'Order updated successfully',
+        raw: data,
+      };
+    } catch (error: any) {
+      const msg = error.response?.data?.message || error.message;
+      logger.error('Failed to update Velocity order', { error: msg });
+      throw new Error(`Velocity update order failed: ${msg}`);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // 11. ORDER DETAILS (Forward & Returns)
+  // ═══════════════════════════════════════════════════════════
+
+  /**
+   * Fetch full details for a forward shipment
+   * GET /custom/api/v1/order-details
+   */
+  async getForwardOrderDetails(identifier: { orderId?: string; awb?: string }): Promise<any> {
+    try {
+      const response = await this.client.get('/custom/api/v1/order-details', {
+        params: {
+          order_id: identifier.orderId,
+          awb: identifier.awb,
+        },
+      });
+      return response.data?.payload || response.data?.data || response.data;
+    } catch (error: any) {
+      throw new Error(`Failed to fetch forward order details: ${error.response?.data?.message || error.message}`);
+    }
+  }
+
+  /**
+   * Fetch full details for a return / reverse shipment
+   * GET /custom/api/v1/return-order-details
+   */
+  async getReturnOrderDetails(identifier: { orderId?: string; awb?: string }): Promise<any> {
+    try {
+      const response = await this.client.get('/custom/api/v1/return-order-details', {
+        params: {
+          order_id: identifier.orderId,
+          awb: identifier.awb,
+        },
+      });
+      return response.data?.payload || response.data?.data || response.data;
+    } catch (error: any) {
+      throw new Error(`Failed to fetch return order details: ${error.response?.data?.message || error.message}`);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // 12. EXCHANGE ORDERS
+  // ═══════════════════════════════════════════════════════════
+
+  /**
+   * Create an exchange order (reverse pickup + forward delivery)
+   * POST /custom/api/v1/exchange-order
+   */
+  async createExchangeOrder(params: {
+    orderId: string;
+    reverseWarehouseId?: string;
+    pickupAddress: any;
+    forwardItems: any[];
+    returnItems: any[];
+  }): Promise<any> {
+    try {
+      const response = await this.client.post('/custom/api/v1/exchange-order', params);
+      return response.data?.payload || response.data;
+    } catch (error: any) {
+      throw new Error(`Failed to create exchange order: ${error.response?.data?.message || error.message}`);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // 13. FINANCE & REMITTANCE
+  // ═══════════════════════════════════════════════════════════
+
+  /**
+   * Fetch remittance and COD payout statements
+   * GET /custom/api/v1/finance/remittance
+   */
+  async getRemittanceDetails(params?: { startDate?: string; endDate?: string }): Promise<any> {
+    try {
+      const response = await this.client.get('/custom/api/v1/finance/remittance', {
+        params: {
+          start_date: params?.startDate,
+          end_date: params?.endDate,
+        },
+      });
+      return response.data?.payload || response.data?.data || response.data;
+    } catch (error: any) {
+      throw new Error(`Failed to fetch finance remittance: ${error.response?.data?.message || error.message}`);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // 14. REPORTS EXPORT
+  // ═══════════════════════════════════════════════════════════
+
+  /**
+   * Trigger export of operational reports (orders, tracking, ndr, remittances)
+   * POST /custom/api/v1/reports/export
+   */
+  async requestReport(reportType: 'orders' | 'tracking' | 'ndr' | 'remittance', filterParams?: any): Promise<any> {
+    try {
+      const response = await this.client.post('/custom/api/v1/reports/export', {
+        report_type: reportType,
+        ...filterParams,
+      });
+      return response.data?.payload || response.data;
+    } catch (error: any) {
+      throw new Error(`Failed to request report export: ${error.response?.data?.message || error.message}`);
+    }
+  }
+
   // ═══════════════════════════════════════════════════════════
   // 8. WEBHOOK VERIFICATION & STATUS MAPPING
   // ═══════════════════════════════════════════════════════════

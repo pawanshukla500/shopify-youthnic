@@ -47,3 +47,5 @@ jobs:
 
       - name: Build Vite React Frontend
         run: cd frontend && npm run build
+      - name: Validate Production Docker Builder
+        run: docker build --target builder --tag youthnic-oms-pr-builder .

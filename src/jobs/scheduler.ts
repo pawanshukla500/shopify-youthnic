@@ -5,13 +5,14 @@ import trackingService from '../modules/tracking/tracking.service';
 import returnService from '../modules/returns/return.service';
 import shopifyService from '../modules/shopify/shopify.service';
 import delhiveryDocumentFetcher from '../modules/delhivery/delhivery-document-fetcher.service';
-import delhiveryService from '../modules/delhivery/delhivery.service';
 import { runAccountsMaintenance } from '../modules/accounts/accounts.service';
 import { backfillMissingRefundTrailEvents } from '../modules/accounts/account-trail.service';
 import { sendDueMonthlyReport } from '../modules/accounts/accounts-report.service';
 import { estimatePendingShippingCosts } from '../modules/accounts/shipping-cost.service';
 import { syncGatewaySettlements } from '../modules/accounts/gateway-settlement.service';
 import logger from '../utils/logger';
+import { processPickupBatches } from '../modules/delhivery/pickup-batch.service';
+import returnScanService from '../modules/returns/return-scan.service';
 
 /**
  * Scheduler
@@ -48,16 +49,13 @@ class Scheduler {
         } catch (error: any) {
           logger.error('[CRON] Tracking sync failed', { error: error.message });
         }
-        try {
-          const pickup = await delhiveryService.ensureDailyWarehousePickup();
-          if (!pickup.skipped) {
-            logger.info('[CRON] Warehouse pickup', { message: pickup.message, pickupId: pickup.pickupId });
-          }
-        } catch (error: any) {
-          logger.error('[CRON] Warehouse pickup failed', { error: error.message });
-        }
       })
     );
+
+    this.jobs.push(cron.schedule('*/5 * * * *', async () => {
+      try { await processPickupBatches(); }
+      catch (error: any) { logger.error('[CRON] Pickup batching failed', { error: error.message }); }
+    }, { timezone: 'Asia/Kolkata' }));
 
     // 3. Retry failed syncs/refunds
     this.jobs.push(
@@ -141,17 +139,33 @@ class Scheduler {
       )
     );
 
-    // 4. Delhivery document backfill (EPOD / signature / QC / sorter → Firebase Storage)
-    // Runs every 30 minutes by default. Idempotent — only fetches rows missing the artifact.
+    // 8. Return scan sync (reads read-only RETURN_SCAN_DATABASE and updates Return Delivered / auto-refunds)
     this.jobs.push(
-      cron.schedule(config.cron.delhiveryDocFetch || '*/30 * * * *', async () => {
-        logger.info('[CRON] Running Delhivery document fetcher...');
+      cron.schedule(config.cron.returnScanSync || '*/30 * * * *', async () => {
+        logger.info('[CRON] Running warehouse return scan sync...');
         try {
-          await delhiveryDocumentFetcher.runAll();
+          const res = await returnScanService.syncReturnScans();
+          logger.info('[CRON] Return scan sync completed', res);
         } catch (error: any) {
-          logger.error('[CRON] Delhivery document fetcher failed', { error: error.message });
+          logger.error('[CRON] Return scan sync failed', { error: error.message });
         }
       })
+    );
+
+    // 9. Daily manual COD refund digest to listings@vbexports.co.in (10:00 AM IST)
+    this.jobs.push(
+      cron.schedule(
+        config.cron.codRefundDigest || '0 10 * * *',
+        async () => {
+          logger.info('[CRON] Running daily manual COD refund digest...');
+          try {
+            await returnScanService.sendDailyCodManualRefundDigest();
+          } catch (error: any) {
+            logger.error('[CRON] Daily COD refund digest failed', { error: error.message });
+          }
+        },
+        { timezone: 'Asia/Kolkata' }
+      )
     );
 
     logger.info('Scheduler started successfully', {

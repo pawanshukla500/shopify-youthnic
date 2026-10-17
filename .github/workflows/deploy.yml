@@ -83,6 +83,8 @@ jobs:
           PORT: ${{ vars.PORT || '3000' }}
           TZ: ${{ vars.TZ || 'Asia/Kolkata' }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          RETURN_SCAN_DATABASE: ${{ secrets.RETURN_SCAN_DATABASE || vars.RETURN_SCAN_DATABASE }}
+          COD_REFUND_EMAIL: ${{ vars.COD_REFUND_EMAIL || 'listings@vbexports.co.in' }}
           SHOPIFY_SHOP_DOMAIN: ${{ vars.SHOPIFY_SHOP_DOMAIN }}
           SHOPIFY_CLIENT_ID: ${{ vars.SHOPIFY_CLIENT_ID }}
           SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
@@ -102,7 +104,7 @@ jobs:
           DELHIVERY_SELLER_PHONE: ${{ vars.DELHIVERY_SELLER_PHONE }}
           DELHIVERY_SHIPPING_MODE: ${{ vars.DELHIVERY_SHIPPING_MODE || 'Surface' }}
           DELHIVERY_LABEL_SIZE: ${{ vars.DELHIVERY_LABEL_SIZE || '4R' }}
-          DELHIVERY_AUTO_PICKUP: ${{ vars.DELHIVERY_AUTO_PICKUP || 'false' }}
+          DELHIVERY_AUTO_PICKUP: ${{ vars.DELHIVERY_AUTO_PICKUP || 'true' }}
           DELHIVERY_PICKUP_TIME: ${{ vars.DELHIVERY_PICKUP_TIME || '14:00:00' }}
           KWIKENGAGE_API_KEY: ${{ secrets.KWIKENGAGE_API_KEY }}
           KWIKENGAGE_API_URL: ${{ vars.KWIKENGAGE_API_URL || 'https://api.kwikengage.ai/send-message/v2' }}
@@ -135,6 +137,8 @@ jobs:
           LOG_LEVEL=info
           APP_BASE_URL=https://${APP_DOMAIN}
           DATABASE_URL=${DATABASE_URL}
+          RETURN_SCAN_DATABASE=${RETURN_SCAN_DATABASE}
+          COD_REFUND_EMAIL=${COD_REFUND_EMAIL}
           SHOPIFY_SHOP_DOMAIN=${SHOPIFY_SHOP_DOMAIN}
           SHOPIFY_CLIENT_ID=${SHOPIFY_CLIENT_ID}
           SHOPIFY_CLIENT_SECRET=${SHOPIFY_CLIENT_SECRET}

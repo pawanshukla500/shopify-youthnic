@@ -76,6 +76,13 @@ describe('syncOrderToDb integrity', () => {
     prismaStub.orderItem.create.mockResolvedValue({});
     prismaStub.orderItem.update.mockResolvedValue({});
   });
+  it('moves a Shopify COD_CONFIRMED tag into the dispatch queue without creating an AWB', async () => {
+    await shopifyService.syncOrderToDb(order({ tags: 'COD, COD_CONFIRMED', financial_status: 'pending', payment_gateway_names: ['Cash on Delivery'] }));
+    const writes = prismaStub.order.upsert.mock.calls[0][0];
+    expect(writes.create.status).toBe('DISPATCH_PENDING');
+    expect(writes.update.status).toBe('DISPATCH_PENDING');
+    expect(prismaStub.shipment.create).not.toHaveBeenCalled();
+  });
 
   it('keeps Kurta-S and Kurta-M as two rows instead of overwriting S with M', async () => {
     prismaStub.orderItem.findMany.mockResolvedValue([

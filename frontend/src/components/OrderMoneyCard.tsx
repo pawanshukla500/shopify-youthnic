@@ -59,6 +59,10 @@ export function OrderMoneyCard({ order, onChanged }: { order: Order; onChanged: 
       return
     }
     const parsedAmount = amount.trim() ? Number(amount.replace(/[₹,\s]/g, '')) : undefined
+    if (parsedAmount === undefined && !order.paymentReceivedAt) {
+      toast.toast('error', 'Enter the actual net amount credited to the bank.')
+      return
+    }
     if (parsedAmount !== undefined && (!Number.isFinite(parsedAmount) || parsedAmount < 0)) {
       toast.toast('error', 'Enter the amount as a number, e.g. 1299.50.')
       return
@@ -94,7 +98,7 @@ export function OrderMoneyCard({ order, onChanged }: { order: Order; onChanged: 
       <Row label="Payment in bank">
         {order.paymentReceivedAt ? (
           <>
-            <strong>{formatMoney(order.paymentReceivedAmount ?? order.totalAmount)}</strong> on {shortDate(order.paymentReceivedAt)}
+            <strong>{order.paymentReceivedAmount == null ? 'Amount not recorded' : formatMoney(order.paymentReceivedAmount)}</strong> on {shortDate(order.paymentReceivedAt)}
             <span className="money-muted"> · {SOURCE_LABELS[order.paymentReceivedSource || ''] || order.paymentReceivedSource}</span>
           </>
         ) : (

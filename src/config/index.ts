@@ -54,6 +54,9 @@ export const config = {
 
   // Database
   databaseUrl: required('DATABASE_URL'),
+  // Return Scan Database (Read-only warehouse return scan database)
+  returnScanDatabase: optional('RETURN_SCAN_DATABASE', ''),
+  codRefundEmail: optional('COD_REFUND_EMAIL', 'listings@vbexports.co.in'),
 
   // Shopify
   shopify: {
@@ -125,7 +128,7 @@ export const config = {
     // Reverse customer pickups are NOT this API — Delhivery schedules those when
     // a return is manifested with payment_mode Pickup.
     autoPickup: optional('DELHIVERY_AUTO_PICKUP', 'true') === 'true',
-    pickupTime: optional('DELHIVERY_PICKUP_TIME', '11:00:00'),
+    pickupTime: optional('DELHIVERY_PICKUP_TIME', '14:00:00'),
     // Optional shared secret for Delhivery scan-push webhooks.
     // When set, /webhooks/delhivery requires ?secret= or x-delhivery-secret header.
     // When empty (default), webhooks stay open for backward compatibility.
@@ -253,6 +256,10 @@ export const config = {
     shippingCostEstimate: optional('CRON_SHIPPING_COST_ESTIMATE', '*/15 * * * *'),
     // Pull PhonePe / Easebuzz settlements (when credentials are set), daily.
     gatewaySettlementSync: optional('CRON_GATEWAY_SETTLEMENT_SYNC', '30 7 * * *'),
+    // Sync warehouse return scans from read-only RETURN_SCAN_DATABASE
+    returnScanSync: optional('CRON_RETURN_SCAN_SYNC', '*/30 * * * *'),
+    // Send daily manual COD refund digest email to listings@vbexports.co.in
+    codRefundDigest: optional('CRON_COD_REFUND_DIGEST', '0 10 * * *'),
   },
 
   // Tracking sync resilience — prevents Delhivery 429 fallback during large backlogs.

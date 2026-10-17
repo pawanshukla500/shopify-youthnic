@@ -11,16 +11,17 @@ vi.mock('../src/utils/logger', () => ({
 
 const { prismaStub, axiosStub, delhiveryStub, shopifyStub } = vi.hoisted(() => ({
   prismaStub: {
-    order: { findFirst: vi.fn(), findMany: vi.fn(), update: vi.fn() },
+    order: { findUnique: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
     shipment: { findMany: vi.fn(), updateMany: vi.fn() },
     return: { findMany: vi.fn(), updateMany: vi.fn() },
     reconciliationImport: { create: vi.fn() },
+    accountTrailEvent: { create: vi.fn(), findFirst: vi.fn() },
   },
   axiosStub: { get: vi.fn(), post: vi.fn() },
   delhiveryStub: { fetchLiveShippingRate: vi.fn() },
   shopifyStub: { updateOrderTags: vi.fn() },
 }));
-vi.mock('../src/database/prisma', () => ({ default: prismaStub }));
+vi.mock('../src/database/prisma', () => ({ default: { ...prismaStub, $transaction: vi.fn(async (fn: any) => fn(prismaStub)) } }));
 vi.mock('axios', () => ({ default: axiosStub }));
 vi.mock('../src/modules/delhivery/delhivery.service', () => ({ default: delhiveryStub }));
 vi.mock('../src/modules/shopify/shopify.service', () => ({ default: shopifyStub }));
@@ -41,6 +42,9 @@ beforeEach(() => {
     for (const fn of Object.values(group)) (fn as any).mockReset();
   }
   prismaStub.order.update.mockResolvedValue({});
+  prismaStub.accountTrailEvent.create.mockResolvedValue({ id: 1 });
+  prismaStub.order.findUnique.mockImplementation(async ({ where }: any) => ({ id: where.id, paymentReceivedAt: null, paymentReceivedUtr: null, paymentReceivedRef: null }));
+  prismaStub.order.updateMany.mockResolvedValue({ count: 1 });
   prismaStub.shipment.updateMany.mockResolvedValue({ count: 1 });
   prismaStub.return.updateMany.mockResolvedValue({ count: 1 });
   config.phonepe.clientId = '';
@@ -98,7 +102,7 @@ describe('PhonePe settlements', () => {
     expect(tokenCall[0]).toBe('https://api.phonepe.com/apis/identity-manager/v1/oauth/token');
     expect(String(tokenCall[1])).toContain('grant_type=client_credentials');
     expect(axiosStub.get.mock.calls[0][1].headers.Authorization).toBe('O-Bearer tok');
-    expect(prismaStub.order.update.mock.calls[0][0]).toMatchObject({
+    expect(prismaStub.order.updateMany.mock.calls[0][0]).toMatchObject({
       where: { id: 70 },
       data: {
         paymentReceivedUtr: 'HDFC0001',

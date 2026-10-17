@@ -37,6 +37,9 @@ function nextStep(p: OrderNextStepProps): Step {
   const { order } = p
   const shipment = order.shipment
   const tab = classifyOrderTab(order)
+  if (order.supportFlag === 'MANIFEST_REVIEW') {
+    return { tone: 'warn', title: 'Manifest needs review', text: 'Delhivery did not confirm the previous manifest. Check the order in Delhivery ONE before another dispatch; no duplicate AWB will be requested automatically.' }
+  }
 
   if (order.status === 'CANCELLED') {
     return { tone: 'neutral', title: 'Cancelled', text: 'This order was cancelled. Nothing to ship or collect.' }

@@ -29,6 +29,7 @@ export interface EmailTemplateData {
   paymentMethod?: string;
   customerAddress?: string;
   customMessage?: string;
+  customHtml?: string;
   actionUrl?: string;
   // Specific return & refund fields
   refundId?: string;
@@ -930,8 +931,8 @@ export function renderCustomEmail(data: EmailTemplateData): { subject: string; h
     <h2 style="margin: 0 0 16px 0; font-size: 20px; font-weight: 800; color: #0f172a;">
       Dear ${data.customerName || 'Customer'},
     </h2>
-    <div style="font-size: 14px; line-height: 1.7; color: #334155; margin-bottom: 24px; white-space: pre-line;">
-      ${data.customMessage || 'We hope you are enjoying your experience with Youthnic.'}
+    <div style="font-size: 14px; line-height: 1.7; color: #334155; margin-bottom: 24px;">
+      ${data.customHtml ? data.customHtml : `<div style="white-space: pre-line;">${data.customMessage || 'We hope you are enjoying your experience with Youthnic.'}</div>`}
     </div>
 
     ${

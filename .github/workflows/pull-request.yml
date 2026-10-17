@@ -64,6 +64,7 @@ jobs:
         run: |
           python tests/browser/order_detail.py
           python tests/browser/order_workspace.py
+          python tests/browser/payments_pickup.py
 
       - name: Upload Order Workspace Screenshots
         if: always()

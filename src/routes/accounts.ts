@@ -42,6 +42,8 @@ import {
   setReportRecipients,
 } from '../modules/accounts/accounts-report.service';
 import resendService from '../modules/email/resend.service';
+import { correctImportUtr } from '../modules/accounts/settlement-utr.service';
+import { istDateRange } from '../modules/accounts/settlement-summary';
 
 const router = Router();
 
@@ -74,8 +76,7 @@ router.get('/overview', async (req: AuthenticatedRequest, res: Response): Promis
     let label: string;
 
     if (startDate && endDate) {
-      start = new Date(`${String(startDate)}T00:00:00.000Z`);
-      end = new Date(`${String(endDate)}T23:59:59.999Z`);
+      ({ start, end } = istDateRange(String(startDate), String(endDate)));
       month = String(startDate).slice(0, 7);
       label = `${String(startDate)} to ${String(endDate)}`;
     } else {
@@ -87,7 +88,7 @@ router.get('/overview', async (req: AuthenticatedRequest, res: Response): Promis
     }
 
     const orders = await prisma.order.findMany({
-      where: { shopifyCreatedAt: { gte: start, lte: end } },
+      where: { shopifyCreatedAt: { gte: start, lt: end } },
       include: { shipment: true, returns: true },
     });
     const data = buildReportData(label, orders);
@@ -322,13 +323,13 @@ router.post('/import', async (req: AuthenticatedRequest, res: Response): Promise
     const by = req.user?.email;
     let result;
     if (kind === 'DELHIVERY_REMITTANCE') {
-      result = await importDelhiveryRemittance(cleanFileName, sheets, defaults || {}, by);
+      result = await importDelhiveryRemittance(cleanFileName, sheets, defaults || {}, by, req.user);
     } else if (kind === 'DELHIVERY_CHARGES') {
-      result = await importDelhiveryCharges(cleanFileName, sheets, by);
+      result = await importDelhiveryCharges(cleanFileName, sheets, by, req.user);
     } else if (kind === 'GOKWIK_SETTLEMENT' || kind === 'PHONEPE_SETTLEMENT' || kind === 'PG_SETTLEMENT') {
-      result = await importGatewaySettlement(cleanFileName, sheets, by, kind);
+      result = await importGatewaySettlement(cleanFileName, sheets, by, kind, req.user, defaults || {});
     } else {
-      result = await importCarrierRemittance(kind, cleanFileName, sheets, defaults || {}, by);
+      result = await importCarrierRemittance(kind, cleanFileName, sheets, defaults || {}, by, req.user);
     }
 
     // Newly paid orders may now be past their return window.
@@ -356,47 +357,9 @@ router.patch('/remittance/:importId/utr', async (req: AuthenticatedRequest, res:
       return;
     }
 
-    const row = await prisma.reconciliationImport.findUnique({ where: { id: importId } });
-    if (!row) {
-      res.status(404).json({ error: 'Import record not found' });
-      return;
-    }
-
-    const summary = ((row.summary as any) || {}) as Record<string, any>;
-    summary.bankTransactionId = utr;
-    summary.state = 'Completed';
-
-    const remittanceNum = summary.remittanceNumber;
-    const orderIds: number[] = Array.isArray(summary.matchedOrders)
-      ? summary.matchedOrders.map((o: any) => o.orderId).filter(Boolean)
-      : [];
-
-    if (orderIds.length > 0) {
-      await prisma.order.updateMany({
-        where: { id: { in: orderIds } },
-        data: {
-          paymentReceivedUtr: utr,
-          paymentVerified: true,
-        },
-      });
-    } else if (remittanceNum) {
-      await prisma.order.updateMany({
-        where: { paymentReceivedRef: remittanceNum },
-        data: {
-          paymentReceivedUtr: utr,
-          paymentVerified: true,
-        },
-      });
-    }
-
-    if (Array.isArray(summary.matchedOrders)) {
-      summary.matchedOrders = summary.matchedOrders.map((o: any) => ({ ...o, utr }));
-    }
-
-    const updated = await prisma.reconciliationImport.update({
-      where: { id: importId },
-      data: { summary },
-    });
+    if (!req.user?.uid) { res.status(401).json({ error: 'Authentication required.' }); return; }
+    const requestedOrder = req.body?.orderId === undefined ? undefined : Number(req.body.orderId);
+    const updated = await correctImportUtr(importId, utr, req.user, requestedOrder);
 
     const maintenance = await runAccountsMaintenance().catch(() => ({ closed: 0 }));
     res.json({ success: true, import: updated, closedNow: maintenance?.closed ?? 0 });
@@ -419,17 +382,17 @@ router.post('/orders/:id/payment-received', async (req: AuthenticatedRequest, re
       return;
     }
     const receivedAt = parseDateLoose(String(req.body?.receivedAt || '')) || new Date();
-    // Blank means the order total; anything else must be a real amount
-    // ("1,299" is accepted; null or text is refused, never recorded as ₹0).
+    // New bank receipts require the actual net credit, not an assumed order total.
+    // Existing receipt enrichment preserves its stored amount.
     const rawAmount = req.body?.amount;
     const amount =
       rawAmount === undefined || rawAmount === ''
-        ? order.totalAmount
+        ? order.paymentReceivedAt ? order.paymentReceivedAmount : NaN
         : rawAmount === null
           ? NaN
           : Number(String(rawAmount).replace(/[₹,\s]/g, ''));
-    if (!Number.isFinite(amount) || amount < 0) {
-      res.status(400).json({ error: 'Amount must be a number.' });
+    if ((amount !== null && (!Number.isFinite(amount) || amount < 0)) || (amount === null && !order.paymentReceivedAt)) {
+      res.status(400).json({ error: 'Enter the actual net amount credited to the bank.' });
       return;
     }
     await recordPaymentReceived(orderId, {
@@ -438,6 +401,7 @@ router.post('/orders/:id/payment-received', async (req: AuthenticatedRequest, re
       utr,
       ref: String(req.body?.ref || '').trim() || null,
       source: 'MANUAL',
+      actor: req.user,
     });
     await prisma.syncLog.create({
       data: {

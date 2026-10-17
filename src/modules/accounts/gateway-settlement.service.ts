@@ -233,6 +233,7 @@ export async function syncGatewaySettlements(daysBack = 3): Promise<{ phonepe: n
       const amount =
         name === 'phonepe' ? phonePeAmountToRupees(line.amount, order.totalAmount) : line.amount;
       const fee = name === 'phonepe' && line.fee !== null ? phonePeAmountToRupees(line.fee) : line.fee;
+      try {
       await recordPaymentReceived(order.id, {
         receivedAt: line.settledAt,
         amount,
@@ -242,6 +243,10 @@ export async function syncGatewaySettlements(daysBack = 3): Promise<{ phonepe: n
         gatewayFee: fee,
       });
       result[name]++;
+      } catch (error: any) {
+        result.unmatched.push(order.shopifyOrderName || line.references[0] || String(order.id));
+        logger.warn('Gateway settlement needs order-level review', { orderId: order.id, gateway: name, error: error.message });
+      }
     }
   }
   if (result.phonepe || result.easebuzz) logger.info('Gateway settlements recorded', result);

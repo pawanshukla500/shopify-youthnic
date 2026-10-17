@@ -18,6 +18,9 @@
 import prisma from '../../database/prisma';
 import logger from '../../utils/logger';
 import { ParsedSheet, parseAmount, parseDateLoose, pickColumn } from './spreadsheet';
+import { settlementEvidence } from './settlement-summary';
+import { recordOrderAction } from '../orders/order-activity.service';
+import { recordAccountTrailEvent, type AccountTrailActor } from './account-trail.service';
 
 export type ImportKind =
   | 'DELHIVERY_REMITTANCE'
@@ -37,6 +40,7 @@ export interface MatchedOrderSummary {
   utr?: string | null;
   status?: string;
   city?: string;
+  remittanceRef?: string | null;
 }
 
 export interface ImportResult {
@@ -119,6 +123,8 @@ export async function findOrderByReference(reference: string) {
 }
 
 async function saveImport(result: ImportResult, uploadedBy?: string): Promise<ImportResult> {
+  const evidence = result.kind === 'DELHIVERY_CHARGES' ? {} : settlementEvidence(result.matchedOrders || []);
+  result = { ...result, ...evidence };
   try {
     const row = await prisma.reconciliationImport.create({
       data: {
@@ -138,6 +144,7 @@ async function saveImport(result: ImportResult, uploadedBy?: string): Promise<Im
           state: result.state || (result.bankTransactionId ? 'Completed' : 'Pending'),
           totalRemittance: result.totalRemittance ?? null,
           matchedOrders: (result.matchedOrders || []).slice(0, 500),
+          ...evidence,
         } as any,
         uploadedBy: uploadedBy || null,
       },
@@ -164,21 +171,45 @@ export async function recordPaymentReceived(
     source: string;
     gatewayFee?: number | null;
     deliveredAt?: Date | null;
+    actor?: AccountTrailActor;
   }
 ): Promise<void> {
-  await prisma.order.update({
-    where: { id: orderId },
-    data: {
-      paymentReceivedAt: payment.receivedAt,
-      paymentReceivedAmount: payment.amount ?? null,
-      paymentReceivedUtr: payment.utr || null,
-      paymentReceivedRef: payment.ref || null,
-      paymentReceivedSource: payment.source,
-      ...(payment.gatewayFee !== undefined && payment.gatewayFee !== null ? { gatewayFee: payment.gatewayFee } : {}),
-      ...(payment.deliveredAt ? { deliveredAt: payment.deliveredAt, status: 'DELIVERED' } : {}),
-      paymentVerified: true,
-      paymentVerifiedAt: payment.receivedAt,
-    },
+  payment = { ...payment, utr: payment.utr?.trim() || null, ref: payment.ref?.trim() || null };
+  if (!Number.isFinite(payment.receivedAt.getTime()) || (payment.amount != null && (!Number.isFinite(payment.amount) || payment.amount < 0))) throw new Error('Payment date and amount must be valid.');
+  const previous = await prisma.order.findUnique({ where: { id: orderId } });
+  if (!previous) throw new Error('Order not found while recording payment.');
+  const recorded = Boolean(previous.paymentReceivedAt);
+  if (recorded && previous.paymentReceivedUtr && payment.utr && previous.paymentReceivedUtr !== payment.utr) {
+    throw new Error('Order already has a different bank UTR. Use a settlement-scoped correction.');
+  }
+  if (recorded && previous.paymentReceivedRef && payment.ref && previous.paymentReceivedRef !== payment.ref) {
+    throw new Error('Order already belongs to another settlement; review before replacing it.');
+  }
+  if (recorded && previous.paymentReceivedUtr) return;
+  if (recorded && !payment.utr) return;
+  await prisma.$transaction(async (tx) => {
+    const written = await tx.order.updateMany({
+      where: { id: orderId, paymentReceivedAt: previous.paymentReceivedAt, paymentReceivedUtr: previous.paymentReceivedUtr, paymentReceivedRef: previous.paymentReceivedRef },
+      data: {
+        paymentReceivedAt: previous.paymentReceivedAt || payment.receivedAt,
+        paymentReceivedAmount: recorded ? previous.paymentReceivedAmount : payment.amount ?? null,
+        paymentReceivedUtr: payment.utr || previous.paymentReceivedUtr || null,
+        paymentReceivedRef: previous.paymentReceivedRef || payment.ref || null,
+        paymentReceivedSource: previous.paymentReceivedSource || payment.source,
+        ...(!recorded && payment.gatewayFee !== undefined && payment.gatewayFee !== null ? { gatewayFee: payment.gatewayFee } : {}),
+        paymentVerified: true,
+        paymentVerifiedAt: previous.paymentVerifiedAt || payment.receivedAt,
+      },
+    });
+    if (written.count !== 1) throw new Error('Payment changed concurrently. Reload and retry.');
+    await recordAccountTrailEvent({
+      orderId, eventType: recorded ? 'BANK_UTR_UPDATED' : 'PAYMENT_RECEIVED',
+      actor: payment.actor, actorType: payment.actor?.uid ? 'USER' : payment.actor?.email ? 'EXTERNAL' : 'SYSTEM',
+      source: payment.source, status: payment.utr ? 'COMPLETED' : 'UTR_MISSING',
+      note: recorded ? 'Missing bank UTR added; existing amount and settlement date preserved.' : payment.utr ? 'Bank receipt recorded. Customer checkout reference is unchanged.' : 'Settlement reported without a bank UTR; this does not close the order for accounts.',
+      amount: (recorded ? previous.paymentReceivedAmount : payment.amount) ?? null,
+      externalReference: payment.utr || null, metadata: { source: payment.source, settlementRef: previous.paymentReceivedRef || payment.ref || null },
+    }, tx);
   });
 }
 
@@ -188,7 +219,8 @@ export async function importDelhiveryRemittance(
   fileName: string,
   sheets: ParsedSheet[],
   defaults: RemittanceDefaults = {},
-  uploadedBy?: string
+  uploadedBy?: string,
+  actor?: AccountTrailActor
 ): Promise<ImportResult> {
   const headers = sheets.flatMap((s) => s.headers);
   const columns = {
@@ -231,7 +263,7 @@ export async function importDelhiveryRemittance(
   }
 
   const refFromFileName = fileName.match(/\b(R\d{6,})\b/i)?.[1];
-  const dateFromFileName = refFromFileName?.match(/(\d{4})(\d{2})(\d{2})/);
+  const dateFromFileName = refFromFileName?.match(/(20\d{2})(0[1-9]|1[0-2])([0-2]\d|3[01])/);
   const inferredDate = dateFromFileName
     ? parseDateLoose(`${dateFromFileName[1]}-${dateFromFileName[2]}-${dateFromFileName[3]}`)
     : null;
@@ -292,22 +324,6 @@ export async function importDelhiveryRemittance(
       if (order) {
         if (order.shipment) {
           shipment = order.shipment as any;
-        } else {
-          try {
-            shipment = (await prisma.shipment.create({
-              data: {
-                orderId: order.id,
-                waybillNumber: awb || `MANUAL-${order.shopifyOrderName}`,
-                courier: 'Delhivery',
-                paymentMode: 'COD',
-                status: 'DELIVERED',
-                codAmount: order.totalAmount,
-              },
-            })) as any;
-          } catch {
-            // If another process created the shipment concurrently
-            shipment = await prisma.shipment.findFirst({ where: { orderId: order.id } });
-          }
         }
       }
     }
@@ -329,7 +345,8 @@ export async function importDelhiveryRemittance(
     const ref = (columns.remittance && row[columns.remittance]) || defaultRef || null;
     const remittedAt = (columns.date && parseDateLoose(row[columns.date])) || fallbackDate;
     const fileAmount = columns.amount ? parseAmount(row[columns.amount]) : null;
-    const amount: number = fileAmount || shipment?.codAmount || order?.totalAmount || 0;
+    if (fileAmount === null || fileAmount < 0) { unmatched.push(trackingKey); notes.push(`${trackingKey}: no non-negative remittance amount in the report; not inferred from the order total.`); continue; }
+    const amount: number = fileAmount;
     if (!utr) missingUtr++;
     totalAmountRemitted += amount;
 
@@ -340,10 +357,29 @@ export async function importDelhiveryRemittance(
       waybillNumber: shipment?.waybillNumber || awb,
       amount,
       utr,
-      status: 'DELIVERED',
+      remittanceRef: ref,
+      status: currentOrder?.status || 'Unknown',
       city: row['City'] || row['city'],
     });
 
+    if (currentOrder) {
+      try {
+      await recordPaymentReceived(currentOrder.id, {
+        receivedAt: remittedAt,
+        amount,
+        utr,
+        ref,
+        source: 'DELHIVERY_REMITTANCE',
+        actor: actor || (uploadedBy ? { email: uploadedBy } : undefined),
+        deliveredAt: currentOrder.deliveredAt || remittedAt,
+      });
+      } catch (error: any) {
+        totalAmountRemitted -= amount; matchedOrders.pop(); unmatched.push(trackingKey);
+        notes.push(`${trackingKey}: bank evidence conflicts or could not be recorded; review this order.`);
+        logger.warn('Remittance row not recorded', { orderId: currentOrder.id, error: error.message });
+        continue;
+      }
+    }
     if (shipment) {
       await prisma.shipment.update({
         where: { id: shipment.id },
@@ -354,18 +390,7 @@ export async function importDelhiveryRemittance(
           codRemittedAt: remittedAt,
           codRemittanceRef: ref || utr || 'DELHIVERY-REMITTANCE',
           codRemittedAmount: amount,
-          ...(shipment.status !== 'DELIVERED' ? { status: 'DELIVERED' } : {}),
         },
-      });
-    }
-    if (currentOrder) {
-      await recordPaymentReceived(currentOrder.id, {
-        receivedAt: remittedAt,
-        amount,
-        utr,
-        ref,
-        source: 'DELHIVERY_REMITTANCE',
-        deliveredAt: currentOrder.deliveredAt || remittedAt,
       });
     }
     matchedCount++;
@@ -379,7 +404,7 @@ export async function importDelhiveryRemittance(
 
   if (missingUtr > 0) {
     notes.push(
-      `${missingUtr} matched row(s) had no UTR. Enter the remittance's Bank Transaction ID in the UTR box and upload the file again to fill it.`
+      `${missingUtr} matched row(s) had no UTR. Use the import history UTR correction to add the Bank Transaction ID without re-crediting these orders.`
     );
   }
 
@@ -435,7 +460,8 @@ export interface WalletTransactionEntry {
 export async function importDelhiveryCharges(
   fileName: string,
   sheets: ParsedSheet[],
-  uploadedBy?: string
+  uploadedBy?: string,
+  actor?: AccountTrailActor
 ): Promise<ImportResult> {
   const hasDeductions = sheets.some((s) => /^deductions$/i.test(s.name.trim()));
   const hasRefunds = sheets.some((s) => /^refunds$/i.test(s.name.trim()));
@@ -751,6 +777,10 @@ export async function importDelhiveryCharges(
     }
 
     matchedAwbs.add(awb);
+    if (shipment.orderId) await recordOrderAction(shipment.orderId, 'FREIGHT_RECONCILED', actor || (uploadedBy ? { email: uploadedBy } : undefined), {
+      note: 'Freight costs reconciled from the uploaded Delhivery wallet report.', amount: netBilledCost,
+      reference: `${fileName}:${awb}`,
+    });
     totalFreightBilled += netBilledCost;
     matchedOrders.push({
       orderId: shipment.order?.id,
@@ -800,7 +830,9 @@ export async function importGatewaySettlement(
   fileName: string,
   sheets: ParsedSheet[],
   uploadedBy?: string,
-  kind: ImportKind = 'PG_SETTLEMENT'
+  kind: ImportKind = 'PG_SETTLEMENT',
+  actor?: AccountTrailActor,
+  defaults: RemittanceDefaults = {}
 ): Promise<ImportResult> {
   const headers = sheets.flatMap((s) => s.headers);
   const columns = {
@@ -809,6 +841,7 @@ export async function importGatewaySettlement(
       /merchant transaction id|pg transaction id|transaction id|txn ?id|txnid/,
       /easepayid|payment id|^reference$/,
     ]),
+    settlementRef: pickColumn(headers, [/settlement (id|ref|reference|number)|payout (id|ref)/]),
     utr: pickColumn(headers, [/settlement utr|payout utr/, /^utr( no| number)?$|bank transaction id|bank utr/, /utr|bank ref/]),
     date: pickColumn(headers, [/settlement date|settled (on|date)|payout (actual )?date|settlement time/, /^date$|date/]),
     amount: pickColumn(headers, [
@@ -827,6 +860,10 @@ export async function importGatewaySettlement(
 
   const notes: string[] = [];
   const unmatched: string[] = [];
+  const settlementRefs = new Set(columns.settlementRef ? rowsOf(sheets).map(({ row }) => row[columns.settlementRef!]).filter(Boolean) : []);
+  const fileUtrs = new Set(columns.utr ? rowsOf(sheets).map(({ row }) => row[columns.utr!]).filter(Boolean) : []);
+  const typedUtr = settlementRefs.size <= 1 && fileUtrs.size <= 1 && (!fileUtrs.size || fileUtrs.has(defaults.utr || '')) ? defaults.utr : undefined;
+  if (defaults.utr && !typedUtr) notes.push('The typed UTR was not applied to this mixed settlement file. Correct individual order evidence.');
   if (!columns.order && !columns.transaction) {
     return saveImport(
       {
@@ -856,6 +893,7 @@ export async function importGatewaySettlement(
       ref: string;
     }
   >();
+  const ambiguousOrders = new Set<number>();
   let rowCount = 0;
   let skippedState = 0;
   let codRows = 0;
@@ -877,10 +915,10 @@ export async function importGatewaySettlement(
       unmatched.push(orderRef || txn);
       continue;
     }
+    if (ambiguousOrders.has(order.id)) continue;
     const isC2P =
       Boolean((order as any).gokwikPaymentId) ||
-      /c2p|prepaid|converted/i.test((order as any).tags || '') ||
-      kind === 'GOKWIK_SETTLEMENT';
+      /c2p|prepaid|converted/i.test((order as any).tags || '');
     if (order.paymentMethod === 'COD' && !isC2P) {
       codRows++;
       continue;
@@ -895,11 +933,18 @@ export async function importGatewaySettlement(
       utr: '',
       ref: '',
     };
-    entry.amount += (columns.amount && parseAmount(row[columns.amount])) || 0;
+    const rowAmount = columns.amount ? parseAmount(row[columns.amount]) : null;
+    if (rowAmount === null || rowAmount < 0) { unmatched.push(orderRef || txn); notes.push(`${orderRef || txn}: settlement amount missing/negative; review instead of inferring a credit.`); continue; }
+    entry.amount += rowAmount;
     entry.fee += Math.abs((columns.fee && parseAmount(row[columns.fee])) || 0) + Math.abs((columns.tax && parseAmount(row[columns.tax])) || 0);
-    const utr = columns.utr ? row[columns.utr] : '';
+    const utr = (columns.utr ? row[columns.utr] : '') || typedUtr || '';
+    if (entry.utr && utr && entry.utr !== utr) {
+      ambiguousOrders.add(order.id); perOrder.delete(order.id); unmatched.push(orderRef || txn);
+      notes.push(`${orderRef || txn}: multiple bank UTRs for one order; requires reconciliation rather than overwriting one.`);
+      continue;
+    }
     if (utr) entry.utr = utr;
-    entry.ref = txn || entry.ref;
+    entry.ref = (columns.settlementRef && row[columns.settlementRef]) || defaults.remittanceRef || utr || txn || entry.ref;
     const at = (columns.date && parseDateLoose(row[columns.date])) || null;
     if (at && at > entry.at) entry.at = at;
     perOrder.set(order.id, entry);
@@ -907,13 +952,14 @@ export async function importGatewaySettlement(
 
   let missingUtr = 0;
   let totalSettled = 0;
+  let recordedCount = 0;
   let primaryUtr: string | null = null;
   const matchedOrders: MatchedOrderSummary[] = [];
 
   for (const [orderId, entry] of perOrder) {
     if (!entry.utr) missingUtr++;
     if (!primaryUtr && entry.utr) primaryUtr = entry.utr;
-    const amount = Math.round(entry.amount * 100) / 100 || null;
+    const amount = Math.round(entry.amount * 100) / 100;
     if (amount) totalSettled += amount;
 
     matchedOrders.push({
@@ -921,7 +967,8 @@ export async function importGatewaySettlement(
       shopifyOrderName: entry.orderName,
       amount: amount || 0,
       utr: entry.utr || null,
-      status: 'DELIVERED',
+      status: 'Payment settlement',
+      remittanceRef: entry.ref,
       city: entry.city,
     });
 
@@ -932,14 +979,22 @@ export async function importGatewaySettlement(
           ? 'PHONEPE_SETTLEMENT'
           : 'PG_SETTLEMENT_REPORT';
 
+    try {
     await recordPaymentReceived(orderId, {
       receivedAt: entry.at.getTime() > 0 ? entry.at : new Date(),
       amount,
       utr: entry.utr || null,
       ref: entry.ref || null,
       source: sourceLabel,
+      actor: actor || (uploadedBy ? { email: uploadedBy } : undefined),
       gatewayFee: Math.round(entry.fee * 100) / 100,
     });
+    recordedCount++;
+    } catch (error: any) {
+      totalSettled -= amount; matchedOrders.pop(); unmatched.push(entry.orderName || String(orderId));
+      notes.push(`${entry.orderName || orderId}: bank evidence conflicts or could not be recorded; review this order.`);
+      logger.warn('Gateway settlement row not recorded', { orderId, error: error.message });
+    }
   }
 
   if (skippedState) notes.push(`${skippedState} row(s) were not settled yet (status column) and were skipped.`);
@@ -951,7 +1006,7 @@ export async function importGatewaySettlement(
       kind,
       fileName,
       rowCount,
-      matchedCount: perOrder.size,
+      matchedCount: recordedCount,
       unmatched,
       columns,
       notes,
@@ -971,7 +1026,8 @@ export async function importCarrierRemittance(
   fileName: string,
   sheets: ParsedSheet[],
   defaults: RemittanceDefaults = {},
-  uploadedBy?: string
+  uploadedBy?: string,
+  actor?: AccountTrailActor
 ): Promise<ImportResult> {
   const headers = sheets.flatMap((s) => s.headers);
   const columns = {
@@ -1014,7 +1070,8 @@ export async function importCarrierRemittance(
   }
 
   const fallbackDate = parseDateLoose(defaults.remittedAt || '') || new Date();
-  const defaultUtr = defaults.utr;
+  const refCount = new Set(columns.remittance ? rowsOf(sheets).map(({ row }) => row[columns.remittance!]).filter(Boolean) : []).size;
+  const defaultUtr = refCount <= 1 ? defaults.utr : undefined;
   const defaultRef = defaults.remittanceRef || fileName.replace(/\.zip|\.csv|\.xlsx/i, '');
 
   let totalAmountRemitted = 0;
@@ -1061,7 +1118,8 @@ export async function importCarrierRemittance(
     const ref = (columns.remittance && row[columns.remittance]) || defaultRef || null;
     const remittedAt = (columns.date && parseDateLoose(row[columns.date])) || fallbackDate;
     const fileAmount = columns.amount ? parseAmount(row[columns.amount]) : null;
-    const amount: number = fileAmount || shipment.codAmount || shipment.order?.totalAmount || 0;
+    if (fileAmount === null || fileAmount < 0) { unmatched.push(trackingKey); notes.push(`${trackingKey}: no non-negative remittance amount; not inferred from the order.`); continue; }
+    const amount: number = fileAmount;
     if (!utr) missingUtr++;
     totalAmountRemitted += amount;
 
@@ -1071,10 +1129,29 @@ export async function importCarrierRemittance(
       waybillNumber: shipment.waybillNumber || awb,
       amount,
       utr,
-      status: 'DELIVERED',
+      status: shipment.order?.status || 'Unknown',
+      remittanceRef: ref,
       city: row['City'] || row['city'],
     });
 
+    if (shipment.order) {
+      try {
+      await recordPaymentReceived(shipment.order.id, {
+        receivedAt: remittedAt,
+        amount,
+        utr,
+        ref,
+        source: `${carrierKind}_REMITTANCE`,
+        actor: actor || (uploadedBy ? { email: uploadedBy } : undefined),
+        deliveredAt: shipment.order.deliveredAt || remittedAt,
+      });
+      } catch (error: any) {
+        totalAmountRemitted -= amount; matchedOrders.pop(); unmatched.push(trackingKey);
+        notes.push(`${trackingKey}: bank evidence conflicts or could not be recorded; review this order.`);
+        logger.warn('Carrier remittance row not recorded', { orderId: shipment.order.id, error: error.message });
+        continue;
+      }
+    }
     await prisma.shipment.update({
       where: { id: shipment.id },
       data: {
@@ -1084,19 +1161,8 @@ export async function importCarrierRemittance(
         codRemittedAt: remittedAt,
         codRemittanceRef: ref || utr || `${carrierKind}-REMITTANCE`,
         codRemittedAmount: amount,
-        ...(shipment.status !== 'DELIVERED' ? { status: 'DELIVERED' } : {}),
       },
     });
-    if (shipment.order) {
-      await recordPaymentReceived(shipment.order.id, {
-        receivedAt: remittedAt,
-        amount,
-        utr,
-        ref,
-        source: `${carrierKind}_REMITTANCE`,
-        deliveredAt: shipment.order.deliveredAt || remittedAt,
-      });
-    }
     matchedCount++;
   }
 

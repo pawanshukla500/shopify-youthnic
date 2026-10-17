@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import type { AuthenticatedRequest } from '../middleware/auth.middleware';
 import axios from 'axios';
 import orderService from '../modules/orders/order.service';
-import { classifyOrderTab, isPrepaidOrder, prioritizeOrdersForDispatch } from '../modules/orders/order-tabs';
+import { classifyOrderTab, isCodConfirmed, isHighRtoCancel, isPrepaidOrder, prioritizeOrdersForDispatch } from '../modules/orders/order-tabs';
 import returnService from '../modules/returns/return.service';
 import trackingService from '../modules/tracking/tracking.service';
 import shopifyService from '../modules/shopify/shopify.service';
@@ -30,6 +30,9 @@ import invoiceService from '../modules/invoice/invoice.service';
 import picklistService from '../modules/picklist/picklist.service';
 import bulkPackService from '../modules/bulk-pack/bulk-pack.service';
 import { isExpiredSignedUrl, isUsableHttpUrl } from '../utils/signed-url';
+import { queueManifestForPickup, scheduleWaitingParcels, submitPickupBatch } from '../modules/delhivery/pickup-batch.service';
+import { addStaffNote, getOrderActivity, recordOrderAction } from '../modules/orders/order-activity.service';
+import returnScanService from '../modules/returns/return-scan.service';
 
 const router = Router();
 
@@ -802,6 +805,37 @@ router.get('/orders/:id', async (req: Request, res: Response): Promise<void> => 
   }
 });
 
+router.post('/orders/:id/pickup', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const orderId = Number(req.params.id);
+    if (!Number.isSafeInteger(orderId) || orderId <= 0) { res.status(400).json({ error: 'Invalid order ID.' }); return; }
+    const shipment = await prisma.shipment.findUnique({ where: { orderId } });
+    if (!shipment?.waybillNumber || shipment.status !== 'CREATED') { res.status(409).json({ error: 'Only a manifested parcel awaiting pickup can be scheduled.' }); return; }
+    const batch = await queueManifestForPickup(orderId, shipment.waybillNumber, req.user);
+    if (!batch) { res.status(409).json({ error: 'This parcel is not eligible for warehouse pickup.' }); return; }
+    const result = await submitPickupBatch(batch.key, req.user, new Date(), true);
+    res.json({ success: result?.status === 'SCHEDULED', batch: result, message: result?.message });
+  } catch (error: any) { res.status(400).json({ error: error.message }); }
+});
+router.get('/orders/:id/activity', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id <= 0) { res.status(400).json({ error: 'Invalid order ID.' }); return; }
+    const events = await getOrderActivity(id);
+    if (!events) { res.status(404).json({ error: 'Order not found.' }); return; }
+    res.json({ events });
+  } catch { res.status(500).json({ error: 'Could not load order activity.' }); }
+});
+router.post('/orders/:id/activity/notes', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user?.uid) { res.status(401).json({ error: 'Authentication required.' }); return; }
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id <= 0) { res.status(400).json({ error: 'Invalid order ID.' }); return; }
+    const event = await addStaffNote(id, String(req.body?.text || ''), String(req.body?.requestId || ''), req.user);
+    res.status(201).json({ id: event.id });
+  } catch (error: any) { res.status(400).json({ error: error.message }); }
+});
+
 // Explicit single-order refresh: never invoke bulk sync or auto-dispatch.
 router.post('/orders/:id/refresh-shopify', async (req: Request, res: Response): Promise<void> => {
   try {
@@ -917,7 +951,7 @@ router.get('/orders/:id/shipping-estimate', async (req: Request, res: Response):
 router.post('/orders/:id/dispatch', async (req: Request, res: Response): Promise<void> => {
   try {
     const orderId = parseInt(req.params.id, 10);
-    const result = await orderService.dispatchOrder(orderId);
+    const result = await orderService.dispatchOrder(orderId, (req as AuthenticatedRequest).user);
     res.json({ success: true, waybillNumber: result.waybillNumber });
   } catch (error: any) {
     res.status(400).json({ error: error.message });
@@ -956,7 +990,7 @@ router.post('/orders/bulk-dispatch', async (req: Request, res: Response): Promis
       const paymentMode = order ? (isPrepaid ? 'Prepaid' : 'COD') : undefined;
 
       try {
-        const result = await orderService.dispatchOrder(Number(id));
+        const result = await orderService.dispatchOrder(Number(id), (req as AuthenticatedRequest).user);
         results.push({ orderId: Number(id), success: true, waybillNumber: result.waybillNumber, paymentMode });
       } catch (err: any) {
         results.push({ orderId: Number(id), success: false, error: err.message, paymentMode });
@@ -1544,48 +1578,12 @@ router.post('/orders/sync-external', async (req: Request, res: Response): Promis
 });
 
 // Delhivery Warehouse Courier Pickup Request
-router.post('/delhivery/pickup', async (req: Request, res: Response): Promise<void> => {
+router.post('/delhivery/pickup', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const { pickupDate, pickupTime, packageCount, pickupLocation } = req.body;
-    const count = parseInt(packageCount, 10) || 1;
-    const result = await delhiveryService.requestPickup(pickupDate, pickupTime, count, pickupLocation);
-    const slotDate = pickupDate || new Date().toISOString().split('T')[0];
-    const slotTime = pickupTime || config.delhivery.pickupTime;
-    const location = pickupLocation || config.delhivery.pickupLocation;
-    if (result.success || result.alreadyOpen) {
-      try {
-        await prisma.pickupRequest.create({
-          data: {
-            pickupId: result.pickupId || null,
-            pickupLocation: location,
-            pickupDate: slotDate,
-            pickupTime: slotTime,
-            expectedPackageCount: count,
-            direction: 'FORWARD',
-            status: result.success ? 'SCHEDULED' : 'ALREADY_OPEN',
-            message: result.message,
-            rawResponse: result.data ?? undefined,
-          },
-        });
-      } catch (saveErr: any) {
-        logger.warn('Manual pickup was sent but could not be stored', { error: saveErr.message });
-      }
-    }
-
-    res.json({
-      success: result.success,
-      message: result.message,
-      data: result.data,
-      details: {
-        location: pickupLocation || config.delhivery.pickupLocation,
-        date: pickupDate || new Date().toISOString().split('T')[0],
-        time: pickupTime || config.delhivery.pickupTime,
-        packageCount: count,
-      },
-    });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
+    const batch = await scheduleWaitingParcels(req.user);
+    res.json({ success: batch?.status === 'SCHEDULED', message: batch?.message || 'No manifested parcels are awaiting a next-day pickup.', batch,
+      details: batch ? { location: batch.pickupLocation, date: batch.pickupDate, time: batch.pickupTime, packageCount: batch.submittedPackageCount } : null });
+  } catch (error: any) { res.status(400).json({ error: error.message }); }
 });
 
 // Confirm COD order (adds COD_CONFIRMED tag on Shopify & DB, moves order to dispatch queue)
@@ -1602,6 +1600,10 @@ router.post('/orders/:id/confirm-cod', async (req: AuthenticatedRequest, res: Re
     }
 
     const currentTags = order.tags || '';
+    if (order.paymentMethod !== 'COD' || !['NEW', 'DISPATCH_PENDING'].includes(order.status) || order.shipment?.waybillNumber || isHighRtoCancel(order)) {
+      res.status(409).json({ error: 'Only an unshipped, non-cancelled COD order can be approved.' });
+      return;
+    }
     const tagSet = new Set(currentTags.split(',').map((t) => t.trim()).filter(Boolean));
     tagSet.add('COD_CONFIRMED');
     tagSet.add('Confirmed');
@@ -1615,19 +1617,18 @@ router.post('/orders/:id/confirm-cod', async (req: AuthenticatedRequest, res: Re
     }
 
     // Update in database
-    const updated = await prisma.order.update({
-      where: { id: orderId },
-      data: {
-        tags: updatedTags,
-        status: order.status === 'NEW' ? 'DISPATCH_PENDING' : order.status,
-      },
-      include: { items: true, shipment: true },
+    const claimed = await prisma.order.updateMany({
+      where: { id: orderId, status: order.status, tags: order.tags },
+      data: { tags: updatedTags, status: 'DISPATCH_PENDING' },
     });
+    if (claimed.count !== 1) { res.status(409).json({ error: 'Order changed while confirming COD. Reload before trying again.' }); return; }
+    const updated = await prisma.order.findUnique({ where: { id: orderId }, include: { items: true, shipment: true } });
 
     // Snapshot the Firebase actor so future account changes do not erase who approved COD.
     await recordAccountTrailEvent({
       orderId,
       eventType: 'COD_APPROVED',
+      externalReference: 'COD_CONFIRMED',
       actorType: 'USER',
       actor: req.user,
       source: 'OMS_UI',
@@ -1716,6 +1717,10 @@ router.post('/orders/:id/cancel', async (req: Request, res: Response): Promise<v
     });
 
     logger.info('Order cancelled successfully', { orderId, orderName: order.shopifyOrderName, delhiveryCancel });
+    await recordOrderAction(orderId, 'ORDER_CANCELLED', (req as AuthenticatedRequest).user, {
+      note: `Order cancellation requested. Carrier: ${delhiveryCancel}; Shopify accepted: ${shopifyCancelled}.`,
+      status: delhiveryCancel === 'refused' ? 'REVIEW' : 'COMPLETED',
+    });
     res.json({
       success: true,
       delhiveryCancel,
@@ -1884,6 +1889,9 @@ router.post('/orders/:id/ndr-action', async (req: Request, res: Response): Promi
       return;
     }
     const result = await orderService.handleNdrAction(orderId, action, notes);
+    await recordOrderAction(orderId, 'NDR_ACTION', (req as AuthenticatedRequest).user, {
+      note: `Requested ${action}${notes ? `: ${String(notes).slice(0, 1000)}` : ''}.`,
+    });
     res.json(result);
   } catch (error: any) {
     logger.error('Error handling NDR action', { orderId: req.params.id, error: error.message });
@@ -2194,6 +2202,37 @@ router.post('/returns/scan', async (req: AuthenticatedRequest, res: Response): P
     });
   } catch (error: any) {
     res.status(400).json({ error: error.message });
+  }
+});
+
+// Check status and connection to read-only RETURN_SCAN_DATABASE
+router.get('/returns/scan-status', async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const status = await returnScanService.ping();
+    res.json(status);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Sync return scans from read-only RETURN_SCAN_DATABASE into OMS
+router.post('/returns/scan-sync', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const lookbackDays = req.body?.lookbackDays ? parseInt(req.body.lookbackDays, 10) : 30;
+    const result = await returnScanService.syncReturnScans(lookbackDays);
+    res.json({ success: true, ...result });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Trigger daily manual COD refund digest email to listings@vbexports.co.in
+router.post('/returns/cod-refund-digest', async (_req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const result = await returnScanService.sendDailyCodManualRefundDigest();
+    res.json(result);
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -2860,6 +2899,10 @@ router.get('/delhivery/label/:waybill/download', async (req: Request, res: Respo
 router.patch('/delhivery/shipment/:waybill', async (req: Request, res: Response): Promise<void> => {
   try {
     const result = await delhiveryService.updateShipment(req.params.waybill, req.body);
+    const shipment = await prisma.shipment.findUnique({ where: { waybillNumber: req.params.waybill } });
+    if (shipment) await recordOrderAction(shipment.orderId, 'SHIPMENT_DETAILS_UPDATED', (req as AuthenticatedRequest).user, {
+      note: 'Delivery phone/address correction submitted to Delhivery.', status: result.success === false ? 'FAILED' : 'COMPLETED',
+    });
     res.json(result);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -2938,7 +2981,12 @@ router.get('/delhivery/shipping-cost', async (req: Request, res: Response): Prom
 router.post('/delhivery/shipment/:waybill/cancel', async (req: Request, res: Response): Promise<void> => {
   try {
     const success = await delhiveryService.cancelShipment(req.params.waybill);
-    res.json({ success });
+    const shipment = await prisma.shipment.findUnique({ where: { waybillNumber: req.params.waybill } });
+    if (shipment) await recordOrderAction(shipment.orderId, 'SHIPMENT_CANCEL_REQUESTED', (req as AuthenticatedRequest).user, {
+      note: success ? 'Delhivery accepted shipment cancellation.' : 'Delhivery did not accept cancellation; parcel remains tracked.',
+      status: success ? 'COMPLETED' : 'REVIEW',
+    });
+    res.status(success ? 200 : 409).json(success ? { success } : { success: false, error: 'Delhivery did not accept cancellation; keep tracking this parcel.' });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -3788,7 +3836,7 @@ router.post('/orders/:id/whatsapp-trigger', async (req: Request, res: Response):
 
     const resolvedTrigger: KwikEngageTriggerType =
       (trigger as KwikEngageTriggerType) ||
-      (order.paymentMethod === 'COD' && !order.tags?.includes('COD_Confirmed')
+      (order.paymentMethod === 'COD' && !isCodConfirmed(order)
         ? 'COD_CONFIRMATION'
         : order.shipment?.waybillNumber
         ? 'ORDER_SHIPPED'
@@ -3801,7 +3849,10 @@ router.post('/orders/:id/whatsapp-trigger', async (req: Request, res: Response):
       customText,
     });
 
-    res.json({ success: result.success, result, orderId, trigger: resolvedTrigger });
+    await recordOrderAction(orderId, 'CUSTOMER_MESSAGE_REQUESTED', (req as AuthenticatedRequest).user, {
+      note: `WhatsApp ${resolvedTrigger} requested.`, status: result.success ? 'COMPLETED' : 'FAILED',
+    });
+    res.status(result.success ? 200 : 502).json({ success: result.success, result, orderId, trigger: resolvedTrigger, ...(!result.success ? { error: 'WhatsApp provider did not accept the message.' } : {}) });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

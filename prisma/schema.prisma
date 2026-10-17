@@ -155,6 +155,11 @@ model Shipment {
   waybillNumber    String? @unique // AWB number from Delhivery
   orderIdDelhivery String? // Delhivery's internal order ID
   courier          String?
+  pickupBatchKey   String?
+  manifestedByOms Boolean @default(false)
+  manifestPickupLocation String?
+  omsManifestedAt DateTime?
+  pickupBatch      WarehousePickupBatch? @relation(fields: [pickupBatchKey], references: [key], onDelete: SetNull)
   paymentMode      String? // COD / Pre-paid
   codAmount        Float?  @default(0)
   declaredValue    Float?
@@ -357,6 +362,26 @@ model PickupRequest {
 
   @@index([pickupLocation, pickupDate])
   @@index([status])
+}
+
+// Unique only on this new table; existing pickup history is left intact.
+model WarehousePickupBatch {
+  key                   String   @id
+  pickupLocation        String
+  pickupDate            String
+  pickupTime            String
+  status                String   @default("QUEUED")
+  pickupId              String?
+  submittedPackageCount Int      @default(0)
+  attempts              Int      @default(0)
+  claimedAt             DateTime?
+  nextAttemptAt         DateTime @default(now())
+  message               String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  shipments             Shipment[]
+
+  @@index([status, nextAttemptAt])
 }
 
 model ReturnItem {

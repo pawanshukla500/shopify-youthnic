@@ -30,6 +30,9 @@ import { OrderNextStep } from '../components/OrderNextStep'
 import { OrderMoneyCard } from '../components/OrderMoneyCard'
 import { OrderFinancialSummary } from '../components/OrderFinancialSummary'
 import { OrderTrackingHistory } from '../components/OrderTrackingHistory'
+import { OrderActivityFeed } from '../components/OrderActivityFeed'
+import { OrderPaymentEvidence } from '../components/OrderPaymentEvidence'
+import { OrderPickupStatus } from '../components/OrderPickupStatus'
 import { ORDER_SECTIONS, contactPhone, hasCustomerDelivery, type OrderSection } from '../order-workspace'
 import type { AccountTrailEvent, Order, OrderItem, ReturnRecord } from '../types'
 import './OrderDetail.css'
@@ -47,6 +50,9 @@ export function OrderDetail() {
   const [returnTracking, setReturnTracking] = useState('')
   const [carrier, setCarrier] = useState('Delhivery')
   const [section, setSection] = useState<OrderSection>(() => window.location.hash === '#return-panel' ? 'returns' : 'overview')
+  useEffect(() => {
+    if (orderQuery.dataUpdatedAt) queryClient.invalidateQueries({ queryKey: ['order-activity', id] })
+  }, [orderQuery.dataUpdatedAt, id, queryClient])
   const sectionRefs = useRef<Array<HTMLButtonElement | null>>([])
 
   // Cancel / Delete / Confirm COD States
@@ -738,9 +744,11 @@ export function OrderDetail() {
           </div>
         </Panel>}
         <Panel className="order-activity-panel">
-          <PanelHeading title="Recent activity" />
+          <PanelHeading title="Recent carrier activity" />
           <OrderTrackingHistory logs={order.shipment?.trackingLogs} />
         </Panel>
+        <OrderPaymentEvidence order={order} />
+        <OrderActivityFeed orderId={order.id} currency={order.currency} />
         </section>
 
 
@@ -844,7 +852,7 @@ export function OrderDetail() {
                       )}
                       {order.paymentReference && (
                         <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '6px', padding: '7px 9px' }}>
-                          <span className="detail-label" style={{ fontSize: '10px', color: 'var(--muted)' }}>Bank Reference / UTR</span>
+                          <span className="detail-label" style={{ fontSize: '10px', color: 'var(--muted)' }}>Customer checkout reference</span>
                           <div
                             className="waybill-chip"
                             onClick={() => {
@@ -1297,6 +1305,7 @@ export function OrderDetail() {
           )}
         </Panel>
 
+        <OrderPickupStatus order={order} />
         {/* ─── Carrier Tracking Timeline ────────────────────────── */}
         <Panel>
           <PanelHeading title="Tracking history" />

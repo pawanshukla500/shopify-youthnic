@@ -8,10 +8,14 @@ const { prismaStub, shopifyStub, orderStub, resendStub, pgQueryStub } = vi.hoist
   prismaStub: {
     order: { findFirst: vi.fn(), findMany: vi.fn(), update: vi.fn() },
     shipment: { update: vi.fn() },
-    return: { update: vi.fn() },
+    return: { update: vi.fn(), create: vi.fn() },
     accountTrailEvent: { create: vi.fn() },
   },
-  shopifyStub: { updateOrderTags: vi.fn() },
+  shopifyStub: {
+    updateOrderTags: vi.fn().mockResolvedValue({ success: true, tags: [] }),
+    markReturnReceivedOnShopify: vi.fn().mockResolvedValue({ success: true, closedReturnIds: ['gid://shopify/Return/37529714887'], tagsAdded: ['Return Received', 'Return Delivered'], noteUpdated: true, errors: [] }),
+    closeShopifyReturn: vi.fn().mockResolvedValue({ success: true, status: 'CLOSED' }),
+  },
   orderStub: { processRtoRefund: vi.fn() },
   resendStub: { sendEmail: vi.fn() },
   pgQueryStub: vi.fn(),
@@ -111,10 +115,13 @@ describe('ReturnScanService.syncReturnScans', () => {
       })
     );
 
-    // Verify Shopify tags were updated with Return Delivered
-    expect(shopifyStub.updateOrderTags).toHaveBeenCalledWith(
+    // Verify markReturnReceivedOnShopify was called with order details
+    expect(shopifyStub.markReturnReceivedOnShopify).toHaveBeenCalledWith(
       'gid://shopify/Order/5839',
-      expect.arrayContaining(['Return Delivered', 'RTO_DELIVERED'])
+      expect.objectContaining({
+        scanId: 101,
+        tracking: '30100810010673',
+      })
     );
 
     // Verify processRtoRefund was called for prepaid order
@@ -166,10 +173,14 @@ describe('ReturnScanService.syncReturnScans', () => {
     // processRtoRefund must NOT be called for COD orders
     expect(orderStub.processRtoRefund).not.toHaveBeenCalled();
 
-    // Verify COD_MANUAL_REFUND_DUE tag was added
-    expect(shopifyStub.updateOrderTags).toHaveBeenCalledWith(
+    // Verify markReturnReceivedOnShopify was called with ironRequired: true
+    expect(shopifyStub.markReturnReceivedOnShopify).toHaveBeenCalledWith(
       'gid://shopify/Order/5806',
-      expect.arrayContaining(['COD_MANUAL_REFUND_DUE'])
+      expect.objectContaining({
+        scanId: 102,
+        tracking: '30100810010743',
+        ironRequired: true,
+      })
     );
   });
 

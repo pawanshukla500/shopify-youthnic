@@ -314,4 +314,102 @@ describe('Shopify Agent Skills Improvements', () => {
       expect(isDuplicateWebhook(webhookId)).toBe(false);
     });
   });
+
+  describe('Return Receipt & Return Close Automation', () => {
+    it('closeShopifyReturn executes returnClose GraphQL mutation', async () => {
+      mockPost.mockResolvedValueOnce({
+        data: {
+          data: {
+            returnClose: {
+              return: { id: 'gid://shopify/Return/37529714887', status: 'CLOSED' },
+              userErrors: [],
+            },
+          },
+        },
+      });
+
+      const res = await shopifyService.closeShopifyReturn('37529714887');
+
+      expect(res.success).toBe(true);
+      expect(res.status).toBe('CLOSED');
+      expect(mockPost).toHaveBeenCalledWith(
+        '/graphql.json',
+        expect.objectContaining({
+          query: expect.stringContaining('returnClose'),
+          variables: { id: 'gid://shopify/Return/37529714887' },
+        })
+      );
+    });
+
+    it('markReturnReceivedOnShopify closes open returns, updates tags, and appends timeline note', async () => {
+      // 1. GraphQL query for order returns
+      mockPost.mockResolvedValueOnce({
+        data: {
+          data: {
+            order: {
+              id: 'gid://shopify/Order/18929182769351',
+              name: '#26YOU5892',
+              returnStatus: 'IN_PROGRESS',
+              returns: {
+                nodes: [
+                  { id: 'gid://shopify/Return/37529714887', status: 'OPEN' },
+                ],
+              },
+            },
+          },
+        },
+      });
+
+      // 2. GraphQL mutation returnClose
+      mockPost.mockResolvedValueOnce({
+        data: {
+          data: {
+            returnClose: {
+              return: { id: 'gid://shopify/Return/37529714887', status: 'CLOSED' },
+              userErrors: [],
+            },
+          },
+        },
+      });
+
+      // 3. REST fetchOrder
+      mockGet.mockResolvedValueOnce({
+        data: {
+          order: {
+            id: 18929182769351,
+            tags: 'Confirmed, Dispatched',
+            note: 'Original note',
+          },
+        },
+      });
+
+      // 4. REST put update
+      mockPut.mockResolvedValueOnce({
+        data: {
+          order: {
+            id: 18929182769351,
+          },
+        },
+      });
+
+      const res = await shopifyService.markReturnReceivedOnShopify('18929182769351', {
+        scanId: 3865,
+        tracking: '30100810012681',
+        issueLabel: 'No issue',
+      });
+
+      expect(res.success).toBe(true);
+      expect(res.closedReturnIds).toContain('gid://shopify/Return/37529714887');
+      expect(res.noteUpdated).toBe(true);
+      expect(mockPut).toHaveBeenCalledWith(
+        '/orders/18929182769351.json',
+        expect.objectContaining({
+          order: expect.objectContaining({
+            tags: expect.stringContaining('Return Received'),
+            note: expect.stringContaining('Verified received at warehouse'),
+          }),
+        })
+      );
+    });
+  });
 });

@@ -23,11 +23,19 @@ export interface ReturnScanRow {
   scanned_tracking: string | null;
   forward_tracking_snapshot: string | null;
   return_type_raw_snapshot: string | null;
+  shopify_order_id?: string | null;
+  shopify_return_id?: string | null;
+  shopify_order_name?: string | null;
+  return_type?: string | null;
+  er_tracking_id?: string | null;
+  er_forward_tracking_id?: string | null;
+  er_alt_tracking_id?: string | null;
 }
 
 export interface SyncReturnScansResult {
   scansChecked: number;
   matchedOrders: number;
+  shopifyReturnsClosed: number;
   prepaidRefunded: number;
   codQueued: number;
   alreadyProcessed: number;
@@ -160,6 +168,7 @@ class ReturnScanService {
     const result: SyncReturnScansResult = {
       scansChecked: 0,
       matchedOrders: 0,
+      shopifyReturnsClosed: 0,
       prepaidRefunded: 0,
       codQueued: 0,
       alreadyProcessed: 0,
@@ -179,22 +188,42 @@ class ReturnScanService {
     }
 
     try {
-      // Query recent scans for Shopify / YOU orders or scans with tracking
+      // Query recent scans for Shopify / YOU orders or scans with tracking, joined with expected_returns
       const cutoff = new Date(Date.now() - lookbackDays * 24 * 3600 * 1000);
       const query = `
         SELECT 
-          id, expected_return_id, scanned_by, scanned_at, outcome, issue_label, status, notes,
-          tracking_id_snapshot, order_number_snapshot, marketplace_snapshot, scanned_tracking,
-          forward_tracking_snapshot, return_type_raw_snapshot
-        FROM receipt_scans
+          rs.id,
+          rs.expected_return_id,
+          rs.scanned_by,
+          rs.scanned_at,
+          rs.outcome,
+          rs.issue_label,
+          rs.status,
+          rs.notes,
+          rs.tracking_id_snapshot,
+          rs.order_number_snapshot,
+          rs.marketplace_snapshot,
+          rs.scanned_tracking,
+          rs.forward_tracking_snapshot,
+          rs.return_type_raw_snapshot,
+          er.shopify_order_id,
+          er.shopify_return_id,
+          er.shopify_order_name,
+          er.return_type,
+          er.tracking_id as er_tracking_id,
+          er.forward_tracking_id as er_forward_tracking_id,
+          er.alt_tracking_id as er_alt_tracking_id
+        FROM receipt_scans rs
+        LEFT JOIN expected_returns er ON rs.expected_return_id = er.id
         WHERE (
-          marketplace_snapshot ILIKE '%Shopify%' 
-          OR order_number_snapshot ILIKE '%YOU%' 
-          OR order_number_snapshot ILIKE '#%'
-          OR scanned_tracking IS NOT NULL
+          rs.marketplace_snapshot ILIKE '%Shopify%' 
+          OR er.marketplace_id = 465
+          OR rs.order_number_snapshot ILIKE '%YOU%' 
+          OR rs.order_number_snapshot ILIKE '#%'
+          OR (rs.scanned_tracking IS NOT NULL AND rs.scanned_tracking != '')
         )
-        AND scanned_at >= $1
-        ORDER BY id ASC
+        AND rs.scanned_at >= $1
+        ORDER BY rs.id ASC
       `;
 
       const scansRes = await pool.query(query, [cutoff]);
@@ -214,14 +243,25 @@ class ReturnScanService {
             continue;
           }
 
-          // Resolve order by tracking or order number
-          const tracking = (scan.scanned_tracking || scan.tracking_id_snapshot || scan.forward_tracking_snapshot || '').trim();
-          const orderNumberRaw = (scan.order_number_snapshot || '').trim();
+          // Resolve order by tracking or order number or shopify order id
+          const tracking = (
+            scan.scanned_tracking ||
+            scan.tracking_id_snapshot ||
+            scan.forward_tracking_snapshot ||
+            scan.er_tracking_id ||
+            scan.er_forward_tracking_id ||
+            scan.er_alt_tracking_id ||
+            ''
+          ).trim();
+
+          const orderNumberRaw = (scan.order_number_snapshot || scan.shopify_order_name || '').trim();
           const orderNumberClean = orderNumberRaw.replace(/^#/, '');
+          const shopifyOrderId = (scan.shopify_order_id || '').trim();
 
           const order = await prisma.order.findFirst({
             where: {
               OR: [
+                ...(shopifyOrderId ? [{ shopifyOrderId }] : []),
                 ...(orderNumberRaw ? [
                   { shopifyOrderName: orderNumberRaw },
                   { shopifyOrderName: `#${orderNumberClean}` },
@@ -242,13 +282,33 @@ class ReturnScanService {
 
           result.matchedOrders++;
 
+          // Always ensure Shopify marks the return received and closes open returns
+          try {
+            const shopifyRes = await shopifyService.markReturnReceivedOnShopify(order.shopifyOrderId, {
+              scanId: scan.id,
+              tracking,
+              issueLabel: scan.issue_label,
+              shopifyReturnId: scan.shopify_return_id || order.returns?.[0]?.shopifyReturnId,
+              ironRequired: Boolean(scan.issue_label && scan.issue_label.toLowerCase().includes('iron')),
+            });
+            if (shopifyRes.closedReturnIds.length) {
+              result.shopifyReturnsClosed += shopifyRes.closedReturnIds.length;
+            }
+          } catch (shopifyErr: any) {
+            logger.warn('Failed to mark return received on Shopify', {
+              orderId: order.id,
+              shopifyOrderId: order.shopifyOrderId,
+              error: shopifyErr.message,
+            });
+          }
+
           // Check if already marked delivered & refunded
           const isAlreadyDelivered = order.status === 'RTO_DELIVERED' || order.status === 'RETURN_RECEIVED' || order.status === 'REFUNDED';
           const isPrepaid = isPrepaidOrder(order);
 
-          // 1. Mark order Return Delivered if not already marked
+          // 1. Mark order Return Delivered in OMS if not already marked
           if (!isAlreadyDelivered) {
-            const newStatus = order.returns?.length ? 'RETURN_RECEIVED' : 'RTO_DELIVERED';
+            const newStatus = order.returns?.length || scan.return_type === 'Customer Return' ? 'RETURN_RECEIVED' : 'RTO_DELIVERED';
             await prisma.order.update({
               where: { id: order.id },
               data: { status: newStatus },
@@ -281,23 +341,25 @@ class ReturnScanService {
                   });
                 }
               }
-            }
-
-            // Tag on Shopify
-            try {
-              const existingTags = (order.tags || '').split(',').map((t) => t.trim()).filter(Boolean);
-              const tagSet = new Set(existingTags);
-              tagSet.add('Return Delivered');
-              tagSet.add('RTO_DELIVERED');
-              if (scan.issue_label && scan.issue_label.toLowerCase().includes('iron')) {
-                tagSet.add('Iron Required');
+            } else if (scan.return_type === 'Customer Return') {
+              // Create Return record in OMS if customer return scanned
+              try {
+                await prisma.return.create({
+                  data: {
+                    orderId: order.id,
+                    returnWaybillNumber: tracking,
+                    carrier: 'Delhivery',
+                    returnReason: scan.notes || scan.issue_label || 'Customer Return',
+                    returnStatus: 'RECEIVED',
+                    qcStatus: 'APPROVED',
+                    qcRemark: scan.issue_label || 'Verified without issue (Warehouse scan)',
+                    receivedAt: scan.scanned_at || new Date(),
+                    shopifyReturnId: scan.shopify_return_id || null,
+                  },
+                });
+              } catch (createRetErr: any) {
+                logger.warn('Failed to create Return record in OMS', { orderId: order.id, error: createRetErr.message });
               }
-              await shopifyService.updateOrderTags(order.shopifyOrderId, Array.from(tagSet));
-            } catch (tagErr: any) {
-              logger.warn('Failed to update Return Delivered tags on Shopify', {
-                orderId: order.id,
-                error: tagErr.message,
-              });
             }
 
             // Record audit trail event
@@ -309,12 +371,13 @@ class ReturnScanService {
               source: 'RETURN_SCAN_DATABASE',
               status: 'COMPLETED',
               externalReference: tracking || `SCAN_${scan.id}`,
-              note: `Return package verified received at warehouse without blocker issue (Scan #${scan.id}, Issue: ${scan.issue_label || 'No issue'}). Marked Return Delivered.`,
+              note: `Return package verified received at warehouse without blocker issue (Scan #${scan.id}, Issue: ${scan.issue_label || 'No issue'}). Marked Return Delivered and Closed on Shopify.`,
               metadata: {
                 scanId: scan.id,
                 scannedAt: scan.scanned_at,
                 issueLabel: scan.issue_label,
                 tracking,
+                shopifyReturnId: scan.shopify_return_id,
               },
             }).catch((err) => logger.warn('Failed to record return delivery trail', { error: err.message }));
           }

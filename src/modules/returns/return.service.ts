@@ -622,6 +622,21 @@ class ReturnService {
     // Notify customer that return is received
     await notificationEngine.notifyReturnReceived(returnRecord.order);
 
+    // Mark return received and close return on Shopify
+    if (returnRecord.order?.shopifyOrderId) {
+      shopifyService.markReturnReceivedOnShopify(returnRecord.order.shopifyOrderId, {
+        scanId: returnRecord.id,
+        tracking: waybillNumber,
+        issueLabel: qcRemark,
+        shopifyReturnId: returnRecord.shopifyReturnId,
+      }).catch((err) => {
+        logger.warn('Failed to mark return received on Shopify from scanReturnAtWarehouse', {
+          orderId: returnRecord.orderId,
+          error: err.message,
+        });
+      });
+    }
+
     // If QC approved, auto-process refund
     if (qcStatus === 'APPROVED' || qcStatus === 'PARTIAL') {
       const refundResult = await this.processRefund(returnRecord.id, qcStatus === 'PARTIAL', actor);

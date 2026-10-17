@@ -4,6 +4,7 @@ Requires Python Playwright and its Chromium browser, plus installed frontend dep
 All API traffic and auth are intercepted in the test browser only.
 """
 import json
+import os
 import subprocess
 import tempfile
 import time
@@ -36,7 +37,8 @@ ORDER = {
 
 
 def run():
-    artifacts = Path(tempfile.mkdtemp(prefix="youthnic-order-ui-"))
+    artifacts = Path(os.environ.get("ORDER_UI_ARTIFACT_DIR") or tempfile.mkdtemp(prefix="youthnic-order-ui-"))
+    artifacts.mkdir(parents=True, exist_ok=True)
     with (artifacts / "vite.log").open("w") as log:
         server = subprocess.Popen(
             ["node", str(ROOT / "frontend/node_modules/vite/bin/vite.js"),
@@ -119,7 +121,7 @@ def run():
                     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), width
                     expect(rows.filter(has_text="Discount")).to_be_visible()
                     page.screenshot(path=str(artifacts / f"order-{width}.png"), full_page=True)
-                page.evaluate("document.documentElement.dataset.theme = 'dark'")
+                page.get_by_role("button", name="🌙 Dark", exact=True).click()
                 page.screenshot(path=str(artifacts / "order-dark.png"), full_page=True)
                 current.update({"totalShipping": None, "totalDiscounts": None, "totalTax": None})
                 page.reload()

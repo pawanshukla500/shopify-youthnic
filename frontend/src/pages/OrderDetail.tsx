@@ -29,7 +29,10 @@ import { Button, ButtonGroup, CopyableBadge, EmptyState, ErrorBox, FormField, Ic
 import { OrderNextStep } from '../components/OrderNextStep'
 import { OrderMoneyCard } from '../components/OrderMoneyCard'
 import { OrderFinancialSummary } from '../components/OrderFinancialSummary'
+import { OrderTrackingHistory } from '../components/OrderTrackingHistory'
+import { ORDER_SECTIONS, contactPhone, hasCustomerDelivery, type OrderSection } from '../order-workspace'
 import type { AccountTrailEvent, Order, OrderItem, ReturnRecord } from '../types'
+import './OrderDetail.css'
 
 export function OrderDetail() {
   useDocumentTitle('Order detail')
@@ -43,6 +46,8 @@ export function OrderDetail() {
   const [reason, setReason] = useState('')
   const [returnTracking, setReturnTracking] = useState('')
   const [carrier, setCarrier] = useState('Delhivery')
+  const [section, setSection] = useState<OrderSection>(() => window.location.hash === '#return-panel' ? 'returns' : 'overview')
+  const sectionRefs = useRef<Array<HTMLButtonElement | null>>([])
 
   // Cancel / Delete / Confirm COD States
   const [showCancelModal, setShowCancelModal] = useState(false)
@@ -130,7 +135,9 @@ export function OrderDetail() {
       })).data
     },
     onSuccess: async (data) => {
-      toast.toast('success', `Shopify refund processed successfully · ID: ${data.refundId}`)
+      toast.toast('success', data.moneyMoved === false
+        ? 'Refund recorded, but no online payment was available. Pay the customer manually and record it in Payments.'
+        : `Shopify refund processed successfully · ID: ${data.refundId}`)
       await queryClient.invalidateQueries({ queryKey: ['order', id] })
       await queryClient.invalidateQueries({ queryKey: ['orders'] })
       await queryClient.invalidateQueries({ queryKey: ['payment', id] })
@@ -174,9 +181,45 @@ export function OrderDetail() {
   })
 
   useEffect(() => {
-    if (!orderQuery.data || window.location.hash !== '#return-panel') return
-    document.getElementById('return-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }, [orderQuery.data])
+    const followHash = () => setSection(window.location.hash === '#return-panel' ? 'returns' : 'overview')
+    followHash()
+    window.addEventListener('hashchange', followHash)
+    return () => window.removeEventListener('hashchange', followHash)
+  }, [id])
+
+  useEffect(() => {
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      if (moreOpen) {
+        setMoreOpen(false)
+        moreButtonRef.current?.focus()
+      }
+      if (!isCancelling) setShowCancelModal(false)
+      if (!isDeleting) setShowDeleteModal(false)
+      if (!isSubmittingNdr) setShowNdrModal(false)
+      if (!isSendingWhatsApp) setShowWhatsAppModal(false)
+    }
+    document.addEventListener('keydown', escape)
+    return () => document.removeEventListener('keydown', escape)
+  }, [moreOpen, isCancelling, isDeleting, isSubmittingNdr, isSendingWhatsApp])
+
+  useEffect(() => {
+    if (!showCancelModal && !showDeleteModal && !showNdrModal && !showWhatsAppModal) return
+    const previous = document.activeElement as HTMLElement | null
+    const dialog = document.querySelector<HTMLElement>('.shopify-order-page .modal-card')
+    const controls = () => Array.from(dialog?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href]') || [])
+    controls()[0]?.focus()
+    const trap = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab') return
+      const items = controls()
+      const first = items[0]
+      const last = items[items.length - 1]
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
+    }
+    dialog?.addEventListener('keydown', trap)
+    return () => { dialog?.removeEventListener('keydown', trap); previous?.focus() }
+  }, [showCancelModal, showDeleteModal, showNdrModal, showWhatsAppModal])
 
   useEffect(() => {
     if (!moreOpen) return
@@ -184,7 +227,13 @@ export function OrderDetail() {
       const target = event.target as Node
       if (!moreRef.current?.contains(target) && !moreButtonRef.current?.contains(target)) setMoreOpen(false)
     }
-    const dismiss = () => setMoreOpen(false)
+    const dismiss = (event: Event) => {
+      if (event.type === 'scroll' && event.target instanceof Node && moreRef.current?.contains(event.target)) return
+      if (event.type === 'resize') { setMoreOpen(false); return }
+      const rect = moreButtonRef.current?.getBoundingClientRect()
+      if (!rect || rect.bottom < 0 || rect.top > window.innerHeight) { setMoreOpen(false); return }
+      setMorePos({ top: rect.bottom + 6, left: Math.max(8, rect.right - 248) })
+    }
     document.addEventListener('mousedown', close)
     window.addEventListener('scroll', dismiss, true)
     window.addEventListener('resize', dismiss)
@@ -200,7 +249,18 @@ export function OrderDetail() {
   if (orderQuery.isError || !order) return <><PageIntro eyebrow="Order detail" title="Order not found" /><ErrorBox message={orderQuery.error ? apiError(orderQuery.error) : 'The requested order could not be found.'} /></>
   const payment = paymentQuery.data
 
-  const cleanPhone = (order.customerPhone || '').replace(/\D/g, '')
+  const cleanPhone = contactPhone(order.customerPhone)
+
+  const openSection = (value: OrderSection) => {
+    setSection(value)
+    requestAnimationFrame(() => document.getElementById(`order-section-${value}`)?.focus())
+  }
+  const editShipment = () => {
+    setEditPhone(order.customerPhone || '')
+    setEditAddress([order.customerAddress, order.customerCity, order.customerState, order.customerPincode].filter(Boolean).join(', '))
+    setShowEditDetails(true)
+    openSection('shipment')
+  }
 
   const copyAddress = () => {
     const fullAddr = [order.customerAddress, order.customerCity, `${order.customerState} ${order.customerPincode}`, order.customerCountry].filter(Boolean).join(', ')
@@ -503,10 +563,11 @@ export function OrderDetail() {
     if (!rect) return
     setMorePos({ top: rect.bottom + 6, left: Math.max(8, rect.right - 248) })
     setMoreOpen(true)
+    requestAnimationFrame(() => moreRef.current?.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)')?.focus({ preventScroll: true }))
   }
   const closeMore = () => setMoreOpen(false)
 
-  return <div className="shopify-order-page">
+  return <div className="shopify-order-page order-workspace">
     <div className="shopify-order-top">
       <button type="button" className="shopify-back" onClick={() => navigate('/orders')}>
         <Icon name="arrow" size={16} />
@@ -533,12 +594,20 @@ export function OrderDetail() {
             <Icon name="chevron" size={14} />
           </button>
           {moreOpen && morePos && (
-            <div className="shopify-more-menu" role="menu" style={{ top: morePos.top, left: morePos.left }}>
+            <div className="shopify-more-menu" role="menu" aria-label="Order actions" style={{ top: morePos.top, left: morePos.left }} onKeyDown={(event) => {
+              const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)'))
+              const index = controls.indexOf(document.activeElement as HTMLElement)
+              if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+                event.preventDefault()
+                const next = event.key === 'Home' ? 0 : event.key === 'End' ? controls.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + controls.length) % controls.length
+                controls[next]?.focus()
+              }
+            }}>
               <div className="shopify-more-label">Documents</div>
-              <button type="button" role="menuitem" disabled={isDownloadingLabel} onClick={() => { closeMore(); handleDownloadLabel() }}>Download label</button>
-              <button type="button" role="menuitem" onClick={() => { closeMore(); openPrintableOrderLabel(order.id) }}>Print label</button>
-              <button type="button" role="menuitem" disabled={isDownloadingLabelAndInvoice} onClick={() => { closeMore(); handleDownloadLabelAndInvoice() }}>Download label + invoice</button>
-              <button type="button" role="menuitem" onClick={() => { closeMore(); openPrintableOrderLabelAndInvoice(order.id) }}>Print label + invoice</button>
+              <button type="button" role="menuitem" disabled={!hasWaybill || isDownloadingLabel} onClick={() => { closeMore(); handleDownloadLabel() }}>Download label</button>
+              <button type="button" role="menuitem" disabled={!hasWaybill} onClick={() => { closeMore(); openPrintableOrderLabel(order.id) }}>Print label</button>
+              <button type="button" role="menuitem" disabled={!hasWaybill || isDownloadingLabelAndInvoice} onClick={() => { closeMore(); handleDownloadLabelAndInvoice() }}>Download label + invoice</button>
+              <button type="button" role="menuitem" disabled={!hasWaybill} onClick={() => { closeMore(); openPrintableOrderLabelAndInvoice(order.id) }}>Print label + invoice</button>
               <button type="button" role="menuitem" onClick={() => { closeMore(); openPrintableOrderInvoice(order.id) }}>GST tax invoice</button>
               <button type="button" role="menuitem" disabled={isDownloadingInvoice} onClick={() => { closeMore(); handleDownloadInvoice() }}>Download invoice</button>
               <button type="button" role="menuitem" disabled={isDownloadingPack} onClick={() => { closeMore(); handleDownloadOrderPack() }}>Order pack (ZIP)</button>
@@ -555,11 +624,11 @@ export function OrderDetail() {
               {!hasWaybill && (
                 <button type="button" role="menuitem" disabled={isFetchingExternalAwb} onClick={() => { closeMore(); handleFetchExternalFulfillment() }}>Fetch Delhivery AWB</button>
               )}
-              {hasWaybill && (
-                <button type="button" role="menuitem" onClick={() => { closeMore(); setShowEditDetails(true); document.getElementById('shipment-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}>Edit phone / address</button>
+              {hasWaybill && !['DELIVERED', 'RTO_DELIVERED', 'CANCELLED'].includes(order.shipment?.status || '') && (
+                <button type="button" role="menuitem" onClick={() => { closeMore(); editShipment() }}>Edit phone / address</button>
               )}
               {order.status === 'DELIVERED' && (
-                <button type="button" role="menuitem" onClick={() => { closeMore(); document.getElementById('return-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}>Create reverse pickup</button>
+                <button type="button" role="menuitem" onClick={() => { closeMore(); openSection('returns') }}>Create reverse pickup</button>
               )}
               {(order.hasNdrException || ['FAILED_DELIVERY', 'RTO_INITIATED'].includes(order.status)) && (
                 <button type="button" role="menuitem" onClick={() => { closeMore(); setShowNdrModal(true) }}>Resolve NDR</button>
@@ -624,29 +693,28 @@ export function OrderDetail() {
       onRtoRefund={handleProcessRtoRefund}
     />
 
+    <div className="order-section-nav" role="tablist" aria-label="Order sections">
+      {ORDER_SECTIONS.map((tab, index) => (
+        <button type="button" role="tab" key={tab.key} id={`order-tab-${tab.key}`} aria-label={tab.label} aria-controls={`order-section-${tab.key}`}
+          aria-selected={section === tab.key} tabIndex={section === tab.key ? 0 : -1}
+          ref={(element) => { sectionRefs.current[index] = element }}
+          onClick={() => setSection(tab.key)} onKeyDown={(event) => {
+            if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+            event.preventDefault()
+            const next = event.key === 'Home' ? 0 : event.key === 'End' ? ORDER_SECTIONS.length - 1
+              : (index + (event.key === 'ArrowRight' ? 1 : -1) + ORDER_SECTIONS.length) % ORDER_SECTIONS.length
+            setSection(ORDER_SECTIONS[next].key)
+            sectionRefs.current[next]?.focus()
+          }}>{tab.label}{tab.key === 'returns' && order.returns?.length ? <span>{order.returns.length}</span> : null}</button>
+      ))}
+    </div>
     <div className="detail-grid">
       <div className="detail-main">
+        <section className="order-section" id="order-section-overview" role="tabpanel" aria-labelledby="order-tab-overview" tabIndex={-1} hidden={section !== 'overview'}>
         <Panel className="shopify-card" style={{ padding: 0 }}>
           <div className="shopify-card-head">
+            <h2>Order items <span className="order-item-count">{(order.items || []).reduce((sum, item) => sum + item.quantity, 0)}</span></h2>
             <span className={`shopify-pill ${fulfillmentPill.tone}`}>{fulfillmentPill.label}</span>
-            {canDispatch && isDispatchNeeded ? (
-              <button
-                type="button"
-                className="shopify-btn shopify-btn-primary"
-                disabled={action.isPending}
-                onClick={() => action.mutate('dispatch')}
-              >
-                {action.isPending && action.variables === 'dispatch' ? 'Dispatching…' : 'Dispatch'}
-              </button>
-            ) : canDispatch && !isCodConf && (order.paymentMethod === 'COD' || order.shipment?.paymentMode === 'COD') ? (
-              <button type="button" className="shopify-btn shopify-btn-primary" disabled={isConfirmingCod} onClick={handleConfirmCod}>
-                {isConfirmingCod ? 'Confirming…' : 'Confirm COD'}
-              </button>
-            ) : hasWaybill && !isReturnOrder && order.status !== 'DELIVERED' ? (
-              <button type="button" className="shopify-btn shopify-btn-primary" onClick={() => openPrintableOrderLabel(order.id)}>
-                Print label
-              </button>
-            ) : null}
           </div>
           <div className="shopify-ship-line">
             {order.shippingTitle || order.shipment?.courier || 'Shipping'}
@@ -654,14 +722,29 @@ export function OrderDetail() {
           </div>
           <ItemsTable items={order.items ?? []} currency={order.currency} order={order} section="lines" />
         </Panel>
-
         <Panel className="shopify-card" style={{ padding: 0 }}>
           <div className="shopify-card-head">
+            <h2>Payment summary</h2>
             <span className={`shopify-pill ${paymentPill.tone}`}>{paymentPill.label}</span>
           </div>
           <ItemsTable items={order.items ?? []} currency={order.currency} order={order} section="summary" />
         </Panel>
+        {order.shipment?.waybillNumber && <Panel className="order-shipment-preview">
+          <PanelHeading title="Shipment" action={<button type="button" className="order-text-action" onClick={() => openSection('shipment')}>Manage shipment <Icon name="arrow" size={14} /></button>} />
+          <div className="order-preview-facts">
+            <div><span>Tracking number</span><CopyableBadge text={order.shipment.waybillNumber} monospace /></div>
+            <div><span>Carrier status</span><strong>{order.shipment.trackingStatus || labelize(order.shipment.status)}</strong></div>
+            <div><span>Last location</span><strong>{order.shipment.trackingLocation || 'Awaiting carrier scan'}</strong></div>
+          </div>
+        </Panel>}
+        <Panel className="order-activity-panel">
+          <PanelHeading title="Recent activity" />
+          <OrderTrackingHistory logs={order.shipment?.trackingLogs} />
+        </Panel>
+        </section>
 
+
+        <section className="order-section" id="order-section-payments" role="tabpanel" aria-labelledby="order-tab-payments" tabIndex={-1} hidden={section !== 'payments'}>
         <OrderMoneyCard
           order={order}
           onChanged={() => {
@@ -669,16 +752,255 @@ export function OrderDetail() {
             queryClient.invalidateQueries({ queryKey: ['orders'] })
           }}
         />
+          <Panel>
+            <PanelHeading
+              eyebrow="Financials"
+              title="Payment & Receipt"
+              action={
+                <span className={`payment-state ${payment?.paymentVerified ?? order.paymentVerified ? 'verified' : ''}`}>
+                  <span />
+                  {payment?.paymentVerified ?? order.paymentVerified ? 'Verified' : 'Unverified'}
+                </span>
+              }
+            />
+            {paymentQuery.isError ? (
+              <ErrorBox compact message={apiError(paymentQuery.error)} />
+            ) : (
+              <div className="payment-detail">
+                {/* ─── GoKwik / Easebuzz Aggregated Partner Payment Card ─── */}
+                {(order.paymentAggregator === 'GoKwik' ||
+                  (order.paymentGateway || '').toLowerCase().includes('kwik') ||
+                  order.paymentProvider) && (
+                  <div style={{ background: 'var(--line-subtle)', border: '1px solid var(--line)', borderRadius: '10px', padding: '14px', marginBottom: '14px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px', flexWrap: 'wrap', gap: '6px' }}>
+                      <span style={{ fontSize: '11px', fontWeight: 800, color: 'var(--ink)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                        Payment Routing & Partner Settlement
+                      </span>
+                      <span className={`verified-badge ${order.paymentVerified ? 'verified' : 'unverified'}`}>
+                        {order.paymentVerified ? 'Captured & Verified' : 'Verification Pending'}
+                      </span>
+                    </div>
+
+                    {/* Flow Banner */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '8px', padding: '10px 14px', marginBottom: '12px', flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <img src="/logos/gokwik.png" alt="GoKwik" style={{ height: '20px', objectFit: 'contain' }} />
+                        <div>
+                          <div style={{ fontSize: '11.5px', fontWeight: 700, color: '#034694' }}>GoKwik Checkout</div>
+                          <div style={{ fontSize: '9.5px', color: 'var(--muted)' }}>Order & 1-Click Aggregator</div>
+                        </div>
+                      </div>
+                      <span style={{ color: '#94a3b8', fontSize: '13px', fontWeight: 700 }} aria-hidden="true">→</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <img src="/logos/easebuzz.png" alt="Easebuzz" style={{ height: '18px', objectFit: 'contain' }} />
+                        <div>
+                          <div style={{ fontSize: '11.5px', fontWeight: 700, color: 'var(--ink)' }}>
+                            {order.paymentProvider || 'Easebuzz'}
+                          </div>
+                          <div style={{ fontSize: '9.5px', color: '#059669', fontWeight: 600 }}>Acquiring Payment Partner</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* IDs Grid */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '8px' }}>
+                      {order.paymentProviderPaymentId && (
+                        <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '6px', padding: '7px 9px' }}>
+                          <span className="detail-label" style={{ fontSize: '10px', color: 'var(--muted)' }}>Easebuzz Payment ID</span>
+                          <div
+                            className="waybill-chip"
+                            onClick={() => {
+                              navigator.clipboard.writeText(order.paymentProviderPaymentId || '')
+                              toast.toast('success', 'Easebuzz Payment ID copied!')
+                            }}
+                            style={{ marginTop: '2px', cursor: 'pointer' }}
+                            title="Click to copy Easebuzz ID"
+                          >
+                            <span className="mono" style={{ fontSize: '11px', fontWeight: 700, color: 'var(--ink)' }}>
+                              {order.paymentProviderPaymentId}
+                            </span>
+                            <Icon name="copy" size={11} />
+                          </div>
+                        </div>
+                      )}
+                      {order.gokwikPaymentId && (
+                        <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '6px', padding: '7px 9px' }}>
+                          <span className="detail-label" style={{ fontSize: '10px', color: 'var(--muted)' }}>GoKwik Payment ID</span>
+                          <div
+                            className="waybill-chip"
+                            onClick={() => {
+                              navigator.clipboard.writeText(order.gokwikPaymentId || '')
+                              toast.toast('success', 'GoKwik Payment ID copied!')
+                            }}
+                            style={{ marginTop: '2px', cursor: 'pointer' }}
+                            title="Click to copy GoKwik ID"
+                          >
+                            <span className="mono" style={{ fontSize: '11px', fontWeight: 700, color: '#034694' }}>
+                              {order.gokwikPaymentId}
+                            </span>
+                            <Icon name="copy" size={11} />
+                          </div>
+                        </div>
+                      )}
+                      {order.paymentReference && (
+                        <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '6px', padding: '7px 9px' }}>
+                          <span className="detail-label" style={{ fontSize: '10px', color: 'var(--muted)' }}>Bank Reference / UTR</span>
+                          <div
+                            className="waybill-chip"
+                            onClick={() => {
+                              navigator.clipboard.writeText(order.paymentReference || '')
+                              toast.toast('success', 'Bank UTR copied!')
+                            }}
+                            style={{ marginTop: '2px', cursor: 'pointer' }}
+                            title="Click to copy Bank UTR"
+                          >
+                            <span className="mono" style={{ fontSize: '11px', fontWeight: 700, color: '#15803d' }}>
+                              {order.paymentReference}
+                            </span>
+                            <Icon name="copy" size={11} />
+                          </div>
+                        </div>
+                      )}
+                      {order.paymentAuthorizationKey && (
+                        <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '6px', padding: '7px 9px' }}>
+                          <span className="detail-label" style={{ fontSize: '10px', color: 'var(--muted)' }}>Authorization Key</span>
+                          <div
+                            className="waybill-chip"
+                            onClick={() => {
+                              navigator.clipboard.writeText(order.paymentAuthorizationKey || '')
+                              toast.toast('success', 'Auth Key copied!')
+                            }}
+                            style={{ marginTop: '2px', cursor: 'pointer' }}
+                            title="Click to copy Auth Key"
+                          >
+                            <span className="mono" style={{ fontSize: '11px', fontWeight: 700, color: 'var(--ink-secondary)' }}>
+                              {order.paymentAuthorizationKey}
+                            </span>
+                            <Icon name="copy" size={11} />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                <DetailRow
+                  label="Amount"
+                  value={formatMoney(payment?.totalAmount ?? order.totalAmount, payment?.currency ?? order.currency)}
+                  strong
+                />
+                <DetailRow label="Method" value={payment?.paymentMethod ?? order.paymentMethod} />
+                <DetailRow
+                  label="Money Source"
+                  value={
+                    order.paymentMethod === 'COD' ? (
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                        {order.shipment?.courier?.toLowerCase() === 'delhivery' && (
+                          <img src="/logos/delhivery.png" alt="Delhivery" style={{ height: '11px', objectFit: 'contain' }} />
+                        )}
+                        <span>{order.shipment?.courier || 'Cash'} on Delivery Collection</span>
+                      </div>
+                    ) : order.paymentAggregator === 'GoKwik' || (order.paymentGateway || '').toLowerCase().includes('gokwik') ? (
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                        <img src="/logos/gokwik.png" alt="GoKwik" style={{ height: '14px', objectFit: 'contain' }} />
+                        <span style={{ color: '#94a3b8', fontSize: '11px' }}>via</span>
+                        <img src="/logos/easebuzz.png" alt="Easebuzz" style={{ height: '13px', objectFit: 'contain' }} />
+                        <span style={{ fontWeight: 600, color: 'var(--ink)' }}>{order.paymentProvider || 'Easebuzz'}</span>
+                      </div>
+                    ) : (order.paymentGateway || '').toLowerCase().includes('phonepe') ? (
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                        <img src="/logos/phonepe.png" alt="PhonePe" style={{ height: '14px', objectFit: 'contain' }} />
+                        <span>PhonePe Payment Gateway</span>
+                      </div>
+                    ) : (
+                      payment?.paymentGateway ?? order.paymentGateway
+                    )
+                  }
+                />
+                {order.paymentAggregator && (
+                  <DetailRow
+                    label="Aggregator"
+                    value={
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                        {order.paymentAggregator.toLowerCase() === 'gokwik' && (
+                          <img src="/logos/gokwik.png" alt="GoKwik" style={{ height: '13px', objectFit: 'contain' }} />
+                        )}
+                        <span>{order.paymentAggregator} Checkout</span>
+                      </div>
+                    }
+                  />
+                )}
+                {order.paymentProvider && (
+                  <DetailRow
+                    label="Acquiring Partner"
+                    value={
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                        {order.paymentProvider.toLowerCase() === 'easebuzz' && (
+                          <img src="/logos/easebuzz.png" alt="Easebuzz" style={{ height: '13px', objectFit: 'contain' }} />
+                        )}
+                        <span style={{ fontWeight: 700, color: 'var(--ink)' }}>{order.paymentProvider}</span>
+                      </div>
+                    }
+                  />
+                )}
+                <DetailRow label="Gateway" value={payment?.paymentGateway ?? order.paymentGateway} />
+                <DetailRow
+                  label="Transaction ID"
+                  value={payment?.gatewayTransactionId ?? order.gatewayTransactionId}
+                  mono
+                  copyable
+                  onCopy={(val) => {
+                    navigator.clipboard.writeText(val)
+                    toast.toast('success', 'Transaction ID copied!')
+                  }}
+                />
+                <DetailRow label="Financial status" value={payment?.financialStatus ?? order.financialStatus} />
+                <DetailRow label="Channel" value={order.salesChannel} />
+                <DetailRow label="Verified at" value={formatDate(payment?.paymentVerifiedAt ?? order.paymentVerifiedAt)} />
+
+                {!order.paymentVerified && (
+                  <Button
+                    className="button-primary full-button"
+                    loading={action.isPending && action.variables === 'verify'}
+                    onClick={() => action.mutate('verify')}
+                  >
+                    <Icon name="shield" size={16} />
+                    Verify payment
+                  </Button>
+                )}
+
+                {/* Direct Shopify Refund Option */}
+                {canRefund && (
+                  <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: '1px dashed #e2e8f0', display: 'flex', flexDirection: 'column', gap: '7px' }}>
+                    <Button
+                      className="button-secondary full-button"
+                      style={{ borderColor: '#fca5a5', color: '#b91c1c', background: '#fff5f5' }}
+                      loading={refundMutation.isPending}
+                      onClick={() => refundMutation.mutate()}
+                    >
+                      <Icon name="dollar" size={15} />
+                      Issue Shopify Refund ({formatMoney(order.totalAmount, order.currency)})
+                    </Button>
+                    <span style={{ fontSize: '10px', color: 'var(--muted)', textAlign: 'center' }}>
+                      Processes refund directly via Shopify API. Shopify automatically routes the refund back through {order.paymentAggregator || 'GoKwik'}{order.paymentProvider ? ` / ${order.paymentProvider}` : ''} to the customer.
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+          </Panel>
+        <AccountTrailPanel orderId={order.id} returns={order.returns ?? []} defaultAmount={order.totalAmount} currency={order.currency} />
+        </section>
 
         {/* ─── Live Delhivery Tracking & Parcel Journey ───────────────────────── */}
+        <section className="order-section" id="order-section-shipment" role="tabpanel" aria-labelledby="order-tab-shipment" tabIndex={-1} hidden={section !== 'shipment'}>
         <Panel id="shipment-panel">
           <PanelHeading
-            eyebrow={order.shipment?.courier?.toLowerCase() === 'delhivery' ? 'Delhivery Express Network' : 'Carrier Logistics'}
             title={
               order.shipment?.courier?.toLowerCase() === 'delhivery' ? (
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
                   <img src="/logos/delhivery.png" alt="Delhivery" style={{ height: '14px', objectFit: 'contain' }} />
-                  <span>Live Delhivery Tracking & Parcel Journey</span>
+                  <span>Shipment details</span>
                 </span>
               ) : (
                 `${order.shipment?.courier || 'Carrier'} Shipment Tracking`
@@ -719,7 +1041,7 @@ export function OrderDetail() {
           {order.shipment ? (
             <>
               {/* 21st.dev Design Pro: Summary Telemetry Metric Cards */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '12px', marginTop: '12px', marginBottom: '14px' }}>
+              <div className="order-shipment-facts">
                 <StatCard
                   title={isReturnOrder && returnAwb ? 'Return Courier AWB' : `${order.shipment.courier || 'Carrier'} AWB`}
                   value={
@@ -743,7 +1065,7 @@ export function OrderDetail() {
                 <StatCard
                   title={isReturnOrder ? 'Reverse Tracking Status' : 'Tracking Status'}
                   value={
-                    <span style={{ fontSize: '14px', fontWeight: 700, color: '#0f172a' }}>
+                    <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--ink)' }}>
                       {isReturnOrder
                         ? (order.shipment.trackingStatus ?? labelize(order.status))
                         : (order.shipment.trackingStatus ?? (order.shipment?.status || order.status ? labelize(order.shipment?.status ?? order.status) : 'Awaiting carrier scan'))}
@@ -756,7 +1078,7 @@ export function OrderDetail() {
 
                 <StatCard
                   title="Current Location"
-                  value={<span style={{ fontSize: '14px', fontWeight: 700, color: '#0f172a' }}>{order.shipment.trackingLocation ?? 'Origin Hub (Surat)'}</span>}
+                  value={<span>{order.shipment.trackingLocation ?? 'Awaiting carrier scan'}</span>}
                   icon="pin"
                   accentColor="#0284c7"
                   subtext={order.customerCity ? `Destination: ${order.customerCity}` : 'In Transit'}
@@ -790,7 +1112,7 @@ export function OrderDetail() {
                             ? (order.shipment.netBilledCost ?? 0) === 0
                               ? '#059669'
                               : '#1e293b'
-                            : '#64748b',
+                            : 'var(--muted)',
                       }}
                     >
                       {formatMoney(
@@ -849,7 +1171,7 @@ export function OrderDetail() {
                   </a>
                 )}
 
-                {order.shipment.courier?.toLowerCase() === 'delhivery' && (
+                {order.shipment.courier?.toLowerCase() === 'delhivery' && !['DELIVERED', 'RTO_DELIVERED', 'CANCELLED'].includes(order.shipment.status) && (
                   <Button
                     className="button-danger-ghost"
                     disabled={!order.shipment.waybillNumber || action.isPending || order.shipment.status === 'CANCELLED'}
@@ -875,7 +1197,7 @@ export function OrderDetail() {
                   </Button>
                 )}
 
-                {order.shipment.courier?.toLowerCase() === 'delhivery' && order.shipment.waybillNumber && (
+                {order.shipment.courier?.toLowerCase() === 'delhivery' && order.shipment.waybillNumber && !['DELIVERED', 'RTO_DELIVERED', 'CANCELLED'].includes(order.shipment.status) && (
                   <Button
                     className="button-secondary"
                     onClick={() => {
@@ -916,24 +1238,24 @@ export function OrderDetail() {
               )}
 
               {showEditDetails && order.shipment?.waybillNumber && (
-                <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px', marginTop: '10px', display: 'grid', gap: '8px' }}>
-                  <span style={{ fontSize: '11px', color: '#64748b' }}>
+                <div style={{ background: 'var(--line-subtle)', border: '1px solid var(--line)', borderRadius: '8px', padding: '12px', marginTop: '10px', display: 'grid', gap: '8px' }}>
+                  <span style={{ fontSize: '11px', color: 'var(--muted)' }}>
                     Pushes corrected details to Delhivery (Edit Order API — allowed while Manifested / In Transit / Pending).
                   </span>
-                  <input
+                  <label className="form-field"><span className="field-label">Corrected phone</span><input
                     type="text"
                     placeholder="Corrected 10-digit phone"
                     value={editPhone}
                     onChange={(e) => setEditPhone(e.target.value)}
                     style={{ width: '100%' }}
-                  />
-                  <input
+                  /></label>
+                  <label className="form-field"><span className="field-label">Corrected address</span><input
                     type="text"
                     placeholder="Corrected address with pincode"
                     value={editAddress}
                     onChange={(e) => setEditAddress(e.target.value)}
                     style={{ width: '100%' }}
-                  />
+                  /></label>
                   <div>
                     <Button
                       className="button-primary"
@@ -977,91 +1299,27 @@ export function OrderDetail() {
 
         {/* ─── Carrier Tracking Timeline ────────────────────────── */}
         <Panel>
-          <PanelHeading eyebrow="Carrier events" title="Tracking timeline" />
-          {order.shipment?.trackingLogs?.length ? (
-            <div className="timeline">
-              {[...order.shipment.trackingLogs]
-                .sort((a, b) => new Date(b.scannedAt).getTime() - new Date(a.scannedAt).getTime())
-                .map((log, index) => (
-                  <div className="timeline-item" key={log.id}>
-                    <div className={`timeline-marker ${index === 0 ? 'current' : ''}`}>
-                      <Icon name={index === 0 ? 'pin' : 'check'} size={13} />
-                    </div>
-                    <div className="timeline-copy">
-                      <strong>{log.status}</strong>
-                      <span>{[log.location, log.remark].filter(Boolean).join(' · ') || 'Carrier update'}</span>
-                      <time dateTime={log.scannedAt ? String(log.scannedAt) : undefined}>{formatDate(log.scannedAt)}</time>
-                    </div>
-                  </div>
-                ))}
-            </div>
-          ) : (
-            <EmptyState
-              title="No tracking events yet"
-              description="Delhivery carrier scans will appear here as the shipment moves through hubs."
-              icon="clock"
-            />
-          )}
+          <PanelHeading title="Tracking history" />
+          <OrderTrackingHistory logs={order.shipment?.trackingLogs} limit={6} />
         </Panel>
-      </div>
-
-      <div className="detail-side">
-        <Panel className="shopify-order-notes">
-          <h2>Notes</h2>
-          <p>{order.shopifyNote || 'No notes from Shopify.'}</p>
-        </Panel>
-        {Boolean(order.additionalDetails?.length) && (
-          <Panel className="shopify-order-notes">
-            <details>
-              <summary>Additional details <span>{order.additionalDetails!.length}</span></summary>
-              <dl className="shopify-additional-details">
-                {order.additionalDetails!.map((attribute, index) => (
-                  <div key={`${attribute.name}-${index}`}><dt>{attribute.name}</dt><dd>{attribute.value}</dd></div>
-                ))}
-              </dl>
-            </details>
-          </Panel>
-        )}
-        <Panel>
-          <PanelHeading eyebrow="Customer" title={order.customerName} />
-          <div className="customer-detail">
-            <div className="customer-avatar">
-              {order.customerName.split(' ').map((part) => part[0]).slice(0, 2).join('').toUpperCase()}
-            </div>
-            <div>
-              <strong style={{ fontSize: '14px', color: 'var(--ink)' }}>{order.customerName}</strong>
-              <span style={{ fontSize: '11px', color: 'var(--ink-secondary)' }}>{order.customerPhone || 'No phone'}</span>
-              <span style={{ fontSize: '11px', color: 'var(--muted)' }}>{order.customerEmail ?? 'No email provided'}</span>
-            </div>
-          </div>
-          <div className="address-card">
-            <Icon name="pin" size={20} />
-            <div style={{ flex: 1 }}>
-              <strong style={{ fontSize: '12px', color: 'var(--ink)' }}>{order.customerAddress}</strong>
-              <span style={{ fontSize: '11px', color: 'var(--ink-secondary)', marginTop: '2px', display: 'block' }}>
-                {order.customerCity}, {order.customerState} — <strong className="mono">{order.customerPincode}</strong>
-              </span>
-              <span style={{ fontSize: '10px', color: 'var(--muted)' }}>{order.customerCountry}</span>
-            </div>
-          </div>
-          <div className="customer-quick-actions">
-            {cleanPhone ? (
-              <a className="quick-action-btn quick-action-wa" href={`https://wa.me/91${cleanPhone}?text=${encodeURIComponent(`Hi ${order.customerName}, this is regarding your order ${order.shopifyOrderName} from our store.`)}`} target="_blank" rel="noopener noreferrer">
-                <Icon name="message" size={14} /> WhatsApp Chat
-              </a>
-            ) : (
-              <button className="quick-action-btn quick-action-wa" disabled><Icon name="message" size={14} /> No WhatsApp</button>
-            )}
-            {cleanPhone ? (
-              <a className="quick-action-btn quick-action-call" href={`tel:${cleanPhone}`}><Icon name="phone" size={14} /> Call Customer</a>
-            ) : (
-              <button className="quick-action-btn quick-action-call" disabled><Icon name="phone" size={14} /> No Phone</button>
-            )}
-            <button className="quick-action-btn quick-action-copy" onClick={copyAddress}><Icon name="copy" size={14} /> Copy Address</button>
-          </div>
-        </Panel>
-        <details className="detail-more">
-          <summary>More details: RTO risk, Shopify tags, payment IDs, notifications</summary>
+        </section>
+        <section className="order-section" id="order-section-returns" role="tabpanel" aria-labelledby="order-tab-returns" tabIndex={-1} hidden={section !== 'returns'}>
+        <ReturnForm
+          order={order}
+          items={(order.items ?? []).filter((item) => item.returnable)}
+          selected={selected}
+          setSelected={setSelected}
+          reason={reason}
+          setReason={setReason}
+          returnTracking={returnTracking}
+          setReturnTracking={setReturnTracking}
+          carrier={carrier}
+          setCarrier={setCarrier}
+          loading={returnMutation.isPending}
+          onSubmit={() => returnMutation.mutate()}
+        />
+        </section>
+        <section className="order-section" id="order-section-details" role="tabpanel" aria-labelledby="order-tab-details" tabIndex={-1} hidden={section !== 'details'}>
           {/* ─── GoKwik Buyer Intelligence & RTO Risk Assessment ─── */}
           <Panel>
             <PanelHeading
@@ -1078,14 +1336,14 @@ export function OrderDetail() {
               }
             />
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '7px', padding: '10px 12px' }}>
+              <div style={{ background: 'var(--line-subtle)', border: '1px solid var(--line)', borderRadius: '7px', padding: '10px 12px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                   <span className="detail-label">GoKwik Delivery Track Record</span>
                   <span style={{ fontSize: '11px', fontWeight: 800, color: (order.deliverOrderCount || 0) >= 2 ? '#047857' : '#b45309' }}>
                     {order.deliverOrderCount ?? 0} Prior Deliveries
                   </span>
                 </div>
-                <p style={{ margin: 0, fontSize: '11.5px', color: '#334155', lineHeight: 1.45 }}>
+                <p style={{ margin: 0, fontSize: '11.5px', color: 'var(--ink-secondary)', lineHeight: 1.45 }}>
                   {order.rtoRiskReason ||
                     (order.paymentMethod !== 'COD'
                       ? 'Prepaid order captured upfront · Zero RTO risk'
@@ -1096,13 +1354,13 @@ export function OrderDetail() {
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '8px 10px' }}>
+                <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '6px', padding: '8px 10px' }}>
                   <span className="detail-label">Payment Mode</span>
-                  <strong style={{ fontSize: '12px', color: '#0f172a' }}>{order.paymentMethod || 'Prepaid'}</strong>
+                  <strong style={{ fontSize: '12px', color: 'var(--ink)' }}>{order.paymentMethod || 'Prepaid'}</strong>
                 </div>
-                <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '8px 10px' }}>
+                <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '6px', padding: '8px 10px' }}>
                   <span className="detail-label">COD Confirmation</span>
-                  <strong style={{ fontSize: '12px', color: isCodConf ? '#047857' : '#64748b' }}>
+                  <strong style={{ fontSize: '12px', color: isCodConf ? '#047857' : 'var(--muted)' }}>
                     {isCodConf ? '✓ Confirmed' : order.paymentMethod === 'COD' ? 'Pending' : 'N/A (Prepaid)'}
                   </strong>
                 </div>
@@ -1152,12 +1410,12 @@ export function OrderDetail() {
                 )}
               </div>
 
-              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '10px 12px', fontSize: '11px', color: '#334155', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <div style={{ background: 'var(--line-subtle)', border: '1px solid var(--line)', borderRadius: '8px', padding: '10px 12px', fontSize: '11px', color: 'var(--ink-secondary)', display: 'flex', flexDirection: 'column', gap: '4px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontWeight: 700, color: '#0f172a' }}>Delhivery ONE Channel Link</span>
+                  <span style={{ fontWeight: 700, color: 'var(--ink)' }}>Delhivery ONE Channel Link</span>
                   <span style={{ color: '#16a34a', fontWeight: 700 }}>● Active</span>
                 </div>
-                <p style={{ margin: 0, fontSize: '10.5px', color: '#64748b', lineHeight: 1.4 }}>
+                <p style={{ margin: 0, fontSize: '10.5px', color: 'var(--muted)', lineHeight: 1.4 }}>
                   When Shopify is linked in Delhivery ONE, dispatches triggered from this OMS automatically update Shopify fulfillment tracking with carrier <strong>Delhivery</strong> and append the generated AWB to order tags.
                 </p>
               </div>
@@ -1165,243 +1423,7 @@ export function OrderDetail() {
           </Panel>
 
           {/* ─── Financials & 3-Way Money Reconciliation ─────────── */}
-          <Panel>
-            <PanelHeading
-              eyebrow="Financials"
-              title="Payment & Receipt"
-              action={
-                <span className={`payment-state ${payment?.paymentVerified ?? order.paymentVerified ? 'verified' : ''}`}>
-                  <span />
-                  {payment?.paymentVerified ?? order.paymentVerified ? 'Verified' : 'Unverified'}
-                </span>
-              }
-            />
-            {paymentQuery.isError ? (
-              <ErrorBox compact message={apiError(paymentQuery.error)} />
-            ) : (
-              <div className="payment-detail">
-                {/* ─── GoKwik / Easebuzz Aggregated Partner Payment Card ─── */}
-                {(order.paymentAggregator === 'GoKwik' ||
-                  (order.paymentGateway || '').toLowerCase().includes('kwik') ||
-                  order.paymentProvider) && (
-                  <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '14px', marginBottom: '14px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px', flexWrap: 'wrap', gap: '6px' }}>
-                      <span style={{ fontSize: '11px', fontWeight: 800, color: '#0f172a', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                        Payment Routing & Partner Settlement
-                      </span>
-                      <span className={`verified-badge ${order.paymentVerified ? 'verified' : 'unverified'}`}>
-                        {order.paymentVerified ? 'Captured & Verified' : 'Verification Pending'}
-                      </span>
-                    </div>
 
-                    {/* Flow Banner */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '10px 14px', marginBottom: '12px', flexWrap: 'wrap' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <img src="/logos/gokwik.png" alt="GoKwik" style={{ height: '20px', objectFit: 'contain' }} />
-                        <div>
-                          <div style={{ fontSize: '11.5px', fontWeight: 700, color: '#034694' }}>GoKwik Checkout</div>
-                          <div style={{ fontSize: '9.5px', color: '#64748b' }}>Order & 1-Click Aggregator</div>
-                        </div>
-                      </div>
-                      <span style={{ color: '#94a3b8', fontSize: '13px', fontWeight: 700 }} aria-hidden="true">→</span>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <img src="/logos/easebuzz.png" alt="Easebuzz" style={{ height: '18px', objectFit: 'contain' }} />
-                        <div>
-                          <div style={{ fontSize: '11.5px', fontWeight: 700, color: '#0f172a' }}>
-                            {order.paymentProvider || 'Easebuzz'}
-                          </div>
-                          <div style={{ fontSize: '9.5px', color: '#059669', fontWeight: 600 }}>Acquiring Payment Partner</div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* IDs Grid */}
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '8px' }}>
-                      {order.paymentProviderPaymentId && (
-                        <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '7px 9px' }}>
-                          <span className="detail-label" style={{ fontSize: '10px', color: '#64748b' }}>Easebuzz Payment ID</span>
-                          <div
-                            className="waybill-chip"
-                            onClick={() => {
-                              navigator.clipboard.writeText(order.paymentProviderPaymentId || '')
-                              toast.toast('success', 'Easebuzz Payment ID copied!')
-                            }}
-                            style={{ marginTop: '2px', cursor: 'pointer' }}
-                            title="Click to copy Easebuzz ID"
-                          >
-                            <span className="mono" style={{ fontSize: '11px', fontWeight: 700, color: '#0f172a' }}>
-                              {order.paymentProviderPaymentId}
-                            </span>
-                            <Icon name="copy" size={11} />
-                          </div>
-                        </div>
-                      )}
-                      {order.gokwikPaymentId && (
-                        <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '7px 9px' }}>
-                          <span className="detail-label" style={{ fontSize: '10px', color: '#64748b' }}>GoKwik Payment ID</span>
-                          <div
-                            className="waybill-chip"
-                            onClick={() => {
-                              navigator.clipboard.writeText(order.gokwikPaymentId || '')
-                              toast.toast('success', 'GoKwik Payment ID copied!')
-                            }}
-                            style={{ marginTop: '2px', cursor: 'pointer' }}
-                            title="Click to copy GoKwik ID"
-                          >
-                            <span className="mono" style={{ fontSize: '11px', fontWeight: 700, color: '#034694' }}>
-                              {order.gokwikPaymentId}
-                            </span>
-                            <Icon name="copy" size={11} />
-                          </div>
-                        </div>
-                      )}
-                      {order.paymentReference && (
-                        <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '7px 9px' }}>
-                          <span className="detail-label" style={{ fontSize: '10px', color: '#64748b' }}>Bank Reference / UTR</span>
-                          <div
-                            className="waybill-chip"
-                            onClick={() => {
-                              navigator.clipboard.writeText(order.paymentReference || '')
-                              toast.toast('success', 'Bank UTR copied!')
-                            }}
-                            style={{ marginTop: '2px', cursor: 'pointer' }}
-                            title="Click to copy Bank UTR"
-                          >
-                            <span className="mono" style={{ fontSize: '11px', fontWeight: 700, color: '#15803d' }}>
-                              {order.paymentReference}
-                            </span>
-                            <Icon name="copy" size={11} />
-                          </div>
-                        </div>
-                      )}
-                      {order.paymentAuthorizationKey && (
-                        <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '7px 9px' }}>
-                          <span className="detail-label" style={{ fontSize: '10px', color: '#64748b' }}>Authorization Key</span>
-                          <div
-                            className="waybill-chip"
-                            onClick={() => {
-                              navigator.clipboard.writeText(order.paymentAuthorizationKey || '')
-                              toast.toast('success', 'Auth Key copied!')
-                            }}
-                            style={{ marginTop: '2px', cursor: 'pointer' }}
-                            title="Click to copy Auth Key"
-                          >
-                            <span className="mono" style={{ fontSize: '11px', fontWeight: 700, color: '#475569' }}>
-                              {order.paymentAuthorizationKey}
-                            </span>
-                            <Icon name="copy" size={11} />
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                <DetailRow
-                  label="Amount"
-                  value={formatMoney(payment?.totalAmount ?? order.totalAmount, payment?.currency ?? order.currency)}
-                  strong
-                />
-                <DetailRow label="Method" value={payment?.paymentMethod ?? order.paymentMethod} />
-                <DetailRow
-                  label="Money Source"
-                  value={
-                    order.paymentMethod === 'COD' ? (
-                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                        {order.shipment?.courier?.toLowerCase() === 'delhivery' && (
-                          <img src="/logos/delhivery.png" alt="Delhivery" style={{ height: '11px', objectFit: 'contain' }} />
-                        )}
-                        <span>{order.shipment?.courier || 'Cash'} on Delivery Collection</span>
-                      </div>
-                    ) : order.paymentAggregator === 'GoKwik' || (order.paymentGateway || '').toLowerCase().includes('gokwik') ? (
-                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                        <img src="/logos/gokwik.png" alt="GoKwik" style={{ height: '14px', objectFit: 'contain' }} />
-                        <span style={{ color: '#94a3b8', fontSize: '11px' }}>via</span>
-                        <img src="/logos/easebuzz.png" alt="Easebuzz" style={{ height: '13px', objectFit: 'contain' }} />
-                        <span style={{ fontWeight: 600, color: '#0f172a' }}>{order.paymentProvider || 'Easebuzz'}</span>
-                      </div>
-                    ) : (order.paymentGateway || '').toLowerCase().includes('phonepe') ? (
-                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                        <img src="/logos/phonepe.png" alt="PhonePe" style={{ height: '14px', objectFit: 'contain' }} />
-                        <span>PhonePe Payment Gateway</span>
-                      </div>
-                    ) : (
-                      payment?.paymentGateway ?? order.paymentGateway
-                    )
-                  }
-                />
-                {order.paymentAggregator && (
-                  <DetailRow
-                    label="Aggregator"
-                    value={
-                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                        {order.paymentAggregator.toLowerCase() === 'gokwik' && (
-                          <img src="/logos/gokwik.png" alt="GoKwik" style={{ height: '13px', objectFit: 'contain' }} />
-                        )}
-                        <span>{order.paymentAggregator} Checkout</span>
-                      </div>
-                    }
-                  />
-                )}
-                {order.paymentProvider && (
-                  <DetailRow
-                    label="Acquiring Partner"
-                    value={
-                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                        {order.paymentProvider.toLowerCase() === 'easebuzz' && (
-                          <img src="/logos/easebuzz.png" alt="Easebuzz" style={{ height: '13px', objectFit: 'contain' }} />
-                        )}
-                        <span style={{ fontWeight: 700, color: '#0f172a' }}>{order.paymentProvider}</span>
-                      </div>
-                    }
-                  />
-                )}
-                <DetailRow label="Gateway" value={payment?.paymentGateway ?? order.paymentGateway} />
-                <DetailRow
-                  label="Transaction ID"
-                  value={payment?.gatewayTransactionId ?? order.gatewayTransactionId}
-                  mono
-                  copyable
-                  onCopy={(val) => {
-                    navigator.clipboard.writeText(val)
-                    toast.toast('success', 'Transaction ID copied!')
-                  }}
-                />
-                <DetailRow label="Financial status" value={payment?.financialStatus ?? order.financialStatus} />
-                <DetailRow label="Channel" value={order.salesChannel} />
-                <DetailRow label="Verified at" value={formatDate(payment?.paymentVerifiedAt ?? order.paymentVerifiedAt)} />
-
-                {!order.paymentVerified && (
-                  <Button
-                    className="button-primary full-button"
-                    loading={action.isPending && action.variables === 'verify'}
-                    onClick={() => action.mutate('verify')}
-                  >
-                    <Icon name="shield" size={16} />
-                    Verify payment
-                  </Button>
-                )}
-
-                {/* Direct Shopify Refund Option */}
-                {order.status !== 'REFUNDED' && (
-                  <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: '1px dashed #e2e8f0', display: 'flex', flexDirection: 'column', gap: '7px' }}>
-                    <Button
-                      className="button-secondary full-button"
-                      style={{ borderColor: '#fca5a5', color: '#b91c1c', background: '#fff5f5' }}
-                      loading={refundMutation.isPending}
-                      onClick={() => refundMutation.mutate()}
-                    >
-                      <Icon name="dollar" size={15} />
-                      Issue Shopify Refund ({formatMoney(order.totalAmount, order.currency)})
-                    </Button>
-                    <span style={{ fontSize: '10px', color: '#64748b', textAlign: 'center' }}>
-                      Processes refund directly via Shopify API. Shopify automatically routes the refund back through {order.paymentAggregator || 'GoKwik'}{order.paymentProvider ? ` / ${order.paymentProvider}` : ''} to the customer.
-                    </span>
-                  </div>
-                )}
-              </div>
-            )}
-          </Panel>
 
           {/* ─── Customer Notifications ───────────────────────────── */}
           <Panel>
@@ -1425,36 +1447,75 @@ export function OrderDetail() {
               <EmptyState title="No notifications" description="Messages sent for this order will appear here." icon="box" />
             )}
           </Panel>
-        </details>
+        </section>
+      </div>
+
+      <div className="detail-side">
+        <Panel>
+          <PanelHeading title="Customer" />
+          <div className="customer-detail">
+            <div className="customer-avatar">
+              {order.customerName.split(' ').map((part) => part[0]).slice(0, 2).join('').toUpperCase()}
+            </div>
+            <div>
+              <strong style={{ fontSize: '14px', color: 'var(--ink)' }}>{order.customerName}</strong>
+              <span style={{ fontSize: '11px', color: 'var(--ink-secondary)' }}>{order.customerPhone || 'No phone'}</span>
+              <span style={{ fontSize: '11px', color: 'var(--muted)' }}>{order.customerEmail ?? 'No email provided'}</span>
+            </div>
+          </div>
+          <div className="address-card">
+            <Icon name="pin" size={20} />
+            <div style={{ flex: 1 }}>
+              <strong style={{ fontSize: '12px', color: 'var(--ink)' }}>{order.customerAddress}</strong>
+              <span style={{ fontSize: '11px', color: 'var(--ink-secondary)', marginTop: '2px', display: 'block' }}>
+                {order.customerCity}, {order.customerState} — <strong className="mono">{order.customerPincode}</strong>
+              </span>
+              <span style={{ fontSize: '10px', color: 'var(--muted)' }}>{order.customerCountry}</span>
+            </div>
+          </div>
+          <div className="customer-quick-actions">
+            {cleanPhone ? (
+              <a className="quick-action-btn quick-action-wa" href={`https://wa.me/${cleanPhone}?text=${encodeURIComponent(`Hi ${order.customerName}, this is regarding your order ${order.shopifyOrderName} from our store.`)}`} target="_blank" rel="noopener noreferrer">
+                <Icon name="message" size={14} /> WhatsApp Chat
+              </a>
+            ) : (
+              <button className="quick-action-btn quick-action-wa" disabled><Icon name="message" size={14} /> No WhatsApp</button>
+            )}
+            {cleanPhone ? (
+              <a className="quick-action-btn quick-action-call" href={`tel:${cleanPhone}`}><Icon name="phone" size={14} /> Call Customer</a>
+            ) : (
+              <button className="quick-action-btn quick-action-call" disabled><Icon name="phone" size={14} /> No Phone</button>
+            )}
+            <button className="quick-action-btn quick-action-copy" onClick={copyAddress}><Icon name="copy" size={14} /> Copy Address</button>
+          </div>
+        </Panel>
+
 
         {/* ─── Reverse Logistics & Return Management ─────────────── */}
-        <ReturnForm
-          order={order}
-          items={(order.items ?? []).filter((item) => item.returnable)}
-          selected={selected}
-          setSelected={setSelected}
-          reason={reason}
-          setReason={setReason}
-          returnTracking={returnTracking}
-          setReturnTracking={setReturnTracking}
-          carrier={carrier}
-          setCarrier={setCarrier}
-          loading={returnMutation.isPending}
-          onSubmit={() => returnMutation.mutate()}
-        />
-        <AccountTrailPanel
-          orderId={order.id}
-          returns={order.returns ?? []}
-          defaultAmount={order.totalAmount}
-          currency={order.currency}
-        />
+
+        <Panel className="shopify-order-notes">
+          <h2>Notes</h2>
+          <p>{order.shopifyNote || 'No notes from Shopify.'}</p>
+        </Panel>
+        {Boolean(order.additionalDetails?.length) && (
+          <Panel className="shopify-order-notes">
+            <details>
+              <summary>Additional details <span>{order.additionalDetails!.length}</span></summary>
+              <dl className="shopify-additional-details">
+                {order.additionalDetails!.map((attribute, index) => (
+                  <div key={`${attribute.name}-${index}`}><dt>{attribute.name}</dt><dd>{attribute.value}</dd></div>
+                ))}
+              </dl>
+            </details>
+          </Panel>
+        )}
       </div>
     </div>
 
     {/* ─── Cancel Order Confirmation Trigger Modal ─── */}
     {showCancelModal && order && (
       <div className="modal-backdrop" onClick={() => !isCancelling && setShowCancelModal(false)}>
-        <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-card" role="dialog" aria-modal="true" aria-label="Cancel order" onClick={(e) => e.stopPropagation()}>
           <div className="modal-header">
             <div className="modal-header-left">
               <div className="modal-icon-badge danger">
@@ -1548,7 +1609,7 @@ export function OrderDetail() {
     {/* ─── Delete Order Confirmation Trigger Modal ─── */}
     {showDeleteModal && order && (
       <div className="modal-backdrop" onClick={() => !isDeleting && setShowDeleteModal(false)}>
-        <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-card" role="dialog" aria-modal="true" aria-label="Delete order" onClick={(e) => e.stopPropagation()}>
           <div className="modal-header">
             <div className="modal-header-left">
               <div className="modal-icon-badge danger">
@@ -1615,7 +1676,7 @@ export function OrderDetail() {
     {/* ─── NDR Exception Resolution Modal ─── */}
     {showNdrModal && order && (
       <div className="modal-backdrop" onClick={() => !isSubmittingNdr && setShowNdrModal(false)}>
-        <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-card" role="dialog" aria-modal="true" aria-label="Resolve NDR" onClick={(e) => e.stopPropagation()}>
           <div className="modal-header">
             <div className="modal-header-left">
               <div className="modal-icon-badge danger">
@@ -1663,13 +1724,14 @@ export function OrderDetail() {
               </div>
             )}
 
-            <FormField label="Select NDR Action">
+            <fieldset className="order-ndr-options">
+              <legend>Select NDR action</legend>
               <div style={{ display: 'flex', gap: '10px', marginTop: '6px' }}>
                 <label
                   style={{
                     flex: 1,
                     border: ndrActionType === 'RE-ATTEMPT' ? '2px solid #2563eb' : '1px solid #cbd5e1',
-                    background: ndrActionType === 'RE-ATTEMPT' ? '#eff6ff' : '#ffffff',
+                    background: ndrActionType === 'RE-ATTEMPT' ? '#eff6ff' : 'var(--panel)',
                     borderRadius: '8px',
                     padding: '12px',
                     cursor: 'pointer',
@@ -1679,12 +1741,13 @@ export function OrderDetail() {
                     type="radio"
                     name="ndrDetailAction"
                     value="RE-ATTEMPT"
+                    aria-label="Re-attempt delivery"
                     checked={ndrActionType === 'RE-ATTEMPT'}
                     onChange={() => setNdrActionType('RE-ATTEMPT')}
                     style={{ marginRight: '8px' }}
                   />
                   <strong>🔄 Re-attempt Delivery</strong>
-                  <p style={{ margin: '4px 0 0 0', fontSize: '11px', color: '#475569' }}>
+                  <p style={{ margin: '4px 0 0 0', fontSize: '11px', color: 'var(--ink-secondary)' }}>
                     Request courier to re-attempt delivery tomorrow & notify customer via WhatsApp.
                   </p>
                 </label>
@@ -1693,7 +1756,7 @@ export function OrderDetail() {
                   style={{
                     flex: 1,
                     border: ndrActionType === 'RTO' ? '2px solid #dc2626' : '1px solid #cbd5e1',
-                    background: ndrActionType === 'RTO' ? '#fef2f2' : '#ffffff',
+                    background: ndrActionType === 'RTO' ? '#fef2f2' : 'var(--panel)',
                     borderRadius: '8px',
                     padding: '12px',
                     cursor: 'pointer',
@@ -1703,17 +1766,18 @@ export function OrderDetail() {
                     type="radio"
                     name="ndrDetailAction"
                     value="RTO"
+                    aria-label="Return to origin"
                     checked={ndrActionType === 'RTO'}
                     onChange={() => setNdrActionType('RTO')}
                     style={{ marginRight: '8px' }}
                   />
                   <strong>↩️ Return to Origin (RTO)</strong>
-                  <p style={{ margin: '4px 0 0 0', fontSize: '11px', color: '#475569' }}>
+                  <p style={{ margin: '4px 0 0 0', fontSize: '11px', color: 'var(--ink-secondary)' }}>
                     Package will be returned to our Surat warehouse. (Prepaid orders get auto-refunded upon warehouse delivery).
                   </p>
                 </label>
               </div>
-            </FormField>
+            </fieldset>
 
             <FormField label="Instruction / Courier Remarks (Optional)">
               <input
@@ -1741,7 +1805,7 @@ export function OrderDetail() {
               className="modal-btn-primary"
               style={{
                 background: ndrActionType === 'RE-ATTEMPT' ? '#2563eb' : '#dc2626',
-                color: '#fff',
+                color: 'var(--panel)',
                 border: 'none',
                 borderRadius: '6px',
                 padding: '8px 16px',
@@ -1765,7 +1829,7 @@ export function OrderDetail() {
     {/* ─── KwikEngage WhatsApp Trigger Modal ─── */}
     {showWhatsAppModal && order && (
       <div className="modal-backdrop" onClick={() => !isSendingWhatsApp && setShowWhatsAppModal(false)}>
-        <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '540px' }}>
+        <div className="modal-card" role="dialog" aria-modal="true" aria-label="Send WhatsApp message" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '540px' }}>
           <div className="modal-header">
             <div className="modal-header-left">
               <div className="modal-icon-badge" style={{ background: '#dcfce7', color: '#16a34a' }}>
@@ -1825,8 +1889,8 @@ export function OrderDetail() {
                 />
               </FormField>
             ) : (
-              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px', fontSize: '11.5px', color: '#475569' }}>
-                <strong style={{ color: '#0f172a', display: 'block', marginBottom: '4px' }}>
+              <div style={{ background: 'var(--line-subtle)', border: '1px solid var(--line)', borderRadius: '8px', padding: '12px', fontSize: '11.5px', color: 'var(--ink-secondary)' }}>
+                <strong style={{ color: 'var(--ink)', display: 'block', marginBottom: '4px' }}>
                   ℹ️ Template Preview
                 </strong>
                 {whatsAppTrigger === 'COD_CONFIRMATION' && (
@@ -2179,13 +2243,18 @@ function ReturnForm({
 }) {
   const [linkExisting, setLinkExisting] = useState(false)
   const active = (order.returns || []).find((row) => !['REFUNDED', 'CANCELLED'].includes(row.returnStatus))
-  const tracking = order.shipment?.trackingStatus || ''
-  const delivered =
-    order.status === 'DELIVERED' ||
-    Boolean(order.deliveredAt) ||
-    order.shipment?.status === 'DELIVERED' ||
-    (/delivered/i.test(tracking) && !/undeliver/i.test(tracking))
+  const delivered = hasCustomerDelivery(order)
   const forwardAwb = order.shipment?.waybillNumber
+  if (!active && !delivered) return (
+    <Panel className="order-return-eligibility" id="return-panel">
+      <PanelHeading title="Returns & reverse pickup" />
+      <div className="order-eligibility-message"><Icon name="return" size={24} /><div>
+        <h3>Customer delivery required</h3>
+        <p>A reverse pickup becomes available after the customer receives the parcel. In-transit and RTO shipments cannot start a customer return.</p>
+        {forwardAwb && <p>Forward AWB: <strong>{forwardAwb}</strong></p>}
+      </div></div>
+    </Panel>
+  )
 
   return (
     <Panel className="return-form-panel" id="return-panel">

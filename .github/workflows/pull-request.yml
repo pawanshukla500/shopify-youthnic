@@ -47,5 +47,31 @@ jobs:
 
       - name: Build Vite React Frontend
         run: cd frontend && npm run build
+
+      - name: Setup Python for Browser Verification
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Browser Test Tools
+        run: |
+          python -m pip install playwright==1.62.0
+          python -m playwright install --with-deps chromium
+
+      - name: Verify Order Workspace Interactions
+        env:
+          ORDER_UI_ARTIFACT_DIR: ${{ runner.temp }}/order-workspace
+        run: |
+          python tests/browser/order_detail.py
+          python tests/browser/order_workspace.py
+
+      - name: Upload Order Workspace Screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: order-workspace-ui
+          path: ${{ runner.temp }}/order-workspace
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Validate Production Docker Builder
         run: docker build --target builder --tag youthnic-oms-pr-builder .

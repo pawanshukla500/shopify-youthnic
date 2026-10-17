@@ -151,8 +151,8 @@ export function OrderMoneyCard({ order, onChanged }: { order: Order; onChanged: 
             marginTop: '12px',
             marginBottom: '4px',
             padding: '12px 14px',
-            background: '#f8fafc',
-            border: '1px solid #e2e8f0',
+            background: 'var(--line-subtle)',
+            border: '1px solid var(--line)',
             borderRadius: '9px',
           }}
         >
@@ -167,7 +167,7 @@ export function OrderMoneyCard({ order, onChanged }: { order: Order; onChanged: 
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '12.5px', fontWeight: 750, color: '#0f172a' }}>
+              <span style={{ fontSize: '12.5px', fontWeight: 750, color: 'var(--ink)' }}>
                 📦 Delhivery Shipping Fee Ledger
               </span>
               <span
@@ -202,10 +202,10 @@ export function OrderMoneyCard({ order, onChanged }: { order: Order; onChanged: 
                 alignItems: 'center',
                 gap: '12px',
                 fontSize: '11px',
-                background: '#ffffff',
+                background: 'var(--panel)',
                 padding: '4px 10px',
                 borderRadius: '6px',
-                border: '1px solid #e2e8f0',
+                border: '1px solid var(--line)',
               }}
             >
               <span>
@@ -219,7 +219,7 @@ export function OrderMoneyCard({ order, onChanged }: { order: Order; onChanged: 
                 <strong
                   style={{
                     color:
-                      (shipment.netBilledCost ?? 0) === 0 ? '#16a34a' : '#0f172a',
+                      (shipment.netBilledCost ?? 0) === 0 ? '#16a34a' : 'var(--ink)',
                   }}
                 >
                   {formatMoney(shipment.netBilledCost ?? 0)}
@@ -231,9 +231,9 @@ export function OrderMoneyCard({ order, onChanged }: { order: Order; onChanged: 
           <div
             style={{
               overflowX: 'auto',
-              border: '1px solid #e2e8f0',
+              border: '1px solid var(--line)',
               borderRadius: '7px',
-              background: '#ffffff',
+              background: 'var(--panel)',
             }}
           >
             <table
@@ -245,7 +245,7 @@ export function OrderMoneyCard({ order, onChanged }: { order: Order; onChanged: 
               }}
             >
               <thead>
-                <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#475569' }}>
+                <tr style={{ background: 'var(--line-subtle)', borderBottom: '1px solid var(--line)', color: 'var(--ink-secondary)' }}>
                   <th style={{ padding: '7px 10px', fontWeight: 650 }}>Date & Time</th>
                   <th style={{ padding: '7px 10px', fontWeight: 650 }}>Txn ID</th>
                   <th style={{ padding: '7px 10px', fontWeight: 650 }}>Type</th>
@@ -265,7 +265,7 @@ export function OrderMoneyCard({ order, onChanged }: { order: Order; onChanged: 
                           : 'none',
                     }}
                   >
-                    <td style={{ padding: '7px 10px', whiteSpace: 'nowrap', color: '#334155' }}>
+                    <td style={{ padding: '7px 10px', whiteSpace: 'nowrap', color: 'var(--ink-secondary)' }}>
                       {tx.date}
                     </td>
                     <td style={{ padding: '7px 10px', fontFamily: 'monospace', fontSize: '11px' }}>
@@ -279,7 +279,7 @@ export function OrderMoneyCard({ order, onChanged }: { order: Order; onChanged: 
                           background: '#f1f5f9',
                           padding: '2px 5px',
                           borderRadius: '4px',
-                          border: '1px solid #e2e8f0',
+                          border: '1px solid var(--line)',
                           cursor: 'pointer',
                           display: 'inline-flex',
                           alignItems: 'center',
@@ -309,7 +309,7 @@ export function OrderMoneyCard({ order, onChanged }: { order: Order; onChanged: 
                     <td style={{ padding: '7px 10px', color: '#1e293b', fontWeight: 550 }}>
                       {tx.description}
                     </td>
-                    <td style={{ padding: '7px 10px', color: '#64748b' }}>
+                    <td style={{ padding: '7px 10px', color: 'var(--muted)' }}>
                       {tx.zone ? `Zone ${tx.zone}` : ''}
                       {tx.weight ? ` · ${tx.weight}g` : ''}
                       {tx.status && !tx.description.includes(tx.status) ? ` · ${tx.status}` : ''}
@@ -336,11 +336,11 @@ export function OrderMoneyCard({ order, onChanged }: { order: Order; onChanged: 
           style={{
             marginTop: '8px',
             padding: '7px 10px',
-            background: '#f8fafc',
+            background: 'var(--line-subtle)',
             border: '1px solid #f1f5f9',
             borderRadius: '6px',
             fontSize: '11px',
-            color: '#64748b',
+            color: 'var(--muted)',
           }}
         >
           ℹ️ <strong>Delhivery Shipping Fee Ledger:</strong> Showing estimated rate (

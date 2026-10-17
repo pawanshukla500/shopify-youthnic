@@ -4,7 +4,8 @@ import shopifyService from '../shopify/shopify.service';
 import delhiveryService from '../delhivery/delhivery.service';
 import notificationEngine from '../notifications/notification.service';
 import paymentService from '../payments/payment.service';
-import { recordAccountTrailEvent } from '../accounts/account-trail.service';
+import { recordAccountTrailEvent, type AccountTrailActor } from '../accounts/account-trail.service';
+import { queueManifestForPickup } from '../delhivery/pickup-batch.service';
 import logger from '../../utils/logger';
 import { Order } from '@prisma/client';
 import { ShopifyOrderWebhook } from '../../types';
@@ -656,7 +657,7 @@ class OrderService {
    * Dispatch an order: push it to Delhivery to generate AWB.
    * Can be called manually or automatically for all DISPATCH_PENDING orders.
    */
-  async dispatchOrder(orderId: number): Promise<{ waybillNumber: string }> {
+  async dispatchOrder(orderId: number, actor?: AccountTrailActor): Promise<{ waybillNumber: string }> {
     const order = await prisma.order.findUnique({
       where: { id: orderId },
       include: { items: true, shipment: true },
@@ -666,6 +667,7 @@ class OrderService {
       throw new Error(`Order not found: ${orderId}`);
     }
 
+    if (order.supportFlag === 'MANIFEST_REVIEW') throw new Error('Previous manifest requires review in Delhivery ONE before dispatching again.');
     if (order.status !== 'NEW' && order.status !== 'DISPATCH_PENDING') {
       throw new Error(`Order ${order.shopifyOrderName} is not in dispatchable state (current: ${order.status})`);
     }
@@ -729,7 +731,7 @@ class OrderService {
     }
 
     try {
-      return await this.dispatchClaimedOrder(order);
+      return await this.dispatchClaimedOrder(order, actor);
     } finally {
       await prisma.order
         .updateMany({ where: { id: order.id, dispatchLockedAt: claimedAt }, data: { dispatchLockedAt: null } })
@@ -740,7 +742,7 @@ class OrderService {
   }
 
   /** The manifest itself. Only called by dispatchOrder while it holds the claim. */
-  private async dispatchClaimedOrder(order: Order): Promise<{ waybillNumber: string }> {
+  private async dispatchClaimedOrder(order: Order, actor?: AccountTrailActor): Promise<{ waybillNumber: string }> {
     const orderId = order.id;
 
     // Verify payment before dispatch (prepaid orders must be paid, COD is always OK)
@@ -802,6 +804,14 @@ class OrderService {
       );
     }
 
+    await recordAccountTrailEvent({
+      orderId, eventType: 'SHIPMENT_MANIFESTED', actorType: actor ? 'USER' : 'SYSTEM', actor,
+      source: 'OMS_DISPATCH', status: 'COMPLETED', externalReference: result.waybillNumber,
+      note: 'Delhivery accepted the manifest. Label generated; parcel is Ready to Ship and awaiting pickup.',
+    }).catch((error) => logger.warn('Manifest audit failed', { orderId, error: error.message }));
+    await queueManifestForPickup(orderId, result.waybillNumber, actor)
+      .catch((error) => logger.error('Accepted shipment could not be queued for pickup; scheduler will recover', { orderId, error: error.message }));
+
     // Sync fulfillment and tracking number directly to Shopify order
     try {
       await shopifyService.fulfillOrderOnShopify(verifiedOrder.shopifyOrderId, result.waybillNumber);
@@ -844,6 +854,7 @@ class OrderService {
     let dispatchedCount = 0;
     let skippedFulfilled = 0;
     for (const order of prioritizedPending) {
+      if (order.supportFlag === 'MANIFEST_REVIEW') continue;
       // Skip if shipment already exists
       if (order.shipment?.waybillNumber) {
         logger.info('Order already has a shipment, skipping', { orderId: order.id });
@@ -1225,7 +1236,7 @@ class OrderService {
       where: { id: orderId },
       include: {
         items: true,
-        shipment: { include: { trackingLogs: true } },
+        shipment: { include: { trackingLogs: true, pickupBatch: true } },
         returns: { include: { items: { include: { orderItem: true } } } },
         notifications: true,
       },
@@ -1239,6 +1250,7 @@ class OrderService {
    * Helper to attach RTO risk, dispatch SLA, and NDR flags to an order.
    */
   enrichOrderMetadata(order: any): any {
+    const { paymentAuthorizationKey: _authorization, ...publicOrder } = order;
     const rate = delhiveryService.calculateRateCardMatrix({
       mode: (config.delhivery.shippingMode === 'Express' ? 'E' : 'S') as 'E' | 'S',
       chargeableWeightGrams: 500,
@@ -1289,7 +1301,7 @@ class OrderService {
     }
 
     return {
-      ...order,
+      ...publicOrder,
       estimatedShippingCost: rate.totalAmount,
       shippingZone: rate.zone,
       shippingZoneCode: rate.zoneCode,

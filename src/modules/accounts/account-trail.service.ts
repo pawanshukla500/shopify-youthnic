@@ -66,7 +66,7 @@ function actorSnapshot(actor: AccountTrailActor | null | undefined) {
   };
 }
 
-export async function recordAccountTrailEvent(input: AccountTrailEventInput) {
+export async function recordAccountTrailEvent(input: AccountTrailEventInput, client: Pick<Prisma.TransactionClient, 'accountTrailEvent'> = prisma) {
   const data = {
     orderId: input.orderId,
     returnId: input.returnId ?? null,
@@ -87,10 +87,11 @@ export async function recordAccountTrailEvent(input: AccountTrailEventInput) {
     metadata: input.metadata ?? undefined,
   };
   try {
-    return await prisma.accountTrailEvent.create({ data });
+    return await client.accountTrailEvent.create({ data });
   } catch (error: any) {
+    if (client !== prisma) throw error; // The caller's transaction rolls back both bookkeeping and audit.
     if (error?.code === 'P2002' && input.externalReference) {
-      const existing = await prisma.accountTrailEvent.findFirst({
+      const existing = await client.accountTrailEvent.findFirst({
         where: {
           orderId: input.orderId,
           eventType: input.eventType,

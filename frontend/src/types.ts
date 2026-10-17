@@ -67,6 +67,11 @@ export interface TrackingLog {
 }
 
 export interface Shipment {
+  manifestedByOms?: boolean
+  pickupBatch?: {
+    key: string; pickupLocation: string; pickupDate: string; pickupTime: string; status: string;
+    pickupId: string | null; submittedPackageCount: number; message: string | null;
+  } | null
   id: number
   orderId: number
   waybillNumber: string | null

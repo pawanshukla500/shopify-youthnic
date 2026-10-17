@@ -300,6 +300,7 @@ class DelhiveryService {
           // and 22×20×5 cm envelope size to minimise logistic cost).
           shipment_length: shipmentLengthCm,
           shipment_breadth: shipmentBreadthCm,
+          shipment_width: shipmentBreadthCm,
           shipment_height: shipmentHeightCm,
           weight: declaredWeightGrams,           // grams
           gm: declaredWeightGrams,               // alias used by some B2C endpoints
@@ -354,10 +355,18 @@ class DelhiveryService {
         }
 
         packageStatus = response.data?.packages?.[0]?.status || (response.data?.success === false ? 'Fail' : '');
+        const acknowledged = response.data?.success === true || /^(success|manifested)$/i.test(packageStatus);
+        if (!acknowledged && packageStatus !== 'Fail' && response.data?.success !== false) {
+          await prisma.order.updateMany({
+            where: { id: order.id, status: { in: ['NEW', 'DISPATCH_PENDING'] } },
+            data: { supportFlag: 'MANIFEST_REVIEW', hasUrgentSupport: true },
+          });
+          throw new Error('Manifest outcome unconfirmed. Check this order in Delhivery ONE before another dispatch.');
+        }
         const remarks = response.data?.packages?.[0]?.remarks || [];
         manifestRemark = remarks.join('; ') || response.data?.rmk || '';
 
-        if (packageStatus === 'Fail' || manifestRemark.toLowerCase().includes('insufficient balance')) {
+        if (/^fail$/i.test(packageStatus) || response.data?.success === false || manifestRemark.toLowerCase().includes('insufficient balance')) {
           const detailedError = manifestRemark.toLowerCase().includes('insufficient balance')
             ? 'Delhivery Manifest Failed: Insufficient balance in Delhivery prepaid wallet. Please recharge your Delhivery One account.'
             : (manifestRemark || 'Delhivery manifest was rejected by courier.');
@@ -379,6 +388,12 @@ class DelhiveryService {
           throw cmuErr;
         }
         const rawErr = cmuErr.response?.data?.rmk || cmuErr.message || '';
+        if (!cmuErr.response || cmuErr.response.status >= 500) {
+          await prisma.order.updateMany({
+            where: { id: order.id, status: { in: ['NEW', 'DISPATCH_PENDING'] } },
+            data: { supportFlag: 'MANIFEST_REVIEW', hasUrgentSupport: true },
+          });
+        }
         const detailedError = rawErr.toLowerCase().includes('insufficient balance')
           ? 'Delhivery Manifest Failed: Insufficient balance in Delhivery prepaid wallet. Please recharge your Delhivery One account.'
           : (rawErr || 'Delhivery manifest API call failed.');
@@ -402,11 +417,15 @@ class DelhiveryService {
       }
 
       // Upsert the shipment in DB with the official Delhivery waybill
+      const omsManifestedAt = new Date();
       await prisma.shipment.upsert({
         where: { orderId: order.id },
         create: {
           orderId: order.id,
           waybillNumber,
+          manifestedByOms: true,
+          manifestPickupLocation: config.delhivery.pickupLocation,
+          omsManifestedAt,
           courier: 'Delhivery',
           paymentMode,
           codAmount: codAmount,
@@ -416,6 +435,10 @@ class DelhiveryService {
         },
         update: {
           waybillNumber,
+          pickupBatchKey: null,
+          manifestedByOms: true,
+          manifestPickupLocation: config.delhivery.pickupLocation,
+          omsManifestedAt,
           courier: 'Delhivery',
           paymentMode,
           codAmount: codAmount,
@@ -447,18 +470,7 @@ class DelhiveryService {
         // Label fallback is generated on-the-fly
       }
 
-      // One open warehouse pickup covers every manifested parcel at this location.
-      // A failure here must not roll back the AWB — the tracking cron retries.
-      if (config.delhivery.autoPickup) {
-        try {
-          await this.ensureDailyWarehousePickup();
-        } catch (pickupErr: any) {
-          logger.warn('Automatic warehouse pickup was not created', {
-            shopifyOrderId: order.shopifyOrderId,
-            error: pickupErr.message,
-          });
-        }
-      }
+      // Pickup is queued by dispatchOrder after its cancellation-safe promotion.
 
       logger.info('Shipment successfully dispatched on Delhivery', {
         shopifyOrderId: order.shopifyOrderId,
@@ -1495,7 +1507,7 @@ class DelhiveryService {
     pickupTime?: string,
     packageCount: number = 1,
     pickupLocation?: string
-  ): Promise<{ success: boolean; message: string; data?: any; pickupId?: string | null; alreadyOpen?: boolean }> {
+  ): Promise<{ success: boolean; message: string; data?: any; pickupId?: string | null; alreadyOpen?: boolean; uncertain?: boolean }> {
     const location = pickupLocation || config.delhivery.pickupLocation;
     const date = pickupDate || new Date().toISOString().split('T')[0];
     const time = pickupTime || config.delhivery.pickupTime;
@@ -1510,6 +1522,11 @@ class DelhiveryService {
     try {
       const response = await this.client.post('/fm/request/new/', payload);
       const pickupId = readPickupId(response.data);
+      const rejected = response.data?.success === false || response.data?.status === false || Boolean(response.data?.error);
+      if (rejected || !pickupId) {
+        const message = String(response.data?.error || response.data?.rmk || response.data?.message || 'Pickup response did not contain a confirmed pickup ID. Review Delhivery ONE before retrying.');
+        return { success: false, uncertain: !rejected, alreadyOpen: rejected && isExistingPickupError(message), pickupId: null, message, data: response.data };
+      }
       logger.info('Pickup request created on Delhivery', {
         date,
         time,
@@ -1545,9 +1562,10 @@ class DelhiveryService {
       return {
         success: false,
         alreadyOpen,
+        uncertain: !error.response || error.response.status >= 500,
         pickupId: readPickupId(errData),
         message: alreadyOpen
-          ? `A pickup is already open for ${location} on ${date}. Delhivery will collect the manifested parcels on that request.`
+          ? `Another pickup is open for ${location}. The requested date ${date} is not confirmed; retry after that pickup completes.`
           : errMsg,
         data: errData,
       };
@@ -1555,93 +1573,11 @@ class DelhiveryService {
   }
 
   /**
-   * Create today's warehouse pickup if manifested parcels are waiting and
-   * Delhivery does not already have an open request. Safe to call after every
-   * dispatch and from the tracking cron.
+   * Compatibility entry point for the durable next-day pickup batch worker.
    */
-  async ensureDailyWarehousePickup(): Promise<{
-    scheduled: boolean;
-    skipped?: boolean;
-    alreadyOpen?: boolean;
-    pickupId?: string | null;
-    message: string;
-    date?: string;
-    time?: string;
-    packageCount?: number;
-  }> {
-    if (!config.delhivery.autoPickup) {
-      return { scheduled: false, skipped: true, message: 'Automatic warehouse pickup is turned off.' };
-    }
-
-    const location = config.delhivery.pickupLocation;
-    const awaiting = await prisma.shipment.count({
-      where: {
-        status: 'CREATED',
-        waybillNumber: { not: null },
-        OR: [
-          { courier: null },
-          { courier: { contains: 'delhivery', mode: 'insensitive' } },
-        ],
-      },
-    });
-    if (awaiting < 1) {
-      return { scheduled: false, skipped: true, message: 'No manifested parcels are waiting for pickup.' };
-    }
-
-    const slot = planWarehousePickupSlot(new Date(), config.delhivery.pickupTime);
-    const latest = await prisma.pickupRequest.findFirst({
-      where: { pickupLocation: location, pickupDate: slot.date, direction: 'FORWARD' },
-      orderBy: { createdAt: 'desc' },
-    });
-    if (latest) {
-      const ageMs = Date.now() - new Date(latest.createdAt).getTime();
-      const open = latest.status === 'SCHEDULED' || latest.status === 'ALREADY_OPEN';
-      const cooldownMs = open ? 3 * 60 * 60 * 1000 : 20 * 60 * 1000;
-      if (ageMs < cooldownMs) {
-        return {
-          scheduled: open,
-          skipped: true,
-          alreadyOpen: open,
-          pickupId: latest.pickupId,
-          date: slot.date,
-          time: latest.pickupTime,
-          packageCount: latest.expectedPackageCount,
-          message: open
-            ? `Pickup already open for ${location} on ${slot.date}${latest.pickupId ? ` (id ${latest.pickupId})` : ''}.`
-            : latest.message || 'Pickup request was attempted recently.',
-        };
-      }
-    }
-
-    const result = await this.requestPickup(slot.date, slot.time, awaiting, location);
-    const status = result.success ? 'SCHEDULED' : result.alreadyOpen ? 'ALREADY_OPEN' : 'FAILED';
-    try {
-      await prisma.pickupRequest.create({
-        data: {
-          pickupId: result.pickupId || null,
-          pickupLocation: location,
-          pickupDate: slot.date,
-          pickupTime: slot.time,
-          expectedPackageCount: awaiting,
-          direction: 'FORWARD',
-          status,
-          message: result.message,
-          rawResponse: result.data ?? undefined,
-        },
-      });
-    } catch (saveErr: any) {
-      logger.warn('Pickup request was sent but could not be stored', { error: saveErr.message });
-    }
-
-    return {
-      scheduled: result.success || Boolean(result.alreadyOpen),
-      alreadyOpen: result.alreadyOpen,
-      pickupId: result.pickupId,
-      date: slot.date,
-      time: slot.time,
-      packageCount: awaiting,
-      message: result.message,
-    };
+  async ensureDailyWarehousePickup() {
+    const { processPickupBatches } = await import('./pickup-batch.service');
+    return processPickupBatches();
   }
 
   // ═══════════════════════════════════════════════════════════

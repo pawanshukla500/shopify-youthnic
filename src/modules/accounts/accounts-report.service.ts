@@ -17,6 +17,7 @@ import { config } from '../../config';
 import logger from '../../utils/logger';
 import resendService from '../email/resend.service';
 import { accountsStatus } from '../orders/order-tabs';
+import { istDateRange } from './settlement-summary';
 
 const IST_OFFSET_MS = 5.5 * 3600 * 1000;
 
@@ -528,11 +529,10 @@ export async function generateDateRangeReport(
   endDateStr: string,
   now: Date = new Date()
 ): Promise<{ data: ReportData; buffer: Buffer; fileName: string }> {
-  const start = new Date(`${startDateStr}T00:00:00.000Z`);
-  const end = new Date(`${endDateStr}T23:59:59.999Z`);
+  const { start, end } = istDateRange(startDateStr, endDateStr);
   const label = `${startDateStr} to ${endDateStr}`;
   const orders = await prisma.order.findMany({
-    where: { shopifyCreatedAt: { gte: start, lte: end } },
+    where: { shopifyCreatedAt: { gte: start, lt: end } },
     include: { shipment: true, returns: true },
     orderBy: { shopifyCreatedAt: 'asc' },
   });

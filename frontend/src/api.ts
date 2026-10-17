@@ -1434,8 +1434,45 @@ export async function runAccountsNow(): Promise<{ deliveredBackfilled: number; c
 
 export async function updateRemittanceUtr(
   importId: number,
-  utr: string
+  utr: string,
+  orderId?: number
 ): Promise<{ success: boolean; closedNow: number }> {
-  const response = await api.patch(`/api/accounts/remittance/${importId}/utr`, { utr })
+  const response = await api.patch(`/api/accounts/remittance/${importId}/utr`, { utr, orderId })
   return response.data
 }
+
+export async function getReturnScanStatus(): Promise<{
+  configured: boolean
+  connected: boolean
+  latencyMs: number
+  totalScans?: number
+  error?: string
+}> {
+  const response = await api.get('/api/returns/scan-status')
+  return response.data
+}
+
+export async function syncReturnScans(lookbackDays = 30): Promise<{
+  success: boolean
+  scansChecked: number
+  matchedOrders: number
+  prepaidRefunded: number
+  codQueued: number
+  alreadyProcessed: number
+  issuesSkipped: number
+  errors: string[]
+}> {
+  const response = await api.post('/api/returns/scan-sync', { lookbackDays })
+  return response.data
+}
+
+export async function sendCodRefundDigest(): Promise<{
+  sent: boolean
+  ordersCount: number
+  recipient: string
+  message: string
+}> {
+  const response = await api.post('/api/returns/cod-refund-digest')
+  return response.data
+}
+

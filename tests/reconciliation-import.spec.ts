@@ -9,13 +9,14 @@ vi.mock('../src/utils/logger', () => ({
 
 const { prismaStub } = vi.hoisted(() => ({
   prismaStub: {
-    order: { findMany: vi.fn(), update: vi.fn() },
+    order: { findUnique: vi.fn(), findMany: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
     shipment: { findFirst: vi.fn(), update: vi.fn(), create: vi.fn() },
     return: { findFirst: vi.fn(), update: vi.fn() },
     reconciliationImport: { create: vi.fn() },
+    accountTrailEvent: { create: vi.fn(), findFirst: vi.fn() },
   },
 }));
-vi.mock('../src/database/prisma', () => ({ default: prismaStub }));
+vi.mock('../src/database/prisma', () => ({ default: { ...prismaStub, $transaction: vi.fn(async (fn: any) => fn(prismaStub)) } }));
 
 import {
   importCarrierRemittance,
@@ -32,7 +33,10 @@ function sheet(name: string, grid: string[][]) {
 beforeEach(() => {
   for (const group of Object.values(prismaStub)) for (const fn of Object.values(group)) (fn as any).mockReset();
   prismaStub.order.findMany.mockResolvedValue([]);
+  prismaStub.order.findUnique.mockImplementation(async ({ where }: any) => ({ id: where.id, paymentReceivedAt: null, paymentReceivedUtr: null, paymentReceivedRef: null }));
+  prismaStub.order.updateMany.mockResolvedValue({ count: 1 });
   prismaStub.order.update.mockResolvedValue({});
+  prismaStub.accountTrailEvent.create.mockResolvedValue({ id: 1 });
   prismaStub.shipment.update.mockResolvedValue({});
   prismaStub.return.update.mockResolvedValue({});
   prismaStub.reconciliationImport.create.mockResolvedValue({ id: 1 });
@@ -61,7 +65,7 @@ describe('Delhivery COD remittance', () => {
       codRemittanceRef: 'RMT-91',
       codRemittedAmount: 799,
     });
-    expect(prismaStub.order.update.mock.calls[0][0]).toMatchObject({
+    expect(prismaStub.order.updateMany.mock.calls[0][0]).toMatchObject({
       where: { id: 50 },
       data: {
         paymentReceivedUtr: 'UTIBR52026100800123',
@@ -78,7 +82,7 @@ describe('Delhivery COD remittance', () => {
     const grid = [['Waybill Number', 'COD Amount'], ['30100810011111', '799']];
 
     await importDelhiveryRemittance('awbs.csv', [sheet('a', grid)], { utr: 'UTR-FROM-FORM', remittedAt: '09-10-2026' });
-    expect(prismaStub.order.update.mock.calls[0][0].data.paymentReceivedUtr).toBe('UTR-FROM-FORM');
+    expect(prismaStub.order.updateMany.mock.calls[0][0].data.paymentReceivedUtr).toBe('UTR-FROM-FORM');
 
     const withoutUtr = await importDelhiveryRemittance('awbs.csv', [sheet('a', grid)]);
     expect(withoutUtr.notes.join(' ')).toMatch(/had no UTR/);
@@ -154,6 +158,7 @@ describe('Delhivery COD remittance', () => {
 
     expect(result.matchedCount).toBe(1);
     expect(result.remittanceNumber).toBe('R3359352026101200000');
+    expect(result.remittanceDate).toBe('2026-10-11T18:30:00.000Z');
     expect(result.totalRemittance).toBe(719.1);
     expect(result.state).toBe('Pending');
     expect(prismaStub.shipment.update).toHaveBeenCalledWith(
@@ -348,7 +353,7 @@ describe('Gateway settlement report', () => {
     expect(result.matchedCount).toBe(1);
     expect(result.unmatched).toEqual(['26YOU9999']);
     expect(result.notes.join(' ')).toMatch(/1 row\(s\) were not settled yet/);
-    expect(prismaStub.order.update.mock.calls[0][0]).toMatchObject({
+    expect(prismaStub.order.updateMany.mock.calls[0][0]).toMatchObject({
       where: { id: 70 },
       data: {
         paymentReceivedAmount: 736.96,
@@ -373,12 +378,33 @@ describe('Gateway settlement report', () => {
 });
 
 describe('review fixes', () => {
+  it('keeps an explicit zero remittance and never infers a missing amount or delivery state', async () => {
+    prismaStub.shipment.findFirst.mockResolvedValue({ id: 5, codAmount: 799, status: 'CREATED', order: { id: 50, status: 'CANCELLED', totalAmount: 799 } });
+    const result = await importDelhiveryRemittance('zero.csv', [sheet('m', [['Waybill Number', 'COD Amount', 'UTR'], ['A1', '0', 'U1'], ['A2', '', 'U1']])]);
+    expect(result.matchedCount).toBe(1);
+    expect(result.unmatched).toEqual(['A2']);
+    expect(prismaStub.order.updateMany.mock.calls[0][0].data.paymentReceivedAmount).toBe(0);
+    expect(prismaStub.shipment.update.mock.calls[0][0].data).not.toHaveProperty('status');
+  });
+  it('applies a typed gateway UTR to one settlement, not a mixed file', async () => {
+    prismaStub.order.findMany.mockResolvedValue([{ id: 70, paymentMethod: 'Pre-paid', totalAmount: 1000 }]);
+    const result = await importGatewaySettlement('gateway.csv', [sheet('s', [['Order Id', 'Settlement Id', 'Amount'], ['26YOU1', 'S1', '976.40']])], undefined, 'GOKWIK_SETTLEMENT', undefined, { utr: 'BANK-U1' });
+    expect(result.matchedCount).toBe(1);
+    expect(prismaStub.order.updateMany.mock.calls[0][0].data).toMatchObject({ paymentReceivedUtr: 'BANK-U1', paymentReceivedRef: 'S1' });
+  });
+  it('requires review instead of merging two UTRs into a single order bank record', async () => {
+    prismaStub.order.findMany.mockResolvedValue([{ id: 70, paymentMethod: 'Pre-paid', totalAmount: 1000 }]);
+    const result = await importGatewaySettlement('split.csv', [sheet('s', [['Order Id', 'UTR', 'Amount'], ['26YOU1', 'U1', '500'], ['26YOU1', 'U2', '500']])]);
+    expect(result.matchedCount).toBe(0);
+    expect(prismaStub.order.updateMany).not.toHaveBeenCalled();
+    expect(result.notes.join(' ')).toMatch(/multiple bank UTRs/);
+  });
   it('does not add a "Fee (incl. GST)" column twice', async () => {
     prismaStub.order.findMany.mockResolvedValue([{ id: 70, paymentMethod: 'Pre-paid', totalAmount: 1000 }]);
     await importGatewaySettlement('s.csv', [
       sheet('s', [['Order Id', 'Settlement UTR', 'Settlement Amount', 'Fee (incl. GST)'], ['26YOU1', 'U1', '976.40', '23.60']]),
     ]);
-    expect(prismaStub.order.update.mock.calls[0][0].data.gatewayFee).toBe(23.6);
+    expect(prismaStub.order.updateMany.mock.calls[0][0].data.gatewayFee).toBe(23.6);
   });
 
   it('does not lend the typed UTR to a file that covers several remittances', async () => {
@@ -388,7 +414,7 @@ describe('review fixes', () => {
       [sheet('m', [['Waybill Number', 'Remittance Number', 'COD Amount'], ['1', 'RMT-1', '799'], ['2', 'RMT-2', '799']])],
       { utr: 'UTR-OF-RMT-1' }
     );
-    expect(prismaStub.order.update.mock.calls.every((c: any[]) => c[0].data.paymentReceivedUtr === null)).toBe(true);
+    expect(prismaStub.order.updateMany.mock.calls.every((c: any[]) => c[0].data.paymentReceivedUtr === null)).toBe(true);
     expect(result.notes.join(' ')).toMatch(/covers 2 remittances/);
   });
 
@@ -442,7 +468,6 @@ describe('Carrier Remittance (Amazon Shipping / Ekart / Generic)', () => {
           codRemitted: true,
           codRemittedAmount: 950,
           codRemittanceRef: 'AMZ-REM-01',
-          status: 'DELIVERED',
         }),
       })
     );

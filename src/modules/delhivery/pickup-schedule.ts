@@ -84,18 +84,27 @@ export function planWarehousePickupSlot(now: Date, configuredTime: string): Pick
   return { date: today, time: minutesToClock(clamped) };
 }
 
+/** Manifest day is IST, independently of the host timezone. */
+export function nextDayWarehousePickupSlot(now: Date, configuredTime: string): PickupSlot {
+  const parts = istDateParts(now);
+  return {
+    date: addIstDays(parts.year, parts.month, parts.day, 1),
+    time: minutesToClock(parseClockMinutes(configuredTime, 14 * 60)),
+  };
+}
+
 export function readPickupId(data: unknown): string | null {
   if (!data || typeof data !== 'object') return null;
   const bag = data as Record<string, any>;
   const nested = bag.data && typeof bag.data === 'object' ? bag.data : {};
   const raw = bag.pickup_id ?? bag.pickupId ?? nested.pickup_id ?? nested.pickupId;
-  if (raw == null || raw === '') return null;
+  if (raw == null || raw === '' || typeof raw === 'boolean' || String(raw) === '0' || !/^[a-zA-Z0-9_-]{1,100}$/.test(String(raw))) return null;
   return String(raw);
 }
 
 /**
  * Delhivery rejects a second open pickup for the same warehouse.
- * That is a success for us: an executive is already assigned.
+ * This is not proof our requested date was accepted; the caller must not mark it scheduled.
  */
 export function isExistingPickupError(message: string): boolean {
   const text = (message || '').toLowerCase();

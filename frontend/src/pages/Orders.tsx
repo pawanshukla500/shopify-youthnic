@@ -186,9 +186,6 @@ export function Orders() {
   const [isBulkGeneratingLabels, setIsBulkGeneratingLabels] = useState(false)
   const [isBulkGeneratingInvoices, setIsBulkGeneratingInvoices] = useState(false)
   const [showPickupModal, setShowPickupModal] = useState(false)
-  const [pickupDate, setPickupDate] = useState(() => new Date().toISOString().split('T')[0])
-  const [pickupTime, setPickupTime] = useState('14:00:00')
-  const [pickupLocation, setPickupLocation] = useState('Surat Warehouse')
   const [isSubmittingPickup, setIsSubmittingPickup] = useState(false)
 
   const query = useQuery({
@@ -994,13 +991,7 @@ export function Orders() {
   const handleSchedulePickup = async () => {
     setIsSubmittingPickup(true)
     try {
-      const count = selectedOrderIds.size || 1
-      const res = await api.post('/api/delhivery/pickup', {
-        pickupDate,
-        pickupTime,
-        packageCount: count,
-        pickupLocation,
-      })
+      const res = await api.post('/api/delhivery/pickup', {})
       if (res.data?.success) {
         toast.toast('success', res.data.message || 'Pickup scheduled successfully!')
         setShowPickupModal(false)
@@ -1043,7 +1034,7 @@ export function Orders() {
             {courierLabel}
           </span>
           <span className="cell-muted">
-            {isRemitted ? 'Remitted to Bank' : isCollected ? 'Collected at Door' : 'Collection Pending'}
+            {isRemitted ? (order.paymentReceivedUtr ? 'Bank UTR recorded' : 'Remittance recorded / UTR missing') : isCollected ? 'Collected at Door' : 'Collection Pending'}
           </span>
         </div>
       )
@@ -1869,7 +1860,7 @@ export function Orders() {
             type="button"
             className="bulk-btn bulk-btn-secondary"
             onClick={() => setShowPickupModal(true)}
-            title="Forward parcels: a warehouse pickup is created automatically after dispatch. Use this to send another request."
+            title="Forward parcels: a warehouse pickup is created automatically after dispatch. Use this to submit the same guarded next-day warehouse batch."
           >
             <Icon name="truck" size={15} />
             <span className="bulk-btn-label">Schedule Pickup</span>
@@ -1944,75 +1935,10 @@ export function Orders() {
               </button>
             </div>
 
-            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, marginBottom: '4px', color: '#475569' }}>
-                  Pickup Warehouse Location
-                </label>
-                <input
-                  type="text"
-                  className="search-input"
-                  style={{ width: '100%', padding: '8px 12px' }}
-                  value={pickupLocation}
-                  onChange={(e) => setPickupLocation(e.target.value)}
-                  placeholder="e.g. Surat Warehouse"
-                />
-                <span style={{ fontSize: '11px', color: '#64748b', marginTop: '2px', display: 'block' }}>
-                  Must match the registered pickup location name in Delhivery ONE.
-                </span>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, marginBottom: '4px', color: '#475569' }}>
-                    Pickup Date
-                  </label>
-                  <input
-                    type="date"
-                    className="search-input"
-                    style={{ width: '100%', padding: '8px 12px' }}
-                    value={pickupDate}
-                    onChange={(e) => setPickupDate(e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, marginBottom: '4px', color: '#475569' }}>
-                    Pickup Slot Time
-                  </label>
-                  <input
-                    type="text"
-                    className="search-input"
-                    style={{ width: '100%', padding: '8px 12px' }}
-                    value={pickupTime}
-                    onChange={(e) => setPickupTime(e.target.value)}
-                    placeholder="14:00:00"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, marginBottom: '4px', color: '#475569' }}>
-                  Expected Package Count
-                </label>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <input
-                    type="number"
-                    min={1}
-                    className="search-input"
-                    style={{ width: '120px', padding: '8px 12px' }}
-                    value={selectedOrderIds.size || 1}
-                    readOnly
-                  />
-                  <span style={{ fontSize: '12px', color: '#64748b' }}>
-                    Based on {selectedOrderIds.size || 1} selected order{selectedOrderIds.size > 1 ? 's' : ''}.
-                  </span>
-                </div>
-              </div>
-
-              <div style={{ background: '#f8fafc', padding: '10px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '11px', color: '#475569' }}>
-                ℹ️ <strong>Delhivery Surface Express:</strong> Pickup is scheduled for your warehouse address at HTC Market - 1, Surat. The courier van will arrive to collect ready parcels.
-              </div>
+            <div className="modal-body">
+              <p>Accepted OMS labels are automatically grouped for the next calendar day in Asia/Kolkata. The registered warehouse and slot come from server configuration.</p>
+              <p>This submits the warehouse batch of live manifested parcels, not the selected-order count. Picked-up, cancelled, reverse and external shipments are excluded. An existing confirmed batch is reused.</p>
+              <p>A response without a confirmed pickup ID is shown for review, never treated as a scheduled pickup.</p>
             </div>
 
             <div className="modal-footer" style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '12px' }}>

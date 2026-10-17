@@ -802,6 +802,32 @@ router.get('/orders/:id', async (req: Request, res: Response): Promise<void> => 
   }
 });
 
+// Explicit single-order refresh: never invoke bulk sync or auto-dispatch.
+router.post('/orders/:id/refresh-shopify', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const orderId = Number(req.params.id);
+    if (!Number.isSafeInteger(orderId) || orderId <= 0) {
+      res.status(400).json({ error: 'Invalid order id' });
+      return;
+    }
+    const stored = await orderService.getOrder(orderId);
+    if (!stored) {
+      res.status(404).json({ error: 'Order not found' });
+      return;
+    }
+    const payload = await shopifyService.fetchOrder(stored.shopifyOrderId);
+    if (String(payload.id) !== stored.shopifyOrderId) {
+      res.status(502).json({ error: 'Shopify returned a different order' });
+      return;
+    }
+    await shopifyService.syncOrderToDb(payload);
+    res.json({ order: await orderService.getOrder(orderId) });
+  } catch (error: any) {
+    logger.error('Single-order Shopify refresh failed', { error: error.message });
+    res.status(502).json({ error: 'Could not refresh this order from Shopify. Please try again.' });
+  }
+});
+
 // Account trail is accessible only through this authenticated API mount.
 router.get('/orders/:id/account-trail', async (req: Request, res: Response): Promise<void> => {
   try {

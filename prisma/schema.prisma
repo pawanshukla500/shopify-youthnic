@@ -27,6 +27,16 @@ model Order {
 
   // Order details
   totalAmount       Float
+  totalShipping     Float?
+  totalDiscounts    Float?
+  totalTax          Float?
+  totalOutstanding  Float?
+  taxesIncluded     Boolean?
+  taxLines          Json?
+  discountCodes     Json?
+  shippingTitle     String?
+  shopifyNote       String?
+  additionalDetails Json?
   currency          String  @default("INR")
   paymentMethod     String? // COD, prepaid, etc.
   financialStatus   String? // paid, pending, refunded, etc.

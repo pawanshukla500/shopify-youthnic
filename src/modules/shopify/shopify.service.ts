@@ -5,6 +5,7 @@ import logger from '../../utils/logger';
 import { withRetry } from '../../utils/retry';
 import { isDelhiveryCourier, normalizeCourierName } from '../../utils/courier';
 import { ShopifyOrderWebhook } from '../../types';
+import { extractOrderFinancials } from '../orders/order-financials';
 import { OrderStatus } from '@prisma/client';
 import { shopifyTokenProvider } from './token.provider';
 import { mapReturnReason, selectReturnFulfillmentLines } from '../returns/return-reasons';
@@ -1685,6 +1686,7 @@ class ShopifyService {
           customerPincode: address?.zip || 'N/A',
           customerCountry: address?.country || 'India',
           totalAmount: parseFloat(order.total_price) || 0,
+          ...extractOrderFinancials(order),
           currency: order.currency || 'INR',
           paymentMethod,
           paymentGateway,
@@ -1743,6 +1745,7 @@ class ShopifyService {
           customerState: address?.province || 'N/A',
           customerPincode: address?.zip || 'N/A',
           totalAmount: parseFloat(order.total_price) || 0,
+          ...extractOrderFinancials(order),
           paymentMethod,
           paymentGateway,
           paymentAggregator,

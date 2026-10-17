@@ -1226,6 +1226,60 @@ a { color: inherit; text-decoration: none; }
 .detail-header-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
 
 /* Shopify-style order page */
+.shopify-order-page {
+  --ink: #303030;
+  --ink-secondary: #4d4d4d;
+  --muted: #696969;
+  --line: #dedede;
+  --line-subtle: #f5f5f5;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  max-width: 1220px;
+  margin: 0 auto;
+}
+.shopify-order-page .panel { border-radius: 12px; box-shadow: 0 2px 4px #0000000a; padding: 20px; }
+.shopify-order-page .panel:hover { box-shadow: 0 2px 4px #0000000a; }
+.shopify-order-page .detail-grid { grid-template-columns: minmax(0, 2.2fr) minmax(280px, 1fr); gap: 24px; }
+.shopify-order-page .detail-main, .shopify-order-page .detail-side { min-width: 0; gap: 20px; }
+.shopify-order-page .shopify-order-title h1 { font-size: 24px; font-weight: 650; font-style: normal; }
+.shopify-order-page .shopify-order-meta { color: var(--ink-secondary); line-height: 1.5; }
+.shopify-order-page .shopify-pill { border-radius: 5px; height: 22px; font-weight: 500; }
+.shopify-order-page .shopify-pill-neutral { background: #ebebeb; color: #4d4d4d; }
+.shopify-order-page .shopify-pill-pending { background: #ffea8a; color: #4f4700; }
+.shopify-order-page .shopify-order-stage { font-size: 12px; color: var(--muted); border-left: 1px solid var(--line); padding-left: 10px; }
+.shopify-order-page .shopify-line-unit { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; white-space: nowrap; }
+.shopify-order-page .shopify-line-qty { min-width: 22px; height: 22px; border: 0; background: var(--line-subtle); border-radius: 6px; }
+.shopify-order-page .shopify-line-title { font-weight: 500; line-height: 1.5; }
+.shopify-order-page .shopify-line-money strong, .shopify-order-page .shopify-paid-row strong { font-weight: 500; font-variant-numeric: tabular-nums; }
+.shopify-order-page .shopify-paid-row.is-total strong { font-weight: 650; }
+.shopify-order-page .shopify-paid-row.is-paid { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 14px; }
+.shopify-order-page .shopify-sync-hint { color: var(--muted); background: var(--line-subtle); border-radius: 6px; padding: 10px; font-size: 12px; line-height: 1.5; }
+.shopify-order-page .shopify-order-notes h2, .shopify-order-page .shopify-order-notes summary { margin: 0; font-size: 14px; font-weight: 600; color: var(--ink); }
+.shopify-order-page .shopify-order-notes p { margin: 12px 0 0; font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.shopify-order-page .shopify-order-notes summary { cursor: pointer; }
+.shopify-order-page .shopify-order-notes summary span { font-size: 12px; color: var(--muted); margin-left: 6px; }
+.shopify-order-page .shopify-additional-details { margin: 16px 0 0; display: grid; gap: 16px; font-size: 13px; }
+.shopify-order-page .shopify-additional-details dt { font-weight: 500; overflow-wrap: anywhere; }
+.shopify-order-page .shopify-additional-details dd { margin: 5px 0 0; color: var(--ink-secondary); white-space: pre-wrap; overflow-wrap: anywhere; }
+.shopify-order-page :is(button, a, summary):focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+[data-theme="dark"] .shopify-order-page, .theme-dark .shopify-order-page {
+  --ink: #f5f5f5;
+  --ink-secondary: #dedede;
+  --muted: #ababab;
+  --line: #4d4d4d;
+  --line-subtle: #333333;
+}
+[data-theme="dark"] .shopify-order-page .shopify-pill-neutral, .theme-dark .shopify-order-page .shopify-pill-neutral { background: #4d4d4d; color: #f5f5f5; }
+@media (max-width: 1100px) {
+  .shopify-order-page .detail-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 600px) {
+  .shopify-order-page .shopify-order-top { align-items: flex-start; flex-wrap: wrap; }
+  .shopify-order-page .shopify-order-actions { flex-wrap: wrap; gap: 6px; }
+  .shopify-order-page .shopify-line { grid-template-columns: 36px minmax(0, 1fr); gap: 10px; }
+  .shopify-order-page .shopify-line-unit { grid-column: 2; }
+  .shopify-order-page .shopify-line-money { grid-column: 2; text-align: left; }
+  .shopify-order-page .shopify-paid-row { grid-template-columns: 75px minmax(0, 1fr) auto; gap: 8px; font-size: 12px; }
+}
 .shopify-order-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
 .shopify-back { display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; color: var(--ink); font-size: 14px; font-weight: 650; padding: 4px 2px; }
 .shopify-back svg { transform: rotate(180deg); }

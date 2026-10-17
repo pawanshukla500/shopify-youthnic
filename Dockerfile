@@ -23,9 +23,11 @@ RUN npx prisma generate
 # Build Frontend
 COPY frontend/package*.json ./frontend/
 RUN cd frontend && npm ci
-# Orders.tsx imports the shared tab classifier from ../src/modules/orders.
-# The rest of the backend is copied after this stage, so this file must land first.
+# Frontend imports these shared order helpers and their type-only dependencies.
+# The rest of the backend is copied after the frontend build.
 COPY src/modules/orders/order-tabs.ts ./src/modules/orders/order-tabs.ts
+COPY src/modules/orders/order-financials.ts ./src/modules/orders/order-financials.ts
+COPY src/types ./src/types
 COPY frontend ./frontend
 RUN cd frontend && npm run build
 

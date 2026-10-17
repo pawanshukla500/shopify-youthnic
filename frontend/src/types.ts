@@ -43,6 +43,8 @@ export type ReturnStatus =
 
 export type QcStatus = 'APPROVED' | 'REJECTED' | 'PARTIAL'
 export type RefundStatus = 'NONE' | 'PENDING' | 'PROCESSED' | 'FAILED'
+export type CarrierPriority = 'DELHIVERY_FIRST' | 'VELOCITY_FIRST'
+export type CourierChoice = 'Delhivery' | 'Velocity'
 
 export interface OrderItem {
   id: number
@@ -666,6 +668,18 @@ export interface SystemStatusData {
     shippingMode: string
     labelSize: string
     baseUrl: string
+  }
+  velocity?: {
+    status: string
+    baseUrl: string
+    warehouseId: string
+    enabled: boolean
+    hasToken: boolean
+  }
+  shipping?: {
+    priority: CarrierPriority
+    delhiveryConfigured: boolean
+    velocityConfigured: boolean
   }
   payments: {
     gokwik: {

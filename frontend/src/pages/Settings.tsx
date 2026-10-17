@@ -19,11 +19,16 @@ import {
   getResendStatus,
   updateResendConfig,
   testResendEmail,
+  getShippingPriority,
+  setShippingPriority,
+  getVelocityStatus,
+  testVelocityConnection,
+  checkVelocityServiceability,
 } from '../api'
 import { ErrorBox, Icon, LoadingState, PageIntro, Panel, PanelHeading, useDocumentTitle, useToast } from '../components/UI'
-import type { SystemUser } from '../types'
+import type { SystemUser, CarrierPriority } from '../types'
 
-type SettingsTab = 'stack' | 'users'
+type SettingsTab = 'stack' | 'shipping' | 'users'
 
 const ROLE_OPTIONS = [
   'Admin / System Architect',
@@ -135,19 +140,71 @@ export function Settings() {
     staleTime: 15_000,
   })
 
+  const shippingPriorityQuery = useQuery({
+    queryKey: ['shipping-priority'],
+    queryFn: getShippingPriority,
+    staleTime: 10_000,
+  })
+
+  const velocityStatusQuery = useQuery({
+    queryKey: ['velocity-status'],
+    queryFn: getVelocityStatus,
+    staleTime: 15_000,
+  })
+
+  // State for Velocity pincode serviceability testing
+  const [velTestPincode, setVelTestPincode] = useState('')
+  const [velTestPaymentMode, setVelTestPaymentMode] = useState<'cod' | 'prepaid'>('cod')
+  const [velServiceabilityResult, setVelServiceabilityResult] = useState<any>(null)
+  const [velChecking, setVelChecking] = useState(false)
+
   // Mutations
+  const setPriorityMutation = useMutation({
+    mutationFn: setShippingPriority,
+    onSuccess: (data) => {
+      toast.toast(
+        'success',
+        `Shipping priority updated to: ${data.priority === 'VELOCITY_FIRST' ? 'Velocity First' : 'Delhivery First'}`
+      )
+      queryClient.invalidateQueries({ queryKey: ['shipping-priority'] })
+      queryClient.invalidateQueries({ queryKey: ['system-status'] })
+    },
+    onError: (err: any) => {
+      toast.toast('error', `Failed to update shipping priority: ${err.message || 'Error'}`)
+    },
+  })
+
+  const testVelocityMutation = useMutation({
+    mutationFn: testVelocityConnection,
+    onSuccess: (data) => {
+      if (data.ok) {
+        toast.toast('success', `Velocity Connected: ${data.message} (${data.latencyMs}ms)`)
+      } else {
+        toast.toast('error', `Velocity Connection: ${data.message}`)
+      }
+      queryClient.invalidateQueries({ queryKey: ['velocity-status'] })
+      queryClient.invalidateQueries({ queryKey: ['system-status'] })
+    },
+    onError: (err: any) => {
+      toast.toast('error', `Velocity ping failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
+    },
+  })
+
   const pingMutation = useMutation({
     mutationFn: pingIntegrations,
     onSuccess: (data) => {
       const dbMs = data.results.database?.latencyMs ?? 0
       const shopifyMs = data.results.shopify?.latencyMs ?? 0
       const delhiveryMs = data.results.delhivery?.latencyMs ?? 0
+      const velocityMs = (data.results as any)?.velocity?.latencyMs ?? 0
       const kwikEngageMs = data.results.kwikengage?.latencyMs ?? data.results.whatsapp?.latencyMs ?? 0
       toast.toast(
         'success',
-        `Live Ping Success! DB: ${dbMs}ms · Shopify: ${shopifyMs}ms · Delhivery: ${delhiveryMs}ms · KwikEngage: ${kwikEngageMs}ms`
+        `Live Ping Success! DB: ${dbMs}ms · Shopify: ${shopifyMs}ms · Delhivery: ${delhiveryMs}ms · Velocity: ${velocityMs}ms · KwikEngage: ${kwikEngageMs}ms`
       )
       queryClient.invalidateQueries({ queryKey: ['system-status'] })
+      queryClient.invalidateQueries({ queryKey: ['shipping-priority'] })
+      queryClient.invalidateQueries({ queryKey: ['velocity-status'] })
       queryClient.invalidateQueries({ queryKey: ['kwikengage-status'] })
       queryClient.invalidateQueries({ queryKey: ['resend-status'] })
     },
@@ -431,6 +488,14 @@ export function Settings() {
         >
           <Icon name="server" size={16} />
           <span>System Stack & API Status</span>
+        </button>
+        <button
+          type="button"
+          className={`analytics-tab-btn ${activeTab === 'shipping' ? 'active' : ''}`}
+          onClick={() => setActiveTab('shipping')}
+        >
+          <Icon name="truck" size={16} />
+          <span>Shipping & Carrier Priority</span>
         </button>
         <button
           type="button"
@@ -1119,7 +1184,355 @@ export function Settings() {
       )}
 
       {/* ─────────────────────────────────────────────────────────────
-          TAB 2: USER CREATION & TEAM MANAGEMENT
+          TAB 2: SHIPPING CARRIER PRIORITY & VELOCITY INTEGRATION
+          ───────────────────────────────────────────────────────────── */}
+      {activeTab === 'shipping' && (
+        <div style={{ display: 'grid', gap: '22px' }}>
+          {/* Priority Routing Engine Panel */}
+          <Panel style={{ padding: '20px 24px' }}>
+            <PanelHeading
+              title="Shipping Carrier Priority & Smart Routing Engine"
+              eyebrow="Configure primary shipping partner with automated failover and destination serviceability check"
+            />
+            <p style={{ fontSize: '13px', color: '#64748b', marginTop: '6px', marginBottom: '20px' }}>
+              During single and bulk dispatch, the system automatically queries the destination pincode against the primary carrier.
+              If the primary partner is unserviceable or credentials are down, it seamlessly routes the shipment to the secondary partner without halting your fulfillment queue.
+            </p>
+
+            {/* Carrier Priority Selector Cards */}
+            {(() => {
+              const currentPriority = shippingPriorityQuery.data?.priority || 'DELHIVERY_FIRST'
+              return (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px' }}>
+                  {/* Option 1: Delhivery First */}
+                  <div
+                    onClick={() => setPriorityMutation.mutate('DELHIVERY_FIRST')}
+                    style={{
+                      cursor: 'pointer',
+                      border: currentPriority === 'DELHIVERY_FIRST' ? '2px solid #2563eb' : '1px solid #e2e8f0',
+                      borderRadius: '12px',
+                      padding: '18px 20px',
+                      background: currentPriority === 'DELHIVERY_FIRST' ? '#eff6ff' : '#ffffff',
+                      transition: 'all 0.15s ease-in-out',
+                      position: 'relative',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <div style={{ width: '40px', height: '40px', borderRadius: '8px', background: '#ffffff', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '6px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+                          <img
+                            src="/logos/delhivery.png"
+                            alt="Delhivery"
+                            style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                            onError={(e) => { (e.currentTarget as HTMLImageElement).src = 'https://cdn.brandfetch.io/idz2dv9TsL/theme/dark/logo.svg?c=1bxz7nrnjqcuvlb6lc2wbkb2gh18SXdPupo' }}
+                          />
+                        </div>
+                        <div>
+                          <strong style={{ fontSize: '15px', color: '#1e293b' }}>Delhivery First</strong>
+                          <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>Primary Carrier (Default)</span>
+                        </div>
+                      </div>
+                      {currentPriority === 'DELHIVERY_FIRST' ? (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#2563eb', color: '#ffffff', fontSize: '11px', fontWeight: 600, padding: '3px 10px', borderRadius: '12px' }}>
+                          <Icon name="check" size={12} /> ACTIVE
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          className="button button-secondary"
+                          style={{ fontSize: '11px', padding: '4px 10px' }}
+                          disabled={setPriorityMutation.isPending}
+                        >
+                          Select Priority
+                        </button>
+                      )}
+                    </div>
+                    <p style={{ fontSize: '12px', color: '#475569', lineHeight: 1.5, margin: 0 }}>
+                      Orders are dispatched via <strong>Delhivery Express</strong> first. If destination pincode is unserviceable or wallet balance is exhausted, automatically falls back to <strong>Velocity Shipping</strong>.
+                    </p>
+                  </div>
+
+                  {/* Option 2: Velocity First */}
+                  <div
+                    onClick={() => setPriorityMutation.mutate('VELOCITY_FIRST')}
+                    style={{
+                      cursor: 'pointer',
+                      border: currentPriority === 'VELOCITY_FIRST' ? '2px solid #7c3aed' : '1px solid #e2e8f0',
+                      borderRadius: '12px',
+                      padding: '18px 20px',
+                      background: currentPriority === 'VELOCITY_FIRST' ? '#f5f3ff' : '#ffffff',
+                      transition: 'all 0.15s ease-in-out',
+                      position: 'relative',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <div style={{ width: '40px', height: '40px', borderRadius: '8px', background: '#ffffff', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '6px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+                          <span style={{ fontSize: '18px', fontWeight: 800, color: '#7c3aed' }}>⚡</span>
+                        </div>
+                        <div>
+                          <strong style={{ fontSize: '15px', color: '#1e293b' }}>Velocity First</strong>
+                          <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>Primary Carrier (Velocity)</span>
+                        </div>
+                      </div>
+                      {currentPriority === 'VELOCITY_FIRST' ? (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#7c3aed', color: '#ffffff', fontSize: '11px', fontWeight: 600, padding: '3px 10px', borderRadius: '12px' }}>
+                          <Icon name="check" size={12} /> ACTIVE
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          className="button button-secondary"
+                          style={{ fontSize: '11px', padding: '4px 10px' }}
+                          disabled={setPriorityMutation.isPending}
+                        >
+                          Select Priority
+                        </button>
+                      )}
+                    </div>
+                    <p style={{ fontSize: '12px', color: '#475569', lineHeight: 1.5, margin: 0 }}>
+                      Orders are dispatched via <strong>Velocity Shipping</strong> first. If destination pincode is unserviceable, automatically falls back to <strong>Delhivery Express</strong>.
+                    </p>
+                  </div>
+                </div>
+              )
+            })()}
+          </Panel>
+
+          {/* Integrated Carriers Overview (2-Column Grid) */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '20px' }}>
+            {/* Delhivery Express Card */}
+            <Panel style={{ padding: '20px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: '#ffffff', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px' }}>
+                    <img
+                      src="/logos/delhivery.png"
+                      alt="Delhivery"
+                      style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                      onError={(e) => { (e.currentTarget as HTMLImageElement).src = 'https://cdn.brandfetch.io/idz2dv9TsL/theme/dark/logo.svg?c=1bxz7nrnjqcuvlb6lc2wbkb2gh18SXdPupo' }}
+                    />
+                  </div>
+                  <div>
+                    <strong style={{ fontSize: '14px', color: 'var(--ink)' }}>Delhivery Express B2C</strong>
+                    <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>Primary Carrier Partner</span>
+                  </div>
+                </div>
+                <span className="status-badge status-warning">
+                  <span className="status-dot" /> ACTIVE
+                </span>
+              </div>
+              <div style={{ fontSize: '12px', display: 'grid', gap: '8px', color: '#475569' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#64748b' }}>Origin Hub:</span>
+                  <strong style={{ color: 'var(--ink)' }}>{statusData?.delhivery.originHub || 'Surat Hub'}</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#64748b' }}>Origin Pincode:</span>
+                  <strong style={{ color: '#d97706' }}>{statusData?.delhivery.originPincode || '395002'} (Surat)</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#64748b' }}>Shipping Mode:</span>
+                  <span style={{ color: 'var(--ink)', fontWeight: 600 }}>{statusData?.delhivery.shippingMode || 'Surface'} ({statusData?.delhivery.labelSize || '4x6'})</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#64748b' }}>Tracking Base:</span>
+                  <span style={{ color: '#64748b' }}>https://delhivery.com/track/package/</span>
+                </div>
+              </div>
+            </Panel>
+
+            {/* Velocity Shipping Card */}
+            <Panel style={{ padding: '20px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: '#f5f3ff', border: '1px solid #ddd6fe', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <span style={{ fontSize: '18px' }}>⚡</span>
+                  </div>
+                  <div>
+                    <strong style={{ fontSize: '14px', color: 'var(--ink)' }}>Velocity Shipping</strong>
+                    <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>Multi-Carrier Logistics Aggregator</span>
+                  </div>
+                </div>
+                <span className={`status-badge ${velocityStatusQuery.data?.configured ? 'status-success' : 'status-warning'}`}>
+                  <span className="status-dot" /> {velocityStatusQuery.data?.configured ? 'CONNECTED' : 'STANDBY'}
+                </span>
+              </div>
+              <div style={{ fontSize: '12px', display: 'grid', gap: '8px', color: '#475569' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#64748b' }}>Base URL:</span>
+                  <strong style={{ color: 'var(--ink)' }}>{velocityStatusQuery.data?.baseUrl || 'https://shazam.velocity.in'}</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#64748b' }}>Warehouse ID:</span>
+                  <strong style={{ color: 'var(--ink)' }}>{velocityStatusQuery.data?.warehouseId || 'Surat FC'}</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#64748b' }}>API Token:</span>
+                  <span style={{ color: '#64748b', fontWeight: 600 }}>{velocityStatusQuery.data?.maskedToken || 'Configured via .env'}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#64748b' }}>Webhook Ingestion:</span>
+                  <span style={{ color: '#16a34a', fontWeight: 600 }}>/webhooks/velocity (HMAC Active)</span>
+                </div>
+              </div>
+              <div style={{ marginTop: '14px', display: 'flex', gap: '8px' }}>
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  style={{ fontSize: '12px' }}
+                  disabled={testVelocityMutation.isPending}
+                  onClick={() => testVelocityMutation.mutate()}
+                >
+                  <Icon name="refresh" size={13} />
+                  <span>{testVelocityMutation.isPending ? 'Testing…' : 'Test Velocity API Connection'}</span>
+                </button>
+              </div>
+            </Panel>
+          </div>
+
+          {/* Live Velocity Serviceability Probe */}
+          <Panel style={{ padding: '20px 24px' }}>
+            <PanelHeading
+              title="Velocity Pincode Serviceability Probe"
+              eyebrow="Test live destination pincodes against Velocity shipping network & available carriers"
+            />
+            <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end', flexWrap: 'wrap', marginTop: 14 }}>
+              <label style={{ display: 'grid', gap: 4, fontSize: 12, color: '#64748b' }}>
+                Destination Pincode:
+                <input
+                  type="text"
+                  placeholder="e.g. 400001, 110001, 560001"
+                  value={velTestPincode}
+                  onChange={(e) => setVelTestPincode(e.target.value)}
+                  style={{ fontSize: 13, padding: '8px 12px', borderRadius: 6, border: '1px solid #cbd5e1', width: 200 }}
+                />
+              </label>
+              <label style={{ display: 'grid', gap: 4, fontSize: 12, color: '#64748b' }}>
+                Payment Mode:
+                <select
+                  value={velTestPaymentMode}
+                  onChange={(e) => setVelTestPaymentMode(e.target.value as any)}
+                  style={{ fontSize: 13, padding: '8px 12px', borderRadius: 6, border: '1px solid #cbd5e1' }}
+                >
+                  <option value="cod">COD (Cash on Delivery)</option>
+                  <option value="prepaid">Prepaid (Online Payment)</option>
+                </select>
+              </label>
+              <button
+                type="button"
+                className="button button-primary"
+                disabled={velChecking || !velTestPincode.trim()}
+                onClick={async () => {
+                  setVelChecking(true)
+                  setVelServiceabilityResult(null)
+                  try {
+                    const res = await checkVelocityServiceability(velTestPincode.trim(), velTestPaymentMode)
+                    setVelServiceabilityResult(res?.result || res)
+                    if (res?.result?.serviceable) {
+                      toast.toast('success', `Pincode ${velTestPincode} is serviceable on Velocity!`)
+                    } else {
+                      toast.toast('error', `Pincode ${velTestPincode} not serviceable: ${res?.result?.remark || 'No couriers available'}`)
+                    }
+                  } catch (err: any) {
+                    toast.toast('error', `Serviceability check failed: ${err.message}`)
+                  } finally {
+                    setVelChecking(false)
+                  }
+                }}
+              >
+                <Icon name="search" size={14} />
+                <span>{velChecking ? 'Checking…' : 'Check Serviceability'}</span>
+              </button>
+            </div>
+            {velServiceabilityResult && (
+              <div style={{ marginTop: 16, padding: 14, borderRadius: 8, background: velServiceabilityResult.serviceable ? '#f0fdf4' : '#fef2f2', border: `1px solid ${velServiceabilityResult.serviceable ? '#bbf7d0' : '#fecaca'}` }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, color: velServiceabilityResult.serviceable ? '#166534' : '#991b1b' }}>
+                  <Icon name={velServiceabilityResult.serviceable ? 'check' : 'close'} size={18} />
+                  <span>{velServiceabilityResult.serviceable ? 'Serviceable by Velocity Network' : 'Unserviceable for this Pincode'}</span>
+                </div>
+                {velServiceabilityResult.remark && (
+                  <div style={{ fontSize: 12, color: '#475569', marginTop: 4 }}>Remark: {velServiceabilityResult.remark}</div>
+                )}
+                {velServiceabilityResult.zone && (
+                  <div style={{ fontSize: 12, color: '#475569', marginTop: 2 }}>Zone: {velServiceabilityResult.zone}</div>
+                )}
+                {velServiceabilityResult.couriers && velServiceabilityResult.couriers.length > 0 && (
+                  <div style={{ marginTop: 10 }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: '#334155', textTransform: 'uppercase' }}>Available Couriers ({velServiceabilityResult.couriers.length}):</div>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+                      {velServiceabilityResult.couriers.map((c: any, idx: number) => (
+                        <span key={idx} style={{ background: '#ffffff', padding: '3px 8px', borderRadius: 4, fontSize: 11, border: '1px solid #cbd5e1', color: '#1e293b' }}>
+                          {c.carrier_name || c.carrier_id}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </Panel>
+
+          {/* Pickup Warehouse Registration Panel */}
+          <Panel style={{ padding: '18px 20px' }}>
+            <PanelHeading title="Pickup Warehouse Registration" eyebrow="One-time registration · avoids ClientWarehouse-mismatch manifest failures" />
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px', marginTop: 12 }}>
+              {(['name', 'phone', 'city', 'pin', 'address', 'email'] as const).map((field) => (
+                <label key={field} style={{ display: 'grid', gap: 4, fontSize: 11, color: '#64748b', textTransform: 'capitalize' }}>
+                  {field}
+                  <input
+                    value={whForm[field]}
+                    onChange={(e) => setWhForm({ ...whForm, [field]: e.target.value })}
+                    placeholder={field === 'name' ? 'Surat Warehouse' : field}
+                    style={{ fontSize: 12 }}
+                  />
+                </label>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginTop: 12 }}>
+              <button
+                type="button"
+                className="button button-secondary"
+                disabled={whBusy}
+                onClick={async () => {
+                  setWhBusy(true)
+                  try {
+                    await createDelhiveryWarehouse(whForm)
+                    toast.toast('success', `Warehouse "${whForm.name}" registered!`)
+                  } catch (err) {
+                    toast.toast('error', `Warehouse create failed: ${err instanceof Error ? err.message : 'Unknown'}`)
+                  } finally {
+                    setWhBusy(false)
+                  }
+                }}
+              >
+                {whBusy ? 'Working…' : 'Register warehouse'}
+              </button>
+              <button
+                type="button"
+                className="button button-secondary"
+                disabled={whBusy || !whForm.name.trim()}
+                onClick={async () => {
+                  setWhBusy(true)
+                  try {
+                    await updateDelhiveryWarehouse({ name: whForm.name.trim(), phone: whForm.phone, city: whForm.city, pin: whForm.pin, address: whForm.address, email: whForm.email })
+                    toast.toast('success', `Warehouse "${whForm.name}" updated!`)
+                  } catch (err) {
+                    toast.toast('error', `Warehouse update failed: ${err instanceof Error ? err.message : 'Unknown'}`)
+                  } finally {
+                    setWhBusy(false)
+                  }
+                }}
+              >
+                Update warehouse
+              </button>
+            </div>
+          </Panel>
+        </div>
+      )}
+
+      {/* ─────────────────────────────────────────────────────────────
+          TAB 3: USER CREATION & TEAM MANAGEMENT
           ───────────────────────────────────────────────────────────── */}
       {activeTab === 'users' && (
         <div style={{ display: 'grid', gap: '20px' }}>

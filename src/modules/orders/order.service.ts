@@ -2,6 +2,9 @@ import prisma from '../../database/prisma';
 import { config } from '../../config';
 import shopifyService from '../shopify/shopify.service';
 import delhiveryService from '../delhivery/delhivery.service';
+import velocityService from '../velocity/velocity.service';
+import shippingRouterService, { CourierChoice } from '../shipping/shipping-router.service';
+import { isVelocityCourier } from '../../utils/courier';
 import notificationEngine from '../notifications/notification.service';
 import paymentService from '../payments/payment.service';
 import { recordAccountTrailEvent, type AccountTrailActor } from '../accounts/account-trail.service';
@@ -657,7 +660,11 @@ class OrderService {
    * Dispatch an order: push it to Delhivery to generate AWB.
    * Can be called manually or automatically for all DISPATCH_PENDING orders.
    */
-  async dispatchOrder(orderId: number, actor?: AccountTrailActor): Promise<{ waybillNumber: string }> {
+  async dispatchOrder(
+    orderId: number,
+    actor?: AccountTrailActor,
+    preferredCourier?: CourierChoice | 'auto'
+  ): Promise<{ waybillNumber: string; courier?: string }> {
     const order = await prisma.order.findUnique({
       where: { id: orderId },
       include: { items: true, shipment: true },
@@ -693,7 +700,7 @@ class OrderService {
       );
     }
 
-    // Shopify already marks this order fulfilled, so a Delhivery shipment here
+    // Shopify already marks this order fulfilled, so a shipping manifest here
     // would ship goods that are already out (or were never meant to be). This
     // catches both historic imports and orders fulfilled through another path.
     if (order.fulfillmentStatus === 'fulfilled') {
@@ -702,13 +709,14 @@ class OrderService {
       );
     }
 
-    // A live AWB means Delhivery already has this parcel. Manifesting again
+    // A live AWB means courier already has this parcel. Manifesting again
     // would create a second shipment and overwrite the first AWB. Rejected
     // manifests (ERROR) and cancelled shipments may be dispatched again.
     const existing = (order as any).shipment;
     if (existing?.waybillNumber && !['ERROR', 'CANCELLED'].includes(existing.status)) {
+      const courierName = (existing.courier && isVelocityCourier(existing.courier)) ? 'Velocity' : 'Delhivery';
       throw new Error(
-        `Order ${order.shopifyOrderName} already has Delhivery AWB ${existing.waybillNumber}`
+        `Order ${order.shopifyOrderName} already has ${courierName} AWB ${existing.waybillNumber}`
       );
     }
 
@@ -731,7 +739,7 @@ class OrderService {
     }
 
     try {
-      return await this.dispatchClaimedOrder(order, actor);
+      return await this.dispatchClaimedOrder(order, actor, preferredCourier);
     } finally {
       await prisma.order
         .updateMany({ where: { id: order.id, dispatchLockedAt: claimedAt }, data: { dispatchLockedAt: null } })
@@ -742,7 +750,11 @@ class OrderService {
   }
 
   /** The manifest itself. Only called by dispatchOrder while it holds the claim. */
-  private async dispatchClaimedOrder(order: Order, actor?: AccountTrailActor): Promise<{ waybillNumber: string }> {
+  private async dispatchClaimedOrder(
+    order: Order,
+    actor?: AccountTrailActor,
+    preferredCourier?: CourierChoice | 'auto'
+  ): Promise<{ waybillNumber: string; courier?: string }> {
     const orderId = order.id;
 
     // Verify payment before dispatch (prepaid orders must be paid, COD is always OK)
@@ -768,10 +780,31 @@ class OrderService {
       );
     }
 
-    // Create shipment on Delhivery
-    const result = await delhiveryService.createShipment(verifiedOrder, {
-      itemCount: verifiedOrder.items?.length ?? 1,
-    });
+    // Resolve carrier routing (Delhivery vs Velocity based on priority and availability)
+    const { courier: chosenCourier, reason: routingReason } = await shippingRouterService.resolveCarrierForOrder(
+      verifiedOrder,
+      preferredCourier
+    );
+
+    let waybillNumber: string;
+    let labelUrl: string | null = null;
+    let courierNameForShopify = chosenCourier as string;
+
+    if (chosenCourier === 'Velocity') {
+      const result = await velocityService.createForwardShipment(verifiedOrder);
+      waybillNumber = result.awbCode;
+      labelUrl = result.labelUrl || null;
+      courierNameForShopify = result.courierName || 'Velocity';
+    } else {
+      // Create shipment on Delhivery
+      const result = await delhiveryService.createShipment(verifiedOrder, {
+        itemCount: verifiedOrder.items?.length ?? 1,
+      });
+      waybillNumber = result.waybillNumber;
+
+      await queueManifestForPickup(orderId, waybillNumber, actor)
+        .catch((error) => logger.error('Accepted shipment could not be queued for pickup; scheduler will recover', { orderId, error: error.message }));
+    }
 
     // Promote the order + shipment out of their pre-dispatch states so the
     // UI stops showing "Dispatch Pending". Without these updates the row
@@ -781,7 +814,13 @@ class OrderService {
     const [, promoted] = await prisma.$transaction([
       prisma.shipment.update({
         where: { orderId: order.id },
-        data: { status: 'CREATED', trackingStatus: 'Label generated', courier: 'Delhivery' },
+        data: {
+          status: 'CREATED',
+          trackingStatus: 'Label generated',
+          courier: chosenCourier,
+          waybillNumber,
+          ...(labelUrl ? { labelUrl } : {}),
+        },
       }),
       // Conditional: a Shopify cancel that landed during the manifest call
       // must not be overwritten back to DISPATCHED.
@@ -790,6 +829,7 @@ class OrderService {
         data: { status: 'DISPATCHED', dispatchedAt: new Date() },
       }),
     ]);
+
     if (promoted?.count === 0) {
       const shipment = await prisma.shipment.findUnique({ where: { orderId: order.id } });
       const outcome = await this.cancelLiveShipment({
@@ -800,27 +840,25 @@ class OrderService {
           : null,
       });
       throw new Error(
-        `Order ${order.shopifyOrderName} was cancelled while it was being dispatched. AWB ${result.waybillNumber} ${outcome === 'cancelled' ? 'was cancelled at Delhivery' : 'could NOT be cancelled at Delhivery; cancel it in Delhivery One'}.`
+        `Order ${order.shopifyOrderName} was cancelled while it was being dispatched. AWB ${waybillNumber} ${outcome === 'cancelled' ? `was cancelled at ${chosenCourier}` : `could NOT be cancelled at ${chosenCourier}; cancel it in ${chosenCourier} One`}.`
       );
     }
 
     await recordAccountTrailEvent({
       orderId, eventType: 'SHIPMENT_MANIFESTED', actorType: actor ? 'USER' : 'SYSTEM', actor,
-      source: 'OMS_DISPATCH', status: 'COMPLETED', externalReference: result.waybillNumber,
-      note: 'Delhivery accepted the manifest. Label generated; parcel is Ready to Ship and awaiting pickup.',
+      source: chosenCourier === 'Velocity' ? 'VELOCITY_DISPATCH' : 'OMS_DISPATCH', status: 'COMPLETED', externalReference: waybillNumber,
+      note: `${chosenCourier} accepted the manifest (${routingReason}). Label generated; parcel is Ready to Ship and awaiting pickup.`,
     }).catch((error) => logger.warn('Manifest audit failed', { orderId, error: error.message }));
-    await queueManifestForPickup(orderId, result.waybillNumber, actor)
-      .catch((error) => logger.error('Accepted shipment could not be queued for pickup; scheduler will recover', { orderId, error: error.message }));
 
     // Sync fulfillment and tracking number directly to Shopify order
     try {
-      await shopifyService.fulfillOrderOnShopify(verifiedOrder.shopifyOrderId, result.waybillNumber);
+      await shopifyService.fulfillOrderOnShopify(verifiedOrder.shopifyOrderId, waybillNumber, courierNameForShopify);
     } catch (shopifyErr: any) {
       logger.warn('Could not sync fulfillment to Shopify (non-critical)', { error: shopifyErr.message });
     }
 
     // Send "order shipped" WhatsApp notification
-    await notificationEngine.notifyOrderShipped(verifiedOrder, result.waybillNumber);
+    await notificationEngine.notifyOrderShipped(verifiedOrder, waybillNumber);
 
     // Record sync log
     await prisma.syncLog.create({
@@ -828,11 +866,14 @@ class OrderService {
         orderId: order.id,
         syncType: 'SHIPMENT_CREATE',
         status: 'SUCCESS',
-        message: `Shipment created with waybill ${result.waybillNumber}`,
+        message: `Shipment created with waybill ${waybillNumber} via ${chosenCourier}`,
       },
     });
 
-    return { waybillNumber: result.waybillNumber };
+    return {
+      waybillNumber,
+      ...(chosenCourier === 'Velocity' ? { courier: 'Velocity' } : {}),
+    };
   }
 
   /**
@@ -970,7 +1011,18 @@ class OrderService {
       !['CANCELLED', 'ERROR', 'DELIVERED', 'RTO', 'RTO_DELIVERED'].includes(shipment.status);
     if (!shipment || !live) return 'none';
 
-    const accepted = await delhiveryService.cancelShipment(shipment.waybillNumber!);
+    const shipCourier = (shipment as any)?.courier;
+    const isVelocity = isVelocityCourier(shipCourier, null, shipment.waybillNumber);
+    let accepted = false;
+
+    if (isVelocity) {
+      const cancelRes = await velocityService.cancelShipment(shipment.waybillNumber!);
+      accepted = cancelRes.success;
+    } else {
+      accepted = await delhiveryService.cancelShipment(shipment.waybillNumber!);
+    }
+
+    const carrierName = isVelocity ? 'Velocity' : 'Delhivery';
     if (accepted) {
       await prisma.shipment.update({
         where: { id: shipment.id },
@@ -979,7 +1031,7 @@ class OrderService {
       return 'cancelled';
     }
 
-    const message = `Delhivery did not accept the cancel for AWB ${shipment.waybillNumber}. The parcel may still move; cancel it in Delhivery One.`;
+    const message = `${carrierName} did not accept the cancel for AWB ${shipment.waybillNumber}. The parcel may still move; cancel it in ${carrierName} portal.`;
     await prisma.shipment.update({
       where: { id: shipment.id },
       data: { errorMessage: message },
@@ -989,11 +1041,11 @@ class OrderService {
         orderId: order.id,
         syncType: 'SHIPMENT_CREATE',
         status: 'FAILED',
-        message: `Cancel ${order.shopifyOrderName}: Delhivery refused`,
+        message: `Cancel ${order.shopifyOrderName}: ${carrierName} refused`,
         errorMessage: message,
       },
     });
-    logger.warn('Delhivery refused shipment cancel', {
+    logger.warn(`${carrierName} refused shipment cancel`, {
       orderId: order.id,
       waybill: shipment.waybillNumber,
     });

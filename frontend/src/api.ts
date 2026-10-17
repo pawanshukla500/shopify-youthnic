@@ -304,6 +304,47 @@ export async function pingIntegrations(): Promise<import('./types').PingResults>
   return response.data
 }
 
+export async function getShippingPriority(): Promise<{ success: boolean; priority: import('./types').CarrierPriority }> {
+  const response = await api.get('/api/settings/shipping-priority')
+  return response.data
+}
+
+export async function setShippingPriority(priority: import('./types').CarrierPriority): Promise<{ success: boolean; priority: import('./types').CarrierPriority }> {
+  const response = await api.put('/api/settings/shipping-priority', { priority })
+  return response.data
+}
+
+export async function getVelocityStatus(): Promise<{
+  success: boolean
+  priority: import('./types').CarrierPriority
+  configured: boolean
+  baseUrl: string
+  warehouseId: string
+  enabled: boolean
+  hasWebhookSecret: boolean
+  maskedToken: string | null
+}> {
+  const response = await api.get('/api/settings/velocity/status')
+  return response.data
+}
+
+export async function testVelocityConnection(): Promise<{
+  success: boolean
+  ok: boolean
+  message: string
+  latencyMs: number
+}> {
+  const response = await api.post('/api/settings/velocity/test')
+  return response.data
+}
+
+export async function checkVelocityServiceability(pincode: string, paymentMode: 'cod' | 'prepaid' = 'cod'): Promise<any> {
+  const response = await api.get(`/api/velocity/serviceability/${encodeURIComponent(pincode)}`, {
+    params: { paymentMode },
+  })
+  return response.data
+}
+
 export async function getSystemUsers(): Promise<import('./types').SystemUser[]> {
   const response = await api.get<{ success: boolean; users: import('./types').SystemUser[] }>('/api/settings/users')
   return response.data.users

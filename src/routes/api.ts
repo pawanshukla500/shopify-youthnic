@@ -33,6 +33,9 @@ import { isExpiredSignedUrl, isUsableHttpUrl } from '../utils/signed-url';
 import { queueManifestForPickup, scheduleWaitingParcels, submitPickupBatch } from '../modules/delhivery/pickup-batch.service';
 import { addStaffNote, getOrderActivity, recordOrderAction } from '../modules/orders/order-activity.service';
 import returnScanService from '../modules/returns/return-scan.service';
+import shippingRouterService, { CarrierPriority, CourierChoice } from '../modules/shipping/shipping-router.service';
+import velocityService from '../modules/velocity/velocity.service';
+import { isVelocityCourier } from '../utils/courier';
 
 const router = Router();
 
@@ -57,10 +60,23 @@ async function downloadLabelBytes(url: string): Promise<Buffer> {
 async function loadFreshLabelPdf(
   waybill: string,
   currentUrl?: string | null,
-  shipmentId?: number
+  shipmentId?: number,
+  courier?: string | null
 ): Promise<Buffer | null> {
   const candidates: string[] = [];
   if (isUsableHttpUrl(currentUrl)) candidates.push(currentUrl);
+
+  if (courier && isVelocityCourier(courier)) {
+    for (const url of candidates) {
+      try {
+        return await downloadLabelBytes(url);
+      } catch (err: any) {
+        logger.warn('Velocity shipping label download failed', { waybill, url, error: err.message });
+      }
+    }
+    return null;
+  }
+
   try {
     const fresh = await delhiveryService.generateLabel(waybill);
     if (isUsableHttpUrl(fresh) && !candidates.includes(fresh)) candidates.unshift(fresh);
@@ -951,8 +967,9 @@ router.get('/orders/:id/shipping-estimate', async (req: Request, res: Response):
 router.post('/orders/:id/dispatch', async (req: Request, res: Response): Promise<void> => {
   try {
     const orderId = parseInt(req.params.id, 10);
-    const result = await orderService.dispatchOrder(orderId, (req as AuthenticatedRequest).user);
-    res.json({ success: true, waybillNumber: result.waybillNumber });
+    const courierChoice = (req.body?.courier || req.query?.courier) as CourierChoice | 'auto' | undefined;
+    const result = await orderService.dispatchOrder(orderId, (req as AuthenticatedRequest).user, courierChoice);
+    res.json({ success: true, waybillNumber: result.waybillNumber, courier: result.courier });
   } catch (error: any) {
     res.status(400).json({ error: error.message });
   }
@@ -961,12 +978,13 @@ router.post('/orders/:id/dispatch', async (req: Request, res: Response): Promise
 // Bulk dispatch multiple orders with priority: Prepaid first (FIFO), then COD (FIFO)
 router.post('/orders/bulk-dispatch', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { orderIds } = req.body;
+    const { orderIds, courier } = req.body;
     if (!Array.isArray(orderIds) || !orderIds.length) {
       res.status(400).json({ error: 'orderIds array is required' });
       return;
     }
 
+    const courierChoice = courier as CourierChoice | 'auto' | undefined;
     const numericIds = orderIds.map((id) => Number(id)).filter((id) => !isNaN(id));
 
     // Fetch orders to determine payment methods and creation dates for prioritization
@@ -983,15 +1001,15 @@ router.post('/orders/bulk-dispatch', async (req: Request, res: Response): Promis
     const missingIds = numericIds.filter((id) => !prioritizedIds.includes(id));
     const finalDispatchQueue = [...prioritizedIds, ...missingIds];
 
-    const results: Array<{ orderId: number; success: boolean; waybillNumber?: string; error?: string; paymentMode?: string }> = [];
+    const results: Array<{ orderId: number; success: boolean; waybillNumber?: string; courier?: string; error?: string; paymentMode?: string }> = [];
     for (const id of finalDispatchQueue) {
       const order = dbOrders.find((o) => o.id === id);
       const isPrepaid = order ? isPrepaidOrder(order) : false;
       const paymentMode = order ? (isPrepaid ? 'Prepaid' : 'COD') : undefined;
 
       try {
-        const result = await orderService.dispatchOrder(Number(id), (req as AuthenticatedRequest).user);
-        results.push({ orderId: Number(id), success: true, waybillNumber: result.waybillNumber, paymentMode });
+        const result = await orderService.dispatchOrder(Number(id), (req as AuthenticatedRequest).user, courierChoice);
+        results.push({ orderId: Number(id), success: true, waybillNumber: result.waybillNumber, courier: result.courier, paymentMode });
       } catch (err: any) {
         results.push({ orderId: Number(id), success: false, error: err.message, paymentMode });
       }
@@ -1121,7 +1139,7 @@ router.get('/orders/:id/label', async (req: Request, res: Response): Promise<voi
 
     let waybillNumber = order.shipment?.waybillNumber;
     if (!waybillNumber || order.shipment?.status === 'ERROR') {
-      const err = order.shipment?.errorMessage || 'Order has not been manifested on Delhivery yet. Please click Dispatch to generate an official waybill.';
+      const err = order.shipment?.errorMessage || 'Order has not been manifested yet. Please click Dispatch to generate an official waybill.';
       res.status(400).send(`
         <!DOCTYPE html>
         <html>
@@ -1130,7 +1148,7 @@ router.get('/orders/:id/label', async (req: Request, res: Response): Promise<voi
           <div style="max-width:500px; margin:0 auto; background:#fff; padding:30px; border-radius:12px; box-shadow:0 4px 12px rgba(0,0,0,0.08); border:1px solid #e2e8f0;">
             <h2 style="color:#ef4444; margin-top:0;">⚠️ Label Not Available</h2>
             <p style="color:#334155; font-size:15px; line-height:1.5;">${err}</p>
-            <p style="color:#64748b; font-size:13px;">Please ensure your Delhivery One prepaid wallet has sufficient balance, then click <strong>Dispatch</strong> on the OMS dashboard to create this shipment in the Delhivery portal.</p>
+            <p style="color:#64748b; font-size:13px;">Please check courier serviceability and credentials, then click <strong>Dispatch</strong> on the OMS dashboard to create this shipment.</p>
             <button onclick="window.close()" style="margin-top:15px; padding:8px 20px; background:#0f172a; color:#fff; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Close Window</button>
           </div>
         </body>
@@ -1139,10 +1157,12 @@ router.get('/orders/:id/label', async (req: Request, res: Response): Promise<voi
       return;
     }
 
-    // Refresh the packing-slip URL when it is missing or the S3 signature has
-    // expired. A stale link renders AccessDenied XML instead of a label.
+    const isVelocity = isVelocityCourier(order.shipment?.courier);
+
+    // Refresh the packing-slip URL for Delhivery when it is missing or the S3 signature has expired.
+    // Velocity provides a direct immutable label_url PDF at orchestration time.
     const storedLabel = order.shipment?.labelUrl;
-    if (!isUsableHttpUrl(storedLabel)) {
+    if (!isVelocity && !isUsableHttpUrl(storedLabel)) {
       try {
         const officialUrl = await delhiveryService.generateLabel(waybillNumber);
         if (isUsableHttpUrl(officialUrl)) {
@@ -1184,17 +1204,20 @@ router.get('/orders/:id/label/download', async (req: Request, res: Response): Pr
       res.status(404).json({ error: 'Order not found' });
       return;
     }
+    const isVelocity = isVelocityCourier(order.shipment?.courier);
     const waybill = order.shipment?.waybillNumber || `PENDING-${order.shopifyOrderName.replace('#', '')}`;
-    const pdf = await loadFreshLabelPdf(waybill, order.shipment?.labelUrl, order.shipment?.id);
+    const pdf = await loadFreshLabelPdf(waybill, order.shipment?.labelUrl, order.shipment?.id, order.shipment?.courier);
     if (pdf) {
+      const prefix = isVelocity ? 'velocity' : 'delhivery';
       res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="delhivery-label-${waybill}.pdf"`);
+      res.setHeader('Content-Disposition', `attachment; filename="${prefix}-label-${waybill}.pdf"`);
       res.send(pdf);
       return;
     }
     const html = shippingLabelService.generatePrintableLabelPage(order as any, waybill);
+    const prefix = isVelocity ? 'velocity' : 'delhivery';
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="delhivery-label-${waybill}.html"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${prefix}-label-${waybill}.html"`);
     res.send(html);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -3373,6 +3396,18 @@ router.get('/settings/system-status', async (_req: Request, res: Response): Prom
         labelSize: config.delhivery.labelSize,
         baseUrl: config.delhivery.baseUrl,
       },
+      velocity: {
+        status: config.velocity.apiToken ? 'CONNECTED' : 'STANDBY',
+        baseUrl: config.velocity.baseUrl,
+        warehouseId: config.velocity.warehouseId,
+        enabled: config.velocity.enabled,
+        hasToken: Boolean(config.velocity.apiToken),
+      },
+      shipping: {
+        priority: await shippingRouterService.getCarrierPriority(),
+        delhiveryConfigured: Boolean(config.delhivery.apiToken),
+        velocityConfigured: Boolean(config.velocity.apiToken),
+      },
       payments: {
         gokwik: {
           name: 'GoKwik',
@@ -3450,6 +3485,7 @@ router.get('/settings/system-status', async (_req: Request, res: Response): Prom
       webhooks: [
         { name: 'Shopify Orders (create/paid/updated/cancelled + refunds/create)', path: '/webhooks/shopify', method: 'POST', active: true, latency: '8ms' },
         { name: 'Delhivery Scan-Push', path: '/webhooks/delhivery', method: 'POST', active: true, latency: '15ms' },
+        { name: 'Velocity Shipment Status Change', path: '/webhooks/velocity', method: 'POST', active: Boolean(config.velocity.apiToken), latency: '18ms' },
         { name: 'WhatsApp Inbound (KwikEngage/Meta)', path: '/api/webhooks/whatsapp', method: 'GET+POST', active: true, latency: '12ms' },
         { name: 'GoKwik Payments & Refunds', path: '/api/webhooks/gokwik', method: 'POST', active: true, latency: '10ms' },
       ],
@@ -3499,7 +3535,24 @@ router.post('/settings/ping', async (_req: Request, res: Response): Promise<void
     results.delhivery = { status: 'error', latencyMs: Date.now() - delhiveryStart, message: err.message };
   }
 
-  // 4. Test KwikEngage WhatsApp REST API
+  // 4. Test Velocity Shipping API
+  const velocityStart = Date.now();
+  try {
+    if (!config.velocity.apiToken) {
+      results.velocity = { status: 'error', latencyMs: 0, message: 'Velocity API token not configured (Optional)' };
+    } else {
+      const velRes = await velocityService.ping();
+      results.velocity = {
+        status: velRes.ok ? 'ok' : 'error',
+        latencyMs: velRes.latencyMs,
+        message: velRes.message,
+      };
+    }
+  } catch (err: any) {
+    results.velocity = { status: 'error', latencyMs: Date.now() - velocityStart, message: err.message };
+  }
+
+  // 5. Test KwikEngage WhatsApp REST API
   const kwikengageStart = Date.now();
   try {
     const kwikengageRes = await kwikengageService.ping();
@@ -3512,7 +3565,7 @@ router.post('/settings/ping', async (_req: Request, res: Response): Promise<void
     results.kwikengage = { status: 'error', latencyMs: Date.now() - kwikengageStart, message: err.message };
   }
 
-  // 5. Test Firebase Cloud Storage
+  // 6. Test Firebase Cloud Storage
   try {
     const storageRes = await firebaseService.checkStorageHealth();
     results.firebaseStorage = {
@@ -3524,7 +3577,7 @@ router.post('/settings/ping', async (_req: Request, res: Response): Promise<void
     results.firebaseStorage = { status: 'error', latencyMs: 0, message: err.message };
   }
 
-  // 6. Test Firebase Realtime Database
+  // 7. Test Firebase Realtime Database
   try {
     const rtdbRes = await firebaseService.ping();
     results.firebaseRtdb = {
@@ -3536,7 +3589,7 @@ router.post('/settings/ping', async (_req: Request, res: Response): Promise<void
     results.firebaseRtdb = { status: 'error', latencyMs: 0, message: err.message };
   }
 
-  // 7. Test Meta LLM
+  // 8. Test Meta LLM
   try {
     const metaRes = await metaLlmService.ping();
     results.metaLlm = {
@@ -3549,6 +3602,90 @@ router.post('/settings/ping', async (_req: Request, res: Response): Promise<void
   }
 
   res.json({ success: true, timestamp: new Date().toISOString(), results });
+});
+
+// ─── Carrier Priority & Velocity Settings ─────────────────
+router.get('/settings/shipping-priority', async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const priority = await shippingRouterService.getCarrierPriority();
+    res.json({ success: true, priority });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.put('/settings/shipping-priority', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { priority } = req.body;
+    if (priority !== 'DELHIVERY_FIRST' && priority !== 'VELOCITY_FIRST') {
+      res.status(400).json({ error: 'priority must be DELHIVERY_FIRST or VELOCITY_FIRST' });
+      return;
+    }
+    await shippingRouterService.setCarrierPriority(priority);
+    res.json({ success: true, priority });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/settings/shipping-priority', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { priority } = req.body;
+    if (priority !== 'DELHIVERY_FIRST' && priority !== 'VELOCITY_FIRST') {
+      res.status(400).json({ error: 'priority must be DELHIVERY_FIRST or VELOCITY_FIRST' });
+      return;
+    }
+    await shippingRouterService.setCarrierPriority(priority);
+    res.json({ success: true, priority });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/settings/velocity/status', async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const priority = await shippingRouterService.getCarrierPriority();
+    res.json({
+      success: true,
+      priority,
+      configured: Boolean(config.velocity.apiToken),
+      baseUrl: config.velocity.baseUrl,
+      warehouseId: config.velocity.warehouseId,
+      enabled: config.velocity.enabled,
+      hasWebhookSecret: Boolean(config.velocity.webhookSecret),
+      maskedToken: config.velocity.apiToken
+        ? `${config.velocity.apiToken.slice(0, 4)}...${config.velocity.apiToken.slice(-4)}`
+        : null,
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/settings/velocity/test', async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const pingResult = await velocityService.ping();
+    res.json({ success: pingResult.ok, ...pingResult });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/velocity/serviceability/:pincode', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { pincode } = req.params;
+    const paymentMode = (req.query.paymentMode as any) || 'cod';
+    const fromPincode = config.delhivery.seller.pincode || '395002';
+    const result = await velocityService.checkServiceability({
+      fromPincode,
+      toPincode: pincode,
+      paymentMode,
+      shipmentType: 'forward',
+    });
+    res.json({ success: true, result });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // GET /api/settings/users

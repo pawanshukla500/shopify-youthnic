@@ -1,11 +1,12 @@
 import prisma from '../../database/prisma';
 import delhiveryService from '../delhivery/delhivery.service';
+import velocityService from '../velocity/velocity.service';
 import notificationEngine from '../notifications/notification.service';
 import returnService from '../returns/return.service';
 import resendService from '../email/resend.service';
 import logger from '../../utils/logger';
 import { config } from '../../config';
-import { isDelhiveryCourier } from '../../utils/courier';
+import { isDelhiveryCourier, isVelocityCourier } from '../../utils/courier';
 import { ShipmentStatus } from '@prisma/client';
 import {
   MOVING_SHIPMENT_STATUSES,
@@ -63,6 +64,7 @@ class TrackingService {
               },
               {
                 status: 'ERROR',
+                // Legacy / null-courier errors may still be Delhivery; keep polling them.
                 OR: [
                   { courier: null },
                   { courier: { contains: 'delhivery', mode: 'insensitive' } },
@@ -89,13 +91,22 @@ class TrackingService {
     let updatedCount = 0;
     for (const shipment of activeShipments) {
       if (!shipment.waybillNumber) continue;
-      // Defense-in-depth alongside the query filter: never hand a third-party
-      // waybill to the Delhivery API, even if a legacy row slips through.
-      // ERROR rows from a rejected manifest often have a blank courier; a
-      // numeric Delhivery-style waybill is still ours to verify.
-      const ours = isDelhiveryCourier(shipment.courier, shipment.labelUrl, shipment.waybillNumber);
-      if (!ours && shipment.status !== 'ERROR') continue;
-      if (shipment.status === 'ERROR' && shipment.courier && !ours) continue;
+
+      // Double-check courier name: third-party labels should not hit Delhivery API.
+      // (Legacy rows with NULL courier are still treated as Delhivery).
+      if (
+        !isDelhiveryCourier(shipment.courier, shipment.labelUrl, shipment.waybillNumber) &&
+        shipment.status !== 'ERROR'
+      ) {
+        continue;
+      }
+      if (
+        shipment.status === 'ERROR' &&
+        shipment.courier &&
+        !isDelhiveryCourier(shipment.courier, shipment.labelUrl, shipment.waybillNumber)
+      ) {
+        continue;
+      }
 
       try {
         const tracking = await delhiveryService.trackShipment(shipment.waybillNumber);
@@ -206,6 +217,63 @@ class TrackingService {
             errorMessage: error.message,
           },
         });
+      }
+    }
+
+    // If Velocity Shipping is configured, poll active Velocity shipments
+    if (config.velocity.apiToken) {
+      try {
+        const activeVelocityShipments = await prisma.shipment.findMany({
+          where: {
+            waybillNumber: { not: null },
+            courier: { contains: 'velocity', mode: 'insensitive' },
+            status: { notIn: ['DELIVERED', 'CANCELLED', 'RTO_DELIVERED'] },
+            ...(force
+              ? []
+              : [{ OR: [{ trackingUpdatedAt: null }, { trackingUpdatedAt: { lt: staleBefore } }] }]),
+          },
+          include: { order: { include: { items: true } } },
+          orderBy: { trackingUpdatedAt: { sort: 'asc', nulls: 'first' } },
+          take: batchLimit,
+        });
+
+        for (const shipment of activeVelocityShipments) {
+          if (!shipment.waybillNumber) continue;
+          try {
+            const vTracking = await velocityService.trackShipment(shipment.waybillNumber);
+            const mapped = velocityService.mapTrackingToShipmentStatus(vTracking.shipmentStatus);
+            if (mapped.shipmentStatus !== shipment.status) {
+              await this.handleStatusChange(
+                shipment,
+                shipment.status,
+                mapped.shipmentStatus,
+                mapped.description,
+                vTracking.destination || vTracking.origin
+              );
+            }
+            await prisma.shipment.update({
+              where: { id: shipment.id },
+              data: {
+                trackingStatus: mapped.description,
+                trackingLocation: vTracking.destination || vTracking.origin || null,
+                trackingUpdatedAt: new Date(),
+                trackingHistory: vTracking.activities as any,
+              },
+            });
+            updatedCount++;
+          } catch (velErr: any) {
+            logger.warn('Failed to sync Velocity tracking in cron', {
+              waybill: shipment.waybillNumber,
+              error: velErr.message,
+            });
+            await prisma.shipment.update({
+              where: { id: shipment.id },
+              data: { trackingUpdatedAt: new Date() },
+            }).catch(() => undefined);
+          }
+        }
+      } catch (err: any) {
+        logger.error('Failed to sync active Velocity shipments', { error: err.message });
       }
     }
 
@@ -463,14 +531,41 @@ class TrackingService {
   async trackShipment(waybillNumber: string): Promise<any> {
     let live: any = null;
     let liveError: string | null = null;
-    try {
-      live = await delhiveryService.trackShipment(waybillNumber);
-    } catch (error: any) {
-      liveError = error.message || 'Delhivery tracking request failed';
-      logger.warn('Live Delhivery tracking failed, trying stored scans', {
-        waybillNumber,
-        error: liveError,
-      });
+
+    const shipment = await prisma.shipment.findFirst({ where: { waybillNumber } });
+    if (isVelocityCourier(shipment?.courier, shipment?.labelUrl, waybillNumber)) {
+      try {
+        const vTrack = await velocityService.trackShipment(waybillNumber);
+        return {
+          status: vTrack.currentStatus,
+          statusType: vTrack.shipmentStatus,
+          location: vTrack.destination || vTrack.origin || '',
+          history: (vTrack.activities || []).map((a) => ({
+            status: a.activity,
+            dateTime: a.date,
+            location: a.location,
+          })),
+          waybill: waybillNumber,
+          trackUrl: vTrack.trackUrl,
+          source: 'velocity',
+        };
+      } catch (error: any) {
+        liveError = error.message || 'Velocity tracking request failed';
+        logger.warn('Live Velocity tracking failed, trying stored scans', {
+          waybillNumber,
+          error: liveError,
+        });
+      }
+    } else {
+      try {
+        live = await delhiveryService.trackShipment(waybillNumber);
+      } catch (error: any) {
+        liveError = error.message || 'Delhivery tracking request failed';
+        logger.warn('Live Delhivery tracking failed, trying stored scans', {
+          waybillNumber,
+          error: liveError,
+        });
+      }
     }
 
     const stored = await this.loadStoredTracking(waybillNumber);
@@ -571,7 +666,74 @@ class TrackingService {
       return null;
     }
 
+    const isVel = isVelocityCourier(shipment.courier, shipment.labelUrl, shipment.waybillNumber);
     const ours = isDelhiveryCourier(shipment.courier, shipment.labelUrl, shipment.waybillNumber);
+
+    if (isVel) {
+      const vTracking = await velocityService.trackShipment(shipment.waybillNumber);
+      const mapped = velocityService.mapTrackingToShipmentStatus(vTracking.shipmentStatus);
+
+      if (mapped.shipmentStatus !== shipment.status) {
+        await this.handleStatusChange(
+          shipment,
+          shipment.status,
+          mapped.shipmentStatus,
+          mapped.description,
+          vTracking.destination || vTracking.origin
+        );
+      }
+
+      if (vTracking.activities && vTracking.activities.length > 0) {
+        const existingLogs = await prisma.trackingLog.findMany({
+          where: { shipmentId: shipment.id },
+          select: { scannedAt: true, status: true },
+        });
+
+        for (const act of vTracking.activities) {
+          const actDate = new Date(act.date);
+          const exists = existingLogs.some(
+            (log) => log.status === act.activity && log.scannedAt.getTime() === actDate.getTime()
+          );
+          if (!exists) {
+            await prisma.trackingLog.create({
+              data: {
+                shipmentId: shipment.id,
+                status: act.activity,
+                location: act.location || null,
+                scannedAt: actDate,
+              },
+            }).catch(() => undefined);
+          }
+        }
+      }
+
+      const updatedShipment = await prisma.shipment.update({
+        where: { id: shipment.id },
+        data: {
+          trackingStatus: mapped.description,
+          trackingLocation: vTracking.destination || vTracking.origin || null,
+          trackingUpdatedAt: new Date(),
+          trackingHistory: vTracking.activities as any,
+        },
+        include: { order: { include: { items: true } } },
+      });
+
+      return {
+        shipment: updatedShipment,
+        tracking: {
+          status: mapped.description,
+          courier: 'Velocity',
+          waybill: shipment.waybillNumber,
+          trackUrl: vTracking.trackUrl,
+          history: (vTracking.activities || []).map((a) => ({
+            status: a.activity,
+            dateTime: a.date,
+            location: a.location,
+          })),
+        },
+      };
+    }
+
     if (!ours && !(shipment.status === 'ERROR' && !shipment.courier)) {
       logger.info('Skipping non-Delhivery shipment tracking', {
         courier: shipment.courier,

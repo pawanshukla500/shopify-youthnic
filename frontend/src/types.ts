@@ -170,7 +170,16 @@ export interface Order {
   customerPincode: string
   customerCountry: string
   totalAmount: number
-  totalShipping?: number
+  totalShipping?: number | null
+  totalDiscounts?: number | null
+  totalTax?: number | null
+  totalOutstanding?: number | null
+  taxesIncluded?: boolean | null
+  taxLines?: Array<{ title: string; rate: number; price: string }> | null
+  discountCodes?: Array<{ code: string; amount: string; type: string }> | null
+  shippingTitle?: string | null
+  shopifyNote?: string | null
+  additionalDetails?: Array<{ name: string; value: string }> | null
   currency: string
   paymentMethod: string | null
   financialStatus: string | null

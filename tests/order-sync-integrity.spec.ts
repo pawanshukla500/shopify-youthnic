@@ -174,4 +174,20 @@ describe('syncOrderToDb integrity', () => {
 
     expect(prismaStub.order.upsert.mock.calls[0][0].create.customerName).toBe('Account Holder');
   });
+
+  it('persists the Shopify breakdown in both create and update writes', async () => {
+    await shopifyService.syncOrderToDb(order({
+      total_price: '573.32',
+      total_shipping_price_set: { shop_money: { amount: '45.00' } },
+      total_discounts: '70.68', total_tax: '27.30', taxes_included: true,
+      discount_codes: [{ code: 'newyou10', amount: '70.68', type: 'percentage' }],
+      tax_lines: [{ title: 'CGST', rate: 0.05, price: '27.30' }],
+      shipping_lines: [{ title: 'Shipping Fee', price: '45.00' }],
+    }));
+    const { create, update } = prismaStub.order.upsert.mock.calls[0][0];
+    for (const write of [create, update]) {
+      expect(write).toMatchObject({ totalAmount: 573.32, totalShipping: 45, totalDiscounts: 70.68, totalTax: 27.3, taxesIncluded: true, shippingTitle: 'Shipping Fee' });
+      expect(write.discountCodes[0].code).toBe('newyou10');
+    }
+  });
 });

@@ -28,6 +28,7 @@ import { classifyOrderTab, isCodConfirmed, isPrepaidOrder } from '../../../src/m
 import { Button, ButtonGroup, CopyableBadge, EmptyState, ErrorBox, FormField, Icon, InfoCard, LoadingState, PageIntro, Panel, PanelHeading, StatCard, StatusBadge, useDocumentTitle, useToast } from '../components/UI'
 import { OrderNextStep } from '../components/OrderNextStep'
 import { OrderMoneyCard } from '../components/OrderMoneyCard'
+import { OrderFinancialSummary } from '../components/OrderFinancialSummary'
 import type { AccountTrailEvent, Order, OrderItem, ReturnRecord } from '../types'
 
 export function OrderDetail() {
@@ -86,6 +87,15 @@ export function OrderDetail() {
   const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false)
 
   const order = orderQuery.data
+  const refreshShopify = useMutation({
+    mutationFn: () => api.post(`/api/orders/${id}/refresh-shopify`),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['order', id] })
+      await queryClient.invalidateQueries({ queryKey: ['orders'] })
+      toast.toast('success', 'Order details refreshed from Shopify.')
+    },
+    onError: (error) => toast.toast('error', apiError(error)),
+  })
 
   const action = useMutation({
     mutationFn: async (kind: 'dispatch' | 'verify' | 'label' | 'cancel') => {
@@ -448,16 +458,16 @@ export function OrderDetail() {
 
   const paid =
     order.financialStatus === 'paid' ||
-    order.financialStatus === 'partially_paid' ||
-    isPrepaid ||
-    Boolean(order.paymentVerified)
+    (!order.financialStatus && Boolean(order.paymentVerified))
   const paymentPill =
     order.financialStatus === 'refunded'
       ? { label: 'Refunded', tone: 'shopify-pill-neutral' }
       : order.financialStatus === 'partially_refunded'
         ? { label: 'Partially refunded', tone: 'shopify-pill-pending' }
+        : order.financialStatus === 'partially_paid'
+          ? { label: 'Partially paid', tone: 'shopify-pill-pending' }
         : paid
-          ? { label: 'Paid', tone: 'shopify-pill-paid' }
+          ? { label: 'Paid', tone: 'shopify-pill-neutral' }
           : { label: order.paymentMethod === 'COD' ? 'Payment pending' : 'Unpaid', tone: 'shopify-pill-pending' }
   const hasWaybill = Boolean(order.shipment?.waybillNumber)
   const fulfillmentPill = (() => {
@@ -496,13 +506,17 @@ export function OrderDetail() {
   }
   const closeMore = () => setMoreOpen(false)
 
-  return <>
+  return <div className="shopify-order-page">
     <div className="shopify-order-top">
       <button type="button" className="shopify-back" onClick={() => navigate('/orders')}>
         <Icon name="arrow" size={16} />
         Orders
       </button>
       <div className="shopify-order-actions">
+        <button type="button" className="shopify-btn" disabled={refreshShopify.isPending} onClick={() => refreshShopify.mutate()}>
+          <Icon name="refresh" size={14} />
+          {refreshShopify.isPending ? 'Refreshing…' : 'Refresh from Shopify'}
+        </button>
         {canRefund && (
           <button
             type="button"
@@ -573,6 +587,7 @@ export function OrderDetail() {
         type="button"
         className="order-copy-chip"
         title="Copy order name"
+        aria-label="Copy order name"
         onClick={() => {
           navigator.clipboard.writeText(order.shopifyOrderName)
           toast.toast('success', `Order name ${order.shopifyOrderName} copied!`)
@@ -581,7 +596,8 @@ export function OrderDetail() {
         <Icon name="copy" size={14} />
       </button>
       <span className={`shopify-pill ${paymentPill.tone}`}>{paymentPill.label}</span>
-      <span className="shopify-pill shopify-pill-progress" title={stageTab?.hint}>{stageTab?.label || labelize(order.status)}</span>
+      <span className={`shopify-pill ${fulfillmentPill.tone}`}>{fulfillmentPill.label}</span>
+      <span className="shopify-order-stage" title={stageTab?.hint}>{stageTab?.label || labelize(order.status)}</span>
       {order.hasUrgentSupport && (
         <button type="button" className="shopify-pill shopify-pill-alert" onClick={() => navigate(`/support?search=${order.shopifyOrderName}`)}>
           Support
@@ -633,7 +649,7 @@ export function OrderDetail() {
             ) : null}
           </div>
           <div className="shopify-ship-line">
-            {order.shipment?.courier || 'Standard shipping'}
+            {order.shippingTitle || order.shipment?.courier || 'Shipping'}
             {hasWaybill ? ` · AWB ${order.shipment?.waybillNumber}` : ' · Not yet fulfilled'}
           </div>
           <ItemsTable items={order.items ?? []} currency={order.currency} order={order} section="lines" />
@@ -990,6 +1006,22 @@ export function OrderDetail() {
       </div>
 
       <div className="detail-side">
+        <Panel className="shopify-order-notes">
+          <h2>Notes</h2>
+          <p>{order.shopifyNote || 'No notes from Shopify.'}</p>
+        </Panel>
+        {Boolean(order.additionalDetails?.length) && (
+          <Panel className="shopify-order-notes">
+            <details>
+              <summary>Additional details <span>{order.additionalDetails!.length}</span></summary>
+              <dl className="shopify-additional-details">
+                {order.additionalDetails!.map((attribute, index) => (
+                  <div key={`${attribute.name}-${index}`}><dt>{attribute.name}</dt><dd>{attribute.value}</dd></div>
+                ))}
+              </dl>
+            </details>
+          </Panel>
+        )}
         <Panel>
           <PanelHeading eyebrow="Customer" title={order.customerName} />
           <div className="customer-detail">
@@ -1854,7 +1886,7 @@ export function OrderDetail() {
         </div>
       </div>
     )}
-  </>
+  </div>
 }
 
 
@@ -1871,17 +1903,6 @@ function ItemsTable({ items, currency, order, section = 'both' }: { items: Order
     return <EmptyState title="No line items" description="This order has no item records." icon="box" />
   }
 
-  const subtotal = items.reduce((sum, item) => sum + (Number(item.price) || 0) * (Number(item.quantity) || 1), 0)
-  const shippingFee = Number(order.totalShipping) || 0
-  const grandTotal = Number(order.totalAmount) || (subtotal + shippingFee)
-  const discount = Math.max(0, (subtotal + shippingFee) - grandTotal)
-  const estimatedTax = Math.round((grandTotal * 0.18 / 1.18) * 100) / 100
-  const itemCount = items.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0)
-  const collected = order.financialStatus === 'refunded'
-    ? 0
-    : order.financialStatus === 'paid' || order.financialStatus === 'partially_paid' || (order.paymentMethod !== 'COD' && order.paymentMethod !== null)
-      ? grandTotal
-      : 0
 
   const lines = (
     <div className="shopify-lines">
@@ -1901,7 +1922,7 @@ function ItemsTable({ items, currency, order, section = 'both' }: { items: Order
               </button>
             ) : null}
           </div>
-          <span className="shopify-line-qty">{item.quantity}</span>
+          <span className="shopify-line-unit">{formatMoney(item.price, currency)} <span aria-hidden="true">×</span> <span className="shopify-line-qty" aria-label={`Quantity ${item.quantity}`}>{item.quantity}</span></span>
           <div className="shopify-line-money">
             <strong>{formatMoney(item.price * item.quantity, currency)}</strong>
             {item.quantity > 1 ? <small>{formatMoney(item.price, currency)} each</small> : null}
@@ -1911,18 +1932,7 @@ function ItemsTable({ items, currency, order, section = 'both' }: { items: Order
     </div>
   )
 
-  const summary = (
-    <div className="shopify-paid">
-      <div className="shopify-paid-row"><span>Subtotal</span><span>{itemCount || items.length} item{(itemCount || items.length) === 1 ? '' : 's'}</span><strong>{formatMoney(subtotal, currency)}</strong></div>
-      <div className="shopify-paid-row"><span>Shipping</span><span>{order.shipment?.courier || 'Standard'}</span><strong>{shippingFee === 0 ? 'Free' : formatMoney(shippingFee, currency)}</strong></div>
-      {discount > 0 && (
-        <div className="shopify-paid-row"><span>Discount</span><span /><strong>-{formatMoney(discount, currency)}</strong></div>
-      )}
-      <div className="shopify-paid-row"><span>Tax included</span><span>GST</span><strong>{formatMoney(estimatedTax, currency)}</strong></div>
-      <div className="shopify-paid-row is-total"><span>Total</span><span /><strong>{formatMoney(grandTotal, currency)}</strong></div>
-      <div className="shopify-paid-row"><span>Paid</span><span>{order.financialStatus === 'refunded' ? 'Refunded' : order.paymentMethod === 'COD' && collected === 0 ? 'Due on delivery' : ''}</span><strong>{formatMoney(collected, currency)}</strong></div>
-    </div>
-  )
+  const summary = <OrderFinancialSummary order={order} items={items} currency={currency} />
 
   if (section === 'lines') return lines
   if (section === 'summary') return summary

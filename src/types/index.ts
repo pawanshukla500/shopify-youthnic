@@ -9,6 +9,15 @@ export interface ShopifyOrderWebhook {
   financial_status?: string;
   fulfillment_status?: string;
   total_price: string;
+  total_shipping_price_set?: { shop_money?: { amount: string; currency_code?: string } };
+  total_discounts?: string;
+  total_tax?: string;
+  total_outstanding?: string;
+  taxes_included?: boolean;
+  tax_lines?: Array<{ title: string; rate: number; price: string }>;
+  discount_codes?: Array<{ code: string; amount: string; type: string }>;
+  shipping_lines?: Array<{ title?: string; price: string; discounted_price?: string }>;
+  note_attributes?: Array<{ name: string; value: string }>;
   currency: string;
   tags?: string;
   note?: string;

@@ -263,6 +263,7 @@ def run():
                 tab(page, "Shipment")
                 expect(page.get_by_role("button", name="Cancel shipment", exact=True)).to_have_count(0)
                 page.get_by_role("button", name="View EPOD", exact=True).click()
+                page.wait_for_function("window.__opened.some(url => url.includes('mock-epod'))")
                 assert "mock-epod" in page.evaluate("window.__opened")[-1]
                 checks.append("delivered return validation, selected items/existing AWB payload, terminal cancel guard and EPOD")
 

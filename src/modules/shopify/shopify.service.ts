@@ -628,6 +628,190 @@ class ShopifyService {
   }
 
   /**
+   * Closes an open Return in Shopify using GraphQL mutation returnClose.
+   * This officially marks the return as completed/received in Shopify Admin.
+   */
+  async closeShopifyReturn(shopifyReturnId: string): Promise<{ success: boolean; status?: string; error?: string }> {
+    const returnGid = shopifyReturnId.startsWith('gid://')
+      ? shopifyReturnId
+      : `gid://shopify/Return/${shopifyReturnId}`;
+
+    const mutation = `mutation ReturnClose($id: ID!) {
+      returnClose(id: $id) {
+        return {
+          id
+          status
+        }
+        userErrors {
+          field
+          message
+        }
+      }
+    }`;
+
+    try {
+      const res = await this.graphql<{
+        returnClose: {
+          return: { id: string; status: string } | null;
+          userErrors: Array<{ field: string[]; message: string }>;
+        };
+      }>(mutation, { id: returnGid });
+
+      const errors = res.returnClose?.userErrors || [];
+      if (errors.length) {
+        const errorMsg = errors.map((e) => e.message).join('; ');
+        logger.warn('Shopify returnClose returned user errors', { returnGid, errorMsg });
+        return { success: false, error: errorMsg };
+      }
+
+      logger.info('Shopify return closed successfully', {
+        returnGid,
+        status: res.returnClose?.return?.status,
+      });
+
+      return { success: true, status: res.returnClose?.return?.status };
+    } catch (err: any) {
+      logger.error('Failed to close Shopify return', { returnGid, error: err.message });
+      return { success: false, error: err.message };
+    }
+  }
+
+  /**
+   * Marks a return as received on Shopify:
+   * 1. Closes any open Return on Shopify (via returnClose GraphQL mutation).
+   * 2. Appends 'Return Received', 'Return Delivered', 'RTO_DELIVERED', 'Scanned Received' tags.
+   * 3. Appends an audit note to the Shopify order timeline.
+   */
+  async markReturnReceivedOnShopify(
+    shopifyOrderId: string,
+    details: {
+      scanId?: number | string;
+      tracking?: string;
+      issueLabel?: string | null;
+      shopifyReturnId?: string | null;
+      ironRequired?: boolean;
+    } = {}
+  ): Promise<{
+    success: boolean;
+    closedReturnIds: string[];
+    tagsAdded: string[];
+    noteUpdated: boolean;
+    errors: string[];
+  }> {
+    const result = {
+      success: true,
+      closedReturnIds: [] as string[],
+      tagsAdded: [] as string[],
+      noteUpdated: false,
+      errors: [] as string[],
+    };
+
+    const orderGid = shopifyOrderId.startsWith('gid://')
+      ? shopifyOrderId
+      : `gid://shopify/Order/${shopifyOrderId}`;
+    const numericOrderId = shopifyOrderId.replace(/\D/g, '');
+
+    // 1. Close open returns on Shopify
+    try {
+      const orderQuery = `query OrderReturnsForReceipt($id: ID!) {
+        order(id: $id) {
+          id
+          name
+          returnStatus
+          returns(first: 10) {
+            nodes {
+              id
+              status
+            }
+          }
+        }
+      }`;
+
+      const orderData = await this.graphql<{
+        order: {
+          id: string;
+          name: string;
+          returnStatus: string;
+          returns: { nodes: Array<{ id: string; status: string }> };
+        } | null;
+      }>(orderQuery, { id: orderGid });
+
+      const returnNodes = orderData.order?.returns?.nodes || [];
+      const returnsToClose = returnNodes.filter((r) => r.status === 'OPEN' || r.status === 'REQUESTED');
+
+      // If a specific return ID was provided and not found in nodes, try closing it too
+      if (details.shopifyReturnId) {
+        const specificGid = details.shopifyReturnId.startsWith('gid://')
+          ? details.shopifyReturnId
+          : `gid://shopify/Return/${details.shopifyReturnId}`;
+        if (!returnsToClose.some((r) => r.id === specificGid)) {
+          returnsToClose.push({ id: specificGid, status: 'OPEN' });
+        }
+      }
+
+      for (const ret of returnsToClose) {
+        const closeRes = await this.closeShopifyReturn(ret.id);
+        if (closeRes.success) {
+          result.closedReturnIds.push(ret.id);
+        } else if (closeRes.error) {
+          result.errors.push(`Return ${ret.id}: ${closeRes.error}`);
+        }
+      }
+    } catch (err: any) {
+      logger.warn('Failed to query/close open returns on Shopify', { shopifyOrderId, error: err.message });
+      result.errors.push(`GraphQL returns check: ${err.message}`);
+    }
+
+    // 2. Add Return Received tags and timeline note
+    try {
+      const order = await this.fetchOrder(numericOrderId || shopifyOrderId);
+      const existingTags = order.tags ? order.tags.split(',').map((t: string) => t.trim()).filter(Boolean) : [];
+      const tagSet = new Set(existingTags);
+      tagSet.add('Return Received');
+      tagSet.add('Return Delivered');
+      tagSet.add('RTO_DELIVERED');
+      tagSet.add('Scanned Received');
+      if (details.ironRequired) {
+        tagSet.add('Iron Required');
+      }
+      result.tagsAdded = Array.from(tagSet);
+
+      const timestamp = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+      const qcNote = details.issueLabel ? ` | QC: ${details.issueLabel}` : '';
+      const trackingNote = details.tracking ? ` | Tracking: ${details.tracking}` : '';
+      const scanNote = details.scanId ? ` | Scan #${details.scanId}` : '';
+      const receiptLogEntry = `[Return Received - ${timestamp}] Verified received at warehouse${scanNote}${trackingNote}${qcNote}`;
+      
+      const existingNote = (order as any).note || '';
+      const updatedNote = existingNote ? `${existingNote}\n${receiptLogEntry}` : receiptLogEntry;
+
+      await this.client.put(`/orders/${numericOrderId || shopifyOrderId}.json`, {
+        order: {
+          id: numericOrderId || shopifyOrderId,
+          tags: Array.from(tagSet).join(', '),
+          note: updatedNote,
+        },
+      });
+
+      result.noteUpdated = true;
+      logger.info('Marked return received on Shopify order', {
+        shopifyOrderId,
+        closedReturns: result.closedReturnIds,
+        tagsCount: tagSet.size,
+      });
+    } catch (err: any) {
+      logger.error('Failed to update Shopify tags/note for return receipt', {
+        shopifyOrderId,
+        error: err.response?.data || err.message,
+      });
+      result.errors.push(`Tags/Note update: ${err.message}`);
+      result.success = false;
+    }
+
+    return result;
+  }
+
+  /**
    * returnCreate + reverse delivery tracking. Throws when Shopify rejects it.
    */
   private async createShopifyReturn(

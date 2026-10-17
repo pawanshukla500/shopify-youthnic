@@ -82,9 +82,9 @@ export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   return <svg aria-hidden="true" {...common}>{paths[name]}</svg>
 }
 
-export function Button({ className = '', loading = false, children, ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { loading?: boolean }) {
+export function Button({ className = '', loading = false, disabled = false, children, ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { loading?: boolean }) {
   return (
-    <button className={`button ${className}`} disabled={loading || props.disabled} {...props}>
+    <button className={`button ${className}`} disabled={loading || disabled} aria-busy={loading || undefined} {...props}>
       {loading && <span className="spinner spinner-light" />}
       {children}
     </button>

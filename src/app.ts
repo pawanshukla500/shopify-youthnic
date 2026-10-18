@@ -8,6 +8,7 @@ import apiRoutes from './routes/api';
 import accountsRoutes from './routes/accounts';
 import webhookRoutes from './routes/webhooks';
 import delhiveryWebhookRoutes from './routes/delhivery-webhooks';
+import velocityWebhookRoutes from './routes/velocity-webhooks';
 import scheduler from './jobs/scheduler';
 import { requireAuth } from './middleware/auth.middleware';
 
@@ -109,6 +110,9 @@ app.use(
 app.use('/webhooks', webhookRoutes);
 app.use('/webhooks', delhiveryWebhookRoutes);
 app.use('/', delhiveryWebhookRoutes);
+app.use('/webhooks', velocityWebhookRoutes);
+app.use('/api/webhooks', velocityWebhookRoutes);
+app.use('/', velocityWebhookRoutes);
 app.use('/api/accounts', requireAuth, accountsRoutes);
 app.use('/api', requireAuth, apiRoutes);
 
@@ -121,6 +125,7 @@ if (fs.existsSync(clientDist)) {
       req.path.startsWith('/api') ||
       req.path.startsWith('/webhooks') ||
       req.path.startsWith('/delhivery') ||
+      req.path.startsWith('/velocity') ||
       req.path.startsWith('/logos')
     ) {
       return next();
@@ -144,6 +149,7 @@ if (fs.existsSync(clientDist)) {
         ndr: '/api/delhivery/ndr',
         webhooksShopify: '/webhooks/shopify',
         webhooksDelhivery: '/webhooks/delhivery',
+        webhooksVelocity: '/webhooks/velocity',
       },
     });
   });

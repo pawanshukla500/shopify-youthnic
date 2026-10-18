@@ -1,14 +1,15 @@
 import { Fragment, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { apiError, downloadAccountsReport, downloadAccountsTemplate, getAccountsOverview, getReturnScanStatus, importAccountsFile, sendCodRefundDigest, syncReturnScans, updateRemittanceUtr, type AccountsImportKind, type AccountsImportRecord } from '../api'
+import { apiError, downloadAccountsReport, downloadAccountsTemplate, getAccountsOverview, getReturnScanStatus, getVelocityRemittanceStatus, importAccountsFile, sendCodRefundDigest, syncReturnScans, syncVelocityRemittance, updateRemittanceUtr, type AccountsImportKind, type AccountsImportRecord } from '../api'
 import { Button, CopyableBadge, ErrorBox, FormField, Icon, LoadingState, Panel, PanelHeading, useDocumentTitle, useToast } from '../components/UI'
 import { formatDate, formatMoney } from '../lib'
 import './Remittances.css'
 
-const providers = ['Delhivery', 'GoKwik', 'PhonePe', 'Other providers', 'All history']
+const providers = ['Delhivery', 'Velocity', 'GoKwik', 'PhonePe', 'Other providers', 'All history']
 const options: Array<{ kind: AccountsImportKind; label: string; template: Parameters<typeof downloadAccountsTemplate>[0] }> = [
   { kind: 'DELHIVERY_REMITTANCE', label: 'Delhivery COD remittance', template: 'delhivery-remittance' },
+  { kind: 'VELOCITY_REMITTANCE', label: 'Velocity COD remittance', template: 'carrier-remittance' },
   { kind: 'DELHIVERY_CHARGES', label: 'Delhivery freight ledger', template: 'delhivery-charges' },
   { kind: 'GOKWIK_SETTLEMENT', label: 'GoKwik settlement', template: 'gokwik-settlement' },
   { kind: 'PHONEPE_SETTLEMENT', label: 'PhonePe settlement', template: 'phonepe-settlement' },
@@ -46,7 +47,7 @@ export function Remittances() {
   const params = range ? { startDate: start, endDate: end } : { month }
   const valid = range ? Boolean(start && end && start <= end) : /^\d{4}-\d{2}$/.test(month)
   const query = useQuery({ queryKey: ['accounts-overview', params], queryFn: () => getAccountsOverview(params), enabled: valid, retry: false })
-  const refresh = async () => { await Promise.all(['accounts-overview', 'orders', 'order', 'order-activity'].map((key) => cache.invalidateQueries({ queryKey: [key] }))) }
+  const refresh = async () => { await Promise.all(['accounts-overview', 'orders', 'order', 'order-activity', 'velocity-remittance-status'].map((key) => cache.invalidateQueries({ queryKey: [key] }))) }
   const report = useMutation({ mutationFn: () => downloadAccountsReport(params), onError: (e) => toast.toast('error', apiError(e)) })
   const template = useMutation({ mutationFn: () => downloadAccountsTemplate(options.find((o) => o.kind === kind)!.template), onError: (e) => toast.toast('error', apiError(e)) })
   const upload = useMutation({
@@ -77,8 +78,18 @@ export function Remittances() {
     onSuccess: (r) => toast.toast(r.sent ? 'success' : 'error', r.message),
     onError: (e) => toast.toast('error', apiError(e)),
   })
+  const velocityStatus = useQuery({ queryKey: ['velocity-remittance-status'], queryFn: getVelocityRemittanceStatus, retry: false })
+  const velocitySync = useMutation({
+    mutationFn: () => syncVelocityRemittance(),
+    onSuccess: async (r) => {
+      toast.toast('success', r.message || 'Velocity remittances synchronized successfully.')
+      await refresh()
+      await velocityStatus.refetch()
+    },
+    onError: (e) => toast.toast('error', apiError(e)),
+  })
   const records = useMemo(() => (query.data?.imports || []).filter((r) => {
-    const source = r.kind.startsWith('DELHIVERY') ? 'Delhivery' : r.kind === 'GOKWIK_SETTLEMENT' ? 'GoKwik' : r.kind === 'PHONEPE_SETTLEMENT' ? 'PhonePe' : 'Other providers'
+    const source = r.kind.startsWith('DELHIVERY') ? 'Delhivery' : r.kind === 'VELOCITY_REMITTANCE' ? 'Velocity' : r.kind === 'GOKWIK_SETTLEMENT' ? 'GoKwik' : r.kind === 'PHONEPE_SETTLEMENT' ? 'PhonePe' : 'Other providers'
     const { summary, rows, state } = evidence(r)
     const text = [r.fileName, r.uploadedBy, summary.remittanceNumber, ...rows.flatMap((row) => [row.shopifyOrderName, row.waybillNumber, row.utr])].join(' ').toLowerCase()
     return (provider === 'All history' || provider === source) && (!search || text.includes(search.toLowerCase())) && (filter === 'All statuses' || filter === state)
@@ -97,6 +108,9 @@ export function Remittances() {
       <p>Bank evidence, settlement matching, UTR tracking, and return refund reconciliation.</p>
     </div>
     <div className="remittance-actions">
+      <Button className="button-secondary" loading={velocitySync.isPending} onClick={() => velocitySync.mutate()} title="Sync live remittance records directly from Velocity API (no manual CSV download/upload needed)">
+        <Icon name="refresh" size={15} />Sync Velocity API
+      </Button>
       <Button className="button-secondary" loading={scanSync.isPending} onClick={() => scanSync.mutate()} title="Sync return scans from read-only RETURN_SCAN_DATABASE and process automatic refunds">
         <Icon name="refresh" size={15} />Sync Return Scans
       </Button>
@@ -119,6 +133,23 @@ export function Remittances() {
       <p className="remittance-explainer">ZIP, XLSX or CSV, up to 7 MB. A typed UTR applies only to a single settlement; mixed files need row-wise UTRs. Duplicate payment guards remain active.</p><Button className="button-primary" loading={upload.isPending} disabled={!file} onClick={() => upload.mutate(false)}>Upload & reconcile</Button>
       {duplicate && <div className="remittance-warning"><p>This report already exists. Add missing UTRs in history rather than crediting the same rows again.</p><Button className="button-secondary" disabled={upload.isPending} onClick={() => { if (window.confirm('Reprocess this report? Existing payment duplicate guards still apply.')) upload.mutate(true) }}>Reprocess matching data</Button></div>}{outcome && <p role="status">{outcome}</p>}</Panel>}
     <nav className="remittance-provider-nav" aria-label="Settlement providers">{providers.map((name) => <button type="button" key={name} aria-pressed={provider === name} onClick={() => { setProvider(name); setFilter('All statuses'); setExpanded(null) }}>{name}</button>)}</nav>
+    {provider === 'Velocity' && (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '10px', marginBottom: '20px', gap: '16px', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+          <img src="/logos/velocity.png" alt="Velocity" style={{ height: '26px', objectFit: 'contain' }} onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none' }} />
+          <div>
+            <strong style={{ display: 'block', fontSize: '14px', fontWeight: 650 }}>Velocity Direct Finance & Remittance Sync</strong>
+            <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
+              Direct API reconciliation active. Velocity payouts and COD settlements sync automatically without downloading or uploading CSVs.
+              {velocityStatus.data?.lastSync && ` • Last synced: ${formatDate(velocityStatus.data.lastSync)} (${velocityStatus.data.matchedCount} matched)`}
+            </span>
+          </div>
+        </div>
+        <Button className="button-primary" loading={velocitySync.isPending} onClick={() => velocitySync.mutate()}>
+          <Icon name="refresh" size={14} /> Run Live Sync
+        </Button>
+      </div>
+    )}
     <Panel><PanelHeading title="Report history & bank evidence" action={<Button className="button-secondary" loading={query.isFetching} onClick={refresh}>Refresh</Button>} />
       <div className="remittance-filters"><FormField label="Find a settlement or order"><input type="search" placeholder="File, order, AWB, UTR or uploader" value={search} onChange={(e) => setSearch(e.target.value)} /></FormField><FormField label="Evidence status"><select value={filter} onChange={(e) => setFilter(e.target.value)}>{['All statuses', 'UTR recorded', 'UTR missing', 'Reconciled', 'Needs matching'].map((s) => <option key={s}>{s}</option>)}</select></FormField></div>
       {editing && <div className="remittance-correction"><FormField label="Correct bank UTR"><input value={editing.utr} maxLength={160} onChange={(e) => setEditing({ ...editing, utr: e.target.value })} /></FormField><Button className="button-primary" loading={correction.isPending} onClick={() => correction.mutate()}>Save UTR</Button><Button className="button-secondary" disabled={correction.isPending} onClick={() => setEditing(null)}>Cancel</Button><p>{editing.orderId ? `Order ${editing.orderId}` : `Import ${editing.importId}`}: changes only the UTR, never the existing payment amount/date.</p></div>}

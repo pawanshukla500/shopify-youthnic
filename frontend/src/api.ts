@@ -304,6 +304,83 @@ export async function pingIntegrations(): Promise<import('./types').PingResults>
   return response.data
 }
 
+export async function getShippingPriority(): Promise<{ success: boolean; priority: import('./types').CarrierPriority }> {
+  const response = await api.get('/api/settings/shipping-priority')
+  return response.data
+}
+
+export async function setShippingPriority(priority: import('./types').CarrierPriority): Promise<{ success: boolean; priority: import('./types').CarrierPriority }> {
+  const response = await api.put('/api/settings/shipping-priority', { priority })
+  return response.data
+}
+
+export async function getVelocityStatus(): Promise<{
+  success: boolean
+  priority: import('./types').CarrierPriority
+  configured: boolean
+  baseUrl: string
+  warehouseId: string
+  enabled: boolean
+  hasWebhookSecret: boolean
+  maskedToken: string | null
+}> {
+  const response = await api.get('/api/settings/velocity/status')
+  return response.data
+}
+
+export async function testVelocityConnection(): Promise<{
+  success: boolean
+  ok: boolean
+  message: string
+  latencyMs: number
+}> {
+  const response = await api.post('/api/settings/velocity/test')
+  return response.data
+}
+
+export async function checkVelocityServiceability(pincode: string, paymentMode: 'cod' | 'prepaid' = 'cod'): Promise<any> {
+  const response = await api.get(`/api/velocity/serviceability/${encodeURIComponent(pincode)}`, {
+    params: { paymentMode },
+  })
+  return response.data
+}
+
+export async function getShippingPreferences(): Promise<import('./types').ShippingPreferences> {
+  const response = await api.get('/api/settings/shipping-preferences')
+  return response.data
+}
+
+export async function saveShippingPreferences(payload: Partial<import('./types').ShippingPreferences>): Promise<{ success: boolean; message: string }> {
+  const response = await api.post('/api/settings/shipping-preferences', payload)
+  return response.data
+}
+
+export async function syncVelocityRemittance(payload?: any): Promise<{ success: boolean; message: string; result: any }> {
+  const response = await api.post('/api/velocity/remittance/sync', payload || {})
+  return response.data
+}
+
+export async function getVelocityRemittanceStatus(): Promise<{
+  success: boolean
+  lastSync: string | null
+  matchedCount: number
+  totalRemittance: number | null
+  latestBatch: string | null
+}> {
+  const response = await api.get('/api/velocity/remittance/status')
+  return response.data
+}
+
+export async function getVelocityWarehouses(): Promise<{ success: boolean; warehouses: any[] }> {
+  const response = await api.get('/api/velocity/warehouses')
+  return response.data
+}
+
+export async function getVelocityStores(): Promise<{ success: boolean; stores: any[] }> {
+  const response = await api.get('/api/velocity/stores')
+  return response.data
+}
+
 export async function getSystemUsers(): Promise<import('./types').SystemUser[]> {
   const response = await api.get<{ success: boolean; users: import('./types').SystemUser[] }>('/api/settings/users')
   return response.data.users
@@ -1283,6 +1360,7 @@ export type AccountsImportKind =
   | 'AMAZON_SHIPPING'
   | 'EKART_SHIPPING'
   | 'GENERIC_CARRIER'
+  | 'VELOCITY_REMITTANCE'
 
 export interface MatchedOrderSummary {
   orderId?: number

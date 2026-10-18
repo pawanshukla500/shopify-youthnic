@@ -32,6 +32,10 @@ export function Dashboard() {
     refetchInterval: 60_000,
   })
 
+  // Operational Attention Filters
+  const [alertFilter, setAlertFilter] = useState<'ALL' | 'CRITICAL' | 'FULFILLMENT' | 'FINANCE'>('ALL')
+  const [alertsExpanded, setAlertsExpanded] = useState<boolean>(false)
+
   // Quick Shipping Rate Estimator state
   const [calcPincode, setCalcPincode] = useState('400001')
   const [calcWeight, setCalcWeight] = useState(500)
@@ -178,60 +182,123 @@ export function Dashboard() {
       </PageIntro>
 
       {/* ─── Operational Attention Items (Alert Bar) ──────────────── */}
-      {actionItems.length > 0 && (
-        <div className="action-center">
-          <div className="action-center-header">
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span className="live-dot" />
-              <strong style={{ fontSize: '11px', letterSpacing: '0.06em', textTransform: 'uppercase', color: '#64748b' }}>
-                Priority Action Center · {actionItems.length} Attention Items
-              </strong>
-            </div>
-            <span style={{ fontSize: '11px', color: '#94a3b8' }}>
-              Action required to meet fulfillment SLAs and safeguard cash flow
-            </span>
-          </div>
+      {actionItems.length > 0 && (() => {
+        const criticalCount = actionItems.filter((i) => i.priority === 'critical').length
+        const fulfillmentCount = actionItems.filter((i) => i.category.toLowerCase().includes('dispatch') || i.category.toLowerCase().includes('fulfillment') || i.category.toLowerCase().includes('delivery') || i.category.toLowerCase().includes('sla')).length
+        const financeCount = actionItems.filter((i) => i.category.toLowerCase().includes('finance') || i.category.toLowerCase().includes('settlement') || i.category.toLowerCase().includes('recon') || i.category.toLowerCase().includes('refund')).length
 
-          {actionItems.map((item) => {
-            let iconName: 'zap' | 'alert' | 'truck' | 'shield' | 'clock' = 'alert'
-            if (item.id.includes('prepaid')) iconName = 'zap'
-            else if (item.id.includes('sla') || item.id.includes('delayed')) iconName = 'clock'
-            else if (item.id.includes('dispatch') || item.id.includes('manifest')) iconName = 'truck'
-            else if (item.id.includes('ndr')) iconName = 'alert'
-            else if (item.id.includes('unverified') || item.id.includes('payment')) iconName = 'shield'
+        const filteredAlerts = actionItems.filter((item) => {
+          if (alertFilter === 'CRITICAL') return item.priority === 'critical'
+          if (alertFilter === 'FULFILLMENT') return item.category.toLowerCase().includes('dispatch') || item.category.toLowerCase().includes('fulfillment') || item.category.toLowerCase().includes('delivery') || item.category.toLowerCase().includes('sla')
+          if (alertFilter === 'FINANCE') return item.category.toLowerCase().includes('finance') || item.category.toLowerCase().includes('settlement') || item.category.toLowerCase().includes('recon') || item.category.toLowerCase().includes('refund')
+          return true
+        })
+        const visibleAlerts = alertsExpanded ? filteredAlerts : filteredAlerts.slice(0, 3)
 
-            return (
-              <div className={`alert-card ${item.priority}`} key={item.id}>
-                <div className="alert-card-left">
-                  <div className={`alert-icon-wrap ${item.priority}`}>
-                    <Icon name={iconName} size={16} />
-                  </div>
-                  <div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '2px', flexWrap: 'wrap' }}>
-                      <span className="alert-badge">{item.category}</span>
-                      <h4 className="alert-title">{item.title}</h4>
-                    </div>
-                    <p className="alert-desc">{item.description}</p>
-                  </div>
-                </div>
-                <button
-                  className="alert-btn"
-                  onClick={() => {
-                    if (item.filterParam.includes('returns')) {
-                      navigate('/returns')
-                    } else {
-                      navigate(`/orders?${item.filterParam}`)
-                    }
-                  }}
-                >
-                  <span>{item.actionText}</span>
-                  <Icon name="arrow" size={13} />
-                </button>
+        return (
+          <div className="action-center">
+            <div className="action-center-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span className="live-dot" />
+                <strong style={{ fontSize: '12px', letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--ink)' }}>
+                  Operational Attention Items ({actionItems.length})
+                </strong>
               </div>
-            )
-          })}
-        </div>
-      )}
+
+              {/* Filter Pills */}
+              <div className="action-filter-pills">
+                <button
+                  type="button"
+                  className={`filter-pill ${alertFilter === 'ALL' ? 'active' : ''}`}
+                  onClick={() => setAlertFilter('ALL')}
+                >
+                  All ({actionItems.length})
+                </button>
+                {criticalCount > 0 && (
+                  <button
+                    type="button"
+                    className={`filter-pill critical ${alertFilter === 'CRITICAL' ? 'active' : ''}`}
+                    onClick={() => setAlertFilter('CRITICAL')}
+                  >
+                    Critical ({criticalCount})
+                  </button>
+                )}
+                {fulfillmentCount > 0 && (
+                  <button
+                    type="button"
+                    className={`filter-pill ${alertFilter === 'FULFILLMENT' ? 'active' : ''}`}
+                    onClick={() => setAlertFilter('FULFILLMENT')}
+                  >
+                    Fulfillment ({fulfillmentCount})
+                  </button>
+                )}
+                {financeCount > 0 && (
+                  <button
+                    type="button"
+                    className={`filter-pill ${alertFilter === 'FINANCE' ? 'active' : ''}`}
+                    onClick={() => setAlertFilter('FINANCE')}
+                  >
+                    Finance ({financeCount})
+                  </button>
+                )}
+              </div>
+
+              {filteredAlerts.length > 3 && (
+                <button
+                  type="button"
+                  className="expand-alerts-btn"
+                  onClick={() => setAlertsExpanded(!alertsExpanded)}
+                >
+                  <span>{alertsExpanded ? 'Show Top 3' : `View All (${filteredAlerts.length})`}</span>
+                  <Icon name="arrow" size={12} />
+                </button>
+              )}
+            </div>
+
+            <div className="action-center-grid">
+              {visibleAlerts.map((item) => {
+                let iconName: 'zap' | 'alert' | 'truck' | 'shield' | 'clock' = 'alert'
+                if (item.id.includes('prepaid')) iconName = 'zap'
+                else if (item.id.includes('sla') || item.id.includes('delayed')) iconName = 'clock'
+                else if (item.id.includes('dispatch') || item.id.includes('manifest')) iconName = 'truck'
+                else if (item.id.includes('ndr')) iconName = 'alert'
+                else if (item.id.includes('unverified') || item.id.includes('payment')) iconName = 'shield'
+
+                return (
+                  <div className={`alert-card ${item.priority}`} key={item.id}>
+                    <div className="alert-card-header">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div className={`alert-icon-wrap ${item.priority}`}>
+                          <Icon name={iconName} size={14} />
+                        </div>
+                        <span className="alert-badge">{item.category}</span>
+                      </div>
+                      <button
+                        type="button"
+                        className="alert-btn"
+                        onClick={() => {
+                          if (item.filterParam.includes('returns')) {
+                            navigate('/returns')
+                          } else {
+                            navigate(`/orders?${item.filterParam}`)
+                          }
+                        }}
+                      >
+                        <span>{item.actionText}</span>
+                        <Icon name="arrow" size={11} />
+                      </button>
+                    </div>
+                    <div>
+                      <h4 className="alert-title">{item.title}</h4>
+                      <p className="alert-desc">{item.description}</p>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })()}
 
       {/* ─── 6 Key Executive & Operational KPIs ────────────────────── */}
       <div className="dash-kpis">
@@ -346,6 +413,114 @@ export function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* ─── Multi-Carrier Logistics Pulse (Delhivery vs Velocity) ─── */}
+      {stats?.carriers && (
+        <Panel style={{ marginBottom: '22px', padding: '18px 22px' }}>
+          <PanelHeading
+            eyebrow="Dual-Carrier Logistics Orchestration"
+            title="Multi-Carrier Logistics Pulse"
+            action={
+              <Link to="/settings" className="text-link" style={{ fontSize: '12px' }}>
+                Carrier Routing Rules <Icon name="arrow" size={13} />
+              </Link>
+            }
+          />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px', marginTop: '14px' }}>
+            {/* Delhivery Express */}
+            <div style={{ background: 'var(--panel-subtle, #f8fafc)', border: '1px solid var(--border-color, #e2e8f0)', borderRadius: '10px', padding: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div style={{ width: '32px', height: '32px', borderRadius: '6px', background: '#ffffff', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px' }}>
+                    <img src="/logos/delhivery.png" alt="Delhivery" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none' }} />
+                  </div>
+                  <div>
+                    <strong style={{ fontSize: '13.5px', color: 'var(--ink, #1e293b)' }}>Delhivery Express B2C</strong>
+                    <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>Primary Carrier Partner</span>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                  {(stats.carriers.activePriority || stats.carriers.priority) === 'DELHIVERY_FIRST' && (
+                    <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '10px', background: '#dbeafe', color: '#1d4ed8' }}>
+                      PRIMARY
+                    </span>
+                  )}
+                  <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '10px', background: '#dcfce7', color: '#15803d' }}>
+                    ACTIVE
+                  </span>
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px', textAlign: 'center', background: 'var(--panel, #ffffff)', borderRadius: '8px', padding: '10px 8px', border: '1px solid var(--border-color, #edf2f7)' }}>
+                <div>
+                  <span style={{ fontSize: '10.5px', color: '#64748b', display: 'block' }}>Dispatched</span>
+                  <strong style={{ fontSize: '15px', color: 'var(--ink, #1e293b)' }}>{stats.carriers.delhivery.totalShipments ?? stats.carriers.delhivery.total}</strong>
+                </div>
+                <div>
+                  <span style={{ fontSize: '10.5px', color: '#64748b', display: 'block' }}>In-Transit</span>
+                  <strong style={{ fontSize: '15px', color: '#2563eb' }}>{stats.carriers.delhivery.inTransit}</strong>
+                </div>
+                <div>
+                  <span style={{ fontSize: '10.5px', color: '#64748b', display: 'block' }}>Delivered</span>
+                  <strong style={{ fontSize: '15px', color: '#16a34a' }}>{stats.carriers.delhivery.delivered}</strong>
+                </div>
+                <div>
+                  <span style={{ fontSize: '10.5px', color: '#64748b', display: 'block' }}>NDR</span>
+                  <strong style={{ fontSize: '15px', color: stats.carriers.delhivery.ndr > 0 ? '#dc2626' : '#64748b' }}>{stats.carriers.delhivery.ndr}</strong>
+                </div>
+              </div>
+            </div>
+
+            {/* Velocity Shipping */}
+            <div style={{ background: 'var(--panel-subtle, #f8fafc)', border: '1px solid var(--border-color, #e2e8f0)', borderRadius: '10px', padding: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div style={{ width: '32px', height: '32px', borderRadius: '6px', background: '#ffffff', border: '1px solid #ddd6fe', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px' }}>
+                    <img src="/logos/velocity.png" alt="Velocity" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} onError={(e) => { (e.currentTarget as HTMLImageElement).src = '/velocity-logo.png' }} />
+                  </div>
+                  <div>
+                    <strong style={{ fontSize: '13.5px', color: 'var(--ink, #1e293b)' }}>Velocity Shipping Network</strong>
+                    <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>Multi-Carrier Partner</span>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                  {(stats.carriers.activePriority || stats.carriers.priority) === 'VELOCITY_FIRST' && (
+                    <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '10px', background: '#ede9fe', color: '#6d28d9' }}>
+                      PRIMARY
+                    </span>
+                  )}
+                  <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '10px', background: (stats.carriers.velocity.status === 'CONNECTED' || stats.carriers.velocity.configured) ? '#dcfce7' : '#fef3c7', color: (stats.carriers.velocity.status === 'CONNECTED' || stats.carriers.velocity.configured) ? '#15803d' : '#b45309' }}>
+                    {stats.carriers.velocity.status || (stats.carriers.velocity.configured ? 'CONNECTED' : 'STANDBY')}
+                  </span>
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px', textAlign: 'center', background: 'var(--panel, #ffffff)', borderRadius: '8px', padding: '10px 8px', border: '1px solid var(--border-color, #edf2f7)' }}>
+                <div>
+                  <span style={{ fontSize: '10.5px', color: '#64748b', display: 'block' }}>Dispatched</span>
+                  <strong style={{ fontSize: '15px', color: 'var(--ink, #1e293b)' }}>{stats.carriers.velocity.totalShipments ?? stats.carriers.velocity.total}</strong>
+                </div>
+                <div>
+                  <span style={{ fontSize: '10.5px', color: '#64748b', display: 'block' }}>In-Transit</span>
+                  <strong style={{ fontSize: '15px', color: '#7c3aed' }}>{stats.carriers.velocity.inTransit}</strong>
+                </div>
+                <div>
+                  <span style={{ fontSize: '10.5px', color: '#64748b', display: 'block' }}>Delivered</span>
+                  <strong style={{ fontSize: '15px', color: '#16a34a' }}>{stats.carriers.velocity.delivered}</strong>
+                </div>
+                <div>
+                  <span style={{ fontSize: '10.5px', color: '#64748b', display: 'block' }}>NDR</span>
+                  <strong style={{ fontSize: '15px', color: stats.carriers.velocity.ndr > 0 ? '#dc2626' : '#64748b' }}>{stats.carriers.velocity.ndr}</strong>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div style={{ marginTop: '12px', fontSize: '11.5px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span className="live-dot" style={{ width: '6px', height: '6px' }} />
+            <span>
+              Routing Engine: <strong>{(stats.carriers.activePriority || stats.carriers.priority) === 'VELOCITY_FIRST' ? 'Velocity First' : 'Delhivery First'}</strong> · Auto-Failover: <strong>{stats.carriers.autoFailover ? 'Active' : 'Disabled'}</strong> · Official Label Direct Streaming: <strong>Active</strong>
+            </span>
+          </div>
+        </Panel>
+      )}
 
       {/* ─── Interactive 5-Stage Fulfillment Funnel Pipeline ───────── */}
       <Panel className="funnel-panel">

@@ -1151,6 +1151,8 @@ class ShopifyService {
         trackingUrl ||
         (effectiveCourier.toLowerCase().includes('delhivery')
           ? `https://www.delhivery.com/track/package/${waybillNumber}`
+          : effectiveCourier.toLowerCase().includes('velocity')
+          ? `https://www.velocityshipping.in/track/${waybillNumber}`
           : effectiveCourier.toLowerCase().includes('ekart')
           ? `https://t.proship.in/${waybillNumber}`
           : undefined);

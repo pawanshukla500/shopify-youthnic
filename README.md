@@ -92,6 +92,12 @@ Shopify Store (youthnic2024.myshopify.com)
    - Filled and validated all official Delhivery integration documents (`Scan Push`, `EPOD`, `QC Image`, `Sorter Image`) for profile `fa5d92-VBEXPORT-do` (V B EXPORT) in `C:\Users\Pawan Shukla\Desktop\Delhivery Docs\`.
    - Complete technical specifications documented in [`docs/DELHIVERY_INTEGRATION_SPEC.md`](docs/DELHIVERY_INTEGRATION_SPEC.md).
 
+10. **Velocity Shipping Partner Integration, Multi-Carrier Routing & Automated Remittance (PR #14, Branch: elocityshipping)**:
+    - **Dual-Carrier Smart Routing**: Dispatches shipments across Delhivery Express and Velocity Shipping with configurable carrier priority (DELHIVERY_FIRST vs VELOCITY_FIRST), automatic failover protection upon destination unserviceability, and payment-mode routing rules (dedicated COD vs Prepaid courier preferences).
+    - **Direct Live Remittance & Finance Reconciliation**: Direct API integration with Velocity's Finance API (/custom/api/v1/finance/remittance), automatically matching orders, recording UTR bank settlement evidence, updating accounts trails, and eliminating manual CSV download/upload routines.
+    - **Authentic Official Velocity PDF Labels**: Streaming authentic PDF bytes directly from Velocity API / S3 without customized HTML mockups.
+    - **De-cluttered Executive Attention Center**: Re-engineered dashboard action center from vertically stacked alert banners into a responsive attention grid with category filter chips (Critical, Fulfillment, Finance) and multi-carrier logistics telemetry pulse.
+
 ---
 
 ## Automated Flow

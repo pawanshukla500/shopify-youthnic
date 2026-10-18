@@ -43,6 +43,8 @@ export type ReturnStatus =
 
 export type QcStatus = 'APPROVED' | 'REJECTED' | 'PARTIAL'
 export type RefundStatus = 'NONE' | 'PENDING' | 'PROCESSED' | 'FAILED'
+export type CarrierPriority = 'DELHIVERY_FIRST' | 'VELOCITY_FIRST'
+export type CourierChoice = 'Delhivery' | 'Velocity'
 
 export interface OrderItem {
   id: number
@@ -421,9 +423,39 @@ export interface CodSummary {
   pendingDelivery?: CodPendingDeliveryEntry[]
 }
 
+export interface CarrierBreakdown {
+  name: string
+  total: number
+  totalShipments?: number
+  inTransit: number
+  delivered: number
+  ndr: number
+  configured: boolean
+  status?: string
+}
+
+export interface ShippingCarriersStats {
+  priority: CarrierPriority
+  activePriority?: CarrierPriority
+  autoFailover?: boolean
+  delhivery: CarrierBreakdown
+  velocity: CarrierBreakdown
+}
+
+export interface ShippingPreferences {
+  priority: CarrierPriority
+  autoFailover: boolean
+  codCourier: 'AUTO' | 'DELHIVERY' | 'VELOCITY'
+  prepaidCourier: 'AUTO' | 'DELHIVERY' | 'VELOCITY'
+  velocityWarehouseId: string
+  velocityAutoRemittance: boolean
+  velocityConfigured: boolean
+}
+
 export interface DashboardStats {
   success: boolean
   timestamp: string
+  carriers?: ShippingCarriersStats
   kpis: {
     totalRevenue: number
     totalOrders: number
@@ -666,6 +698,18 @@ export interface SystemStatusData {
     shippingMode: string
     labelSize: string
     baseUrl: string
+  }
+  velocity?: {
+    status: string
+    baseUrl: string
+    warehouseId: string
+    enabled: boolean
+    hasToken: boolean
+  }
+  shipping?: {
+    priority: CarrierPriority
+    delhiveryConfigured: boolean
+    velocityConfigured: boolean
   }
   payments: {
     gokwik: {

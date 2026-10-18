@@ -12,7 +12,7 @@ vi.mock('../src/utils/logger', () => ({
 const { prismaStub, resendStub } = vi.hoisted(() => ({
   prismaStub: {
     order: { findMany: vi.fn() },
-    setting: { findUnique: vi.fn(), upsert: vi.fn(), create: vi.fn(), updateMany: vi.fn(), delete: vi.fn() },
+    setting: { findUnique: vi.fn(), findMany: vi.fn(async () => []), upsert: vi.fn(), create: vi.fn(), updateMany: vi.fn(), delete: vi.fn() },
   },
   resendStub: { sendInternalEmail: vi.fn() },
 }));

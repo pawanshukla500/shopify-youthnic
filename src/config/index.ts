@@ -143,6 +143,23 @@ export const config = {
     },
   },
 
+  // Velocity Shipping (Aggregator / Secondary Shipping Partner)
+  // Base URL: https://shazam.velocity.in
+  velocity: {
+    apiToken: optional('VELOCITY_API_TOKEN', optional('VELOCITY_API_KEY', '')),
+    baseUrl: optional('VELOCITY_BASE_URL', 'https://shazam.velocity.in'),
+    warehouseId: optional('VELOCITY_WAREHOUSE_ID', ''),
+    webhookSecret: optional('VELOCITY_WEBHOOK_SECRET', ''),
+    enabled: optional('VELOCITY_ENABLED', 'true') === 'true',
+  },
+
+  // Multi-carrier Shipping Configuration & Priority
+  shipping: {
+    defaultPriority: (optional('SHIPPING_CARRIER_PRIORITY', 'DELHIVERY_FIRST') as
+      | 'DELHIVERY_FIRST'
+      | 'VELOCITY_FIRST'),
+  },
+
   // KwikEngage WhatsApp Platform (Official GoKwik Customer Engagement API)
   // Base URL: https://api.kwikengage.ai/send-message/v2
   kwikengage: {

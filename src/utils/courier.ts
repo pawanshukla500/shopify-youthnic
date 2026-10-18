@@ -11,6 +11,22 @@
  * must never be polled against the Delhivery tracking API.
  */
 export const DELHIVERY_COURIER_PATTERN = /delhivery/i;
+export const VELOCITY_COURIER_PATTERN = /velocity|shipfastt/i;
+
+/**
+ * True when the courier name, tracking URL, or waybill number matches Velocity Shipping.
+ */
+export function isVelocityCourier(
+  courier?: string | null,
+  trackingUrl?: string | null,
+  waybillNumber?: string | null
+): boolean {
+  if (VELOCITY_COURIER_PATTERN.test(courier || '')) return true;
+  if (VELOCITY_COURIER_PATTERN.test(trackingUrl || '')) return true;
+  if (trackingUrl && /velocityshipping\.in|shipfastt\.in/i.test(trackingUrl)) return true;
+  if (waybillNumber && /^(PD|VEHR|VEL)[0-9A-Z]+$/i.test(waybillNumber.trim())) return true;
+  return false;
+}
 
 /**
  * True when the courier name, tracking URL, or waybill number matches Delhivery.
@@ -23,13 +39,18 @@ export function isDelhiveryCourier(
   trackingUrl?: string | null,
   waybillNumber?: string | null
 ): boolean {
+  // If explicitly identified as Velocity, it is not direct Delhivery
+  if (isVelocityCourier(courier, trackingUrl, waybillNumber)) {
+    return false;
+  }
+
   if (DELHIVERY_COURIER_PATTERN.test(courier || '')) return true;
   if (DELHIVERY_COURIER_PATTERN.test(trackingUrl || '')) return true;
 
   // Guard against known third-party couriers
   if (
     courier &&
-    /bluedart|blue dart|dtdc|ekart|e-kart|shadowfax|xpressbees|xpress bees|ecom express|india post|speed post|smartr|amazon/i.test(
+    /bluedart|blue dart|dtdc|ekart|e-kart|shadowfax|xpressbees|xpress bees|ecom express|india post|speed post|smartr|amazon|velocity/i.test(
       courier
     )
   ) {
@@ -70,7 +91,12 @@ export function normalizeCourierName(
     return 'Delhivery';
   }
 
+  if (isVelocityCourier(courier, trackingUrl, waybillNumber)) {
+    return 'Velocity';
+  }
+
   const c = (courier || '').trim();
+  if (/velocity/i.test(c)) return 'Velocity';
   if (/bluedart|blue dart/i.test(c)) return 'Blue Dart';
   if (/ekart|e-kart/i.test(c)) return 'Ekart';
   if (/dtdc/i.test(c)) return 'DTDC';

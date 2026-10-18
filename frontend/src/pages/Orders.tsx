@@ -231,12 +231,13 @@ export function Orders() {
   }, [searchParams])
 
   // Single order dispatch action
-  const handleSingleDispatch = async (orderId: number) => {
+  const handleSingleDispatch = async (orderId: number, courier?: 'Delhivery' | 'Velocity' | 'auto') => {
     if (dispatchingIds.has(orderId)) return
     setDispatchingIds((prev) => new Set(prev).add(orderId))
     try {
-      const res = await api.post(`/api/orders/${orderId}/dispatch`)
-      toast.toast('success', `Order dispatched · Delhivery AWB: ${res.data.waybillNumber || 'Assigned'}`)
+      const res = await api.post(`/api/orders/${orderId}/dispatch`, { courier })
+      const courierName = res.data.courier || 'Shipping'
+      toast.toast('success', `Order dispatched · ${courierName} AWB: ${res.data.waybillNumber || 'Assigned'}`)
       await queryClient.invalidateQueries({ queryKey: ['orders'] })
     } catch (err: any) {
       toast.toast('error', apiError(err))
@@ -726,7 +727,7 @@ export function Orders() {
   }
 
   // Bulk Dispatch action
-  const handleBulkDispatch = async () => {
+  const handleBulkDispatch = async (courierChoice?: 'Delhivery' | 'Velocity' | 'auto') => {
     const selected = filtered.filter((o) => selectedOrderIds.has(o.id))
     // Same rule the server enforces: prepaid or confirmed COD, not yet
     // manifested. Unconfirmed COD in New is never shipped from a bulk select.
@@ -749,8 +750,8 @@ export function Orders() {
       // Prioritize: Prepaid orders ALWAYS dispatched first (FIFO), then COD (FIFO)
       const prioritizedCandidates = prioritizeOrdersForDispatch(candidateOrders)
       const candidateIds = prioritizedCandidates.map((o) => o.id)
-      const res: any = await api.post('/api/orders/bulk-dispatch', { orderIds: candidateIds })
-      const results: Array<{ orderId: number; success: boolean; error?: string; paymentMode?: string }> = res.data?.results ?? []
+      const res: any = await api.post('/api/orders/bulk-dispatch', { orderIds: candidateIds, courier: courierChoice })
+      const results: Array<{ orderId: number; success: boolean; courier?: string; error?: string; paymentMode?: string }> = res.data?.results ?? []
       const dispatched = res.data?.dispatched ?? results.filter((r) => r.success).length
       const prepaidDispatched = res.data?.prepaidDispatched ?? results.filter((r) => r.success && (r.paymentMode === 'Prepaid' || prepaidOrder(candidateOrders.find((o) => o.id === r.orderId) || {} as any))).length
       const codDispatched = res.data?.codDispatched ?? (dispatched - prepaidDispatched)
@@ -758,7 +759,7 @@ export function Orders() {
       const nameOf = (id: number) => candidateOrders.find((o) => o.id === id)?.shopifyOrderName || `#${id}`
 
       const prioritySummary = dispatched > 0 ? ` (${prepaidDispatched} Prepaid prioritized, ${codDispatched} COD on FIFO)` : ''
-      const parts = [`Dispatched ${dispatched} order${dispatched === 1 ? '' : 's'} to Delhivery${prioritySummary}.`]
+      const parts = [`Dispatched ${dispatched} order${dispatched === 1 ? '' : 's'}${prioritySummary}.`]
       if (notEligible > 0) parts.push(`${notEligible} not eligible (unconfirmed COD or already manifested) were skipped.`)
       if (failures.length > 0) {
         const shown = failures.slice(0, 3).map((f) => `${nameOf(f.orderId)}: ${f.error || 'failed'}`)
@@ -1721,9 +1722,9 @@ export function Orders() {
           <button
             type="button"
             className="bulk-btn bulk-btn-primary"
-            onClick={handleBulkDispatch}
+            onClick={() => handleBulkDispatch()}
             disabled={isBulkDispatching}
-            title="Create Delhivery shipments for all selected orders"
+            title="Dispatch selected orders using configured carrier priority & automatic routing"
           >
             <Icon name="package" size={15} />
             <span className="bulk-btn-label">{isBulkDispatching ? 'Dispatching…' : 'Dispatch'}</span>

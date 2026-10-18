@@ -775,8 +775,8 @@ export class KwikEngageService {
       case 'REFUND_PROCESSED':
         return [
           customer,
-          amount,
           orderNo,
+          amount,
           'Original Payment Method (GoKwik / Easebuzz)',
         ];
 

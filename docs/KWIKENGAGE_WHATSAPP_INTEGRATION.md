@@ -284,14 +284,14 @@ Hi {{1}}, a delivery attempt for your Youthnic order {{2}} was unsuccessful (Rea
 - **Header:** None (or Text: `Refund Processed`)
 - **Body Text:**
 ```text
-Hi {{1}}, a refund of ₹{{2}} for your Youthnic order {{3}} has been processed successfully to your {{4}}. The amount will reflect in your account within 2 to 4 business days.
+Hi {{1}}, your refund for Youthnic order {{2}} of ₹{{3}} has been processed successfully to your {{4}}. The amount will reflect in your account within 2 to 4 business days.
 ```
 - **Footer (Optional):** `Youthnic Accounts Team`
 - **Sample Values:**
-  - `{{1}}`: `Pawan Shukla`
-  - `{{2}}`: `1499`
-  - `{{3}}`: `#26YOU5752`
-  - `{{4}}`: `Original Payment Method (GoKwik / Easebuzz)`
+  - `{{1}}`: `Pawan Shukla` (customer_name)
+  - `{{2}}`: `#26YOU5752` (order_id)
+  - `{{3}}`: `1499` (refund_amount)
+  - `{{4}}`: `Original Payment Method (GoKwik / Easebuzz)` (payment_source)
 
 ---
 

@@ -10,12 +10,17 @@ export type KwikEngageTriggerType =
   | 'ORDER_CONFIRMED'
   | 'COD_CONFIRMATION'
   | 'ORDER_SHIPPED'
+  | 'IN_TRANSIT'
   | 'OUT_FOR_DELIVERY'
   | 'DELIVERED'
   | 'NDR_ALERT'
+  | 'TRANSIT_DELAY'
+  | 'DISPATCH_DELAY'
   | 'RTO_INITIATED'
   | 'RETURN_INITIATED'
+  | 'RETURN_RECEIVED'
   | 'REFUND_PROCESSED'
+  | 'SUPPORT_REPLY'
   | 'CUSTOM';
 
 export interface KwikEngageSendResult {
@@ -26,6 +31,7 @@ export interface KwikEngageSendResult {
   recipient: string;
   previewText?: string;
   simulated?: boolean;
+  requiresTemplate?: boolean;
 }
 
 export interface KwikEngageStatus {
@@ -46,10 +52,13 @@ export interface KwikEngageStatus {
  * https://api.kwikengage.ai/send-message/v2
  *
  * Supports:
- * - Session text messages
- * - Session media messages (image, document)
- * - Approved WhatsApp template messages
- * - Automated critical lifecycle triggers (COD Confirmation, Delhivery Tracking, Delivery alerts, NDR, Return, Refund)
+ * - Session text messages (when customer has interacted within 24 hours)
+ * - Session media messages (image, document, video)
+ * - Approved WhatsApp utility template messages (for outbound messages outside 24h window)
+ * - Automated critical lifecycle triggers synchronized with order emails:
+ *   Order Confirmed, COD Confirmation, Order Shipped, In-Transit, Transit Delay,
+ *   Dispatch Delay, Out for Delivery, Delivered, NDR Alert, Return Initiated,
+ *   Return Received, Refund Processed, Support Reply.
  */
 export class KwikEngageService {
   private client: AxiosInstance;
@@ -75,7 +84,6 @@ export class KwikEngageService {
 
     const apiKey = config.kwikengage.apiKey?.trim();
     if (apiKey) {
-      // Pass both Authorization and custom api key headers for maximum compatibility
       headers['Authorization'] = apiKey;
       headers['x-api-key'] = apiKey;
     }
@@ -96,6 +104,7 @@ export class KwikEngageService {
     const cleaned = (phone || '').replace(/\D/g, '');
     if (!cleaned) return '';
     if (cleaned.length === 10) return `91${cleaned}`;
+    if (cleaned.length === 11 && cleaned.startsWith('0')) return `91${cleaned.slice(1)}`;
     if (cleaned.length === 12 && cleaned.startsWith('91')) return cleaned;
     return cleaned;
   }
@@ -123,17 +132,13 @@ export class KwikEngageService {
     }
 
     try {
-      // Test connectivity by making a lightweight head/options or ping probe
-      // Note: KwikEngage endpoint is POST https://api.kwikengage.ai/send-message/v2
       const endpoint = config.kwikengage.apiUrl || 'https://api.kwikengage.ai/send-message/v2';
       const parsed = new URL(endpoint);
 
-      // Probe origin
       await axios.get(`${parsed.origin}/health`, {
         timeout: 5000,
         headers: this.getHeaders(),
       }).catch((probeErr) => {
-        // A 404 or 405 on /health is fine, it proves DNS and HTTPS connectivity
         if (probeErr.response?.status && probeErr.response.status < 500) {
           return probeErr.response;
         }
@@ -195,14 +200,12 @@ export class KwikEngageService {
       if (fs.existsSync(envPath)) {
         let content = fs.readFileSync(envPath, 'utf8');
 
-        // KWIKENGAGE_API_KEY
         if (/^KWIKENGAGE_API_KEY=.*/m.test(content)) {
           content = content.replace(/^KWIKENGAGE_API_KEY=.*/m, `KWIKENGAGE_API_KEY=${config.kwikengage.apiKey}`);
         } else {
           content += `\nKWIKENGAGE_API_KEY=${config.kwikengage.apiKey}`;
         }
 
-        // KWIKENGAGE_MERCHANT_ID
         if (config.kwikengage.merchantId) {
           if (/^KWIKENGAGE_MERCHANT_ID=.*/m.test(content)) {
             content = content.replace(/^KWIKENGAGE_MERCHANT_ID=.*/m, `KWIKENGAGE_MERCHANT_ID=${config.kwikengage.merchantId}`);
@@ -211,7 +214,6 @@ export class KwikEngageService {
           }
         }
 
-        // KWIKENGAGE_SENDER_PHONE
         if (config.kwikengage.senderPhone) {
           if (/^KWIKENGAGE_SENDER_PHONE=.*/m.test(content)) {
             content = content.replace(/^KWIKENGAGE_SENDER_PHONE=.*/m, `KWIKENGAGE_SENDER_PHONE=${config.kwikengage.senderPhone}`);
@@ -220,7 +222,6 @@ export class KwikEngageService {
           }
         }
 
-        // KWIKENGAGE_WABA_ID
         if (config.kwikengage.wabaId) {
           if (/^KWIKENGAGE_WABA_ID=.*/m.test(content)) {
             content = content.replace(/^KWIKENGAGE_WABA_ID=.*/m, `KWIKENGAGE_WABA_ID=${config.kwikengage.wabaId}`);
@@ -253,7 +254,6 @@ export class KwikEngageService {
       };
     }
 
-    // If no API key configured, simulate dispatch safely
     if (!config.kwikengage.apiKey) {
       logger.info('[KWIKENGAGE_WHATSAPP_SIMULATED] Sending WhatsApp message via KwikEngage:', {
         recipient,
@@ -311,24 +311,31 @@ export class KwikEngageService {
         error.response?.data ||
         error.message;
 
-      logger.error('KwikEngage WhatsApp dispatch error', {
+      const errStr = typeof errDetails === 'string' ? errDetails : JSON.stringify(errDetails);
+      const isOutsideSession = errStr.includes('24 hours') || errStr.includes('template message');
+
+      logger.warn('KwikEngage WhatsApp session dispatch error', {
         recipient,
         error: errDetails,
         status: error.response?.status,
+        requiresTemplate: isOutsideSession,
       });
 
       return {
         success: false,
         provider: 'KWIKENGAGE_WHATSAPP',
         recipient,
-        error: typeof errDetails === 'string' ? errDetails : JSON.stringify(errDetails),
+        error: isOutsideSession
+          ? 'Recipient outside 24-hour session window. Requires approved Meta WhatsApp template to initiate conversation.'
+          : errStr,
         previewText: message,
+        requiresTemplate: isOutsideSession,
       };
     }
   }
 
   /**
-   * Send WhatsApp session media message (image or document) via KwikEngage API.
+   * Send WhatsApp session media message (image, document, video) via KwikEngage API.
    */
   async sendMediaMessage(
     to: string,
@@ -396,14 +403,32 @@ export class KwikEngageService {
   }
 
   /**
-   * Send WhatsApp pre-approved template message via KwikEngage API.
-   * If template dispatch fails, falls back gracefully to session text message.
+   * Send WhatsApp pre-approved template message via official KwikEngage v2 API.
+   * Matches KwikEngage schema:
+   * {
+   *   to: recipient,
+   *   channel: 'whatsapp',
+   *   type: 'template',
+   *   content: {
+   *     type: 'template',
+   *     template: {
+   *       template_id: string,
+   *       language: string,
+   *       parameters?: string[] | object,
+   *       components?: any[]
+   *     }
+   *   }
+   * }
    */
   async sendTemplateMessage(
     to: string,
     templateName: string,
-    parameters: string[],
-    fallbackText?: string
+    parameters?: string[] | Record<string, any>,
+    options?: {
+      language?: string;
+      components?: any[];
+      fallbackText?: string;
+    } | string
   ): Promise<KwikEngageSendResult> {
     const recipient = this.normalizePhoneNumber(to);
     if (!recipient) {
@@ -414,6 +439,10 @@ export class KwikEngageService {
         error: 'Invalid recipient phone number',
       };
     }
+
+    const fallbackText = typeof options === 'string' ? options : options?.fallbackText;
+    const language = typeof options === 'object' && options?.language ? options.language : 'en';
+    const components = typeof options === 'object' ? options?.components : undefined;
 
     if (!config.kwikengage.apiKey) {
       return {
@@ -427,14 +456,26 @@ export class KwikEngageService {
     }
 
     try {
+      const templateObj: Record<string, any> = {
+        template_id: templateName,
+        language,
+      };
+
+      if (components && components.length > 0) {
+        templateObj.components = components;
+      } else if (Array.isArray(parameters) && parameters.length > 0) {
+        templateObj.parameters = parameters;
+      } else if (parameters && typeof parameters === 'object') {
+        templateObj.parameters = parameters;
+      }
+
       const payload = {
         to: recipient,
         channel: 'whatsapp',
         type: 'template',
         content: {
-          template_name: templateName,
-          parameters,
-          language: { code: 'en' },
+          type: 'template',
+          template: templateObj,
         },
       };
 
@@ -448,6 +489,13 @@ export class KwikEngageService {
         response.data?.id ||
         response.data?.data?.messageId ||
         `kwikengage_${Date.now()}`;
+
+      logger.info('KwikEngage template message dispatched successfully', {
+        recipient,
+        templateName,
+        messageId,
+      });
+
       return {
         success: true,
         provider: 'KWIKENGAGE_WHATSAPP',
@@ -457,26 +505,32 @@ export class KwikEngageService {
         simulated: false,
       };
     } catch (err: any) {
-      logger.warn('KwikEngage template send failed, falling back to text session message', {
+      const errDetails = err.response?.data?.message || err.response?.data?.error || err.message;
+      logger.warn('KwikEngage template send failed', {
         templateName,
-        error: err.response?.data || err.message,
+        recipient,
+        error: errDetails,
       });
 
       if (fallbackText) {
-        return this.sendTextMessage(to, fallbackText);
+        logger.info('Attempting session fallback text message for recipient', { recipient });
+        const fallbackRes = await this.sendTextMessage(to, fallbackText);
+        if (fallbackRes.success) {
+          return fallbackRes;
+        }
       }
 
       return {
         success: false,
         provider: 'KWIKENGAGE_WHATSAPP',
         recipient,
-        error: err.response?.data?.message || err.message,
+        error: typeof errDetails === 'string' ? errDetails : JSON.stringify(errDetails),
       };
     }
   }
 
   /**
-   * Build formatted message text for critical order lifecycle triggers.
+   * Build formatted utility message text for all order lifecycle events.
    */
   buildTriggerMessage(
     trigger: KwikEngageTriggerType,
@@ -493,6 +547,9 @@ export class KwikEngageService {
     extra?: {
       waybillNumber?: string;
       courierName?: string;
+      currentLocation?: string;
+      delayReason?: string;
+      newEstimatedDelivery?: string;
       ndrReason?: string;
       itemsSummary?: string;
       customText?: string;
@@ -502,6 +559,7 @@ export class KwikEngageService {
     const orderNo = order.shopifyOrderName || 'Order';
     const amount = Math.round(order.totalAmount || 0);
     const waybill = extra?.waybillNumber || '';
+    const courier = extra?.courierName || 'Delhivery Express';
     const isCod = order.paymentMethod === 'COD';
 
     switch (trigger) {
@@ -527,19 +585,52 @@ export class KwikEngageService {
         return (
           `🚀 *Your Youthnic Parcel is on its way!*\n\n` +
           `Hi *${customer}*,\n` +
-          `Your order *${orderNo}* has been dispatched via *Delhivery Express*!\n\n` +
-          `🏷️ *Delhivery AWB:* \`${waybill}\`\n` +
-          `🔗 *Live Tracking Link:* https://www.delhivery.com/track/package/${waybill}\n\n` +
+          `Your order *${orderNo}* has been dispatched via *${courier}*!\n\n` +
+          (waybill
+            ? `🏷️ *Tracking AWB:* \`${waybill}\`\n` +
+              `🔗 *Live Tracking Link:* https://www.delhivery.com/track/package/${waybill}\n\n`
+            : '') +
           `Expected Delivery: 2 to 4 business days.`
+        );
+
+      case 'IN_TRANSIT':
+        return (
+          `🚚 *Youthnic Order Update: In Transit*\n\n` +
+          `Hi *${customer}*,\n` +
+          `Your order *${orderNo}* is currently in transit with *${courier}*.\n\n` +
+          (waybill ? `🏷️ *Delhivery AWB:* \`${waybill}\`\n` : '') +
+          (extra?.currentLocation ? `📍 *Current Hub:* ${extra.currentLocation}\n` : '') +
+          (waybill ? `🔗 *Track Package:* https://www.delhivery.com/track/package/${waybill}\n\n` : '\n') +
+          `We are actively tracking your shipment to ensure smooth delivery.`
+        );
+
+      case 'TRANSIT_DELAY':
+        return (
+          `⏱️ *Update Regarding Your Youthnic Delivery*\n\n` +
+          `Hi *${customer}*,\n` +
+          `We wanted to let you know that your parcel *${orderNo}* is experiencing a brief transit delay due to: *${extra?.delayReason || 'Logistics network routing check'}*.\n\n` +
+          (waybill ? `🏷️ *Delhivery AWB:* \`${waybill}\`\n` : '') +
+          (extra?.newEstimatedDelivery ? `📅 *Revised Estimated Delivery:* ${extra.newEstimatedDelivery}\n` : '') +
+          (waybill ? `🔗 *Track Live Status:* https://www.delhivery.com/track/package/${waybill}\n\n` : '\n') +
+          `Our logistics team is actively coordinating with Delhivery to deliver your package at the earliest.`
+        );
+
+      case 'DISPATCH_DELAY':
+        return (
+          `📦 *Youthnic Dispatch Update*\n\n` +
+          `Hi *${customer}*,\n` +
+          `Your order *${orderNo}* is being carefully prepared at our Surat Fulfillment Center. Due to high seasonal volume, dispatch is taking slightly longer than usual.\n\n` +
+          `Expected Dispatch: Within 24-48 business hours.\n` +
+          `Thank you for your patience and support!`
         );
 
       case 'OUT_FOR_DELIVERY':
         return (
           `🚚 *Out for Delivery Today!* 🚚\n\n` +
           `Hi *${customer}*,\n` +
-          `Your Youthnic parcel *${orderNo}* is *OUT FOR DELIVERY* today via Delhivery.\n\n` +
+          `Your Youthnic parcel *${orderNo}* is *OUT FOR DELIVERY* today via ${courier}.\n\n` +
           (isCod
-            ? `💵 *Payment Mode: COD* — Please keep *₹${amount}* cash or UPI QR scan ready for the delivery associate.\n\n`
+            ? `💵 *Payment Mode: COD* — Please keep *₹${amount}* cash or UPI QR scan ready for the delivery partner.\n\n`
             : `💳 *Payment Mode: Prepaid* — No payment required at doorstep.\n\n`) +
           `Please keep your phone reachable so the delivery partner can hand over your parcel smoothly.`
         );
@@ -574,14 +665,34 @@ export class KwikEngageService {
         return (
           `📦 *Return Request Initiated*\n\n` +
           `Hi *${customer}*,\n` +
-          `Your return request for order *${orderNo}* has been accepted. A Delhivery courier partner will pick up the package within 24-48 hours.`
+          `Your return request for order *${orderNo}* has been accepted. A Delhivery courier partner will pick up the package within 24-48 hours.\n\n` +
+          (waybill ? `🏷️ *Return AWB:* \`${waybill}\`\n\n` : '') +
+          `Please keep the items in original packaging with tags intact.`
+        );
+
+      case 'RETURN_RECEIVED':
+        return (
+          `🏢 *Returned Parcel Received at Warehouse*\n\n` +
+          `Hi *${customer}*,\n` +
+          `Your returned parcel for order *${orderNo}* has safely arrived at our Surat Fulfillment Center.\n\n` +
+          `Our Quality Check (QC) team is inspecting the items. Once QC is approved, your refund will be processed promptly.`
         );
 
       case 'REFUND_PROCESSED':
         return (
-          `💸 *Refund Processed*\n\n` +
+          `💸 *Refund Processed Successfully*\n\n` +
           `Hi *${customer}*,\n` +
-          `A refund of *₹${amount}* for order *${orderNo}* has been processed to your original payment method via GoKwik / Easebuzz.`
+          `A refund of *₹${amount}* for order *${orderNo}* has been processed to your original payment method via GoKwik / Easebuzz.\n\n` +
+          `The amount will reflect in your account within 2 to 4 business days.`
+        );
+
+      case 'SUPPORT_REPLY':
+        return (
+          `💬 *Youthnic Customer Support*\n\n` +
+          `Hi *${customer}*,\n` +
+          `Update regarding your order *${orderNo}*:\n\n` +
+          `${extra?.customText || 'Our support team has updated your ticket.'}\n\n` +
+          `If you have any further questions, feel free to reply to this message.`
         );
 
       case 'CUSTOM':
@@ -592,6 +703,7 @@ export class KwikEngageService {
 
   /**
    * Primary entry point: Send critical trigger WhatsApp message and record in DB.
+   * If customer is outside 24h window and template is configured, attempts template dispatch.
    */
   async sendCriticalTrigger(
     trigger: KwikEngageTriggerType,
@@ -610,6 +722,9 @@ export class KwikEngageService {
     extra?: {
       waybillNumber?: string;
       courierName?: string;
+      currentLocation?: string;
+      delayReason?: string;
+      newEstimatedDelivery?: string;
       ndrReason?: string;
       itemsSummary?: string;
       customText?: string;
@@ -619,19 +734,31 @@ export class KwikEngageService {
     const message = this.buildTriggerMessage(trigger, order, extra);
     const recipient = this.normalizePhoneNumber(order.customerPhone);
 
+    const dbTypeMap: Record<KwikEngageTriggerType, NotificationType> = {
+      ORDER_CONFIRMED: 'ORDER_CONFIRMED',
+      COD_CONFIRMATION: 'ORDER_CONFIRMED',
+      ORDER_SHIPPED: 'ORDER_SHIPPED',
+      IN_TRANSIT: 'ORDER_SHIPPED',
+      OUT_FOR_DELIVERY: 'OUT_FOR_DELIVERY',
+      DELIVERED: 'DELIVERED',
+      NDR_ALERT: 'NDR_ALERT',
+      TRANSIT_DELAY: 'NDR_ALERT',
+      DISPATCH_DELAY: 'ORDER_CONFIRMED',
+      RTO_INITIATED: 'NDR_ALERT',
+      RETURN_INITIATED: 'RETURN_INITIATED',
+      RETURN_RECEIVED: 'RETURN_RECEIVED',
+      REFUND_PROCESSED: 'REFUND_PROCESSED',
+      SUPPORT_REPLY: 'CUSTOM',
+      CUSTOM: 'CUSTOM',
+    };
+
     // 1. Record pending notification in Prisma DB
     let notificationId: number | undefined;
     try {
-      const dbType: NotificationType =
-        trigger === 'COD_CONFIRMATION'
-          ? 'ORDER_CONFIRMED'
-          : trigger === 'RTO_INITIATED'
-          ? 'NDR_ALERT'
-          : (trigger as NotificationType) || 'CUSTOM';
-
+      const dbType = dbTypeMap[trigger] || 'CUSTOM';
       const created = await prisma.notification.create({
         data: {
-          orderId: order.id,
+          orderId: order.id > 0 ? order.id : undefined,
           type: dbType,
           recipient: recipient || order.customerPhone,
           templateName: `kwikengage_${trigger.toLowerCase()}`,
@@ -644,10 +771,50 @@ export class KwikEngageService {
       logger.warn('Failed to pre-insert notification record in DB', { dbErr });
     }
 
-    // 2. Dispatch via KwikEngage
-    const result = await this.sendTextMessage(order.customerPhone, message);
+    // 2. Dispatch via KwikEngage: try session text first
+    let result = await this.sendTextMessage(order.customerPhone, message);
 
-    // 3. Update notification status in DB
+    // 3. If outside 24h session window, try approved template if configured
+    if (!result.success && result.requiresTemplate) {
+      const templateMap: Partial<Record<KwikEngageTriggerType, string | undefined>> = {
+        ORDER_CONFIRMED: config.kwikengage.templates.orderConfirmed,
+        COD_CONFIRMATION: config.kwikengage.templates.codConfirmation,
+        ORDER_SHIPPED: config.kwikengage.templates.orderDispatched,
+        IN_TRANSIT: config.kwikengage.templates.inTransit,
+        TRANSIT_DELAY: config.kwikengage.templates.transitDelay,
+        DISPATCH_DELAY: config.kwikengage.templates.dispatchDelay,
+        OUT_FOR_DELIVERY: config.kwikengage.templates.outForDelivery,
+        DELIVERED: config.kwikengage.templates.delivered,
+        NDR_ALERT: config.kwikengage.templates.ndrAttempt,
+        RTO_INITIATED: config.kwikengage.templates.rtoInitiated,
+        RETURN_INITIATED: config.kwikengage.templates.returnInitiated,
+        RETURN_RECEIVED: config.kwikengage.templates.returnReceived,
+        REFUND_PROCESSED: config.kwikengage.templates.refundProcessed,
+        SUPPORT_REPLY: config.kwikengage.templates.supportReply,
+      };
+
+      const configuredTemplate = templateMap[trigger];
+      if (configuredTemplate) {
+        logger.info(`Recipient ${recipient} is outside 24h window; attempting configured template: ${configuredTemplate}`);
+        const templateParams = [
+          order.customerName || 'Valued Customer',
+          order.shopifyOrderName || '',
+          Math.round(order.totalAmount || 0).toString(),
+          extra?.waybillNumber || '',
+        ];
+        const templateResult = await this.sendTemplateMessage(
+          order.customerPhone,
+          configuredTemplate,
+          templateParams,
+          { fallbackText: message }
+        );
+        if (templateResult.success) {
+          result = templateResult;
+        }
+      }
+    }
+
+    // 4. Update notification status in DB
     if (notificationId) {
       try {
         await prisma.notification.update({

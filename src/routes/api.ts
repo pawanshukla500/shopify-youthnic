@@ -4191,9 +4191,25 @@ router.delete('/settings/users/:id', async (req: Request, res: Response): Promis
 // POST /api/settings/whatsapp/test — Send test WhatsApp notification
 router.post('/settings/whatsapp/test', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { phone, trigger, customMessage } = req.body;
+    const { phone, trigger, customMessage, mode, templateName, templateParams } = req.body;
     if (!phone) {
       res.status(400).json({ error: 'Phone number is required' });
+      return;
+    }
+
+    if (mode === 'template' && templateName) {
+      const result = await kwikengageService.sendTemplateMessage(
+        phone,
+        templateName,
+        Array.isArray(templateParams) ? templateParams : [customMessage || 'Test Customer', '#YN-TEST', '1499'],
+        customMessage
+      );
+      res.json({
+        success: result.success,
+        mode: 'template',
+        templateName,
+        result,
+      });
       return;
     }
 
@@ -4211,7 +4227,7 @@ router.post('/settings/whatsapp/test', async (req: Request, res: Response): Prom
     };
 
     const result = await kwikengageService.sendCriticalTrigger(
-      (trigger as KwikEngageTriggerType) || 'COD_CONFIRMATION',
+      (trigger as KwikEngageTriggerType) || 'ORDER_CONFIRMED',
       testOrder,
       {
         waybillNumber: '1410293849182',
@@ -4221,7 +4237,15 @@ router.post('/settings/whatsapp/test', async (req: Request, res: Response): Prom
       }
     );
 
-    res.json({ success: result.success, result });
+    const diagnosticAdvice = result.requiresTemplate
+      ? 'Recipient has not messaged +91 79849 84563 in the last 24 hours. Under Meta WhatsApp policy, session messages are restricted. To send without template, the recipient should text the sender number first, or an approved Meta Utility template must be used.'
+      : undefined;
+
+    res.json({
+      success: result.success,
+      result,
+      diagnosticAdvice,
+    });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

@@ -42,6 +42,8 @@ export interface SendEmailOptions {
   data: EmailTemplateData;
   subject?: string;
   replyTo?: string;
+  syncWhatsApp?: boolean;
+  customerPhone?: string;
 }
 
 export interface ResendStatus {
@@ -272,6 +274,12 @@ class ResendService {
         sentAt: new Date(),
       });
 
+      if (options.syncWhatsApp !== false && (orderId || options.customerPhone)) {
+        this.dispatchSyncedWhatsApp(options, templateType).catch((syncErr) => {
+          logger.warn('Failed to sync WhatsApp with simulated email dispatch', { orderId, templateType, error: syncErr?.message });
+        });
+      }
+
       return {
         success: true,
         mode: 'SIMULATED',
@@ -326,6 +334,12 @@ class ResendService {
         resendId,
         sentAt: new Date(),
       });
+
+      if (options.syncWhatsApp !== false && (orderId || options.customerPhone)) {
+        this.dispatchSyncedWhatsApp(options, templateType).catch((syncErr) => {
+          logger.warn('Failed to sync WhatsApp with live email dispatch', { orderId, templateType, error: syncErr?.message });
+        });
+      }
 
       return {
         success: true,
@@ -396,6 +410,67 @@ class ResendService {
       }
     );
     return { id: response.data?.id || '' };
+  }
+
+  /**
+   * Automatically synchronize outbound email events with Meta WhatsApp via KwikEngage.
+   */
+  private async dispatchSyncedWhatsApp(options: SendEmailOptions, templateType: EmailTemplateType): Promise<void> {
+    try {
+      const kwikengageService = (await import('../whatsapp/kwikengage.service')).default;
+      const prisma = (await import('../../database/prisma')).default;
+
+      let order: any = null;
+      if (options.orderId) {
+        order = await prisma.order.findUnique({
+          where: { id: options.orderId },
+          include: { shipment: true },
+        });
+      }
+
+      const phone = options.customerPhone || order?.customerPhone;
+      if (!phone) return;
+
+      const triggerMap: Record<EmailTemplateType, any> = {
+        TRANSIT_DELAY: 'TRANSIT_DELAY',
+        DISPATCH_DELAY: 'DISPATCH_DELAY',
+        IN_TRANSIT: 'IN_TRANSIT',
+        OUT_FOR_DELIVERY: 'OUT_FOR_DELIVERY',
+        NDR_ALERT: 'NDR_ALERT',
+        DELIVERED: 'DELIVERED',
+        ORDER_CONFIRMED: 'ORDER_CONFIRMED',
+        RETURN_INITIATED: 'RETURN_INITIATED',
+        RETURN_RECEIVED: 'RETURN_RECEIVED',
+        RETURN_REFUND: 'REFUND_PROCESSED',
+        SUPPORT_REPLY: 'SUPPORT_REPLY',
+        CUSTOM: 'CUSTOM',
+      };
+
+      const trigger = triggerMap[templateType] || 'CUSTOM';
+      const orderPayload = {
+        id: order?.id || options.orderId || 0,
+        customerName: options.data.customerName || order?.customerName || 'Valued Customer',
+        customerPhone: phone,
+        shopifyOrderName: options.data.orderName || order?.shopifyOrderName || 'Order',
+        totalAmount: options.data.totalAmount !== undefined ? Number(options.data.totalAmount) : (order?.totalAmount ? Number(order.totalAmount) : 0),
+        paymentMethod: options.data.paymentMethod || order?.paymentMethod,
+        customerAddress: options.data.customerAddress || order?.customerAddress,
+        customerCity: order?.customerCity,
+        customerState: order?.customerState,
+        customerPincode: order?.customerPincode,
+      };
+
+      await kwikengageService.sendCriticalTrigger(trigger, orderPayload, {
+        waybillNumber: options.data.waybillNumber || order?.shipment?.waybillNumber,
+        courierName: options.data.courier || 'Delhivery Express',
+        currentLocation: options.data.currentLocation,
+        delayReason: options.data.delayReason,
+        newEstimatedDelivery: options.data.newEstimatedDelivery,
+        customText: options.data.customMessage,
+      });
+    } catch (err: any) {
+      logger.warn('Failed to dispatch synced WhatsApp message', { error: err?.message });
+    }
   }
 
   getStatus() {

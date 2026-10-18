@@ -3,13 +3,15 @@ import kwikengageService from '../whatsapp/kwikengage.service';
 import resendService, { EmailTemplateType } from '../email/resend.service';
 import logger from '../../utils/logger';
 import { Order, Return } from '@prisma/client';
-import { NotificationPayload } from '../../types';
 import { EmailTemplateData } from '../email/email-templates';
 
 /**
  * Notification Engine
- * Central service that triggers critical WhatsApp messages at each order lifecycle stage
- * powered by GoKwik's official KwikEngage WhatsApp API (https://api.kwikengage.ai/send-message/v2).
+ * Central service that synchronizes multi-channel customer communications across:
+ * 1. Meta WhatsApp via GoKwik's official KwikEngage API (https://api.kwikengage.ai/send-message/v2)
+ * 2. Customer transactional emails via Resend (https://api.resend.com)
+ *
+ * Every critical order lifecycle event dispatches BOTH email and WhatsApp utility updates.
  */
 class NotificationEngine {
   /**
@@ -28,11 +30,12 @@ class NotificationEngine {
         to,
         templateType,
         orderId: order.id,
+        syncWhatsApp: false, // Prevent duplicate WhatsApp dispatch since notificationEngine handles it directly
         data: {
           orderName: order.shopifyOrderName,
           customerName: order.customerName,
           recipientEmail: to,
-          customerAddress: [order.customerAddress, order.customerCity, order.customerPincode]
+          customerAddress: [order.customerAddress, order.customerCity, order.customerState, order.customerPincode]
             .filter(Boolean)
             .join(', '),
           totalAmount: order.totalAmount,
@@ -59,6 +62,7 @@ class NotificationEngine {
 
   /**
    * Order confirmed — sent when a new order is synced from Shopify.
+   * Dispatches WhatsApp order confirmation + Email order confirmation.
    */
   async notifyOrderConfirmed(order: Order): Promise<void> {
     try {
@@ -66,6 +70,7 @@ class NotificationEngine {
     } catch (err) {
       logger.warn('KwikEngage send failed for ORDER_CONFIRMED', { err });
     }
+    await this.sendLifecycleEmail(order, 'ORDER_CONFIRMED');
   }
 
   /**
@@ -81,63 +86,152 @@ class NotificationEngine {
 
   /**
    * Order shipped — sent when AWB is generated and shipment is dispatched via Delhivery.
+   * Dispatches WhatsApp dispatch update + Email in-transit notice.
    */
   async notifyOrderShipped(order: Order, waybillNumber: string): Promise<void> {
     try {
       await kwikengageService.sendCriticalTrigger('ORDER_SHIPPED', order, {
         waybillNumber,
-        courierName: 'Delhivery',
+        courierName: 'Delhivery Express',
       });
     } catch (err) {
       logger.warn('KwikEngage send failed for ORDER_SHIPPED', { err });
     }
+    await this.sendLifecycleEmail(order, 'IN_TRANSIT', {
+      waybillNumber,
+      courier: 'Delhivery Express',
+    });
+  }
+
+  /**
+   * In transit — sent when parcel departs the origin hub and travels between fulfillment centers.
+   * Dispatches WhatsApp in-transit alert + Email in-transit notice.
+   */
+  async notifyInTransit(order: Order, waybillNumber?: string, location?: string): Promise<void> {
+    try {
+      await kwikengageService.sendCriticalTrigger('IN_TRANSIT', order, {
+        waybillNumber,
+        courierName: 'Delhivery Express',
+        currentLocation: location,
+      });
+    } catch (err) {
+      logger.warn('KwikEngage send failed for IN_TRANSIT', { err });
+    }
+    await this.sendLifecycleEmail(order, 'IN_TRANSIT', {
+      waybillNumber,
+      currentLocation: location,
+      courier: 'Delhivery Express',
+    });
+  }
+
+  /**
+   * Transit Delay — sent when shipment encounters routing or weather delay in transit.
+   * Dispatches WhatsApp transit delay notice + Email transit delay notice.
+   */
+  async notifyTransitDelay(
+    order: Order,
+    extra: {
+      waybillNumber?: string;
+      delayReason?: string;
+      newEstimatedDelivery?: string;
+      currentLocation?: string;
+    } = {}
+  ): Promise<void> {
+    try {
+      await kwikengageService.sendCriticalTrigger('TRANSIT_DELAY', order, {
+        waybillNumber: extra.waybillNumber,
+        delayReason: extra.delayReason,
+        newEstimatedDelivery: extra.newEstimatedDelivery,
+        currentLocation: extra.currentLocation,
+        courierName: 'Delhivery Express',
+      });
+    } catch (err) {
+      logger.warn('KwikEngage send failed for TRANSIT_DELAY', { err });
+    }
+    await this.sendLifecycleEmail(order, 'TRANSIT_DELAY', {
+      waybillNumber: extra.waybillNumber,
+      delayReason: extra.delayReason,
+      newEstimatedDelivery: extra.newEstimatedDelivery,
+      currentLocation: extra.currentLocation,
+      courier: 'Delhivery Express',
+    });
+  }
+
+  /**
+   * Dispatch Delay — sent when order fulfillment at Surat warehouse takes longer than normal.
+   * Dispatches WhatsApp dispatch delay notice + Email dispatch delay notice.
+   */
+  async notifyDispatchDelay(
+    order: Order,
+    extra: {
+      delayReason?: string;
+      newEstimatedDelivery?: string;
+    } = {}
+  ): Promise<void> {
+    try {
+      await kwikengageService.sendCriticalTrigger('DISPATCH_DELAY', order, {
+        delayReason: extra.delayReason,
+        newEstimatedDelivery: extra.newEstimatedDelivery,
+      });
+    } catch (err) {
+      logger.warn('KwikEngage send failed for DISPATCH_DELAY', { err });
+    }
+    await this.sendLifecycleEmail(order, 'DISPATCH_DELAY', {
+      delayReason: extra.delayReason,
+      newEstimatedDelivery: extra.newEstimatedDelivery,
+    });
   }
 
   /**
    * Out for delivery — sent when tracking shows OFD status.
+   * Dispatches WhatsApp OFD alert + Email OFD notice.
    */
   async notifyOutForDelivery(order: Order, waybillNumber?: string, location?: string): Promise<void> {
     try {
-      await kwikengageService.sendCriticalTrigger('OUT_FOR_DELIVERY', order, { waybillNumber });
+      await kwikengageService.sendCriticalTrigger('OUT_FOR_DELIVERY', order, {
+        waybillNumber,
+        courierName: 'Delhivery Express',
+        currentLocation: location,
+      });
     } catch (err) {
       logger.warn('KwikEngage send failed for OUT_FOR_DELIVERY', { err });
     }
     await this.sendLifecycleEmail(order, 'OUT_FOR_DELIVERY', {
       waybillNumber,
       currentLocation: location,
-    });
-  }
-
-  /**
-   * In transit — email the customer once the parcel leaves the origin hub.
-   */
-  async notifyInTransit(order: Order, waybillNumber?: string, location?: string): Promise<void> {
-    await this.sendLifecycleEmail(order, 'IN_TRANSIT', {
-      waybillNumber,
-      currentLocation: location,
+      courier: 'Delhivery Express',
     });
   }
 
   /**
    * Delivered — sent when tracking shows delivery confirmation.
+   * Dispatches WhatsApp delivery confirmation + Email delivery confirmation.
    */
   async notifyDelivered(order: Order, waybillNumber?: string): Promise<void> {
     try {
-      await kwikengageService.sendCriticalTrigger('DELIVERED', order, { waybillNumber });
+      await kwikengageService.sendCriticalTrigger('DELIVERED', order, {
+        waybillNumber,
+        courierName: 'Delhivery Express',
+      });
     } catch (err) {
       logger.warn('KwikEngage send failed for DELIVERED', { err });
     }
-    await this.sendLifecycleEmail(order, 'DELIVERED', { waybillNumber });
+    await this.sendLifecycleEmail(order, 'DELIVERED', {
+      waybillNumber,
+      courier: 'Delhivery Express',
+    });
   }
 
   /**
    * NDR alert — delivery attempt failed (customer unreachable, address issue).
+   * Dispatches WhatsApp NDR alert + Email NDR notice.
    */
   async notifyNDR(order: Order, remark: string, waybillNumber?: string): Promise<void> {
     try {
       await kwikengageService.sendCriticalTrigger('NDR_ALERT', order, {
         ndrReason: remark,
         waybillNumber,
+        courierName: 'Delhivery Express',
       });
     } catch (err) {
       logger.warn('KwikEngage send failed for NDR_ALERT', { err });
@@ -145,40 +239,49 @@ class NotificationEngine {
     await this.sendLifecycleEmail(order, 'NDR_ALERT', {
       waybillNumber,
       delayReason: remark,
+      courier: 'Delhivery Express',
     });
   }
 
   /**
    * Return initiated — sent when a return request is created.
+   * Dispatches WhatsApp return notice + Email return notice.
    */
   async notifyReturnInitiated(order: Order, returnRecord: Return): Promise<void> {
     try {
       await kwikengageService.sendCriticalTrigger('RETURN_INITIATED', order, {
         waybillNumber: returnRecord.returnWaybillNumber || undefined,
         ndrReason: returnRecord.returnReason,
+        courierName: 'Delhivery Surface Reverse',
       });
     } catch (err) {
       logger.warn('KwikEngage send failed for RETURN_INITIATED', { err });
     }
+    await this.sendLifecycleEmail(order, 'RETURN_INITIATED', {
+      waybillNumber: returnRecord.returnWaybillNumber || undefined,
+      returnReason: returnRecord.returnReason,
+      courier: 'Delhivery Surface Reverse',
+    });
   }
 
   /**
    * Return received at warehouse — sent when returned goods are scanned.
+   * Dispatches WhatsApp return received notice + Email return received notice.
    */
   async notifyReturnReceived(order: Order): Promise<void> {
     try {
-      await kwikengageService.sendCriticalTrigger('CUSTOM', order, {
-        customText: `Hi ${order.customerName}, your returned parcel for order ${order.shopifyOrderName} has been received at our warehouse. QC check is underway.`,
-      });
+      await kwikengageService.sendCriticalTrigger('RETURN_RECEIVED', order);
     } catch (err) {
       logger.warn('KwikEngage send failed for RETURN_RECEIVED', { err });
     }
+    await this.sendLifecycleEmail(order, 'RETURN_RECEIVED');
   }
 
   /**
    * Refund processed — sent when Shopify or GoKwik refund is completed.
+   * Dispatches WhatsApp refund notice + Email refund confirmation.
    */
-  async notifyRefundProcessed(order: Order, refundAmount: number, _returnRecord?: Return): Promise<void> {
+  async notifyRefundProcessed(order: Order, refundAmount: number, returnRecord?: Return): Promise<void> {
     try {
       await kwikengageService.sendCriticalTrigger('REFUND_PROCESSED', order, {
         customText: `A refund of ₹${Math.round(refundAmount)} for order ${order.shopifyOrderName} has been processed to your original payment method.`,
@@ -186,6 +289,10 @@ class NotificationEngine {
     } catch (err) {
       logger.warn('KwikEngage send failed for REFUND_PROCESSED', { err });
     }
+    await this.sendLifecycleEmail(order, 'RETURN_REFUND', {
+      refundAmount,
+      refundId: returnRecord?.shopifyRefundId || `RF-${order.shopifyOrderNumber}`,
+    });
   }
 
   /**

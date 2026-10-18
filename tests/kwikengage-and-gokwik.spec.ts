@@ -103,9 +103,12 @@ describe('KwikEngage Service (Official WhatsApp API)', () => {
           channel: 'whatsapp',
           type: 'template',
           content: {
-            template_name: 'order_confirmed',
-            parameters: ['Pawan', 'YOUTH-1001', '1499'],
-            language: { code: 'en' },
+            type: 'template',
+            template: {
+              template_id: 'order_confirmed',
+              language: 'en',
+              parameters: ['Pawan', 'YOUTH-1001', '1499'],
+            },
           },
         },
         expect.any(Object)
@@ -143,6 +146,52 @@ describe('KwikEngage Service (Official WhatsApp API)', () => {
         },
         expect.any(Object)
       );
+    });
+
+    it('detects 24-hour session window expiry and flags requiresTemplate', async () => {
+      clientPost.mockRejectedValueOnce({
+        response: {
+          status: 400,
+          data: {
+            statusCode: 400,
+            message: "You can no longer reply directly to this user as it's been over 24 hours since their last message. You may now only send a template message on WhatsApp",
+            error: 'Bad Request',
+          },
+        },
+      });
+
+      const res = await kwikengageService.sendTextMessage('9426279142', 'Test text');
+      expect(res.success).toBe(false);
+      expect(res.requiresTemplate).toBe(true);
+      expect(res.error).toContain('outside 24-hour session window');
+    });
+
+    it('builds trigger messages correctly for TRANSIT_DELAY, IN_TRANSIT, and DISPATCH_DELAY', () => {
+      const order = {
+        customerName: 'Pawan Shukla',
+        shopifyOrderName: '#26YOU5752',
+        totalAmount: 1499,
+      };
+
+      const transitDelayMsg = kwikengageService.buildTriggerMessage('TRANSIT_DELAY', order, {
+        waybillNumber: '30100810010054',
+        delayReason: 'Logistics routing check',
+        newEstimatedDelivery: 'Within 2 days',
+      });
+      expect(transitDelayMsg).toContain('brief transit delay');
+      expect(transitDelayMsg).toContain('30100810010054');
+      expect(transitDelayMsg).toContain('Logistics routing check');
+
+      const inTransitMsg = kwikengageService.buildTriggerMessage('IN_TRANSIT', order, {
+        waybillNumber: '30100810010054',
+        currentLocation: 'Bhiwandi Hub',
+      });
+      expect(inTransitMsg).toContain('currently in transit');
+      expect(inTransitMsg).toContain('Bhiwandi Hub');
+
+      const dispatchDelayMsg = kwikengageService.buildTriggerMessage('DISPATCH_DELAY', order);
+      expect(dispatchDelayMsg).toContain('Youthnic Dispatch Update');
+      expect(dispatchDelayMsg).toContain('Surat Fulfillment Center');
     });
 
     it('falls back to simulation mode cleanly when API key is missing', async () => {

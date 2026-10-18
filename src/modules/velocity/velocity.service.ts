@@ -842,6 +842,151 @@ export class VelocityService {
   }
 
   /**
+   * Fetch status-based summary report for forward and return/reverse shipments
+   * POST /custom/api/v1/reports
+   */
+  async getSummaryReport(params: {
+    startDateTime: string;
+    endDateTime: string;
+    shipmentType?: 'forward' | 'return';
+  }): Promise<{
+    dateRange: { startDateTime: string; endDateTime: string };
+    shipmentType: string;
+    summary: Record<string, { count: number; sum_of_prepaid_orders: number; sum_of_cod_orders: number }>;
+    totalShipments: number;
+    raw: any;
+  }> {
+    try {
+      const response = await this.client.post('/custom/api/v1/reports', {
+        start_date_time: params.startDateTime,
+        end_date_time: params.endDateTime,
+        shipment_type: params.shipmentType || 'forward',
+      });
+      const payload = response.data?.payload || response.data;
+      return {
+        dateRange: {
+          startDateTime: payload?.date_range?.start_date_time || params.startDateTime,
+          endDateTime: payload?.date_range?.end_date_time || params.endDateTime,
+        },
+        shipmentType: payload?.shipment_type || params.shipmentType || 'forward',
+        summary: payload?.summary || {},
+        totalShipments: payload?.summary?.total_shipments || 0,
+        raw: response.data,
+      };
+    } catch (error: any) {
+      throw new Error(`Failed to fetch Velocity summary report: ${error.response?.data?.message || error.message}`);
+    }
+  }
+
+  /**
+   * Fetch shipment-level financial charges breakdown per AWB
+   * POST /custom/api/v1/shipping-charges
+   */
+  async getShippingCharges(awbs: string[]): Promise<Array<{
+    trackingNumber: string;
+    charges?: Array<{
+      eventType: string;
+      transactionType: string;
+      amountWithoutGst: number;
+      amountWithGst: number;
+    }>;
+    error?: string;
+  }>> {
+    if (!awbs || awbs.length === 0) return [];
+    try {
+      const response = await this.client.post('/custom/api/v1/shipping-charges', {
+        awbs: awbs.slice(0, 100),
+      });
+      const list = response.data?.data || [];
+      return list.map((item: any) => ({
+        trackingNumber: item.tracking_number,
+        charges: item.charges?.map((c: any) => ({
+          eventType: c.event_type,
+          transactionType: c.transaction_type,
+          amountWithoutGst: Number(c.amount_without_gst || 0),
+          amountWithGst: Number(c.amount_with_gst || 0),
+        })),
+        error: item.error,
+      }));
+    } catch (error: any) {
+      throw new Error(`Failed to fetch Velocity shipping charges: ${error.response?.data?.message || error.message}`);
+    }
+  }
+
+  /**
+   * Fetch shipment-level COD remittance details per AWB
+   * POST /custom/api/v1/cod-remittance
+   */
+  async getCodRemittance(awbs: string[]): Promise<Array<{
+    trackingNumber: string;
+    deliveryDate?: string | null;
+    codAmount?: number;
+    remittanceDate?: string | null;
+    utrNo?: string | null;
+    error?: string;
+  }>> {
+    if (!awbs || awbs.length === 0) return [];
+    try {
+      const response = await this.client.post('/custom/api/v1/cod-remittance', {
+        awbs: awbs.slice(0, 100),
+      });
+      const list = response.data?.data || [];
+      return list.map((item: any) => ({
+        trackingNumber: item.tracking_number,
+        deliveryDate: item.delivery_date,
+        codAmount: item.cod_amount ? Number(item.cod_amount) : undefined,
+        remittanceDate: item.remittance_date,
+        utrNo: item.utr_no,
+        error: item.error,
+      }));
+    } catch (error: any) {
+      throw new Error(`Failed to fetch Velocity COD remittance: ${error.response?.data?.message || error.message}`);
+    }
+  }
+
+  /**
+   * Fetch paginated list of forward shipments with filters
+   * POST /custom/api/v1/shipments
+   */
+  async getShipmentsList(params?: any): Promise<{
+    data: any[];
+    meta?: any;
+    raw: any;
+  }> {
+    try {
+      const response = await this.client.post('/custom/api/v1/shipments', params || { page: 1, per_page: 20 });
+      return {
+        data: response.data?.data || [],
+        meta: response.data?.meta,
+        raw: response.data,
+      };
+    } catch (error: any) {
+      throw new Error(`Failed to fetch Velocity shipments list: ${error.response?.data?.message || error.message}`);
+    }
+  }
+
+  /**
+   * Fetch paginated list of return orders with filters
+   * POST /custom/api/v1/returns
+   */
+  async getReturnsList(params?: any): Promise<{
+    data: any[];
+    meta?: any;
+    raw: any;
+  }> {
+    try {
+      const response = await this.client.post('/custom/api/v1/returns', params || { page: 1, per_page: 20 });
+      return {
+        data: response.data?.data || [],
+        meta: response.data?.meta,
+        raw: response.data,
+      };
+    } catch (error: any) {
+      throw new Error(`Failed to fetch Velocity returns list: ${error.response?.data?.message || error.message}`);
+    }
+  }
+
+  /**
    * Fetch and normalize remittance records from Velocity finance API
    */
   async fetchRemittanceRecords(params?: { startDate?: string; endDate?: string }): Promise<Array<{

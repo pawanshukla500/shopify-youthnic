@@ -16,3 +16,5 @@ process.env.SHOPIFY_WEBHOOK_SECRET ||= 'test_webhook_secret';
 process.env.DELHIVERY_API_TOKEN ||= 'test_delhivery_token';
 process.env.DELHIVERY_PICKUP_LOCATION ||= 'Test Warehouse';
 process.env.NODE_ENV ||= 'test';
+process.env.VELOCITY_API_TOKEN = '';
+process.env.VELOCITY_WEBHOOK_SECRET = '';

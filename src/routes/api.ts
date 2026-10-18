@@ -3890,6 +3890,74 @@ router.get('/api/velocity/stores', async (_req: Request, res: Response): Promise
   }
 });
 
+// GET /api/velocity/reports/summary — Live status-based forward & return summary report
+router.get('/api/velocity/reports/summary', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const startDateTime = (req.query.start_date_time as string) || new Date(Date.now() - 30 * 86400000).toISOString();
+    const endDateTime = (req.query.end_date_time as string) || new Date().toISOString();
+    const shipmentType = (req.query.shipment_type as 'forward' | 'return') || 'forward';
+
+    const report = await velocityService.getSummaryReport({
+      startDateTime,
+      endDateTime,
+      shipmentType,
+    });
+    res.json({ success: true, report });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/velocity/reports/charges — Per-AWB shipping charges breakdown
+router.post('/api/velocity/reports/charges', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const awbs = req.body.awbs || [];
+    if (!Array.isArray(awbs) || awbs.length === 0) {
+      res.status(400).json({ error: 'awbs array is required' });
+      return;
+    }
+    const charges = await velocityService.getShippingCharges(awbs);
+    res.json({ success: true, charges });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/velocity/reports/cod-remittance — Per-AWB COD remittance details
+router.post('/api/velocity/reports/cod-remittance', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const awbs = req.body.awbs || [];
+    if (!Array.isArray(awbs) || awbs.length === 0) {
+      res.status(400).json({ error: 'awbs array is required' });
+      return;
+    }
+    const remittances = await velocityService.getCodRemittance(awbs);
+    res.json({ success: true, remittances });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/velocity/reports/shipments — Paginated shipments list with operational metadata
+router.post('/api/velocity/reports/shipments', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const result = await velocityService.getShipmentsList(req.body);
+    res.json({ success: true, ...result });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/velocity/reports/returns — Paginated returns list with QC and refund metadata
+router.post('/api/velocity/reports/returns', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const result = await velocityService.getReturnsList(req.body);
+    res.json({ success: true, ...result });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // GET /api/settings/users
 router.get('/settings/users', async (_req: Request, res: Response): Promise<void> => {
   try {

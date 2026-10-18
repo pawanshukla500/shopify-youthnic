@@ -2,7 +2,7 @@
  * Unit and integration tests for Velocity Shipping partner integration,
  * priority routing engine, and webhook handler.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import crypto from 'crypto';
 import { isVelocityCourier, isDelhiveryCourier, normalizeCourierName } from '../src/utils/courier';
 import { VelocityService, velocityService } from '../src/modules/velocity/velocity.service';
@@ -435,6 +435,21 @@ describe('Velocity Shipping Integration', () => {
   });
 
   describe('Velocity Webhook Handler', () => {
+    let savedSecret: string;
+    let savedToken: string;
+
+    beforeEach(() => {
+      savedSecret = config.velocity.webhookSecret;
+      savedToken = config.velocity.apiToken;
+      config.velocity.webhookSecret = '';
+      config.velocity.apiToken = '';
+    });
+
+    afterEach(() => {
+      config.velocity.webhookSecret = savedSecret;
+      config.velocity.apiToken = savedToken;
+    });
+
     it('returns 200 when webhook has no tracking_number to avoid disablement', async () => {
       const req: any = {
         body: { event: 'status_change', data: {} },
@@ -558,6 +573,124 @@ describe('Velocity Shipping Integration', () => {
         'DELIVERED',
         expect.any(String),
         'Velocity'
+      );
+    });
+  });
+
+  describe('Velocity Reports & Finance APIs', () => {
+    let service: VelocityService;
+    let mockAxios: any;
+
+    beforeEach(() => {
+      mockAxios = {
+        post: vi.fn(),
+        get: vi.fn(),
+      };
+      service = new VelocityService();
+      (service as any).client = mockAxios;
+    });
+
+    it('fetches summary report with status breakdown', async () => {
+      mockAxios.post.mockResolvedValueOnce({
+        data: {
+          status: 'SUCCESS',
+          payload: {
+            date_range: { start_date_time: '2026-10-01T00:00:00Z', end_date_time: '2026-10-18T23:59:59Z' },
+            shipment_type: 'forward',
+            summary: {
+              delivered: { count: 12, sum_of_prepaid_orders: 5000, sum_of_cod_orders: 8000 },
+              total_shipments: 12,
+            },
+          },
+        },
+      });
+
+      const report = await service.getSummaryReport({
+        startDateTime: '2026-10-01T00:00:00Z',
+        endDateTime: '2026-10-18T23:59:59Z',
+        shipmentType: 'forward',
+      });
+
+      expect(report.totalShipments).toBe(12);
+      expect(report.summary.delivered.count).toBe(12);
+      expect(report.summary.delivered.sum_of_cod_orders).toBe(8000);
+      expect(mockAxios.post).toHaveBeenCalledWith(
+        '/custom/api/v1/reports',
+        expect.objectContaining({ shipment_type: 'forward' })
+      );
+    });
+
+    it('fetches shipping charges breakdown per AWB', async () => {
+      mockAxios.post.mockResolvedValueOnce({
+        data: {
+          data: [
+            {
+              tracking_number: 'AWB001',
+              charges: [
+                { event_type: 'shipment_debit', transaction_type: 'debit', amount_without_gst: 84.75, amount_with_gst: 100 },
+                { event_type: 'platform_fee', transaction_type: 'debit', amount_without_gst: 8.47, amount_with_gst: 10 },
+              ],
+            },
+          ],
+        },
+      });
+
+      const charges = await service.getShippingCharges(['AWB001']);
+      expect(charges.length).toBe(1);
+      expect(charges[0].trackingNumber).toBe('AWB001');
+      expect(charges[0].charges?.length).toBe(2);
+      expect(charges[0].charges?.[0].amountWithGst).toBe(100);
+    });
+
+    it('fetches COD remittance per AWB', async () => {
+      mockAxios.post.mockResolvedValueOnce({
+        data: {
+          data: [
+            {
+              tracking_number: 'AWB001',
+              delivery_date: '2026-10-15',
+              cod_amount: 999,
+              remittance_date: '2026-10-18',
+              utr_no: 'UTR123456789',
+            },
+          ],
+        },
+      });
+
+      const rems = await service.getCodRemittance(['AWB001']);
+      expect(rems.length).toBe(1);
+      expect(rems[0].trackingNumber).toBe('AWB001');
+      expect(rems[0].codAmount).toBe(999);
+      expect(rems[0].utrNo).toBe('UTR123456789');
+    });
+
+    it('fetches forward shipments list with operational metadata', async () => {
+      mockAxios.post.mockResolvedValueOnce({
+        data: {
+          data: [{ id: 'ship-1', attributes: { tracking_number: 'TRK1', status: 'in_transit' } }],
+        },
+      });
+
+      const res = await service.getShipmentsList({ page: 1, per_page: 10 });
+      expect(res.data.length).toBe(1);
+      expect(mockAxios.post).toHaveBeenCalledWith(
+        '/custom/api/v1/shipments',
+        expect.objectContaining({ page: 1, per_page: 10 })
+      );
+    });
+
+    it('fetches return orders list with QC metadata', async () => {
+      mockAxios.post.mockResolvedValueOnce({
+        data: {
+          data: [{ id: 'ret-1', attributes: { return_reason: 'defective', qc_status: 'passed' } }],
+        },
+      });
+
+      const res = await service.getReturnsList({ page: 1, per_page: 10 });
+      expect(res.data.length).toBe(1);
+      expect(mockAxios.post).toHaveBeenCalledWith(
+        '/custom/api/v1/returns',
+        expect.objectContaining({ page: 1, per_page: 10 })
       );
     });
   });

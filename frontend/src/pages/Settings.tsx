@@ -21,12 +21,15 @@ import {
   testResendEmail,
   getShippingPriority,
   setShippingPriority,
+  getShippingPreferences,
+  saveShippingPreferences,
+  getVelocityWarehouses,
   getVelocityStatus,
   testVelocityConnection,
   checkVelocityServiceability,
 } from '../api'
 import { ErrorBox, Icon, LoadingState, PageIntro, Panel, PanelHeading, useDocumentTitle, useToast } from '../components/UI'
-import type { SystemUser, CarrierPriority } from '../types'
+import type { SystemUser, CarrierPriority, ShippingPreferences } from '../types'
 
 type SettingsTab = 'stack' | 'shipping' | 'users'
 
@@ -150,6 +153,60 @@ export function Settings() {
     queryKey: ['velocity-status'],
     queryFn: getVelocityStatus,
     staleTime: 15_000,
+  })
+
+  const preferencesQuery = useQuery({
+    queryKey: ['shipping-preferences'],
+    queryFn: getShippingPreferences,
+    staleTime: 10_000,
+  })
+
+  const velocityWarehousesQuery = useQuery({
+    queryKey: ['velocity-warehouses'],
+    queryFn: getVelocityWarehouses,
+    staleTime: 60_000,
+  })
+
+  const [shippingPrefForm, setShippingPrefForm] = useState<{
+    priority: CarrierPriority
+    autoFailover: boolean
+    codCourier: 'AUTO' | 'DELHIVERY' | 'VELOCITY'
+    prepaidCourier: 'AUTO' | 'DELHIVERY' | 'VELOCITY'
+    velocityWarehouseId: string
+    velocityAutoRemittance: boolean
+  }>({
+    priority: 'DELHIVERY_FIRST',
+    autoFailover: true,
+    codCourier: 'AUTO',
+    prepaidCourier: 'AUTO',
+    velocityWarehouseId: '',
+    velocityAutoRemittance: true,
+  })
+
+  useEffect(() => {
+    if (preferencesQuery.data) {
+      setShippingPrefForm({
+        priority: preferencesQuery.data.priority || 'DELHIVERY_FIRST',
+        autoFailover: preferencesQuery.data.autoFailover ?? true,
+        codCourier: preferencesQuery.data.codCourier || 'AUTO',
+        prepaidCourier: preferencesQuery.data.prepaidCourier || 'AUTO',
+        velocityWarehouseId: preferencesQuery.data.velocityWarehouseId || '',
+        velocityAutoRemittance: preferencesQuery.data.velocityAutoRemittance ?? true,
+      })
+    }
+  }, [preferencesQuery.data])
+
+  const savePreferencesMutation = useMutation({
+    mutationFn: saveShippingPreferences,
+    onSuccess: (data) => {
+      toast.toast('success', data.message || 'Shipping preferences saved successfully!')
+      queryClient.invalidateQueries({ queryKey: ['shipping-preferences'] })
+      queryClient.invalidateQueries({ queryKey: ['shipping-priority'] })
+      queryClient.invalidateQueries({ queryKey: ['system-status'] })
+    },
+    onError: (err: any) => {
+      toast.toast('error', `Failed to save shipping preferences: ${err.message || 'Error'}`)
+    },
   })
 
   // State for Velocity pincode serviceability testing
@@ -1201,12 +1258,15 @@ export function Settings() {
 
             {/* Carrier Priority Selector Cards */}
             {(() => {
-              const currentPriority = shippingPriorityQuery.data?.priority || 'DELHIVERY_FIRST'
+              const currentPriority = shippingPrefForm.priority || shippingPriorityQuery.data?.priority || 'DELHIVERY_FIRST'
               return (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px' }}>
                   {/* Option 1: Delhivery First */}
                   <div
-                    onClick={() => setPriorityMutation.mutate('DELHIVERY_FIRST')}
+                    onClick={() => {
+                      setShippingPrefForm((prev) => ({ ...prev, priority: 'DELHIVERY_FIRST' }))
+                      setPriorityMutation.mutate('DELHIVERY_FIRST')
+                    }}
                     style={{
                       cursor: 'pointer',
                       border: currentPriority === 'DELHIVERY_FIRST' ? '2px solid #2563eb' : '1px solid #e2e8f0',
@@ -1254,7 +1314,10 @@ export function Settings() {
 
                   {/* Option 2: Velocity First */}
                   <div
-                    onClick={() => setPriorityMutation.mutate('VELOCITY_FIRST')}
+                    onClick={() => {
+                      setShippingPrefForm((prev) => ({ ...prev, priority: 'VELOCITY_FIRST' }))
+                      setPriorityMutation.mutate('VELOCITY_FIRST')
+                    }}
                     style={{
                       cursor: 'pointer',
                       border: currentPriority === 'VELOCITY_FIRST' ? '2px solid #7c3aed' : '1px solid #e2e8f0',
@@ -1267,8 +1330,13 @@ export function Settings() {
                   >
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                        <div style={{ width: '40px', height: '40px', borderRadius: '8px', background: '#ffffff', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '6px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
-                          <span style={{ fontSize: '18px', fontWeight: 800, color: '#7c3aed' }}>⚡</span>
+                        <div style={{ width: '40px', height: '40px', borderRadius: '8px', background: '#ffffff', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+                          <img
+                            src="/logos/velocity.png"
+                            alt="Velocity"
+                            style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                            onError={(e) => { (e.currentTarget as HTMLImageElement).src = '/velocity-logo.png' }}
+                          />
                         </div>
                         <div>
                           <strong style={{ fontSize: '15px', color: '#1e293b' }}>Velocity First</strong>
@@ -1297,6 +1365,136 @@ export function Settings() {
                 </div>
               )
             })()}
+          </Panel>
+
+          {/* Advanced Multi-Carrier Preferences & Routing Rules */}
+          <Panel style={{ padding: '20px 24px' }}>
+            <PanelHeading
+              title="Multi-Carrier Preferences & Automated Dispatch Rules"
+              eyebrow="Fine-tune routing policies, failover thresholds, payment-mode preferences, and warehouse IDs"
+            />
+            <div style={{ display: 'grid', gap: '18px', marginTop: '16px' }}>
+              {/* Auto-Failover Switch */}
+              <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', background: 'var(--panel-subtle, #f8fafc)', borderRadius: '10px', border: '1px solid var(--border-color, #e2e8f0)', cursor: 'pointer' }}>
+                <div style={{ maxWidth: '85%' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <strong style={{ fontSize: '13.5px', color: 'var(--ink, #1e293b)' }}>Automatic Carrier Failover</strong>
+                    <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 6px', borderRadius: '4px', background: shippingPrefForm.autoFailover ? '#dcfce7' : '#f1f5f9', color: shippingPrefForm.autoFailover ? '#15803d' : '#64748b' }}>
+                      {shippingPrefForm.autoFailover ? 'ENABLED' : 'DISABLED'}
+                    </span>
+                  </div>
+                  <span style={{ fontSize: '12px', color: '#64748b', display: 'block', marginTop: '3px' }}>
+                    When enabled, if the preferred carrier fails destination pincode serviceability or API authentication, the dispatcher instantly routes through the alternate carrier with zero manual delay.
+                  </span>
+                </div>
+                <input
+                  type="checkbox"
+                  role="switch"
+                  aria-checked={shippingPrefForm.autoFailover}
+                  checked={shippingPrefForm.autoFailover}
+                  onChange={(e) => setShippingPrefForm((prev) => ({ ...prev, autoFailover: e.target.checked }))}
+                  style={{ width: '20px', height: '20px', cursor: 'pointer', accentColor: '#2563eb' }}
+                />
+              </label>
+
+              {/* Payment-Mode Carrier Preferences */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
+                <div style={{ display: 'grid', gap: '6px' }}>
+                  <label style={{ fontSize: '12px', fontWeight: 650, color: '#334155' }}>
+                    COD Orders Courier Rule:
+                  </label>
+                  <select
+                    value={shippingPrefForm.codCourier}
+                    onChange={(e) => setShippingPrefForm((prev) => ({ ...prev, codCourier: e.target.value as any }))}
+                    style={{ fontSize: '13px', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#ffffff', color: '#1e293b' }}
+                  >
+                    <option value="AUTO">AUTO (Follow Global Carrier Priority)</option>
+                    <option value="DELHIVERY">DELHIVERY (Always Delhivery Express for COD)</option>
+                    <option value="VELOCITY">VELOCITY (Always Velocity Shipping for COD)</option>
+                  </select>
+                  <span style={{ fontSize: '11px', color: '#64748b' }}>Route Cash-on-Delivery packages to specific carrier rates or remittance windows.</span>
+                </div>
+
+                <div style={{ display: 'grid', gap: '6px' }}>
+                  <label style={{ fontSize: '12px', fontWeight: 650, color: '#334155' }}>
+                    Prepaid Orders Courier Rule:
+                  </label>
+                  <select
+                    value={shippingPrefForm.prepaidCourier}
+                    onChange={(e) => setShippingPrefForm((prev) => ({ ...prev, prepaidCourier: e.target.value as any }))}
+                    style={{ fontSize: '13px', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#ffffff', color: '#1e293b' }}
+                  >
+                    <option value="AUTO">AUTO (Follow Global Carrier Priority)</option>
+                    <option value="DELHIVERY">DELHIVERY (Always Delhivery Express for Prepaid)</option>
+                    <option value="VELOCITY">VELOCITY (Always Velocity Shipping for Prepaid)</option>
+                  </select>
+                  <span style={{ fontSize: '11px', color: '#64748b' }}>Route verified prepaid packages through lowest weight slab carrier.</span>
+                </div>
+              </div>
+
+              {/* Velocity Warehouse Selection & Auto Remittance */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px', paddingTop: '8px', borderTop: '1px solid #f1f5f9' }}>
+                <div style={{ display: 'grid', gap: '6px' }}>
+                  <label style={{ fontSize: '12px', fontWeight: 650, color: '#334155' }}>
+                    Velocity Registered Warehouse / FC:
+                  </label>
+                  {velocityWarehousesQuery.data?.warehouses && velocityWarehousesQuery.data.warehouses.length > 0 ? (
+                    <select
+                      value={shippingPrefForm.velocityWarehouseId}
+                      onChange={(e) => setShippingPrefForm((prev) => ({ ...prev, velocityWarehouseId: e.target.value }))}
+                      style={{ fontSize: '13px', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#ffffff', color: '#1e293b' }}
+                    >
+                      <option value="">Default Warehouse (Surat Hub)</option>
+                      {velocityWarehousesQuery.data.warehouses.map((wh: any) => (
+                        <option key={wh.id || wh.warehouse_id} value={wh.id || wh.warehouse_id}>
+                          {wh.name || wh.title || wh.warehouse_id} {wh.pincode ? `(${wh.pincode})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      placeholder="e.g. Surat FC or Warehouse ID"
+                      value={shippingPrefForm.velocityWarehouseId}
+                      onChange={(e) => setShippingPrefForm((prev) => ({ ...prev, velocityWarehouseId: e.target.value }))}
+                      style={{ fontSize: '13px', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#ffffff', color: '#1e293b' }}
+                    />
+                  )}
+                  <span style={{ fontSize: '11px', color: '#64748b' }}>Matched with Velocity origin pickup address for manifests.</span>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', background: 'var(--panel-subtle, #f8fafc)', borderRadius: '8px', border: '1px solid #e2e8f0', cursor: 'pointer' }}>
+                    <div style={{ maxWidth: '80%' }}>
+                      <strong style={{ fontSize: '12.5px', color: 'var(--ink, #1e293b)', display: 'block' }}>Direct Live Remittance Sync</strong>
+                      <span style={{ fontSize: '11px', color: '#64748b' }}>Reconcile Velocity COD settlements directly via API without downloading CSVs.</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      role="switch"
+                      aria-checked={shippingPrefForm.velocityAutoRemittance}
+                      checked={shippingPrefForm.velocityAutoRemittance}
+                      onChange={(e) => setShippingPrefForm((prev) => ({ ...prev, velocityAutoRemittance: e.target.checked }))}
+                      style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#7c3aed' }}
+                    />
+                  </label>
+                </div>
+              </div>
+
+              {/* Save Preferences Button */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: '10px' }}>
+                <button
+                  type="button"
+                  className="button button-primary"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '10px 20px', fontSize: '13px' }}
+                  disabled={savePreferencesMutation.isPending}
+                  onClick={() => savePreferencesMutation.mutate(shippingPrefForm)}
+                >
+                  <Icon name="check" size={15} />
+                  <span>{savePreferencesMutation.isPending ? 'Saving Preferences…' : 'Save Shipping Preferences'}</span>
+                </button>
+              </div>
+            </div>
           </Panel>
 
           {/* Integrated Carriers Overview (2-Column Grid) */}
@@ -1346,8 +1544,13 @@ export function Settings() {
             <Panel style={{ padding: '20px' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: '#f5f3ff', border: '1px solid #ddd6fe', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <span style={{ fontSize: '18px' }}>⚡</span>
+                  <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: '#ffffff', border: '1px solid #ddd6fe', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px' }}>
+                    <img
+                      src="/logos/velocity.png"
+                      alt="Velocity"
+                      style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                      onError={(e) => { (e.currentTarget as HTMLImageElement).src = '/velocity-logo.png' }}
+                    />
                   </div>
                   <div>
                     <strong style={{ fontSize: '14px', color: 'var(--ink)' }}>Velocity Shipping</strong>
@@ -1365,7 +1568,7 @@ export function Settings() {
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span style={{ color: '#64748b' }}>Warehouse ID:</span>
-                  <strong style={{ color: 'var(--ink)' }}>{velocityStatusQuery.data?.warehouseId || 'Surat FC'}</strong>
+                  <strong style={{ color: 'var(--ink)' }}>{shippingPrefForm.velocityWarehouseId || velocityStatusQuery.data?.warehouseId || 'Surat FC'}</strong>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span style={{ color: '#64748b' }}>API Token:</span>

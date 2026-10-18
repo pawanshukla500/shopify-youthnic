@@ -819,184 +819,200 @@ a { color: inherit; text-decoration: none; }
 .dash-kpi-label { font-size: 11px; font-weight: 600; color: #64748b; margin: 0; }
 .dash-kpi-sub { font-size: 10px; color: #94a3b8; margin-top: 6px; display: flex; align-items: center; gap: 4px; }
 
-/* ─── Ultra-Modern Executive Attention Cards (Replaces Flat Popups) ─── */
+/* ─── Ultra-Modern Executive Attention Center ─── */
 .action-center {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
   margin-bottom: 24px;
 }
 .action-center-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 4px;
-  padding: 0 4px;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  padding: 0 2px;
+}
+.action-filter-pills {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.filter-pill {
+  border: 1px solid var(--border-color, #e2e8f0);
+  background: var(--panel, #ffffff);
+  color: var(--muted, #64748b);
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.filter-pill:hover {
+  border-color: #cbd5e1;
+  color: var(--ink, #1e293b);
+}
+.filter-pill.active {
+  background: #0f172a;
+  border-color: #0f172a;
+  color: #ffffff;
+}
+.filter-pill.critical.active {
+  background: #e11d48;
+  border-color: #e11d48;
+  color: #ffffff;
+}
+.expand-alerts-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #2563eb;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+.expand-alerts-btn:hover {
+  background: #eff6ff;
+}
+.action-center-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 12px;
+}
+.alert-card {
+  position: relative;
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 8px;
+  background: var(--panel, #ffffff);
+  border: 1px solid var(--border-color, #e2e8f0);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  overflow: hidden;
+  border-left: 4px solid #94a3b8;
+}
+.alert-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
+}
+.alert-card.critical {
+  border-left-color: #e11d48;
+  background: linear-gradient(135deg, rgba(254, 242, 242, 0.5) 0%, var(--panel, #ffffff) 100%);
+}
+.alert-card.high {
+  border-left-color: #d97706;
+  background: linear-gradient(135deg, rgba(254, 252, 232, 0.5) 0%, var(--panel, #ffffff) 100%);
+}
+.alert-card.medium {
+  border-left-color: #10b981;
+  background: linear-gradient(135deg, rgba(240, 253, 244, 0.5) 0%, var(--panel, #ffffff) 100%);
+}
+.alert-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 .alert-icon-wrap {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
   display: grid;
   place-items: center;
   flex-shrink: 0;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
 }
 .alert-icon-wrap.critical {
   background: #ffe4e6;
   color: #e11d48;
-  border: 1px solid #fecdd3;
 }
 .alert-icon-wrap.high {
   background: #fef3c7;
   color: #b45309;
-  border: 1px solid #fde68a;
 }
 .alert-icon-wrap.medium {
   background: #dcfce7;
   color: #15803d;
-  border: 1px solid #bbf7d0;
-}
-.alert-card {
-  position: relative;
-  border-radius: 12px;
-  padding: 14px 20px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  box-shadow: 0 4px 16px -2px rgba(15, 23, 42, 0.05), 0 2px 6px -1px rgba(15, 23, 42, 0.02);
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-  overflow: hidden;
-  animation: fadeIn 0.25s ease-out;
-}
-.alert-card::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 4px;
-  border-radius: 4px 0 0 4px;
-}
-.alert-card:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 8px 24px -4px rgba(15, 23, 42, 0.08), 0 4px 10px -2px rgba(15, 23, 42, 0.04);
-}
-.alert-card.critical {
-  border-color: #fecdd3;
-  background: linear-gradient(90deg, rgba(254, 242, 242, 0.65) 0%, #ffffff 40%);
-}
-.alert-card.critical::before {
-  background: linear-gradient(180deg, #f43f5e, #be123c);
-}
-.alert-card.high {
-  border-color: #fde68a;
-  background: linear-gradient(90deg, rgba(254, 252, 232, 0.65) 0%, #ffffff 40%);
-}
-.alert-card.high::before {
-  background: linear-gradient(180deg, #f59e0b, #d97706);
-}
-.alert-card.medium {
-  border-color: #bbf7d0;
-  background: linear-gradient(90deg, rgba(240, 253, 244, 0.65) 0%, #ffffff 40%);
-}
-.alert-card.medium::before {
-  background: linear-gradient(180deg, #10b981, #059669);
-}
-
-.alert-card-left {
-  display: flex;
-  align-items: center;
-  gap: 14px;
 }
 .alert-badge {
-  font-size: 9.5px;
-  font-weight: 800;
-  padding: 3px 8px;
-  border-radius: 9999px;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 4px;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  flex-shrink: 0;
+  letter-spacing: 0.04em;
 }
 .alert-card.critical .alert-badge {
   background: #ffe4e6;
   color: #e11d48;
-  border: 1px solid #fecdd3;
 }
 .alert-card.high .alert-badge {
   background: #fef3c7;
   color: #b45309;
-  border: 1px solid #fde68a;
 }
 .alert-card.medium .alert-badge {
   background: #dcfce7;
   color: #15803d;
-  border: 1px solid #bbf7d0;
 }
-
 .alert-title {
   font-size: 13px;
-  font-weight: 800;
-  color: #0f172a;
-  letter-spacing: -0.01em;
-  margin: 0 0 2px;
+  font-weight: 700;
+  color: var(--ink, #0f172a);
+  margin: 2px 0 0;
+  line-height: 1.35;
 }
 .alert-desc {
   font-size: 11.5px;
-  color: #475569;
+  color: var(--muted, #64748b);
   margin: 0;
   line-height: 1.4;
 }
-
 .alert-btn {
-  font-size: 11.5px;
-  font-weight: 750;
-  padding: 8px 16px;
-  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 650;
+  padding: 4px 10px;
+  border-radius: 6px;
   border: 1px solid transparent;
   cursor: pointer;
   white-space: nowrap;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+  gap: 4px;
+  transition: all 0.15s ease;
 }
 .alert-card.critical .alert-btn {
-  background: linear-gradient(135deg, #e11d48, #be123c);
-  color: #ffffff;
-  border-color: #be123c;
+  background: #ffe4e6;
+  color: #e11d48;
+  border-color: #fecdd3;
 }
 .alert-card.critical .alert-btn:hover {
-  background: linear-gradient(135deg, #be123c, #9f1239);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(225, 29, 72, 0.35);
+  background: #e11d48;
+  color: #ffffff;
 }
 .alert-card.high .alert-btn {
-  background: linear-gradient(135deg, #d97706, #b45309);
-  color: #ffffff;
-  border-color: #b45309;
+  background: #fef3c7;
+  color: #b45309;
+  border-color: #fde68a;
 }
 .alert-card.high .alert-btn:hover {
-  background: linear-gradient(135deg, #b45309, #92400e);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(217, 119, 6, 0.35);
+  background: #d97706;
+  color: #ffffff;
 }
 .alert-card.medium .alert-btn {
-  background: linear-gradient(135deg, #10b981, #059669);
-  color: #ffffff;
-  border-color: #059669;
+  background: #dcfce7;
+  color: #15803d;
+  border-color: #bbf7d0;
 }
 .alert-card.medium .alert-btn:hover {
-  background: linear-gradient(135deg, #059669, #047857);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.35);
+  background: #10b981;
+  color: #ffffff;
 }
 
 /* 5-Stage Funnel Pipeline */

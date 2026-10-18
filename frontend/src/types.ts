@@ -423,9 +423,39 @@ export interface CodSummary {
   pendingDelivery?: CodPendingDeliveryEntry[]
 }
 
+export interface CarrierBreakdown {
+  name: string
+  total: number
+  totalShipments?: number
+  inTransit: number
+  delivered: number
+  ndr: number
+  configured: boolean
+  status?: string
+}
+
+export interface ShippingCarriersStats {
+  priority: CarrierPriority
+  activePriority?: CarrierPriority
+  autoFailover?: boolean
+  delhivery: CarrierBreakdown
+  velocity: CarrierBreakdown
+}
+
+export interface ShippingPreferences {
+  priority: CarrierPriority
+  autoFailover: boolean
+  codCourier: 'AUTO' | 'DELHIVERY' | 'VELOCITY'
+  prepaidCourier: 'AUTO' | 'DELHIVERY' | 'VELOCITY'
+  velocityWarehouseId: string
+  velocityAutoRemittance: boolean
+  velocityConfigured: boolean
+}
+
 export interface DashboardStats {
   success: boolean
   timestamp: string
+  carriers?: ShippingCarriersStats
   kpis: {
     totalRevenue: number
     totalOrders: number

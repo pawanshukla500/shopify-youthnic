@@ -57,7 +57,23 @@ export class ShippingRouterService {
       return { courier: 'Velocity', reason: 'Explicit operator selection: Velocity' };
     }
 
-    const priority = await this.getCarrierPriority();
+    let priority = await this.getCarrierPriority();
+    let autoFailover = true;
+
+    // Check payment mode specific preference if configured
+    try {
+      const isCod = order.paymentMethod === 'COD';
+      const prefKey = isCod ? 'shipping_cod_courier' : 'shipping_prepaid_courier';
+      const prefSetting = await prisma.setting.findUnique({ where: { key: prefKey } });
+      if (prefSetting?.value === 'VELOCITY') priority = 'VELOCITY_FIRST';
+      else if (prefSetting?.value === 'DELHIVERY') priority = 'DELHIVERY_FIRST';
+
+      const failoverSetting = await prisma.setting.findUnique({ where: { key: 'shipping_auto_failover' } });
+      if (failoverSetting?.value === 'false') autoFailover = false;
+    } catch {
+      // ignore
+    }
+
     const destinationPincode = order.customerPincode?.trim() || '';
     const paymentMode = order.paymentMethod === 'COD' ? 'cod' : 'prepaid';
     const originPincode = config.delhivery.seller.pincode || '395002';
@@ -87,6 +103,13 @@ export class ShippingRouterService {
           return {
             courier: 'Velocity',
             reason: `Velocity First Priority · Destination ${destinationPincode} is serviceable (${velCheck.couriers.length} couriers)`,
+          };
+        }
+
+        if (!autoFailover) {
+          return {
+            courier: 'Velocity',
+            reason: `Velocity unserviceable for destination ${destinationPincode} (Auto-failover disabled in settings)`,
           };
         }
 
@@ -124,6 +147,13 @@ export class ShippingRouterService {
       });
     } catch (delErr: any) {
       logger.warn('Delhivery serviceability probe failed, checking Velocity', { error: delErr.message });
+    }
+
+    if (!autoFailover) {
+      return {
+        courier: 'Delhivery',
+        reason: `Delhivery unserviceable for destination ${destinationPincode} (Auto-failover disabled in settings)`,
+      };
     }
 
     // Check Velocity fallback

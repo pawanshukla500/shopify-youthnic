@@ -129,7 +129,16 @@ export class VelocityService {
   private client: AxiosInstance;
 
   constructor() {
-    this.client = axios.create({
+    const createFn = typeof (axios as any).create === 'function'
+      ? (axios as any).create.bind(axios)
+      : () => ({
+          get: (url: string, c: any) => (axios as any).get?.(url, c),
+          post: (url: string, d: any, c: any) => (axios as any).post?.(url, d, c),
+          interceptors: { request: { use: () => {} }, response: { use: () => {} } },
+          defaults: { headers: {} },
+        });
+
+    this.client = createFn({
       baseURL: config.velocity.baseUrl || 'https://shazam.velocity.in',
       headers: {
         'Accept': 'application/json',
@@ -138,18 +147,20 @@ export class VelocityService {
       timeout: 30000,
     });
 
-    this.client.interceptors.request.use((reqConfig) => {
-      const token = config.velocity.apiToken;
-      if (!token) {
-        throw new Error(
-          'VELOCITY_API_TOKEN is not configured. Add your Velocity API token in Settings or environment variables.'
-        );
-      }
-      // Ensure Bearer prefix is handled cleanly (Velocity supports Bearer <token>)
-      const authValue = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
-      reqConfig.headers['Authorization'] = authValue;
-      return reqConfig;
-    });
+    if (this.client.interceptors?.request?.use) {
+      this.client.interceptors.request.use((reqConfig) => {
+        const token = config.velocity.apiToken;
+        if (!token) {
+          throw new Error(
+            'VELOCITY_API_TOKEN is not configured. Add your Velocity API token in Settings or environment variables.'
+          );
+        }
+        // Ensure Bearer prefix is handled cleanly (Velocity supports Bearer <token>)
+        const authValue = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
+        reqConfig.headers['Authorization'] = authValue;
+        return reqConfig;
+      });
+    }
   }
 
   /**
@@ -828,6 +839,92 @@ export class VelocityService {
     } catch (error: any) {
       throw new Error(`Failed to request report export: ${error.response?.data?.message || error.message}`);
     }
+  }
+
+  /**
+   * Fetch and normalize remittance records from Velocity finance API
+   */
+  async fetchRemittanceRecords(params?: { startDate?: string; endDate?: string }): Promise<Array<{
+    awb: string;
+    orderId?: string;
+    remittedAmount: number;
+    codAmount: number;
+    utr: string;
+    remittanceRef: string;
+    remittanceDate: string;
+    status: string;
+  }>> {
+    const raw = await this.getRemittanceDetails(params);
+    const list = Array.isArray(raw)
+      ? raw
+      : raw?.remittances || raw?.records || raw?.data || raw?.orders || [];
+
+    return list.map((item: any) => ({
+      awb: String(item.awb || item.waybill || item.tracking_number || '').trim(),
+      orderId: item.order_id || item.orderId || item.client_order_id,
+      remittedAmount: Number(item.remitted_amount || item.remittedAmount || item.net_amount || item.amount || 0),
+      codAmount: Number(item.cod_amount || item.codAmount || item.collected_amount || 0),
+      utr: String(item.bank_transaction_id || item.utr || item.bank_ref || item.reference_number || '').trim(),
+      remittanceRef: String(item.crn || item.remittance_number || item.remittance_id || item.batch_id || 'VEL-REMIT').trim(),
+      remittanceDate: item.remittance_date || item.processed_date || item.date || new Date().toISOString(),
+      status: item.status || 'PROCESSED',
+    })).filter((r: any) => Boolean(r.awb || r.orderId));
+  }
+
+  /**
+   * Fetch official Velocity shipping label PDF buffer directly from Velocity API or S3 URL
+   */
+  async fetchOfficialLabelPdf(waybill: string, directUrl?: string | null): Promise<Buffer | null> {
+    const candidates: string[] = [];
+    if (directUrl && directUrl.startsWith('http')) candidates.push(directUrl);
+
+    // If no direct url or expired, probe order details
+    try {
+      const details = await this.getForwardOrderDetails({ awb: waybill });
+      const foundUrl = details?.label_url || details?.labelUrl || details?.payload?.label_url;
+      if (foundUrl && !candidates.includes(foundUrl)) candidates.unshift(foundUrl);
+    } catch {
+      // ignore
+    }
+
+    // Also support direct Velocity label download endpoint
+    const endpointLabel = `${this.client.defaults.baseURL}/custom/api/v1/order/download-label?awb=${encodeURIComponent(waybill)}`;
+    if (!candidates.includes(endpointLabel)) candidates.push(endpointLabel);
+
+    for (const url of candidates) {
+      try {
+        const res = await axios.get<ArrayBuffer>(url, {
+          responseType: 'arraybuffer',
+          timeout: 20000,
+          headers: url.includes('shazam.velocity.in') && config.velocity.apiToken ? {
+            Authorization: config.velocity.apiToken.startsWith('Bearer ')
+              ? config.velocity.apiToken
+              : `Bearer ${config.velocity.apiToken}`,
+          } : undefined,
+        });
+        const buffer = Buffer.from(res.data);
+        if (buffer.length > 50) {
+          const head = buffer.subarray(0, 10).toString('utf8');
+          if (head.includes('%PDF')) {
+            return buffer;
+          }
+          if (head.startsWith('{')) {
+            try {
+              const json = JSON.parse(buffer.toString('utf8'));
+              const nextUrl = json?.label_url || json?.payload?.label_url || json?.url;
+              if (nextUrl && nextUrl !== url) {
+                return await this.fetchOfficialLabelPdf(waybill, nextUrl);
+              }
+            } catch {
+              // ignore
+            }
+          }
+        }
+      } catch (err: any) {
+        logger.warn('Failed to stream official Velocity label candidate', { waybill, url, error: err.message });
+      }
+    }
+    return null;
   }
 
   // ═══════════════════════════════════════════════════════════

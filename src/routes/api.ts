@@ -9,7 +9,7 @@ import shopifyService from '../modules/shopify/shopify.service';
 import paymentService from '../modules/payments/payment.service';
 import delhiveryService from '../modules/delhivery/delhivery.service';
 import { readSpreadsheet } from '../modules/accounts/spreadsheet';
-import { importDelhiveryRemittance, recordPaymentReceived } from '../modules/accounts/reconciliation.service';
+import { importDelhiveryRemittance, recordPaymentReceived, syncVelocityRemittance } from '../modules/accounts/reconciliation.service';
 import { getOrderAccountTrail, presentAccountTrailEvent, recordAccountTrailEvent, recordManualRefund, type RefundMode } from '../modules/accounts/account-trail.service';
 import { config } from '../config';
 import prisma from '../database/prisma';
@@ -67,12 +67,11 @@ async function loadFreshLabelPdf(
   if (isUsableHttpUrl(currentUrl)) candidates.push(currentUrl);
 
   if (courier && isVelocityCourier(courier)) {
-    for (const url of candidates) {
-      try {
-        return await downloadLabelBytes(url);
-      } catch (err: any) {
-        logger.warn('Velocity shipping label download failed', { waybill, url, error: err.message });
-      }
+    try {
+      const vPdf = await velocityService.fetchOfficialLabelPdf(waybill, currentUrl);
+      if (vPdf) return vPdf;
+    } catch (err: any) {
+      logger.warn('Velocity shipping label download failed', { waybill, currentUrl, error: err.message });
     }
     return null;
   }
@@ -283,7 +282,7 @@ router.get('/dashboard/stats', async (_req: Request, res: Response): Promise<voi
         priority: 'critical',
         category: '⚠️ SLA Breach Warning',
         title: `${delayedDispatchCount} order${delayedDispatchCount > 1 ? 's' : ''} overdue for dispatch (>24h SLA)!`,
-        description: 'Orders have exceeded the 24-hour dispatch SLA without AWB generation. Dispatch urgently with Delhivery to prevent customer cancellation.',
+        description: 'Orders have exceeded the 24-hour dispatch SLA without AWB generation. Dispatch via priority courier to prevent customer cancellation.',
         actionText: 'Resolve Overdue Orders',
         filterParam: 'filter=DELAYED_DISPATCH',
       });
@@ -310,7 +309,7 @@ router.get('/dashboard/stats', async (_req: Request, res: Response): Promise<voi
         priority: 'critical',
         category: '⚡ Priority Dispatch',
         title: `${prepaidPendingDispatch.length} PREPAID order${prepaidPendingDispatch.length > 1 ? 's' : ''} awaiting immediate dispatch!`,
-        description: 'Customer has paid in advance via GoKwik / UPI / PhonePe. Dispatch immediately with Delhivery to meet SLA.',
+        description: 'Customer has paid in advance via GoKwik / UPI / PhonePe. Dispatch immediately via partner couriers to meet SLA.',
         actionText: 'Dispatch Prepaid Orders',
         filterParam: 'filter=PREPAID_DISPATCH',
       });
@@ -321,7 +320,7 @@ router.get('/dashboard/stats', async (_req: Request, res: Response): Promise<voi
         id: 'dispatch_queue',
         priority: 'high',
         category: 'Fulfillment',
-        title: `${readyToDispatch} order${readyToDispatch > 1 ? 's' : ''} ready for Delhivery manifest`,
+        title: `${readyToDispatch} order${readyToDispatch > 1 ? 's' : ''} ready for carrier manifest`,
         description: 'New orders require AWB generation and shipping labels to be printed.',
         actionText: 'View Dispatch Queue',
         filterParam: 'status=NEW',
@@ -383,9 +382,47 @@ router.get('/dashboard/stats', async (_req: Request, res: Response): Promise<voi
       }, 0) * 100
     ) / 100;
 
+    const [carrierPriority, autoFailoverSetting] = await Promise.all([
+      shippingRouterService.getCarrierPriority(),
+      prisma.setting.findUnique({ where: { key: 'shipping_auto_failover' } }),
+    ]);
+    const delhiveryShipments = shipments.filter(
+      (s) => !isVelocityCourier(s.courier, s.labelUrl, s.waybillNumber)
+    );
+    const velocityShipments = shipments.filter(
+      (s) => isVelocityCourier(s.courier, s.labelUrl, s.waybillNumber)
+    );
+
+    const carriers = {
+      priority: carrierPriority,
+      activePriority: carrierPriority,
+      autoFailover: autoFailoverSetting?.value !== 'false',
+      delhivery: {
+        name: 'Delhivery Express',
+        total: delhiveryShipments.length,
+        totalShipments: delhiveryShipments.length,
+        inTransit: delhiveryShipments.filter((s) => s.status === 'IN_TRANSIT').length,
+        delivered: delhiveryShipments.filter((s) => s.status === 'DELIVERED').length,
+        ndr: delhiveryShipments.filter((s) => s.status === 'FAILED').length,
+        configured: Boolean(config.delhivery.apiToken),
+        status: config.delhivery.apiToken ? 'CONNECTED' : 'STANDBY',
+      },
+      velocity: {
+        name: 'Velocity Shipping',
+        total: velocityShipments.length,
+        totalShipments: velocityShipments.length,
+        inTransit: velocityShipments.filter((s) => s.status === 'IN_TRANSIT').length,
+        delivered: velocityShipments.filter((s) => s.status === 'DELIVERED').length,
+        ndr: velocityShipments.filter((s) => s.status === 'FAILED').length,
+        configured: Boolean(config.velocity.apiToken),
+        status: config.velocity.apiToken ? 'CONNECTED' : 'STANDBY',
+      },
+    };
+
     res.json({
       success: true,
       timestamp: new Date().toISOString(),
+      carriers,
       kpis: {
         totalRevenue,
         totalOrders,
@@ -1179,6 +1216,35 @@ router.get('/orders/:id/label', async (req: Request, res: Response): Promise<voi
       }
     }
 
+    if (isVelocity) {
+      const pdf = await loadFreshLabelPdf(waybillNumber, order.shipment?.labelUrl, order.shipment?.id, order.shipment?.courier);
+      if (pdf) {
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `inline; filename="velocity-label-${waybillNumber}.pdf"`);
+        res.send(pdf);
+        return;
+      }
+      if (isUsableHttpUrl(order.shipment?.labelUrl)) {
+        res.redirect(order.shipment!.labelUrl!);
+        return;
+      }
+      res.status(404).send(`
+        <!DOCTYPE html>
+        <html>
+        <head><title>Velocity Label Pending - ${order.shopifyOrderName}</title></head>
+        <body style="font-family:sans-serif; text-align:center; padding: 50px 20px; background:#f8fafc;">
+          <div style="max-width:500px; margin:0 auto; background:#fff; padding:30px; border-radius:12px; box-shadow:0 4px 12px rgba(0,0,0,0.08); border:1px solid #e2e8f0;">
+            <h2 style="color:#7c3aed; margin-top:0;">⚡ Velocity Shipping Label</h2>
+            <p style="color:#334155; font-size:15px; line-height:1.5;">Official PDF label is being generated by the Velocity shipping network for AWB <strong>${waybillNumber}</strong>.</p>
+            <p style="color:#64748b; font-size:13px;">Please reload this page in a few seconds or check order tracking.</p>
+            <button onclick="location.reload()" style="margin-top:15px; padding:8px 20px; background:#7c3aed; color:#fff; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Reload Label</button>
+          </div>
+        </body>
+        </html>
+      `);
+      return;
+    }
+
     if (req.query.pdf === 'true' && isUsableHttpUrl(order.shipment?.labelUrl)) {
       res.redirect(order.shipment!.labelUrl!);
       return;
@@ -1214,10 +1280,17 @@ router.get('/orders/:id/label/download', async (req: Request, res: Response): Pr
       res.send(pdf);
       return;
     }
+    if (isVelocity) {
+      if (isUsableHttpUrl(order.shipment?.labelUrl)) {
+        res.redirect(order.shipment!.labelUrl!);
+        return;
+      }
+      res.status(404).json({ error: 'Official Velocity label not ready yet. Please try again shortly.' });
+      return;
+    }
     const html = shippingLabelService.generatePrintableLabelPage(order as any, waybill);
-    const prefix = isVelocity ? 'velocity' : 'delhivery';
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="${prefix}-label-${waybill}.html"`);
+    res.setHeader('Content-Disposition', `attachment; filename="delhivery-label-${waybill}.html"`);
     res.send(html);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -3683,6 +3756,135 @@ router.get('/velocity/serviceability/:pincode', async (req: Request, res: Respon
       shipmentType: 'forward',
     });
     res.json({ success: true, result });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/settings/shipping-preferences
+router.get('/settings/shipping-preferences', async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const priority = await shippingRouterService.getCarrierPriority();
+    const settings = await prisma.setting.findMany({
+      where: {
+        key: {
+          in: [
+            'shipping_auto_failover',
+            'shipping_cod_courier',
+            'shipping_prepaid_courier',
+            'velocity_warehouse_id',
+            'velocity_auto_remittance',
+          ],
+        },
+      },
+    });
+    const map = new Map(settings.map((s) => [s.key, s.value]));
+
+    res.json({
+      success: true,
+      priority,
+      autoFailover: map.get('shipping_auto_failover') !== 'false',
+      codCourier: map.get('shipping_cod_courier') || 'AUTO',
+      prepaidCourier: map.get('shipping_prepaid_courier') || 'AUTO',
+      velocityWarehouseId: map.get('velocity_warehouse_id') || config.velocity.warehouseId || '',
+      velocityAutoRemittance: map.get('velocity_auto_remittance') !== 'false',
+      velocityConfigured: Boolean(config.velocity.apiToken),
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/settings/shipping-preferences
+router.post('/settings/shipping-preferences', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { priority, autoFailover, codCourier, prepaidCourier, velocityWarehouseId, velocityAutoRemittance } = req.body;
+
+    if (priority && (priority === 'DELHIVERY_FIRST' || priority === 'VELOCITY_FIRST')) {
+      await shippingRouterService.setCarrierPriority(priority);
+    }
+
+    const updates: Array<{ key: string; value: string }> = [];
+    if (autoFailover !== undefined) {
+      updates.push({ key: 'shipping_auto_failover', value: String(Boolean(autoFailover)) });
+    }
+    if (codCourier) {
+      updates.push({ key: 'shipping_cod_courier', value: String(codCourier).toUpperCase() });
+    }
+    if (prepaidCourier) {
+      updates.push({ key: 'shipping_prepaid_courier', value: String(prepaidCourier).toUpperCase() });
+    }
+    if (velocityWarehouseId !== undefined) {
+      updates.push({ key: 'velocity_warehouse_id', value: String(velocityWarehouseId).trim() });
+    }
+    if (velocityAutoRemittance !== undefined) {
+      updates.push({ key: 'velocity_auto_remittance', value: String(Boolean(velocityAutoRemittance)) });
+    }
+
+    for (const u of updates) {
+      await prisma.setting.upsert({
+        where: { key: u.key },
+        create: { key: u.key, value: u.value },
+        update: { value: u.value },
+      });
+    }
+
+    res.json({ success: true, message: 'Shipping preferences updated successfully.' });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/velocity/remittance/sync — Direct Live API sync for Velocity COD remittances & wallet
+router.post('/api/velocity/remittance/sync', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const actor = req.user;
+    const result = await syncVelocityRemittance(actor, req.body);
+    res.json({
+      success: true,
+      message: `Velocity Remittance Sync: ${result.matchedCount} of ${result.rowCount} records matched and reconciled.`,
+      result,
+    });
+  } catch (error: any) {
+    logger.error('Velocity remittance sync failed', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/velocity/remittance/status — Remittance health & latest sync details
+router.get('/api/velocity/remittance/status', async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const latest = await prisma.reconciliationImport.findFirst({
+      where: { kind: 'VELOCITY_REMITTANCE' as any },
+      orderBy: { createdAt: 'desc' },
+    });
+    res.json({
+      success: true,
+      lastSync: latest?.createdAt || null,
+      matchedCount: latest?.matchedCount || 0,
+      totalRemittance: (latest?.summary as any)?.totalRemittance || null,
+      latestBatch: latest?.fileName || null,
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/velocity/warehouses — List registered warehouses from Velocity
+router.get('/api/velocity/warehouses', async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const warehouses = await velocityService.listWarehouses();
+    res.json({ success: true, warehouses });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/velocity/stores — List registered stores from Velocity
+router.get('/api/velocity/stores', async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const stores = await velocityService.listStores();
+    res.json({ success: true, stores });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

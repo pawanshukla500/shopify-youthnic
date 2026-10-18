@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../database/prisma';
+import config from '../config';
 import velocityService from '../modules/velocity/velocity.service';
 import trackingService from '../modules/tracking/tracking.service';
 import logger from '../utils/logger';
@@ -44,14 +45,43 @@ export async function handleVelocityWebhook(req: Request, res: Response): Promis
     subStatus: data?.sub_status,
   });
 
-  // Check auth header if HMAC or API key is passed
+  // Check auth header: supports HMAC (x-velocity-signature) and API Key (x-api-key, Bearer token)
   const signature = (req.headers['x-velocity-signature'] ||
     req.headers['x-hmac-signature'] ||
     req.headers['x-signature']) as string | undefined;
 
-  if (signature && !velocityService.verifyWebhookSignature(req.body, signature)) {
-    logger.warn('Velocity webhook HMAC signature verification failed', { eventId });
-    res.status(401).json({ error: 'Invalid webhook signature' });
+  const apiKeyHeader = (req.headers['x-api-key'] ||
+    req.headers['api-key'] ||
+    req.headers['x-velocity-token']) as string | undefined;
+
+  const authHeader = req.headers['authorization'] as string | undefined;
+  const bearerToken = authHeader?.toLowerCase().startsWith('bearer ')
+    ? authHeader.slice(7).trim()
+    : undefined;
+
+  const queryKey = (req.query?.secret || req.query?.api_key) as string | undefined;
+  const clientKey = apiKeyHeader || bearerToken || queryKey;
+
+  const expectedSecret = config.velocity.webhookSecret;
+  const expectedToken = config.velocity.apiToken;
+
+  if (signature) {
+    if (!velocityService.verifyWebhookSignature(req.body, signature)) {
+      logger.warn('Velocity webhook HMAC signature verification failed', { eventId });
+      res.status(401).json({ error: 'Invalid webhook signature' });
+      return;
+    }
+  } else if (clientKey) {
+    const matchSecret = expectedSecret && clientKey === expectedSecret;
+    const matchToken = expectedToken && clientKey === expectedToken;
+    if ((expectedSecret || expectedToken) && !matchSecret && !matchToken) {
+      logger.warn('Velocity webhook API Key verification failed', { eventId });
+      res.status(401).json({ error: 'Invalid webhook API Key' });
+      return;
+    }
+  } else if (expectedSecret) {
+    logger.warn('Velocity webhook missing required authentication header/secret', { eventId });
+    res.status(401).json({ error: 'Missing webhook authentication' });
     return;
   }
 

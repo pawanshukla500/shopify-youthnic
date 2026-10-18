@@ -476,6 +476,47 @@ describe('Velocity Shipping Integration', () => {
       }
     });
 
+    it('authenticates webhook via X-API-Key header matching velocity apiToken or webhookSecret', async () => {
+      const origSecret = config.velocity.webhookSecret;
+      const origToken = config.velocity.apiToken;
+      config.velocity.webhookSecret = 'test-wh-secret';
+      config.velocity.apiToken = 'test-api-token';
+
+      try {
+        const req: any = {
+          body: {
+            event: 'status_change',
+            data: {},
+          },
+          headers: {
+            'x-api-key': 'test-wh-secret',
+          },
+        };
+        const res: any = {
+          status: vi.fn().mockReturnThis(),
+          json: vi.fn(),
+        };
+
+        await handleVelocityWebhook(req, res);
+        expect(res.status).toHaveBeenCalledWith(200);
+
+        // Also test invalid API key
+        const badReq: any = {
+          body: { event: 'status_change', data: {} },
+          headers: { 'x-api-key': 'wrong-key' },
+        };
+        const badRes: any = {
+          status: vi.fn().mockReturnThis(),
+          json: vi.fn(),
+        };
+        await handleVelocityWebhook(badReq, badRes);
+        expect(badRes.status).toHaveBeenCalledWith(401);
+      } finally {
+        config.velocity.webhookSecret = origSecret;
+        config.velocity.apiToken = origToken;
+      }
+    });
+
     it('updates shipment when matching tracking number is received', async () => {
       prismaStub.shipment.findFirst.mockResolvedValueOnce({
         id: 77,

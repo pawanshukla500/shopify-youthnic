@@ -1195,86 +1195,58 @@ export async function importCarrierRemittance(
 }
 
 /**
- * Direct Live API Sync for Velocity COD Remittances & Wallet Settlements.
+ * Direct Live API Sync for Velocity COD Remittances, Bank UTRs & Wallet Charges.
  * Pulls statement data from the Velocity API and automatically reconciles
  * orders in the database without requiring manual spreadsheet downloads/uploads.
  */
 export async function syncVelocityRemittance(
   actor?: AccountTrailActor,
-  params?: { startDate?: string; endDate?: string }
+  params?: { startDate?: string; endDate?: string; awbs?: string[]; lookbackDays?: number }
 ): Promise<ImportResult> {
-  const records = await velocityService.fetchRemittanceRecords(params);
-  const notes: string[] = [];
-  const unmatched: string[] = [];
-  const matchedOrders: MatchedOrderSummary[] = [];
-  let matchedCount = 0;
-  let totalAmount = 0;
+  const { velocityFinancialSyncService } = await import('../velocity/velocity-financial-sync.service');
+  const syncRes = await velocityFinancialSyncService.syncVelocityFinancials({
+    actor,
+    startDate: params?.startDate,
+    endDate: params?.endDate,
+    awbs: params?.awbs,
+    lookbackDays: params?.lookbackDays,
+  });
 
-  for (const item of records) {
-    const order = await findOrderByReference(item.orderId || item.awb);
-    if (!order) {
-      unmatched.push(item.awb || item.orderId || 'Unknown AWB');
-      continue;
-    }
+  const defaultUtr = syncRes.matchedOrders.find((m) => m.utr)?.utr || null;
+  const fileName = `Velocity-Auto-Sync-${new Date().toISOString().slice(0, 10)}`;
 
-    try {
-      const remittedVal = item.remittedAmount || item.codAmount || order.totalAmount;
-      await recordPaymentReceived(order.id, {
-        amount: remittedVal,
-        utr: item.utr || null,
-        ref: item.remittanceRef || 'VEL-REMIT',
-        source: 'Velocity',
-        receivedAt: new Date(item.remittanceDate || Date.now()),
-        actor,
-      });
-      matchedCount++;
-      totalAmount += remittedVal;
-      matchedOrders.push({
-        orderId: order.id,
-        shopifyOrderName: order.shopifyOrderName,
-        waybillNumber: item.awb,
-        amount: remittedVal,
-        utr: item.utr || null,
-        remittanceRef: item.remittanceRef || null,
-        city: order.customerCity || undefined,
-        status: order.status,
-      });
-    } catch (err: any) {
-      notes.push(`Order ${order.shopifyOrderName} (${item.awb}): ${err.message}`);
-    }
-  }
-
-  const fileName = `Velocity-API-Remittance-${new Date().toISOString().slice(0, 10)}`;
-  const defaultRef = records[0]?.remittanceRef || `VEL-BATCH-${Date.now()}`;
-  const defaultUtr = records.find((r) => r.utr)?.utr || null;
-
-  return saveImport(
-    {
-      kind: 'VELOCITY_REMITTANCE',
-      fileName,
-      rowCount: records.length,
-      matchedCount,
-      unmatched,
-      skippedDuplicates: [],
-      remittanceNumber: defaultRef,
-      remittanceDate: new Date().toISOString().slice(0, 10),
-      bankTransactionId: defaultUtr,
-      state: defaultUtr ? 'Completed' : 'Pending',
-      totalRemittance: Math.round(totalAmount * 100) / 100,
-      matchedOrders,
-      columns: {
-        awb: 'awb',
-        utr: 'bank_transaction_id',
-        remittance: 'crn',
-        amount: 'remitted_amount',
-        date: 'remittance_date',
-      },
-      notes:
-        notes.length > 0
-          ? notes
-          : [`Successfully synced ${matchedCount} of ${records.length} records from Velocity API.`],
+  return {
+    importId: syncRes.importId,
+    kind: 'VELOCITY_REMITTANCE',
+    fileName,
+    rowCount: syncRes.awbsChecked,
+    matchedCount: syncRes.matchedCount,
+    unmatched: syncRes.unmatchedAwbs,
+    skippedDuplicates: [],
+    remittanceNumber: `VEL-BATCH-${Date.now()}`,
+    remittanceDate: new Date().toISOString().slice(0, 10),
+    bankTransactionId: defaultUtr,
+    state: defaultUtr ? 'Completed' : 'Pending',
+    totalRemittance: syncRes.totalRemittanceAmount,
+    matchedOrders: syncRes.matchedOrders.map((m) => ({
+      orderId: m.orderId,
+      shopifyOrderName: m.shopifyOrderName,
+      waybillNumber: m.waybillNumber,
+      amount: m.remittedAmount ?? m.codAmount,
+      utr: m.utr || null,
+      remittanceRef: m.remittanceRef || null,
+      city: m.city,
+      status: m.status,
+    })),
+    columns: {
+      awb: 'awb',
+      utr: 'utr_no',
+      remittance: 'remittance_ref',
+      amount: 'cod_amount',
+      date: 'remittance_date',
+      charges: 'shipping_charges',
     },
-    actor?.name || 'Velocity API Auto-Sync'
-  );
+    notes: syncRes.notes,
+  };
 }
 

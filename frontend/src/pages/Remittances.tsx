@@ -134,21 +134,41 @@ export function Remittances() {
       {duplicate && <div className="remittance-warning"><p>This report already exists. Add missing UTRs in history rather than crediting the same rows again.</p><Button className="button-secondary" disabled={upload.isPending} onClick={() => { if (window.confirm('Reprocess this report? Existing payment duplicate guards still apply.')) upload.mutate(true) }}>Reprocess matching data</Button></div>}{outcome && <p role="status">{outcome}</p>}</Panel>}
     <nav className="remittance-provider-nav" aria-label="Settlement providers">{providers.map((name) => <button type="button" key={name} aria-pressed={provider === name} onClick={() => { setProvider(name); setFilter('All statuses'); setExpanded(null) }}>{name}</button>)}</nav>
     {provider === 'Velocity' && (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '10px', marginBottom: '20px', gap: '16px', flexWrap: 'wrap' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-          <img src="/logos/velocity.png" alt="Velocity" style={{ height: '26px', objectFit: 'contain' }} onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none' }} />
+      <>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '10px', marginBottom: '14px', gap: '16px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+            <img src="/logos/velocity.png" alt="Velocity" style={{ height: '26px', objectFit: 'contain' }} onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none' }} />
+            <div>
+              <strong style={{ display: 'block', fontSize: '14px', fontWeight: 650 }}>Velocity Direct Finance & Remittance Sync</strong>
+              <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                Direct API reconciliation active. Velocity payouts and COD settlements sync automatically without downloading or uploading CSVs.
+                {velocityStatus.data?.lastSync && ` • Last synced: ${formatDate(velocityStatus.data.lastSync)} (${velocityStatus.data.matchedCount} matched)`}
+              </span>
+            </div>
+          </div>
+          <Button className="button-primary" loading={velocitySync.isPending} onClick={() => velocitySync.mutate()}>
+            <Icon name="refresh" size={14} /> Run Live Sync
+          </Button>
+        </div>
+        <div className="remittance-metrics" style={{ marginBottom: '20px' }}>
           <div>
-            <strong style={{ display: 'block', fontSize: '14px', fontWeight: 650 }}>Velocity Direct Finance & Remittance Sync</strong>
-            <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
-              Direct API reconciliation active. Velocity payouts and COD settlements sync automatically without downloading or uploading CSVs.
-              {velocityStatus.data?.lastSync && ` • Last synced: ${formatDate(velocityStatus.data.lastSync)} (${velocityStatus.data.matchedCount} matched)`}
-            </span>
+            <span>COD Settled (₹)</span>
+            <strong>{velocityStatus.data?.totalRemittance != null ? formatMoney(velocityStatus.data.totalRemittance) : '₹0.00'}</strong>
+          </div>
+          <div>
+            <span>Audited Freight (₹)</span>
+            <strong>{velocityStatus.data?.totalBilledCharges != null ? formatMoney(velocityStatus.data.totalBilledCharges) : '₹0.00'}</strong>
+          </div>
+          <div>
+            <span>Delivered In Network</span>
+            <strong>{velocityStatus.data?.summaryReport?.delivered?.count ?? 0}</strong>
+          </div>
+          <div>
+            <span>In Transit / OFD</span>
+            <strong>{(velocityStatus.data?.summaryReport?.in_transit?.count || 0) + (velocityStatus.data?.summaryReport?.out_for_delivery?.count || 0)}</strong>
           </div>
         </div>
-        <Button className="button-primary" loading={velocitySync.isPending} onClick={() => velocitySync.mutate()}>
-          <Icon name="refresh" size={14} /> Run Live Sync
-        </Button>
-      </div>
+      </>
     )}
     <Panel><PanelHeading title="Report history & bank evidence" action={<Button className="button-secondary" loading={query.isFetching} onClick={refresh}>Refresh</Button>} />
       <div className="remittance-filters"><FormField label="Find a settlement or order"><input type="search" placeholder="File, order, AWB, UTR or uploader" value={search} onChange={(e) => setSearch(e.target.value)} /></FormField><FormField label="Evidence status"><select value={filter} onChange={(e) => setFilter(e.target.value)}>{['All statuses', 'UTR recorded', 'UTR missing', 'Reconciled', 'Needs matching'].map((s) => <option key={s}>{s}</option>)}</select></FormField></div>

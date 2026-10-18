@@ -3835,35 +3835,37 @@ router.post('/settings/shipping-preferences', async (req: Request, res: Response
   }
 });
 
-// POST /api/velocity/remittance/sync — Direct Live API sync for Velocity COD remittances & wallet
-router.post('/api/velocity/remittance/sync', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+// POST /api/velocity/remittance/sync & /api/velocity/financials/sync — Direct Live API sync for Velocity COD remittances, bank UTRs & wallet charges
+router.post(['/velocity/remittance/sync', '/api/velocity/remittance/sync', '/velocity/financials/sync', '/api/velocity/financials/sync'], async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const actor = req.user;
-    const result = await syncVelocityRemittance(actor, req.body);
+    const { velocityFinancialSyncService } = await import('../modules/velocity/velocity-financial-sync.service');
+    const result = await velocityFinancialSyncService.syncVelocityFinancials({
+      actor,
+      startDate: req.body.startDate,
+      endDate: req.body.endDate,
+      awbs: req.body.awbs,
+      lookbackDays: req.body.lookbackDays,
+    });
     res.json({
       success: true,
-      message: `Velocity Remittance Sync: ${result.matchedCount} of ${result.rowCount} records matched and reconciled.`,
+      message: `Velocity Financial Sync: ${result.matchedCount} orders reconciled (${result.remittancesMatched} remittances, ${result.chargesAudited} freight charge audits).`,
       result,
     });
   } catch (error: any) {
-    logger.error('Velocity remittance sync failed', { error: error.message });
+    logger.error('Velocity financial sync failed', { error: error.message });
     res.status(500).json({ error: error.message });
   }
 });
 
-// GET /api/velocity/remittance/status — Remittance health & latest sync details
-router.get('/api/velocity/remittance/status', async (_req: Request, res: Response): Promise<void> => {
+// GET /api/velocity/remittance/status & /api/velocity/financials/status — Remittance health & latest sync details
+router.get(['/velocity/remittance/status', '/api/velocity/remittance/status', '/velocity/financials/status', '/api/velocity/financials/status'], async (_req: Request, res: Response): Promise<void> => {
   try {
-    const latest = await prisma.reconciliationImport.findFirst({
-      where: { kind: 'VELOCITY_REMITTANCE' as any },
-      orderBy: { createdAt: 'desc' },
-    });
+    const { velocityFinancialSyncService } = await import('../modules/velocity/velocity-financial-sync.service');
+    const overview = await velocityFinancialSyncService.getFinancialOverview();
     res.json({
       success: true,
-      lastSync: latest?.createdAt || null,
-      matchedCount: latest?.matchedCount || 0,
-      totalRemittance: (latest?.summary as any)?.totalRemittance || null,
-      latestBatch: latest?.fileName || null,
+      ...overview,
     });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -3871,7 +3873,7 @@ router.get('/api/velocity/remittance/status', async (_req: Request, res: Respons
 });
 
 // GET /api/velocity/warehouses — List registered warehouses from Velocity
-router.get('/api/velocity/warehouses', async (_req: Request, res: Response): Promise<void> => {
+router.get(['/velocity/warehouses', '/api/velocity/warehouses'], async (_req: Request, res: Response): Promise<void> => {
   try {
     const warehouses = await velocityService.listWarehouses();
     res.json({ success: true, warehouses });
@@ -3881,7 +3883,7 @@ router.get('/api/velocity/warehouses', async (_req: Request, res: Response): Pro
 });
 
 // GET /api/velocity/stores — List registered stores from Velocity
-router.get('/api/velocity/stores', async (_req: Request, res: Response): Promise<void> => {
+router.get(['/velocity/stores', '/api/velocity/stores'], async (_req: Request, res: Response): Promise<void> => {
   try {
     const stores = await velocityService.listStores();
     res.json({ success: true, stores });
@@ -3891,7 +3893,7 @@ router.get('/api/velocity/stores', async (_req: Request, res: Response): Promise
 });
 
 // GET /api/velocity/reports/summary — Live status-based forward & return summary report
-router.get('/api/velocity/reports/summary', async (req: Request, res: Response): Promise<void> => {
+router.get(['/velocity/reports/summary', '/api/velocity/reports/summary'], async (req: Request, res: Response): Promise<void> => {
   try {
     const startDateTime = (req.query.start_date_time as string) || new Date(Date.now() - 30 * 86400000).toISOString();
     const endDateTime = (req.query.end_date_time as string) || new Date().toISOString();
@@ -3909,7 +3911,7 @@ router.get('/api/velocity/reports/summary', async (req: Request, res: Response):
 });
 
 // POST /api/velocity/reports/charges — Per-AWB shipping charges breakdown
-router.post('/api/velocity/reports/charges', async (req: Request, res: Response): Promise<void> => {
+router.post(['/velocity/reports/charges', '/api/velocity/reports/charges'], async (req: Request, res: Response): Promise<void> => {
   try {
     const awbs = req.body.awbs || [];
     if (!Array.isArray(awbs) || awbs.length === 0) {
@@ -3924,7 +3926,7 @@ router.post('/api/velocity/reports/charges', async (req: Request, res: Response)
 });
 
 // POST /api/velocity/reports/cod-remittance — Per-AWB COD remittance details
-router.post('/api/velocity/reports/cod-remittance', async (req: Request, res: Response): Promise<void> => {
+router.post(['/velocity/reports/cod-remittance', '/api/velocity/reports/cod-remittance'], async (req: Request, res: Response): Promise<void> => {
   try {
     const awbs = req.body.awbs || [];
     if (!Array.isArray(awbs) || awbs.length === 0) {
@@ -3939,7 +3941,7 @@ router.post('/api/velocity/reports/cod-remittance', async (req: Request, res: Re
 });
 
 // POST /api/velocity/reports/shipments — Paginated shipments list with operational metadata
-router.post('/api/velocity/reports/shipments', async (req: Request, res: Response): Promise<void> => {
+router.post(['/velocity/reports/shipments', '/api/velocity/reports/shipments'], async (req: Request, res: Response): Promise<void> => {
   try {
     const result = await velocityService.getShipmentsList(req.body);
     res.json({ success: true, ...result });
@@ -3949,7 +3951,7 @@ router.post('/api/velocity/reports/shipments', async (req: Request, res: Respons
 });
 
 // POST /api/velocity/reports/returns — Paginated returns list with QC and refund metadata
-router.post('/api/velocity/reports/returns', async (req: Request, res: Response): Promise<void> => {
+router.post(['/velocity/reports/returns', '/api/velocity/reports/returns'], async (req: Request, res: Response): Promise<void> => {
   try {
     const result = await velocityService.getReturnsList(req.body);
     res.json({ success: true, ...result });

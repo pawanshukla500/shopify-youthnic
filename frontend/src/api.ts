@@ -362,10 +362,22 @@ export async function syncVelocityRemittance(payload?: any): Promise<{ success: 
 
 export async function getVelocityRemittanceStatus(): Promise<{
   success: boolean
+  configured: boolean
   lastSync: string | null
   matchedCount: number
   totalRemittance: number | null
+  totalBilledCharges: number | null
   latestBatch: string | null
+  summaryReport?: {
+    ready_to_ship?: { count: number; sum_of_prepaid_orders: number; sum_of_cod_orders: number }
+    in_transit?: { count: number; sum_of_prepaid_orders: number; sum_of_cod_orders: number }
+    out_for_delivery?: { count: number; sum_of_prepaid_orders: number; sum_of_cod_orders: number }
+    delivered?: { count: number; sum_of_prepaid_orders: number; sum_of_cod_orders: number }
+    ndr?: { count: number; sum_of_prepaid_orders: number; sum_of_cod_orders: number }
+    rto_in_transit?: { count: number; sum_of_prepaid_orders: number; sum_of_cod_orders: number }
+    rto_delivered?: { count: number; sum_of_prepaid_orders: number; sum_of_cod_orders: number }
+    total_shipments?: number
+  } | null
 }> {
   const response = await api.get('/api/velocity/remittance/status')
   return response.data

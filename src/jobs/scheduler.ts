@@ -168,6 +168,33 @@ class Scheduler {
       )
     );
 
+    // 10. Velocity direct financial, remittance & ledger charges sync (automated API sync)
+    this.jobs.push(
+      cron.schedule(
+        config.cron.velocityFinancialSync || '15 */2 * * *',
+        async () => {
+          if (!config.velocity.apiToken || config.velocity.enabled === false) return;
+          logger.info('[CRON] Running Velocity financial and remittance auto-sync...');
+          try {
+            const { velocityFinancialSyncService } = await import(
+              '../modules/velocity/velocity-financial-sync.service'
+            );
+            const res = await velocityFinancialSyncService.syncVelocityFinancials();
+            logger.info('[CRON] Velocity financial sync completed', {
+              matchedOrders: res.matchedCount,
+              remittancesMatched: res.remittancesMatched,
+              chargesAudited: res.chargesAudited,
+              totalRemittance: res.totalRemittanceAmount,
+              totalCharges: res.totalBilledCharges,
+            });
+          } catch (error: any) {
+            logger.error('[CRON] Velocity financial sync failed', { error: error.message });
+          }
+        },
+        { timezone: 'Asia/Kolkata' }
+      )
+    );
+
     logger.info('Scheduler started successfully', {
       orderSync: config.cron.orderSync,
       trackingSync: config.cron.trackingSync,
@@ -176,6 +203,7 @@ class Scheduler {
       accountsReport: `${config.accounts.reportCron} (IST)`,
       shippingCostEstimate: config.cron.shippingCostEstimate,
       gatewaySettlementSync: `${config.cron.gatewaySettlementSync} (IST)`,
+      velocityFinancialSync: `${config.cron.velocityFinancialSync || '15 */2 * * *'} (IST)`,
     });
   }
 

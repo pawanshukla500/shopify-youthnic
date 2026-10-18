@@ -151,6 +151,7 @@ export const config = {
     warehouseId: optional('VELOCITY_WAREHOUSE_ID', ''),
     webhookSecret: optional('VELOCITY_WEBHOOK_SECRET', ''),
     enabled: optional('VELOCITY_ENABLED', 'true') === 'true',
+    autoFinancialSync: optional('VELOCITY_AUTO_FINANCIAL_SYNC', 'true') === 'true',
   },
 
   // Multi-carrier Shipping Configuration & Priority
@@ -277,6 +278,8 @@ export const config = {
     returnScanSync: optional('CRON_RETURN_SCAN_SYNC', '*/30 * * * *'),
     // Send daily manual COD refund digest email to listings@vbexports.co.in
     codRefundDigest: optional('CRON_COD_REFUND_DIGEST', '0 10 * * *'),
+    // Velocity direct financial & remittance sync (COD remittances, bank UTRs, and freight charges)
+    velocityFinancialSync: optional('CRON_VELOCITY_FINANCIAL_SYNC', '15 */2 * * *'),
   },
 
   // Tracking sync resilience — prevents Delhivery 429 fallback during large backlogs.

@@ -702,6 +702,90 @@ export class KwikEngageService {
   }
 
   /**
+   * Build positional template parameters matching the approved Meta WhatsApp Utility Templates.
+   */
+  buildTriggerTemplateParams(
+    trigger: KwikEngageTriggerType,
+    order: {
+      customerName: string;
+      shopifyOrderName: string;
+      totalAmount: number;
+      paymentMethod?: string | null;
+      customerAddress?: string;
+      customerCity?: string;
+      customerState?: string;
+      customerPincode?: string;
+    },
+    extra?: {
+      waybillNumber?: string;
+      courierName?: string;
+      currentLocation?: string;
+      delayReason?: string;
+      newEstimatedDelivery?: string;
+      ndrReason?: string;
+      itemsSummary?: string;
+      customText?: string;
+    }
+  ): string[] {
+    const customer = order.customerName || 'Valued Customer';
+    const orderNo = order.shopifyOrderName || 'Order';
+    const amount = Math.round(order.totalAmount || 0).toString();
+    const waybill = extra?.waybillNumber || '';
+    const courier = extra?.courierName || 'Delhivery Express';
+    const city = order.customerCity || order.customerState || 'your address';
+
+    switch (trigger) {
+      case 'ORDER_CONFIRMED':
+      case 'COD_CONFIRMATION':
+        return [customer, orderNo, amount, city];
+
+      case 'ORDER_SHIPPED':
+      case 'IN_TRANSIT':
+        return [customer, orderNo, courier, waybill];
+
+      case 'OUT_FOR_DELIVERY':
+        return [
+          customer,
+          orderNo,
+          courier,
+          order.paymentMethod === 'COD' ? `₹${amount} (Cash/UPI)` : 'Prepaid (Already Paid)',
+        ];
+
+      case 'DELIVERED':
+        return [customer, orderNo];
+
+      case 'TRANSIT_DELAY':
+        return [
+          customer,
+          orderNo,
+          extra?.delayReason || 'Logistics routing transit check',
+          extra?.newEstimatedDelivery || 'Within 2 business days',
+          waybill,
+        ];
+
+      case 'NDR_ALERT':
+      case 'RTO_INITIATED':
+        return [
+          customer,
+          orderNo,
+          extra?.ndrReason || 'Customer unreachable / premises closed',
+          waybill,
+        ];
+
+      case 'REFUND_PROCESSED':
+        return [
+          customer,
+          amount,
+          orderNo,
+          'Original Payment Method (GoKwik / Easebuzz)',
+        ];
+
+      default:
+        return [customer, orderNo, amount, waybill];
+    }
+  }
+
+  /**
    * Primary entry point: Send critical trigger WhatsApp message and record in DB.
    * If customer is outside 24h window and template is configured, attempts template dispatch.
    */
@@ -796,12 +880,7 @@ export class KwikEngageService {
       const configuredTemplate = templateMap[trigger];
       if (configuredTemplate) {
         logger.info(`Recipient ${recipient} is outside 24h window; attempting configured template: ${configuredTemplate}`);
-        const templateParams = [
-          order.customerName || 'Valued Customer',
-          order.shopifyOrderName || '',
-          Math.round(order.totalAmount || 0).toString(),
-          extra?.waybillNumber || '',
-        ];
+        const templateParams = this.buildTriggerTemplateParams(trigger, order, extra);
         const templateResult = await this.sendTemplateMessage(
           order.customerPhone,
           configuredTemplate,

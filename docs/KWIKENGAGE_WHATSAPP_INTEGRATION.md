@@ -164,25 +164,134 @@ npx tsx scripts/test-whatsapp-kwikengage.ts 919426279142
 
 ---
 
-## 6. Registering Utility Templates in KwikEngage Dashboard
+## 6. Official Meta WhatsApp Utility Templates (Ready to Copy-Paste)
 
-To send outbound WhatsApp notifications to customers at any time (without waiting for them to text you first):
+In your **KwikEngage Dashboard** ([app.kwikengage.ai](https://app.kwikengage.ai)), go to:
+**Templates** -> **WhatsApp Templates** -> **Create Template**
 
-1. Log into your **KwikEngage Dashboard**: [app.kwikengage.ai](https://app.kwikengage.ai)
-2. Go to **Templates** -> **WhatsApp Templates** -> **Create Template**.
-3. Choose Category: **Utility**.
-4. Set Template Name to match `.env`:
-   - `youthnic_order_confirmed`
-   - `youthnic_order_dispatched`
-   - `youthnic_out_for_delivery`
-   - `youthnic_order_delivered`
-   - `youthnic_transit_delay`
-   - `youthnic_ndr_reschedule`
-   - `youthnic_refund_processed`
-5. Use placeholders `{{1}}`, `{{2}}`, `{{3}}` for variables (Customer Name, Order Name, Amount, Tracking Link).
-6. Submit for Meta approval (Meta usually approves Utility templates within 5-15 minutes).
+> [!IMPORTANT]
+> - **Category:** Always select **UTILITY** (for fast approval and lowest Meta delivery pricing).
+> - **Language:** `English` (`en` or `en_US`).
 
-Once approved, our code automatically detects and routes notifications through these templates!
+---
+
+### Template 1: `youthnic_order_confirmed`
+- **Category:** Utility
+- **Header:** None (or Text: `Youthnic Order Confirmation`)
+- **Body Text:**
+```text
+Hi {{1}}, thank you for shopping with Youthnic! Your order {{2}} for ₹{{3}} has been confirmed. Delivery to: {{4}}. We are packaging your items for immediate dispatch from our Surat Hub.
+```
+- **Footer (Optional):** `Youthnic · Surat Fulfillment Center`
+- **Sample Values:**
+  - `{{1}}`: `Pawan Shukla`
+  - `{{2}}`: `#26YOU5752`
+  - `{{3}}`: `1499`
+  - `{{4}}`: `Surat, Gujarat`
+
+---
+
+### Template 2: `youthnic_order_dispatched`
+- **Category:** Utility
+- **Header:** None (or Text: `Shipment Dispatched`)
+- **Body Text:**
+```text
+Hi {{1}}, your Youthnic order {{2}} has been dispatched via {{3}}! Tracking AWB: {{4}}. Expected delivery is 2 to 4 business days.
+```
+- **Buttons (Optional):**
+  - **Type:** URL Button
+  - **Button Text:** `Track Package`
+  - **URL:** `https://www.delhivery.com/track/package/` (Dynamic: `{{1}}`)
+- **Sample Values:**
+  - `{{1}}`: `Pawan Shukla`
+  - `{{2}}`: `#26YOU5752`
+  - `{{3}}`: `Delhivery Express`
+  - `{{4}}`: `30100810010054`
+
+---
+
+### Template 3: `youthnic_out_for_delivery`
+- **Category:** Utility
+- **Header:** None (or Text: `Out For Delivery Today`)
+- **Body Text:**
+```text
+Hi {{1}}, your Youthnic parcel for order {{2}} is OUT FOR DELIVERY today via {{3}}. Payment info: {{4}}. Please keep your phone reachable for smooth doorstep delivery.
+```
+- **Footer (Optional):** `Youthnic Express Delivery`
+- **Sample Values:**
+  - `{{1}}`: `Pawan Shukla`
+  - `{{2}}`: `#26YOU5752`
+  - `{{3}}`: `Delhivery Express`
+  - `{{4}}`: `₹1499 (Cash / UPI QR)`
+
+---
+
+### Template 4: `youthnic_order_delivered`
+- **Category:** Utility
+- **Header:** None (or Text: `Delivered Successfully`)
+- **Body Text:**
+```text
+Hi {{1}}, your Youthnic order {{2}} has been successfully delivered! We hope you love your new ethnic wear. Thank you for choosing Youthnic!
+```
+- **Footer (Optional):** `Youthnic Customer Care`
+- **Buttons (Optional):**
+  - **Type:** Quick Reply Button
+  - **Button Text:** `Need Size Help`
+- **Sample Values:**
+  - `{{1}}`: `Pawan Shukla`
+  - `{{2}}`: `#26YOU5752`
+
+---
+
+### Template 5: `youthnic_transit_delay`
+- **Category:** Utility
+- **Header:** None (or Text: `Shipment Transit Update`)
+- **Body Text:**
+```text
+Hi {{1}}, your Youthnic order {{2}} is experiencing a brief transit delay due to: {{3}}. Revised estimated delivery: {{4}}. Tracking AWB: {{5}}. Our logistics team is actively tracking your shipment.
+```
+- **Footer (Optional):** `Youthnic Logistics Support`
+- **Sample Values:**
+  - `{{1}}`: `Pawan Shukla`
+  - `{{2}}`: `#26YOU5752`
+  - `{{3}}`: `Logistics routing transit check`
+  - `{{4}}`: `Within 2 business days`
+  - `{{5}}`: `30100810010054`
+
+---
+
+### Template 6: `youthnic_ndr_reschedule`
+- **Category:** Utility
+- **Header:** None (or Text: `Delivery Attempt Unsuccessful`)
+- **Body Text:**
+```text
+Hi {{1}}, a delivery attempt for your Youthnic order {{2}} was unsuccessful (Reason: {{3}}). AWB: {{4}}. Please click below or reply to reschedule your delivery before the package returns to Surat.
+```
+- **Buttons (Optional):**
+  - **Type:** URL Button
+  - **Button Text:** `Reschedule Delivery`
+  - **URL:** `https://www.delhivery.com/track/package/`
+- **Sample Values:**
+  - `{{1}}`: `Pawan Shukla`
+  - `{{2}}`: `#26YOU5752`
+  - `{{3}}`: `Customer unreachable / premises closed`
+  - `{{4}}`: `30100810010054`
+
+---
+
+### Template 7: `youthnic_refund_processed`
+- **Category:** Utility
+- **Header:** None (or Text: `Refund Processed`)
+- **Body Text:**
+```text
+Hi {{1}}, a refund of ₹{{2}} for your Youthnic order {{3}} has been processed successfully to your {{4}}. The amount will reflect in your account within 2 to 4 business days.
+```
+- **Footer (Optional):** `Youthnic Accounts Team`
+- **Sample Values:**
+  - `{{1}}`: `Pawan Shukla`
+  - `{{2}}`: `1499`
+  - `{{3}}`: `#26YOU5752`
+  - `{{4}}`: `Original Payment Method (GoKwik / Easebuzz)`
 
 ---
 

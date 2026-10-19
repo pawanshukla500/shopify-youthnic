@@ -178,12 +178,86 @@ describe('Velocity Shipping Integration', () => {
           order_id: '1001-101',
           payment_method: 'COD',
           sub_total: 999,
+          payment_mode: 'cod',
+          cod_amount: 999,
           shipping_pincode: '400001',
           weight: 0.5,
         })
       );
       expect(result.awbCode).toBe('VEL123456789IN');
       expect(result.labelUrl).toContain('VEL123456789IN.pdf');
+    });
+
+    it('creates prepaid forward shipment orchestration with cod_amount: 0 and payment_mode: prepaid', async () => {
+      mockAxios.post.mockResolvedValueOnce({
+        data: {
+          success: true,
+          data: {
+            order_id: 'ORD-102',
+            shipment_id: 'SH-556',
+            awb_code: 'VEL987654321IN',
+            courier_name: 'Velocity Standard',
+            label_url: 'https://shazam.velocity.in/labels/VEL987654321IN.pdf',
+          },
+        },
+      });
+
+      const mockPrepaidOrder: any = {
+        id: 102,
+        shopifyOrderId: '1002',
+        shopifyOrderName: '#1002',
+        customerName: 'Priya Patel',
+        customerPhone: '9825012345',
+        customerAddress: 'Station Road',
+        customerCity: 'Surat',
+        customerState: 'Gujarat',
+        customerPincode: '395002',
+        paymentMethod: 'Prepaid',
+        totalAmount: 1499,
+        items: [{ id: 2, title: 'Cotton Kurta', sku: 'KRT-01', quantity: 1, price: 1499 }],
+      };
+
+      const result = await service.createForwardShipment(mockPrepaidOrder);
+
+      expect(mockAxios.post).toHaveBeenCalledWith(
+        '/custom/api/v1/forward-order-orchestration',
+        expect.objectContaining({
+          payment_method: 'PREPAID',
+          payment_mode: 'prepaid',
+          cod_amount: 0,
+          sub_total: 1499,
+        })
+      );
+      expect(result.awbCode).toBe('VEL987654321IN');
+    });
+
+    it('surfaces Velocity meta.message on 400 error instead of generic Axios message', async () => {
+      mockAxios.post.mockRejectedValueOnce({
+        response: {
+          status: 400,
+          data: {
+            meta: {
+              status: 400,
+              success: false,
+              message: 'COD amount must be greater than 0 for unpaid orders',
+              details: 'COD amount must be greater than 0 for unpaid orders',
+            },
+          },
+        },
+      });
+
+      const mockOrder: any = {
+        id: 103,
+        shopifyOrderId: '1003',
+        shopifyOrderName: '#1003',
+        customerName: 'Test',
+        paymentMethod: 'COD',
+        totalAmount: 500,
+      };
+
+      await expect(service.createForwardShipment(mockOrder)).rejects.toThrow(
+        'Velocity error (400): COD amount must be greater than 0 for unpaid orders'
+      );
     });
 
     it('tracks single shipment and parses activities', async () => {

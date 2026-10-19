@@ -223,7 +223,7 @@ export class VelocityService {
       return {
         serviceable: false,
         couriers: [],
-        remark: data?.message || resObj?.remark || 'Serviceability check failed',
+        remark: data?.meta?.message || data?.meta?.details || data?.message || resObj?.remark || 'Serviceability check failed',
         raw: data,
       };
     } catch (error: any) {
@@ -235,7 +235,7 @@ export class VelocityService {
       return {
         serviceable: false,
         couriers: [],
-        remark: error.response?.data?.message || error.message,
+        remark: error.response?.data?.meta?.message || error.response?.data?.meta?.details || error.response?.data?.message || error.message,
       };
     }
   }
@@ -331,6 +331,8 @@ export class VelocityService {
       warehouse_id: warehouseId,
       order_items: orderItems,
       payment_method: isCod ? 'COD' : 'PREPAID',
+      payment_mode: isCod ? 'cod' : 'prepaid',
+      cod_amount: isCod ? Math.max(1, Math.round(order.totalAmount)) : 0,
       sub_total: Math.max(1, Math.round(order.totalAmount)),
       total_discount: Math.round(order.totalDiscounts || 0),
       length,
@@ -345,6 +347,8 @@ export class VelocityService {
       shopifyOrderName: order.shopifyOrderName,
       warehouseId,
       paymentMethod: payload.payment_method,
+      paymentMode: payload.payment_mode,
+      codAmount: payload.cod_amount,
     });
 
     try {
@@ -369,18 +373,30 @@ export class VelocityService {
         };
       }
 
-      const errMsg = data?.message || data?.error || JSON.stringify(data);
+      const errMsg =
+        data?.meta?.message ||
+        data?.meta?.details ||
+        data?.message ||
+        data?.error ||
+        JSON.stringify(data);
       throw new Error(`Velocity shipment creation failed: ${errMsg}`);
     } catch (error: any) {
       const respData = error.response?.data;
-      const msg = respData?.message || respData?.error || error.message;
+      const msg =
+        respData?.meta?.message ||
+        respData?.meta?.details ||
+        respData?.message ||
+        respData?.error ||
+        respData?.detail ||
+        (Array.isArray(respData?.errors) ? respData.errors.join(', ') : undefined) ||
+        error.message;
       logger.error('Velocity forward shipment creation error', {
         orderId: order.id,
         status: error.response?.status,
         data: respData,
         error: msg,
       });
-      throw new Error(`Velocity error (${error.response?.status || 500}): ${msg}`);
+      throw new Error(`Velocity error (${error.response?.status || 500}): ${typeof msg === 'object' ? JSON.stringify(msg) : msg}`);
     }
   }
 
@@ -483,9 +499,10 @@ export class VelocityService {
         message: data?.message || 'Cancellation request accepted',
       };
     } catch (error: any) {
-      const msg = error.response?.data?.message || error.message;
+      const respData = error.response?.data;
+      const msg = respData?.meta?.message || respData?.meta?.details || respData?.message || error.message;
       logger.warn('Velocity cancellation failed', { awb, error: msg });
-      return { success: false, cancelled: false, message: msg };
+      return { success: false, cancelled: false, message: typeof msg === 'object' ? JSON.stringify(msg) : msg };
     }
   }
 

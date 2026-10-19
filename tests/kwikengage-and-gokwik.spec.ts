@@ -194,6 +194,42 @@ describe('KwikEngage Service (Official WhatsApp API)', () => {
       expect(dispatchDelayMsg).toContain('Surat Fulfillment Center');
     });
 
+    it('builds approved template parameters accurately matching Meta approved schemas', () => {
+      const order = {
+        customerName: 'Pawan Shukla',
+        shopifyOrderName: '#26YOU5752',
+        totalAmount: 1499,
+        paymentMethod: 'Prepaid',
+        customerCity: 'Surat',
+      };
+
+      const confirmedParams = kwikengageService.buildTriggerTemplateParams('ORDER_CONFIRMED', order);
+      expect(confirmedParams).toEqual(['Pawan Shukla', '#26YOU5752', '1499', 'Surat']);
+
+      const shippedParams = kwikengageService.buildTriggerTemplateParams('ORDER_SHIPPED', order, {
+        courierName: 'Delhivery Express',
+        waybillNumber: '30100810010054',
+      });
+      expect(shippedParams).toEqual(['Pawan Shukla', '#26YOU5752', 'Delhivery Express', '30100810010054']);
+
+      const ofdParams = kwikengageService.buildTriggerTemplateParams('OUT_FOR_DELIVERY', order, {
+        courierName: 'Delhivery Express',
+      });
+      expect(ofdParams).toEqual(['Pawan Shukla', '#26YOU5752', 'Delhivery Express', 'Prepaid (Already Paid)']);
+
+      const deliveredParams = kwikengageService.buildTriggerTemplateParams('DELIVERED', order);
+      expect(deliveredParams).toEqual(['Pawan Shukla', '#26YOU5752']);
+
+      const ndrParams = kwikengageService.buildTriggerTemplateParams('NDR_ALERT', order, {
+        ndrReason: 'Customer unreachable / premises closed',
+        waybillNumber: '30100810010054',
+      });
+      expect(ndrParams).toEqual(['Pawan Shukla', '#26YOU5752', 'Customer unreachable / premises closed', '30100810010054']);
+
+      const refundParams = kwikengageService.buildTriggerTemplateParams('REFUND_PROCESSED', order);
+      expect(refundParams).toEqual(['Pawan Shukla', '#26YOU5752', '1499', 'Original Payment Method (GoKwik / Easebuzz)']);
+    });
+
     it('falls back to simulation mode cleanly when API key is missing', async () => {
       config.kwikengage.apiKey = '';
 
@@ -202,6 +238,73 @@ describe('KwikEngage Service (Official WhatsApp API)', () => {
       expect(res.simulated).toBe(true);
       expect(res.messageId).toMatch(/^kwikengage_sim_/);
       expect(clientPost).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('KwikEngage Delivery Flow Coordination', () => {
+    it('skips duplicate WhatsApp dispatch when KwikEngage automated journey flow is active', async () => {
+      const sendTriggerSpy = vi.spyOn(kwikengageService, 'sendCriticalTrigger');
+      config.kwikengage.flowOrderDeliveredActive = true;
+      config.kwikengage.dispatchDelivered = true;
+
+      const notificationEngine = (await import('../src/modules/notifications/notification.service')).default;
+      const sendEmailSpy = vi.spyOn(notificationEngine as any, 'sendLifecycleEmail').mockResolvedValue(undefined);
+
+      const mockOrder: any = {
+        id: 999,
+        customerName: 'Pawan Shukla',
+        customerPhone: '9426279142',
+        shopifyOrderName: '#26YOU5752',
+        totalAmount: 1499,
+        customerEmail: 'pawan@example.com',
+      };
+
+      await notificationEngine.notifyDelivered(mockOrder, '30100810010054');
+
+      expect(sendTriggerSpy).not.toHaveBeenCalled();
+      expect(sendEmailSpy).toHaveBeenCalledWith(mockOrder, 'DELIVERED', {
+        waybillNumber: '30100810010054',
+        courier: 'Delhivery Express',
+      });
+
+      sendTriggerSpy.mockRestore();
+      sendEmailSpy.mockRestore();
+    });
+
+    it('dispatches WhatsApp template when KwikEngage automated flow is disabled and dispatchDelivered is true', async () => {
+      const sendTriggerSpy = vi.spyOn(kwikengageService, 'sendCriticalTrigger').mockResolvedValue({
+        success: true,
+        provider: 'KWIKENGAGE_WHATSAPP',
+        recipient: '919426279142',
+      });
+      config.kwikengage.flowOrderDeliveredActive = false;
+      config.kwikengage.dispatchDelivered = true;
+
+      const notificationEngine = (await import('../src/modules/notifications/notification.service')).default;
+      const sendEmailSpy = vi.spyOn(notificationEngine as any, 'sendLifecycleEmail').mockResolvedValue(undefined);
+
+      const mockOrder: any = {
+        id: 999,
+        customerName: 'Pawan Shukla',
+        customerPhone: '9426279142',
+        shopifyOrderName: '#26YOU5752',
+        totalAmount: 1499,
+        customerEmail: 'pawan@example.com',
+      };
+
+      await notificationEngine.notifyDelivered(mockOrder, '30100810010054');
+
+      expect(sendTriggerSpy).toHaveBeenCalledWith('DELIVERED', mockOrder, {
+        waybillNumber: '30100810010054',
+        courierName: 'Delhivery Express',
+      });
+      expect(sendEmailSpy).toHaveBeenCalledWith(mockOrder, 'DELIVERED', {
+        waybillNumber: '30100810010054',
+        courier: 'Delhivery Express',
+      });
+
+      sendTriggerSpy.mockRestore();
+      sendEmailSpy.mockRestore();
     });
   });
 

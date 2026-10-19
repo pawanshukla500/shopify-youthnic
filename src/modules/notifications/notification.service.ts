@@ -1,4 +1,5 @@
 import prisma from '../../database/prisma';
+import { config } from '../../config';
 import kwikengageService from '../whatsapp/kwikengage.service';
 import resendService, { EmailTemplateType } from '../email/resend.service';
 import logger from '../../utils/logger';
@@ -205,17 +206,30 @@ class NotificationEngine {
 
   /**
    * Delivered — sent when tracking shows delivery confirmation.
-   * Dispatches WhatsApp delivery confirmation + Email delivery confirmation.
+   * If KwikEngage automated Journey Flow is active (KWIKENGAGE_FLOW_ORDER_DELIVERED_ACTIVE=true),
+   * WhatsApp dispatch is handled by KwikEngage's native flow to prevent duplicate messages.
+   * Dispatches Email delivery confirmation via Resend.
    */
   async notifyDelivered(order: Order, waybillNumber?: string): Promise<void> {
-    try {
-      await kwikengageService.sendCriticalTrigger('DELIVERED', order, {
-        waybillNumber,
-        courierName: 'Delhivery Express',
+    const shouldSendWhatsAppDelivered =
+      config.kwikengage.dispatchDelivered && !config.kwikengage.flowOrderDeliveredActive;
+
+    if (shouldSendWhatsAppDelivered) {
+      try {
+        await kwikengageService.sendCriticalTrigger('DELIVERED', order, {
+          waybillNumber,
+          courierName: 'Delhivery Express',
+        });
+      } catch (err) {
+        logger.warn('KwikEngage send failed for DELIVERED', { err });
+      }
+    } else {
+      logger.info('Skipping OMS KwikEngage WhatsApp delivery dispatch (managed by KwikEngage native Journey Flow)', {
+        orderId: order.id,
+        orderName: order.shopifyOrderName,
       });
-    } catch (err) {
-      logger.warn('KwikEngage send failed for DELIVERED', { err });
     }
+
     await this.sendLifecycleEmail(order, 'DELIVERED', {
       waybillNumber,
       courier: 'Delhivery Express',

@@ -170,6 +170,8 @@ export const config = {
     senderPhone: optional('KWIKENGAGE_SENDER_PHONE', optional('KWIKENAGE_SENDER_PHONE', '+91 79849 84563')),
     wabaId: optional('KWIKENGAGE_WABA_ID', '1173075567986214'),
     enabled: optional('KWIKENGAGE_ENABLED', 'true') === 'true',
+    dispatchDelivered: optional('KWIKENGAGE_DISPATCH_DELIVERED', 'true') === 'true',
+    flowOrderDeliveredActive: optional('KWIKENGAGE_FLOW_ORDER_DELIVERED_ACTIVE', 'true') === 'true',
     templates: {
       orderConfirmed: optional('KWIKENGAGE_TEMPLATE_ORDER_CONFIRMED', optional('KWIKENAGE_TEMPLATE_ORDER_CONFIRMED', 'youthnic_order_confirmed')),
       codConfirmation: optional('KWIKENGAGE_TEMPLATE_COD_CONFIRMATION', 'youthnic_cod_confirmation'),

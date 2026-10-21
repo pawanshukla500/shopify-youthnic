@@ -11,34 +11,50 @@
  * must never be polled against the Delhivery tracking API.
  */
 export const DELHIVERY_COURIER_PATTERN = /delhivery/i;
-export const VELOCITY_COURIER_PATTERN = /velocity|shipfastt|amazon|ats/i;
+export const VELOCITY_COURIER_PATTERN = /(velocity|shipfastt|\bamazon\b|\bats\b)/i;
 
 /**
  * True when the courier name, tracking URL, or waybill number matches Velocity Shipping.
+ * Explicitly guards against AWS S3 URLs (*.amazonaws.com) used by Delhivery.
  */
 export function isVelocityCourier(
   courier?: string | null,
   trackingUrl?: string | null,
   waybillNumber?: string | null
 ): boolean {
-  if (VELOCITY_COURIER_PATTERN.test(courier || '')) return true;
-  if (VELOCITY_COURIER_PATTERN.test(trackingUrl || '')) return true;
-  if (
-    trackingUrl &&
-    /velocityshipping\.in|shipfastt\.in|shazam\.velocity\.in|velocity-shazam|labels\/amazon|labels\/velocity/i.test(
-      trackingUrl
-    )
-  ) {
-    return true;
+  const c = (courier || '').trim();
+  const url = (trackingUrl || '').trim();
+  const wb = (waybillNumber || '').trim();
+
+  // If explicitly identified as Delhivery by courier name or URL, it is NEVER direct Velocity
+  if (DELHIVERY_COURIER_PATTERN.test(c) || (url && /delhivery/i.test(url))) {
+    return false;
   }
-  if (waybillNumber && /^(PD|VEHR|VEL)[0-9A-Z]+$/i.test(waybillNumber.trim())) return true;
+
+  // Check courier name (Velocity, Shipfastt, Amazon / ATS)
+  if (VELOCITY_COURIER_PATTERN.test(c)) return true;
+
+  // Check tracking / label URL specifically (avoid matching generic amazonaws.com host)
+  if (url) {
+    if (
+      /velocityshipping\.in|shipfastt\.in|shazam\.velocity\.in|velocity-shazam|ship\.amazon\.in|track\.amazon\.in|\/labels\/amazon\/|\/labels\/velocity\//i.test(
+        url
+      )
+    ) {
+      return true;
+    }
+  }
+
+  // Velocity specific waybill prefixes
+  if (wb && /^(PD|VEHR|VEL)[0-9A-Z]+$/i.test(wb)) return true;
+
   return false;
 }
 
 /**
  * True when the courier name, tracking URL, or waybill number matches Delhivery.
  * - Courier name contains "delhivery" (case-insensitive)
- * - Tracking URL contains "delhivery" (e.g. delhivery.com/track)
+ * - Tracking URL contains "delhivery" (e.g. delhivery.com/track, delhivery-express.s3.amazonaws.com)
  * - Or waybill is a 12-15 digit numeric format and courier is generic, blank, or an external OMS marker (e.g. OMS Guru)
  */
 export function isDelhiveryCourier(
@@ -46,30 +62,36 @@ export function isDelhiveryCourier(
   trackingUrl?: string | null,
   waybillNumber?: string | null
 ): boolean {
+  const c = (courier || '').trim();
+  const url = (trackingUrl || '').trim();
+  const wb = (waybillNumber || '').trim();
+
+  // If courier explicitly contains delhivery or url contains delhivery
+  if (DELHIVERY_COURIER_PATTERN.test(c) || (url && /delhivery/i.test(url))) {
+    return true;
+  }
+
   // If explicitly identified as Velocity, it is not direct Delhivery
   if (isVelocityCourier(courier, trackingUrl, waybillNumber)) {
     return false;
   }
 
-  if (DELHIVERY_COURIER_PATTERN.test(courier || '')) return true;
-  if (DELHIVERY_COURIER_PATTERN.test(trackingUrl || '')) return true;
-
   // Guard against known third-party couriers
   if (
-    courier &&
+    c &&
     /bluedart|blue dart|dtdc|ekart|e-kart|shadowfax|xpressbees|xpress bees|ecom express|india post|speed post|smartr|amazon|velocity/i.test(
-      courier
+      c
     )
   ) {
     return false;
   }
 
   // If waybill is 12-15 digits and courier is generic, absent, or external OMS (e.g. OMS Guru)
-  if (waybillNumber && /^[0-9]{12,15}$/.test(waybillNumber.trim())) {
+  if (wb && /^[0-9]{12,15}$/.test(wb)) {
     if (
-      !courier ||
+      !c ||
       /^(other|surface|express|standard|delhivery|courier|oms\s*guru|omsguru|oms|custom|manual|api|shipway|unicommerce|logistics)$/i.test(
-        courier.trim()
+        c
       )
     ) {
       return true;
@@ -100,6 +122,9 @@ export function normalizeCourierName(
 
   if (isVelocityCourier(courier, trackingUrl, waybillNumber)) {
     if (courier && /amazon|ats/i.test(courier)) return 'Amazon Transportation';
+    if (courier && /bluedart|blue dart/i.test(courier)) return 'Blue Dart';
+    if (courier && /ekart/i.test(courier)) return 'Ekart';
+    if (trackingUrl && /labels\/amazon/i.test(trackingUrl)) return 'Amazon Transportation';
     return 'Velocity';
   }
 

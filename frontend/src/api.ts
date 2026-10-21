@@ -1087,11 +1087,17 @@ export async function downloadBulkLabelsDirectFile(orderIds: number[]): Promise<
     { responseType: 'blob' }
   )
   const rawDisposition = response.headers?.['content-disposition']
+  const contentType = (response.headers?.['content-type'] as string) || ''
+  const isPdf =
+    contentType.includes('application/pdf') ||
+    (typeof rawDisposition === 'string' && /.pdf/i.test(rawDisposition))
   const filename = filenameFromDisposition(
     typeof rawDisposition === 'string' ? rawDisposition : undefined,
-    `Bulk-Labels-${orderIds.length}-Orders.html`
+    `Bulk-Labels-${orderIds.length}-Orders.${isPdf ? 'pdf' : 'html'}`
   )
-  const blob = new Blob([response.data], { type: 'text/html;charset=utf-8' })
+  const blob = new Blob([response.data], {
+    type: isPdf ? 'application/pdf' : 'text/html;charset=utf-8',
+  })
   const url = window.URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
@@ -1167,11 +1173,17 @@ export async function downloadBulkLabelsAndInvoicesDirectFile(orderIds: number[]
     { responseType: 'blob' }
   )
   const rawDisposition = response.headers?.['content-disposition']
+  const contentType = (response.headers?.['content-type'] as string) || ''
+  const isPdf =
+    contentType.includes('application/pdf') ||
+    (typeof rawDisposition === 'string' && /.pdf/i.test(rawDisposition))
   const filename = filenameFromDisposition(
     typeof rawDisposition === 'string' ? rawDisposition : undefined,
-    `Bulk-Labels-And-Invoices-${orderIds.length}-Orders.html`
+    `Bulk-Labels-And-Invoices-${orderIds.length}-Orders.${isPdf ? 'pdf' : 'html'}`
   )
-  const blob = new Blob([response.data], { type: 'text/html;charset=utf-8' })
+  const blob = new Blob([response.data], {
+    type: isPdf ? 'application/pdf' : 'text/html;charset=utf-8',
+  })
   const url = window.URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url

@@ -65,20 +65,25 @@ export class ShippingLabelService {
     const isAmazon =
       isVelocity &&
       (/amazon|ats/i.test(courierRaw) ||
-        !courierRaw ||
-        /velocity/i.test(courierRaw) ||
-        /amazon/i.test(order.shipment?.labelUrl || ''));
+        /labels\/amazon/i.test(order.shipment?.labelUrl || ''));
     const isBlueDart = isVelocity && /bluedart|blue dart/i.test(courierRaw);
     const isEkart = isVelocity && /ekart/i.test(courierRaw);
 
     const isCod = order.paymentMethod === 'COD' || order.shipment?.paymentMode === 'COD';
     const totalAmount = order.totalAmount || 0;
 
+    const city = (order.customerCity || 'City').trim();
+    const state = (order.customerState || (order as any).customerProvince || 'State').trim();
+
     const sortCode = isVelocity
       ? isAmazon
         ? `AMZN / ${order.customerPincode}`
-        : `VEL / ${order.customerPincode}`
-      : this.getSortCode(order.customerPincode, order.customerCity, order.customerState);
+        : isBlueDart
+          ? `BLUEDART / ${order.customerPincode}`
+          : isEkart
+            ? `EKART / ${order.customerPincode}`
+            : `VEL / ${order.customerPincode}`
+      : this.getSortCode(order.customerPincode, city, state);
 
     const barcodeSvg = generateCode128Svg(waybillNumber, { width: 330, height: 68 });
     const orderBarcodeSvg = generateCode128Svg(order.shopifyOrderName.replace('#', ''), {
@@ -180,7 +185,7 @@ export class ShippingLabelService {
           <div class="split-col-left consignee-col">
             <div class="ship-to-header">Ship to - <strong class="consignee-name">${order.customerName}</strong></div>
             <div class="consignee-addr">${order.customerAddress}</div>
-            <div class="consignee-geo"><strong>${order.customerCity.toUpperCase()} (${order.customerState.toUpperCase()})</strong></div>
+            <div class="consignee-geo"><strong>${city.toUpperCase()} (${state.toUpperCase()})</strong></div>
             <div class="consignee-pin"><strong>PIN - ${order.customerPincode}</strong></div>
             <div class="consignee-phone">Phone: ${this.formatPhone(order.customerPhone)}</div>
           </div>
@@ -291,7 +296,10 @@ export class ShippingLabelService {
 
     const labelsHtml = orderList
       .map(({ order, waybillNumber, pdfBuffer }) => {
-        const pdfBase64 = pdfBuffer && pdfBuffer.length > 50 ? pdfBuffer.toString('base64') : '';
+        const isVel = isVelocityCourier(order.shipment?.courier, order.shipment?.labelUrl, waybillNumber);
+        // Only Velocity / Amazon shipments embed official 4x6" PDF labels.
+        // Delhivery shipments display Youthnic's standard 4R thermal label format.
+        const pdfBase64 = isVel && pdfBuffer && pdfBuffer.length > 50 ? pdfBuffer.toString('base64') : '';
         return `
           <div class="label-print-page" data-order-name="${order.shopifyOrderName}" data-awb="${waybillNumber}" ${
           pdfBase64 ? `data-pdf-base64="${pdfBase64}"` : ''
@@ -341,7 +349,11 @@ export class ShippingLabelService {
     (function() {
       if (typeof pdfjsLib === 'undefined') return;
       try {
-        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        if (window.location.protocol === 'file:') {
+          pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+        } else {
+          pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        }
         var pages = document.querySelectorAll('.label-print-page[data-pdf-base64]');
         pages.forEach(async function(pageEl) {
           var base64 = pageEl.getAttribute('data-pdf-base64');
@@ -438,7 +450,8 @@ export class ShippingLabelService {
 
     const pagesHtml = orderList
       .map(({ order, waybillNumber, pdfBuffer }) => {
-        const pdfBase64 = pdfBuffer && pdfBuffer.length > 50 ? pdfBuffer.toString('base64') : '';
+        const isVel = isVelocityCourier(order.shipment?.courier, order.shipment?.labelUrl, waybillNumber);
+        const pdfBase64 = isVel && pdfBuffer && pdfBuffer.length > 50 ? pdfBuffer.toString('base64') : '';
         const labelHtml = this.generateSingleLabelHtml(order, waybillNumber);
         const invoiceHtml = invoiceService.generateInvoiceHtml(order);
         return `
@@ -495,7 +508,11 @@ export class ShippingLabelService {
     (function() {
       if (typeof pdfjsLib === 'undefined') return;
       try {
-        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        if (window.location.protocol === 'file:') {
+          pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+        } else {
+          pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        }
         var pages = document.querySelectorAll('.label-page-wrapper[data-pdf-base64]');
         pages.forEach(async function(pageEl) {
           var base64 = pageEl.getAttribute('data-pdf-base64');

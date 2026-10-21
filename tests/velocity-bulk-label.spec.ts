@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { isVelocityCourier, isDelhiveryCourier, normalizeCourierName } from '../src/utils/courier';
 import shippingLabelService from '../src/modules/delhivery/shipping-label.service';
-import { mergePdfBuffers } from '../src/utils/pdf-merger';
+import { mergePdfBuffers, create4x6FallbackPdf } from '../src/utils/pdf-merger';
 import { PDFDocument } from 'pdf-lib';
 
 describe('Velocity & Amazon Shipping Bulk Label Verification', () => {
@@ -68,7 +68,7 @@ describe('Velocity & Amazon Shipping Bulk Label Verification', () => {
       id: 102,
       courier: 'Delhivery Surface',
       waybillNumber: '123456789012',
-      labelUrl: null,
+      labelUrl: 'https://delhivery-express.s3.amazonaws.com/packing_slips/123456789012.pdf',
       paymentMode: 'Prepaid',
       status: 'CREATED',
     },
@@ -79,7 +79,12 @@ describe('Velocity & Amazon Shipping Bulk Label Verification', () => {
       expect(isVelocityCourier('Amazon Transportation')).toBe(true);
       expect(isVelocityCourier('Amazon Shipping')).toBe(true);
       expect(isVelocityCourier('Amazon ATS')).toBe(true);
-      expect(isVelocityCourier(undefined, 'https://velocity-shazam-prod.s3.ap-south-1.amazonaws.com/labels/amazon/374645218626.pdf')).toBe(true);
+      expect(
+        isVelocityCourier(
+          undefined,
+          'https://velocity-shazam-prod.s3.ap-south-1.amazonaws.com/labels/amazon/374645218626.pdf'
+        )
+      ).toBe(true);
       expect(isVelocityCourier('Amazon Transportation', null, '374645218626')).toBe(true);
 
       expect(isDelhiveryCourier('Amazon Transportation')).toBe(false);
@@ -91,9 +96,21 @@ describe('Velocity & Amazon Shipping Bulk Label Verification', () => {
       expect(normalizeCourierName('Amazon Shipping')).toBe('Amazon Transportation');
     });
 
-    it('correctly keeps Delhivery as Delhivery', () => {
-      expect(isDelhiveryCourier('Delhivery Surface')).toBe(true);
-      expect(isVelocityCourier('Delhivery Surface')).toBe(false);
+    it('correctly keeps Delhivery as Delhivery even with AWS S3 amazonaws.com URL', () => {
+      const delhiveryS3Url = 'https://delhivery-express.s3.amazonaws.com/packing_slips/30100810013731.pdf';
+      expect(isDelhiveryCourier('Delhivery Surface', delhiveryS3Url, '30100810013731')).toBe(true);
+      expect(isVelocityCourier('Delhivery Surface', delhiveryS3Url, '30100810013731')).toBe(false);
+      expect(normalizeCourierName('Delhivery Surface', delhiveryS3Url, '30100810013731')).toBe('Delhivery Surface');
+
+      // Even if courier is omitted but URL contains delhivery
+      expect(isDelhiveryCourier(undefined, delhiveryS3Url, '30100810013731')).toBe(true);
+      expect(isVelocityCourier(undefined, delhiveryS3Url, '30100810013731')).toBe(false);
+    });
+
+    it('identifies Velocity native waybill prefixes', () => {
+      expect(isVelocityCourier(null, null, 'PD12345')).toBe(true);
+      expect(isVelocityCourier(null, null, 'VEHR9988')).toBe(true);
+      expect(isVelocityCourier(null, null, 'VEL7766')).toBe(true);
     });
   });
 
@@ -123,7 +140,7 @@ describe('Velocity & Amazon Shipping Bulk Label Verification', () => {
       expect(html).toContain('AMZN / 110032');
     });
 
-    it('renders Delhivery logo on Delhivery labels', () => {
+    it('renders Delhivery logo on Delhivery labels even with S3 url', () => {
       const html = shippingLabelService.generateSingleLabelHtml(
         dummyDelhiveryOrder,
         dummyDelhiveryOrder.shipment.waybillNumber
@@ -131,6 +148,7 @@ describe('Velocity & Amazon Shipping Bulk Label Verification', () => {
 
       expect(html).toContain('alt="Delhivery"');
       expect(html).toContain('delhivery-logo-img');
+      expect(html).not.toContain('carrier-amazon');
       expect(html).toContain('CCU / SAL');
     });
   });
@@ -147,7 +165,7 @@ describe('Velocity & Amazon Shipping Bulk Label Verification', () => {
       expect(html).not.toContain('Youthnic · Bulk Delhivery 4R Shipping Labels');
     });
 
-    it('embeds PDF canvas container when pdfBuffer is provided', () => {
+    it('embeds PDF canvas container when pdfBuffer is provided for Velocity order', () => {
       const fakePdfBuffer = Buffer.from('%PDF-1.4 test buffer long enough to pass length check 1234567890');
       const html = shippingLabelService.generateBulkPrintableLabelsPage([
         {
@@ -161,10 +179,11 @@ describe('Velocity & Amazon Shipping Bulk Label Verification', () => {
       expect(html).toContain('pdf-canvas-container');
       expect(html).toContain('official-label-canvas');
       expect(html).toContain('pdf.js');
+      expect(html).toContain("window.location.protocol === 'file:'");
     });
   });
 
-  describe('PDF Merging Service', () => {
+  describe('PDF Merging Service and Fallback 4x6 Generation', () => {
     it('merges multiple PDF buffers into a single valid multi-page PDF document', async () => {
       const doc1 = await PDFDocument.create();
       doc1.addPage([288, 432]); // 4x6"
@@ -180,6 +199,19 @@ describe('Velocity & Amazon Shipping Bulk Label Verification', () => {
 
       const parsed = await PDFDocument.load(mergedBuffer);
       expect(parsed.getPageCount()).toBe(2);
+    });
+
+    it('creates a valid 4x6 fallback PDF with exact dimensions', async () => {
+      const pdfBuffer = await create4x6FallbackPdf(dummyDelhiveryOrder, '30100810013086', 'Delhivery Surface');
+      expect(pdfBuffer).toBeInstanceOf(Buffer);
+      expect(pdfBuffer.length).toBeGreaterThan(500);
+
+      const parsed = await PDFDocument.load(pdfBuffer);
+      expect(parsed.getPageCount()).toBe(1);
+      const page = parsed.getPages()[0];
+      const size = page.getSize();
+      expect(size.width).toBe(288);
+      expect(size.height).toBe(432);
     });
   });
 });

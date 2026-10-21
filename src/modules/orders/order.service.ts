@@ -789,12 +789,14 @@ class OrderService {
     let waybillNumber: string;
     let labelUrl: string | null = null;
     let courierNameForShopify = chosenCourier as string;
+    let courierToSave = chosenCourier as string;
 
     if (chosenCourier === 'Velocity') {
       const result = await velocityService.createForwardShipment(verifiedOrder);
       waybillNumber = result.awbCode;
       labelUrl = result.labelUrl || null;
       courierNameForShopify = result.courierName || 'Velocity';
+      courierToSave = result.courierName || 'Velocity';
     } else {
       // Create shipment on Delhivery
       const result = await delhiveryService.createShipment(verifiedOrder, {
@@ -817,7 +819,7 @@ class OrderService {
         data: {
           status: 'CREATED',
           trackingStatus: 'Label generated',
-          courier: chosenCourier,
+          courier: courierToSave,
           waybillNumber,
           ...(labelUrl ? { labelUrl } : {}),
         },

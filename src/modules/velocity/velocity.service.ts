@@ -372,6 +372,7 @@ export class VelocityService {
       height,
       weight: weightKg,
       request_pickup: true,
+      print_label: true,
     };
 
     logger.info('Creating Velocity forward shipment', {

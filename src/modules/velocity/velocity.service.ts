@@ -520,15 +520,23 @@ export class VelocityService {
    */
   async cancelShipment(awb: string, _reason?: string): Promise<{ success: boolean; cancelled: boolean; message: string }> {
     try {
+      const cleanAwb = awb.trim();
       const response = await this.client.post('/custom/api/v1/cancel-order', {
-        awbs: [awb.trim()],
+        awb: cleanAwb,
+        awbs: [cleanAwb],
       });
 
       const data = response.data;
+      const isSuccess =
+        data?.status === 'SUCCESS' ||
+        data?.status === 1 ||
+        data?.success === true ||
+        (response.status >= 200 && response.status < 300 && !data?.error);
+
       return {
-        success: true,
-        cancelled: true,
-        message: data?.message || 'Cancellation request accepted',
+        success: Boolean(isSuccess),
+        cancelled: Boolean(isSuccess),
+        message: data?.message || (isSuccess ? 'Cancellation request accepted' : 'Cancellation could not be completed'),
       };
     } catch (error: any) {
       const respData = error.response?.data;
@@ -588,11 +596,21 @@ export class VelocityService {
 
     try {
       const response = await this.client.post('/custom/api/v1/reverse-order-orchestration', payload);
-      return response.data;
+      const data = response.data;
+      const p = data?.payload || data?.data || data?.result || data;
+      const awbCode = p?.awb_code || p?.awb || p?.tracking_number;
+      return {
+        awbCode: awbCode ? String(awbCode).trim() : '',
+        shipmentId: String(p?.shipment_id || p?.order_id || ''),
+        courierName: p?.courier_name || p?.carrier_name || 'Velocity Reverse',
+        labelUrl: p?.label_url || '',
+        raw: data,
+      };
     } catch (error: any) {
-      const msg = error.response?.data?.message || error.message;
+      const respData = error.response?.data;
+      const msg = respData?.meta?.message || respData?.meta?.details || respData?.message || error.message;
       logger.error('Velocity reverse shipment failed', { error: msg });
-      throw new Error(`Velocity reverse shipment error: ${msg}`);
+      throw new Error(`Velocity reverse shipment error: ${typeof msg === 'object' ? JSON.stringify(msg) : msg}`);
     }
   }
 
@@ -1072,18 +1090,21 @@ export class VelocityService {
     const candidates: string[] = [];
     if (directUrl && directUrl.startsWith('http')) candidates.push(directUrl);
 
-    // If no direct url or expired, probe order details
+    // If no direct url or expired, probe live order tracking which returns fresh presigned S3 label_url
     try {
-      const details = await this.getForwardOrderDetails({ awb: waybill });
-      const foundUrl = details?.label_url || details?.labelUrl || details?.payload?.label_url;
+      const track = await this.trackShipment(waybill);
+      const foundUrl = track?.raw?.label_url || (track as any)?.labelUrl;
       if (foundUrl && !candidates.includes(foundUrl)) candidates.unshift(foundUrl);
     } catch {
-      // ignore
+      // Fallback: probe order details
+      try {
+        const details = await this.getForwardOrderDetails({ awb: waybill });
+        const foundUrl = details?.label_url || details?.labelUrl || details?.payload?.label_url;
+        if (foundUrl && !candidates.includes(foundUrl)) candidates.unshift(foundUrl);
+      } catch {
+        // ignore
+      }
     }
-
-    // Also support direct Velocity label download endpoint
-    const endpointLabel = `${this.client.defaults.baseURL}/custom/api/v1/order/download-label?awb=${encodeURIComponent(waybill)}`;
-    if (!candidates.includes(endpointLabel)) candidates.push(endpointLabel);
 
     for (const url of candidates) {
       try {

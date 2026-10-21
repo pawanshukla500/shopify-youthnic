@@ -225,7 +225,10 @@ class TrackingService {
         const activeVelocityShipments = await prisma.shipment.findMany({
           where: {
             waybillNumber: { not: null },
-            courier: { contains: 'velocity', mode: 'insensitive' },
+            OR: [
+              { courier: { contains: 'velocity', mode: 'insensitive' } },
+              { labelUrl: { contains: 'velocity', mode: 'insensitive' } },
+            ],
             status: { notIn: ['DELIVERED', 'CANCELLED', 'RTO_DELIVERED'] },
             ...(force
               ? []
@@ -250,6 +253,32 @@ class TrackingService {
                 vTracking.destination || vTracking.origin
               );
             }
+
+            if (vTracking.activities && vTracking.activities.length > 0) {
+              const existingLogs = await prisma.trackingLog.findMany({
+                where: { shipmentId: shipment.id },
+                select: { scannedAt: true, status: true },
+              });
+
+              const newScans: Array<{ status: string; location: string | null; remark: string | null; scannedAt: Date }> = [];
+              for (const act of vTracking.activities) {
+                const actDate = new Date(act.date);
+                const exists = existingLogs.some(
+                  (log) => log.status === act.activity && log.scannedAt.getTime() === actDate.getTime()
+                );
+                if (!exists) {
+                  newScans.push({
+                    status: act.activity,
+                    location: act.location || null,
+                    remark: null,
+                    scannedAt: actDate,
+                  });
+                }
+              }
+              await this.saveNewTrackingLogs(shipment.id, newScans);
+            }
+
+            const freshLabel = vTracking.raw?.label_url;
             await prisma.shipment.update({
               where: { id: shipment.id },
               data: {
@@ -257,6 +286,7 @@ class TrackingService {
                 trackingLocation: vTracking.destination || vTracking.origin || null,
                 trackingUpdatedAt: new Date(),
                 trackingHistory: vTracking.activities as any,
+                ...(freshLabel && !shipment.labelUrl ? { labelUrl: freshLabel } : {}),
               },
             });
             updatedCount++;

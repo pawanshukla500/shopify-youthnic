@@ -66,7 +66,7 @@ async function loadFreshLabelPdf(
   const candidates: string[] = [];
   if (isUsableHttpUrl(currentUrl)) candidates.push(currentUrl);
 
-  if (courier && isVelocityCourier(courier)) {
+  if (isVelocityCourier(courier, currentUrl, waybill)) {
     try {
       const vPdf = await velocityService.fetchOfficialLabelPdf(waybill, currentUrl);
       if (vPdf) return vPdf;

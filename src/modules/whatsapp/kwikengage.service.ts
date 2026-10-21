@@ -5,6 +5,7 @@ import { config } from '../../config';
 import prisma from '../../database/prisma';
 import logger from '../../utils/logger';
 import { NotificationType } from '@prisma/client';
+import { isVelocityCourier } from '../../utils/courier';
 
 export type KwikEngageTriggerType =
   | 'ORDER_CONFIRMED'
@@ -559,7 +560,12 @@ export class KwikEngageService {
     const orderNo = order.shopifyOrderName || 'Order';
     const amount = Math.round(order.totalAmount || 0);
     const waybill = extra?.waybillNumber || '';
-    const courier = extra?.courierName || 'Delhivery Express';
+    const isVelocity = isVelocityCourier(extra?.courierName, null, waybill);
+    const courier = extra?.courierName || (isVelocity ? 'Velocity' : 'Delhivery Express');
+    const carrierLabel = isVelocity ? 'Velocity' : 'Delhivery';
+    const trackingLink = isVelocity
+      ? `https://www.velocityshipping.in/track/${waybill}`
+      : `https://www.delhivery.com/track/package/${waybill}`;
     const isCod = order.paymentMethod === 'COD';
 
     switch (trigger) {
@@ -588,7 +594,7 @@ export class KwikEngageService {
           `Your order *${orderNo}* has been dispatched via *${courier}*!\n\n` +
           (waybill
             ? `🏷️ *Tracking AWB:* \`${waybill}\`\n` +
-              `🔗 *Live Tracking Link:* https://www.delhivery.com/track/package/${waybill}\n\n`
+              `🔗 *Live Tracking Link:* ${trackingLink}\n\n`
             : '') +
           `Expected Delivery: 2 to 4 business days.`
         );
@@ -598,9 +604,9 @@ export class KwikEngageService {
           `🚚 *Youthnic Order Update: In Transit*\n\n` +
           `Hi *${customer}*,\n` +
           `Your order *${orderNo}* is currently in transit with *${courier}*.\n\n` +
-          (waybill ? `🏷️ *Delhivery AWB:* \`${waybill}\`\n` : '') +
+          (waybill ? `🏷️ *${carrierLabel} AWB:* \`${waybill}\`\n` : '') +
           (extra?.currentLocation ? `📍 *Current Hub:* ${extra.currentLocation}\n` : '') +
-          (waybill ? `🔗 *Track Package:* https://www.delhivery.com/track/package/${waybill}\n\n` : '\n') +
+          (waybill ? `🔗 *Track Package:* ${trackingLink}\n\n` : '\n') +
           `We are actively tracking your shipment to ensure smooth delivery.`
         );
 
@@ -609,10 +615,10 @@ export class KwikEngageService {
           `⏱️ *Update Regarding Your Youthnic Delivery*\n\n` +
           `Hi *${customer}*,\n` +
           `We wanted to let you know that your parcel *${orderNo}* is experiencing a brief transit delay due to: *${extra?.delayReason || 'Logistics network routing check'}*.\n\n` +
-          (waybill ? `🏷️ *Delhivery AWB:* \`${waybill}\`\n` : '') +
+          (waybill ? `🏷️ *${carrierLabel} AWB:* \`${waybill}\`\n` : '') +
           (extra?.newEstimatedDelivery ? `📅 *Revised Estimated Delivery:* ${extra.newEstimatedDelivery}\n` : '') +
-          (waybill ? `🔗 *Track Live Status:* https://www.delhivery.com/track/package/${waybill}\n\n` : '\n') +
-          `Our logistics team is actively coordinating with Delhivery to deliver your package at the earliest.`
+          (waybill ? `🔗 *Track Live Status:* ${trackingLink}\n\n` : '\n') +
+          `Our logistics team is actively coordinating with ${carrierLabel} to deliver your package at the earliest.`
         );
 
       case 'DISPATCH_DELAY':

@@ -5,6 +5,7 @@ import resendService, { EmailTemplateType } from '../email/resend.service';
 import logger from '../../utils/logger';
 import { Order, Return } from '@prisma/client';
 import { EmailTemplateData } from '../email/email-templates';
+import { isVelocityCourier } from '../../utils/courier';
 
 /**
  * Notification Engine
@@ -89,18 +90,20 @@ class NotificationEngine {
    * Order shipped — sent when AWB is generated and shipment is dispatched via Delhivery.
    * Dispatches WhatsApp dispatch update + Email in-transit notice.
    */
-  async notifyOrderShipped(order: Order, waybillNumber: string): Promise<void> {
+  async notifyOrderShipped(order: Order, waybillNumber: string, courierName?: string): Promise<void> {
+    const isVel = isVelocityCourier(courierName, null, waybillNumber);
+    const resolvedCourier = courierName || (isVel ? 'Velocity' : 'Delhivery Express');
     try {
       await kwikengageService.sendCriticalTrigger('ORDER_SHIPPED', order, {
         waybillNumber,
-        courierName: 'Delhivery Express',
+        courierName: resolvedCourier,
       });
     } catch (err) {
       logger.warn('KwikEngage send failed for ORDER_SHIPPED', { err });
     }
     await this.sendLifecycleEmail(order, 'IN_TRANSIT', {
       waybillNumber,
-      courier: 'Delhivery Express',
+      courier: resolvedCourier,
     });
   }
 
@@ -108,11 +111,13 @@ class NotificationEngine {
    * In transit — sent when parcel departs the origin hub and travels between fulfillment centers.
    * Dispatches WhatsApp in-transit alert + Email in-transit notice.
    */
-  async notifyInTransit(order: Order, waybillNumber?: string, location?: string): Promise<void> {
+  async notifyInTransit(order: Order, waybillNumber?: string, location?: string, courierName?: string): Promise<void> {
+    const isVel = isVelocityCourier(courierName, null, waybillNumber);
+    const resolvedCourier = courierName || (isVel ? 'Velocity' : 'Delhivery Express');
     try {
       await kwikengageService.sendCriticalTrigger('IN_TRANSIT', order, {
         waybillNumber,
-        courierName: 'Delhivery Express',
+        courierName: resolvedCourier,
         currentLocation: location,
       });
     } catch (err) {
@@ -121,7 +126,7 @@ class NotificationEngine {
     await this.sendLifecycleEmail(order, 'IN_TRANSIT', {
       waybillNumber,
       currentLocation: location,
-      courier: 'Delhivery Express',
+      courier: resolvedCourier,
     });
   }
 
@@ -136,15 +141,18 @@ class NotificationEngine {
       delayReason?: string;
       newEstimatedDelivery?: string;
       currentLocation?: string;
+      courierName?: string;
     } = {}
   ): Promise<void> {
+    const isVel = isVelocityCourier(extra.courierName, null, extra.waybillNumber);
+    const resolvedCourier = extra.courierName || (isVel ? 'Velocity' : 'Delhivery Express');
     try {
       await kwikengageService.sendCriticalTrigger('TRANSIT_DELAY', order, {
         waybillNumber: extra.waybillNumber,
         delayReason: extra.delayReason,
         newEstimatedDelivery: extra.newEstimatedDelivery,
         currentLocation: extra.currentLocation,
-        courierName: 'Delhivery Express',
+        courierName: resolvedCourier,
       });
     } catch (err) {
       logger.warn('KwikEngage send failed for TRANSIT_DELAY', { err });
@@ -154,7 +162,7 @@ class NotificationEngine {
       delayReason: extra.delayReason,
       newEstimatedDelivery: extra.newEstimatedDelivery,
       currentLocation: extra.currentLocation,
-      courier: 'Delhivery Express',
+      courier: resolvedCourier,
     });
   }
 
@@ -187,11 +195,13 @@ class NotificationEngine {
    * Out for delivery — sent when tracking shows OFD status.
    * Dispatches WhatsApp OFD alert + Email OFD notice.
    */
-  async notifyOutForDelivery(order: Order, waybillNumber?: string, location?: string): Promise<void> {
+  async notifyOutForDelivery(order: Order, waybillNumber?: string, location?: string, courierName?: string): Promise<void> {
+    const isVel = isVelocityCourier(courierName, null, waybillNumber);
+    const resolvedCourier = courierName || (isVel ? 'Velocity' : 'Delhivery Express');
     try {
       await kwikengageService.sendCriticalTrigger('OUT_FOR_DELIVERY', order, {
         waybillNumber,
-        courierName: 'Delhivery Express',
+        courierName: resolvedCourier,
         currentLocation: location,
       });
     } catch (err) {
@@ -200,7 +210,7 @@ class NotificationEngine {
     await this.sendLifecycleEmail(order, 'OUT_FOR_DELIVERY', {
       waybillNumber,
       currentLocation: location,
-      courier: 'Delhivery Express',
+      courier: resolvedCourier,
     });
   }
 
@@ -210,7 +220,9 @@ class NotificationEngine {
    * WhatsApp dispatch is handled by KwikEngage's native flow to prevent duplicate messages.
    * Dispatches Email delivery confirmation via Resend.
    */
-  async notifyDelivered(order: Order, waybillNumber?: string): Promise<void> {
+  async notifyDelivered(order: Order, waybillNumber?: string, courierName?: string): Promise<void> {
+    const isVel = isVelocityCourier(courierName, null, waybillNumber);
+    const resolvedCourier = courierName || (isVel ? 'Velocity' : 'Delhivery Express');
     const shouldSendWhatsAppDelivered =
       config.kwikengage.dispatchDelivered && !config.kwikengage.flowOrderDeliveredActive;
 
@@ -218,7 +230,7 @@ class NotificationEngine {
       try {
         await kwikengageService.sendCriticalTrigger('DELIVERED', order, {
           waybillNumber,
-          courierName: 'Delhivery Express',
+          courierName: resolvedCourier,
         });
       } catch (err) {
         logger.warn('KwikEngage send failed for DELIVERED', { err });
@@ -232,7 +244,7 @@ class NotificationEngine {
 
     await this.sendLifecycleEmail(order, 'DELIVERED', {
       waybillNumber,
-      courier: 'Delhivery Express',
+      courier: resolvedCourier,
     });
   }
 

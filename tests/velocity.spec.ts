@@ -304,9 +304,9 @@ describe('Velocity Shipping Integration', () => {
 
       const res = await service.cancelShipment('VEL123456789IN', 'Customer requested');
       expect(res.cancelled).toBe(true);
-      expect(mockAxios.post).toHaveBeenCalledWith('/custom/api/v1/cancel-order', {
+      expect(mockAxios.post).toHaveBeenCalledWith('/custom/api/v1/cancel-order', expect.objectContaining({
         awbs: ['VEL123456789IN'],
-      });
+      }));
     });
 
     it('verifies HMAC-SHA256 webhook signatures accurately', () => {

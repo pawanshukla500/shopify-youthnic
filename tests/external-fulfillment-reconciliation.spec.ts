@@ -63,7 +63,7 @@ const { prismaStub } = vi.hoisted(() => ({
       upsert: vi.fn(),
     },
     syncLog: { create: vi.fn() },
-    trackingLog: { findMany: vi.fn(), create: vi.fn() },
+    trackingLog: { findMany: vi.fn(), create: vi.fn(), createMany: vi.fn() },
   },
 }));
 vi.mock('../src/database/prisma', () => ({ default: prismaStub }));

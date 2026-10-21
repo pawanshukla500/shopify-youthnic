@@ -560,6 +560,7 @@ export function OrderDetail() {
   // The Orders tab this order sits in, e.g. "Ready to Dispatch" or "Payment Received".
   const stageTab = ORDER_TABS.find((tab) => tab.key === classifyOrderTab(order))
   const canRefund = order.financialStatus !== 'refunded' && order.status !== 'CANCELLED'
+  const itemCount = (order.items || []).reduce((sum, item) => sum + item.quantity, 0)
   const openMore = () => {
     if (moreOpen) {
       setMoreOpen(false)
@@ -668,21 +669,30 @@ export function OrderDetail() {
           toast.toast('success', `Order name ${order.shopifyOrderName} copied!`)
         }}
       >
-        <Icon name="copy" size={14} />
+        <Icon name="copy" size={13} />
       </button>
-      <span className={`shopify-pill ${paymentPill.tone}`}>{paymentPill.label}</span>
-      <span className={`shopify-pill ${fulfillmentPill.tone}`}>{fulfillmentPill.label}</span>
-      <span className="shopify-order-stage" title={stageTab?.hint}>{stageTab?.label || labelize(order.status)}</span>
-      {order.hasUrgentSupport && (
-        <button type="button" className="shopify-pill shopify-pill-alert" onClick={() => navigate(`/support?search=${order.shopifyOrderName}`)}>
-          Support
-        </button>
-      )}
+      <span className="shopify-pill-cluster">
+        <span className={`shopify-pill ${paymentPill.tone}`}>{paymentPill.label}</span>
+        <span className={`shopify-pill ${fulfillmentPill.tone}`}>{fulfillmentPill.label}</span>
+        <span className="shopify-order-stage" title={stageTab?.hint}>{stageTab?.label || labelize(order.status)}</span>
+        {order.hasUrgentSupport && (
+          <button type="button" className="shopify-pill shopify-pill-alert" onClick={() => navigate(`/support?search=${order.shopifyOrderName}`)}>
+            Support
+          </button>
+        )}
+      </span>
     </div>
-    <p className="shopify-order-meta">
-      {formatDate(order.shopifyCreatedAt || order.createdAt)} from {order.salesChannel || 'Online Store'}
-      {order.customerCity ? ` · ${order.customerCity}, ${order.customerState}` : ''}
-    </p>
+    <div className="shopify-order-meta">
+      <span>{formatDate(order.shopifyCreatedAt || order.createdAt)}</span>
+      <span className="meta-sep" aria-hidden="true">·</span>
+      <span>via {order.salesChannel || 'Online Store'}</span>
+      {order.customerCity ? (
+        <>
+          <span className="meta-sep" aria-hidden="true">·</span>
+          <span>{order.customerCity}, {order.customerState}</span>
+        </>
+      ) : ''}
+    </div>
     <OrderNextStep
       order={order}
       isPrepaid={isPrepaid}
@@ -711,7 +721,10 @@ export function OrderDetail() {
               : (index + (event.key === 'ArrowRight' ? 1 : -1) + ORDER_SECTIONS.length) % ORDER_SECTIONS.length
             setSection(ORDER_SECTIONS[next].key)
             sectionRefs.current[next]?.focus()
-          }}>{tab.label}{tab.key === 'returns' && order.returns?.length ? <span>{order.returns.length}</span> : null}</button>
+          }}>{tab.label}
+            {tab.key === 'overview' && itemCount ? <span className="order-tab-count">{itemCount}</span> : null}
+            {tab.key === 'returns' && order.returns?.length ? <span className="order-tab-count">{order.returns.length}</span> : null}
+          </button>
       ))}
     </div>
     <div className="detail-grid">
@@ -719,7 +732,7 @@ export function OrderDetail() {
         <section className="order-section" id="order-section-overview" role="tabpanel" aria-labelledby="order-tab-overview" tabIndex={-1} hidden={section !== 'overview'}>
         <Panel className="shopify-card" style={{ padding: 0 }}>
           <div className="shopify-card-head">
-            <h2>Order items <span className="order-item-count">{(order.items || []).reduce((sum, item) => sum + item.quantity, 0)}</span></h2>
+            <h2>Order items <span className="order-item-count">{itemCount}</span></h2>
             <span className={`shopify-pill ${fulfillmentPill.tone}`}>{fulfillmentPill.label}</span>
           </div>
           <div className="shopify-ship-line">
@@ -1468,34 +1481,43 @@ export function OrderDetail() {
             </div>
             <div>
               <strong style={{ fontSize: '14px', color: 'var(--ink)' }}>{order.customerName}</strong>
-              <span style={{ fontSize: '11px', color: 'var(--ink-secondary)' }}>{order.customerPhone || 'No phone'}</span>
-              <span style={{ fontSize: '11px', color: 'var(--muted)' }}>{order.customerEmail ?? 'No email provided'}</span>
+              <span style={{ fontSize: '11.5px', color: 'var(--ink-secondary)' }}>{order.customerPhone || 'No phone'}</span>
+              <span style={{ fontSize: '11.5px', color: 'var(--muted)' }}>{order.customerEmail ?? 'No email provided'}</span>
             </div>
           </div>
           <div className="address-card">
-            <Icon name="pin" size={20} />
-            <div style={{ flex: 1 }}>
-              <strong style={{ fontSize: '12px', color: 'var(--ink)' }}>{order.customerAddress}</strong>
-              <span style={{ fontSize: '11px', color: 'var(--ink-secondary)', marginTop: '2px', display: 'block' }}>
+            <button
+              type="button"
+              className="address-copy-btn"
+              title="Copy full delivery address"
+              aria-label="Copy full delivery address"
+              onClick={copyAddress}
+            >
+              <Icon name="copy" size={12} />
+            </button>
+            <Icon name="pin" size={16} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <strong style={{ fontSize: '12.5px', color: 'var(--ink)' }}>{order.customerAddress}</strong>
+              <span style={{ fontSize: '11.5px', color: 'var(--ink-secondary)', marginTop: '3px', display: 'block' }}>
                 {order.customerCity}, {order.customerState} — <strong className="mono">{order.customerPincode}</strong>
               </span>
-              <span style={{ fontSize: '10px', color: 'var(--muted)' }}>{order.customerCountry}</span>
+              <span style={{ fontSize: '11px', color: 'var(--muted)' }}>{order.customerCountry}</span>
             </div>
           </div>
           <div className="customer-quick-actions">
             {cleanPhone ? (
               <a className="quick-action-btn quick-action-wa" href={`https://wa.me/${cleanPhone}?text=${encodeURIComponent(`Hi ${order.customerName}, this is regarding your order ${order.shopifyOrderName} from our store.`)}`} target="_blank" rel="noopener noreferrer">
-                <Icon name="message" size={14} /> WhatsApp Chat
+                <Icon name="message" size={14} /> WhatsApp
               </a>
             ) : (
-              <button className="quick-action-btn quick-action-wa" disabled><Icon name="message" size={14} /> No WhatsApp</button>
+              <button className="quick-action-btn quick-action-wa" disabled><Icon name="message" size={14} /> WhatsApp</button>
             )}
             {cleanPhone ? (
-              <a className="quick-action-btn quick-action-call" href={`tel:${cleanPhone}`}><Icon name="phone" size={14} /> Call Customer</a>
+              <a className="quick-action-btn quick-action-call" href={`tel:${cleanPhone}`}><Icon name="phone" size={14} /> Call</a>
             ) : (
-              <button className="quick-action-btn quick-action-call" disabled><Icon name="phone" size={14} /> No Phone</button>
+              <button className="quick-action-btn quick-action-call" disabled><Icon name="phone" size={14} /> Call</button>
             )}
-            <button className="quick-action-btn quick-action-copy" onClick={copyAddress}><Icon name="copy" size={14} /> Copy Address</button>
+            <button className="quick-action-btn quick-action-copy" onClick={copyAddress}><Icon name="copy" size={14} /> Copy</button>
           </div>
         </Panel>
 
@@ -1504,7 +1526,9 @@ export function OrderDetail() {
 
         <Panel className="shopify-order-notes">
           <h2>Notes</h2>
-          <p>{order.shopifyNote || 'No notes from Shopify.'}</p>
+          {order.shopifyNote ? <p>{order.shopifyNote}</p> : (
+            <p className="shopify-note-empty"><Icon name="box" size={14} /> No notes from Shopify.</p>
+          )}
         </Panel>
         {Boolean(order.additionalDetails?.length) && (
           <Panel className="shopify-order-notes">

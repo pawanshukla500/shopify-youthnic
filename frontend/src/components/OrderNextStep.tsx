@@ -138,10 +138,21 @@ function nextStep(p: OrderNextStepProps): Step {
   return { tone: 'neutral', title: 'Order received', text: 'Waiting to be reviewed.' }
 }
 
+const TONE_ICONS: Record<Tone, IconName> = {
+  info: 'package',
+  warn: 'alert',
+  danger: 'alert',
+  success: 'check',
+  neutral: 'clock',
+}
+
 export function OrderNextStep(props: OrderNextStepProps) {
   const step = nextStep(props)
   return (
     <div className={`next-step next-step-${step.tone}`} role="status">
+      <div className="next-step-icon" aria-hidden="true">
+        <Icon name={TONE_ICONS[step.tone]} size={16} />
+      </div>
       <div className="next-step-copy">
         <strong>{step.title}</strong>
         <span>{step.text}</span>

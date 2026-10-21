@@ -159,12 +159,13 @@ class TrackingService {
 
         // Save tracking history
         if (tracking.history.length > 0) {
-          // Save new tracking logs
+          // Save new tracking logs (deduped against existing scans, batched)
           const existingLogs = await prisma.trackingLog.findMany({
             where: { shipmentId: shipment.id },
             select: { scannedAt: true, status: true },
           });
 
+          const newScans: Array<{ status: string; location: string | null; remark: string | null; scannedAt: Date }> = [];
           for (const scan of tracking.history) {
             const scanDate = new Date(scan.dateTime);
             const exists = existingLogs.some(
@@ -174,17 +175,15 @@ class TrackingService {
             );
 
             if (!exists) {
-              await prisma.trackingLog.create({
-                data: {
-                  shipmentId: shipment.id,
-                  status: scan.status,
-                  location: scan.location || null,
-                  remark: scan.remark || null,
-                  scannedAt: scanDate,
-                },
+              newScans.push({
+                status: scan.status,
+                location: scan.location || null,
+                remark: scan.remark || null,
+                scannedAt: scanDate,
               });
             }
           }
+          await this.saveNewTrackingLogs(shipment.id, newScans);
         }
 
         // Update shipment tracking fields
@@ -295,6 +294,35 @@ class TrackingService {
     const history = Array.isArray(tracking.history) ? tracking.history : [];
     if (status === 'UNKNOWN') return true;
     return !status && history.length === 0;
+  }
+
+  /**
+   * Insert new tracking scans in a single batch instead of one INSERT per
+   * scan (the tracking cron processes up to a few hundred scans per run).
+   * Falls back to per-row inserts — swallowing duplicate-key races, as the
+   * previous per-row loops did — when the batch fails.
+   */
+  private async saveNewTrackingLogs(
+    shipmentId: number,
+    entries: Array<{ status: string; location: string | null; remark: string | null; scannedAt: Date }>
+  ): Promise<void> {
+    if (!entries.length) return;
+    try {
+      await prisma.trackingLog.createMany({
+        data: entries.map((entry) => ({ shipmentId, ...entry })),
+      });
+      return;
+    } catch (batchError: any) {
+      logger.warn('Batch tracking-log insert failed, falling back to per-scan insert', {
+        shipmentId,
+        error: batchError.message,
+      });
+    }
+    for (const entry of entries) {
+      await prisma.trackingLog
+        .create({ data: { shipmentId, ...entry } })
+        .catch(() => undefined);
+    }
   }
 
   /**
@@ -689,22 +717,22 @@ class TrackingService {
           select: { scannedAt: true, status: true },
         });
 
+        const newScans: Array<{ status: string; location: string | null; remark: string | null; scannedAt: Date }> = [];
         for (const act of vTracking.activities) {
           const actDate = new Date(act.date);
           const exists = existingLogs.some(
             (log) => log.status === act.activity && log.scannedAt.getTime() === actDate.getTime()
           );
           if (!exists) {
-            await prisma.trackingLog.create({
-              data: {
-                shipmentId: shipment.id,
-                status: act.activity,
-                location: act.location || null,
-                scannedAt: actDate,
-              },
-            }).catch(() => undefined);
+            newScans.push({
+              status: act.activity,
+              location: act.location || null,
+              remark: null,
+              scannedAt: actDate,
+            });
           }
         }
+        await this.saveNewTrackingLogs(shipment.id, newScans);
       }
 
       const updatedShipment = await prisma.shipment.update({
@@ -783,6 +811,7 @@ class TrackingService {
         select: { scannedAt: true, status: true },
       });
 
+      const newScans: Array<{ status: string; location: string | null; remark: string | null; scannedAt: Date }> = [];
       for (const scan of tracking.history) {
         const scanDate = new Date(scan.dateTime);
         const exists = existingLogs.some(
@@ -790,21 +819,17 @@ class TrackingService {
         );
 
         if (!exists) {
-          try {
-            await prisma.trackingLog.create({
-              data: {
-                shipmentId: shipment.id,
-                status: scan.status,
-                location: scan.location || null,
-                remark: scan.remark || null,
-                scannedAt: scanDate,
-              },
-            });
-          } catch (logErr) {
-            // ignore unique/microsecond collision
-          }
+          newScans.push({
+            status: scan.status,
+            location: scan.location || null,
+            remark: scan.remark || null,
+            scannedAt: scanDate,
+          });
         }
       }
+      // A duplicate here means a webhook raced the same scan; the helper
+      // falls back to per-row inserts that swallow the collision.
+      await this.saveNewTrackingLogs(shipment.id, newScans);
     }
 
     const updatedShipment = await prisma.shipment.update({

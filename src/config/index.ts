@@ -148,7 +148,8 @@ export const config = {
   velocity: {
     apiToken: optional('VELOCITY_API_TOKEN', optional('VELOCITY_API_KEY', '')),
     baseUrl: optional('VELOCITY_BASE_URL', 'https://shazam.velocity.in'),
-    warehouseId: optional('VELOCITY_WAREHOUSE_ID', ''),
+    warehouseId: optional('VELOCITY_WAREHOUSE_ID', 'WHGSYR'),
+    pickupLocation: optional('VELOCITY_PICKUP_LOCATION', 'Surat Warehouse'),
     webhookSecret: optional('VELOCITY_WEBHOOK_SECRET', ''),
     enabled: optional('VELOCITY_ENABLED', 'true') === 'true',
     autoFinancialSync: optional('VELOCITY_AUTO_FINANCIAL_SYNC', 'true') === 'true',

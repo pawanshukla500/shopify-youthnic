@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import { config } from '../../config';
 import logger from '../../utils/logger';
 import { Order, OrderItem, ShipmentStatus } from '@prisma/client';
+import { isPrepaidOrder } from '../orders/order-tabs';
 
 export interface VelocityServiceabilityParams {
   fromPincode: string;
@@ -21,6 +22,7 @@ export interface VelocityServiceabilityResult {
 
 export interface VelocityForwardOrderOptions {
   warehouseId?: string;
+  pickupLocation?: string;
   carrierId?: string;
   length?: number;
   breadth?: number;
@@ -252,8 +254,18 @@ export class VelocityService {
     order: Order & { items: OrderItem[] },
     options?: VelocityForwardOrderOptions
   ): Promise<VelocityForwardShipmentResult> {
-    const isCod = order.paymentMethod === 'COD';
-    const warehouseId = options?.warehouseId || config.velocity.warehouseId || config.delhivery.pickupLocation || 'DEFAULT';
+    const isCod =
+      !isPrepaidOrder(order as any) ||
+      (order.paymentMethod || '').toUpperCase().includes('COD') ||
+      (order.paymentMethod || '').toLowerCase().includes('cash');
+
+    const warehouseId = options?.warehouseId || config.velocity.warehouseId || 'WHGSYR';
+    const pickupLocation =
+      options?.pickupLocation ||
+      (config.velocity as any).pickupLocation ||
+      config.delhivery.pickupLocation ||
+      'Surat Warehouse';
+    const storeName = config.shopify.shopDomain?.replace('.myshopify.com', '') || 'youthnic2024';
 
     // Split customer name into first & last name
     const rawName = (order.customerName || 'Customer').trim();
@@ -273,15 +285,13 @@ export class VelocityService {
       phone = '9999999999';
     }
 
-    const sellerPhone = (config.delhivery.seller.phone || '9999999999').replace(/\D/g, '').slice(-10);
-
     // Dimensions: default to single-piece or multi-piece settings
     const itemCount = order.items?.length || 1;
     const length = options?.length ?? (itemCount > 1 ? config.delhivery.multiItemLengthCm : config.delhivery.singleItemLengthCm);
     const breadth = options?.breadth ?? (itemCount > 1 ? config.delhivery.multiItemBreadthCm : config.delhivery.singleItemBreadthCm);
     const height = options?.height ?? (itemCount > 1 ? config.delhivery.multiItemHeightCm : config.delhivery.singleItemHeightCm);
-    // Velocity weight is in KG (e.g. 0.4 or 0.5)
-    const weightKg = options?.weight ?? ((itemCount > 1 ? 500 : 400) / 1000);
+    // Velocity weight is in KG (e.g. 0.35 or 0.4)
+    const weightKg = options?.weight ?? ((itemCount > 1 ? 500 : 350) / 1000);
 
     // Order date in YYYY-MM-DD HH:mm format
     const now = new Date();
@@ -306,34 +316,56 @@ export class VelocityService {
           },
         ];
 
-    // Payload strictly matching Velocity Forward Order Orchestration API specification
-    const payload = {
-      order_id: `${order.shopifyOrderName.replace('#', '')}-${order.id}`,
+    const customerAddress = (order.customerAddress || 'Address').substring(0, 200);
+    const customerCity = order.customerCity || 'City';
+    const customerState = order.customerState || 'State';
+    const customerCountry = order.customerCountry || 'India';
+    const customerPincode = order.customerPincode?.trim() || '000000';
+    const totalAmount = Math.max(1, Math.round(order.totalAmount || 0));
+
+    // Order ID for Velocity: Shopify orders synced into Velocity use the exact display_id (e.g. #26YOU6001).
+    // Using order.shopifyOrderName directly targets and fulfills the synced Shopify order.
+    const orderId = order.shopifyOrderName.startsWith('#')
+      ? order.shopifyOrderName
+      : `#${order.shopifyOrderName}`;
+
+    // Payload strictly matching Velocity Forward Order Orchestration API specification.
+    // NOTE: Forward orders must NOT send `pickup_customer_name` or `pickup_address`
+    // (which Velocity interprets as reverse logistics / customer return pickups).
+    // The pickup origin is designated by `pickup_location` and `warehouse_id`.
+    const payload: any = {
+      order_id: orderId,
+      external_id: order.shopifyOrderId ? String(order.shopifyOrderId) : orderId,
+      store_name: storeName,
       order_date: orderDateStr,
       carrier_id: options?.carrierId || '', // Empty for Velocity rule-based auto-assignment
-      pickup_customer_name: config.delhivery.seller.name || 'Youthnic',
-      pickup_address: config.delhivery.seller.address || 'Surat Fulfillment Center',
-      pickup_city: config.delhivery.seller.city || 'Surat',
-      pickup_state: config.delhivery.seller.state || 'Gujarat',
-      pickup_country: 'India',
-      pickup_pincode: config.delhivery.seller.pincode || '395002',
-      pickup_phone: sellerPhone,
-      pickup_isd_code: '91',
+      billing_customer_name: firstName,
+      billing_last_name: lastName,
+      billing_address: customerAddress,
+      billing_city: customerCity,
+      billing_state: customerState,
+      billing_country: customerCountry,
+      billing_pincode: customerPincode,
+      billing_phone: phone,
+      billing_email: order.customerEmail || undefined,
+      shipping_is_billing: true,
       shipping_customer_name: firstName,
       shipping_last_name: lastName,
-      shipping_address: (order.customerAddress || 'Address').substring(0, 200),
-      shipping_city: order.customerCity || 'City',
-      shipping_state: order.customerState || 'State',
-      shipping_country: order.customerCountry || 'India',
-      shipping_pincode: order.customerPincode?.trim() || '000000',
+      shipping_address: customerAddress,
+      shipping_city: customerCity,
+      shipping_state: customerState,
+      shipping_country: customerCountry,
+      shipping_pincode: customerPincode,
       shipping_phone: phone,
       shipping_email: order.customerEmail || undefined,
+      pickup_location: pickupLocation,
       warehouse_id: warehouseId,
       order_items: orderItems,
       payment_method: isCod ? 'COD' : 'PREPAID',
       payment_mode: isCod ? 'cod' : 'prepaid',
-      cod_amount: isCod ? Math.max(1, Math.round(order.totalAmount)) : 0,
-      sub_total: Math.max(1, Math.round(order.totalAmount)),
+      cod_amount: isCod ? totalAmount : 0,
+      cod_collectible: isCod ? totalAmount : 0,
+      sub_total: totalAmount,
       total_discount: Math.round(order.totalDiscounts || 0),
       length,
       breadth,

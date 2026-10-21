@@ -3,10 +3,17 @@ import { generateCode128Svg } from './barcode';
 import { config } from '../../config';
 import { YOUTHNIC_LOGO_BASE64, DELHIVERY_LOGO_BASE64 } from './label-logos';
 import invoiceService from '../invoice/invoice.service';
+import { isVelocityCourier } from '../../utils/courier';
 
 export interface OrderWithDetails extends Order {
   items: OrderItem[];
   shipment?: any;
+}
+
+export interface PrintableLabelItem {
+  order: OrderWithDetails;
+  waybillNumber: string;
+  pdfBuffer?: Buffer | null;
 }
 
 export class ShippingLabelService {
@@ -47,20 +54,83 @@ export class ShippingLabelService {
   }
 
   /**
-   * Generates single 4x6" (100mm x 150mm) Delhivery thermal shipping label HTML
+   * Generates single 4x6" (100mm x 150mm) thermal shipping label HTML.
+   * Dynamically renders carrier-authentic branding (Amazon Transportation,
+   * Velocity, Blue Dart, Ekart, or Delhivery). Never hardcodes Delhivery onto
+   * Velocity / Amazon parcels.
    */
   public generateSingleLabelHtml(order: OrderWithDetails, waybillNumber: string): string {
+    const isVelocity = isVelocityCourier(order.shipment?.courier, order.shipment?.labelUrl, waybillNumber);
+    const courierRaw = (order.shipment?.courier || '').trim();
+    const isAmazon =
+      isVelocity &&
+      (/amazon|ats/i.test(courierRaw) ||
+        !courierRaw ||
+        /velocity/i.test(courierRaw) ||
+        /amazon/i.test(order.shipment?.labelUrl || ''));
+    const isBlueDart = isVelocity && /bluedart|blue dart/i.test(courierRaw);
+    const isEkart = isVelocity && /ekart/i.test(courierRaw);
+
     const isCod = order.paymentMethod === 'COD' || order.shipment?.paymentMode === 'COD';
     const totalAmount = order.totalAmount || 0;
-    const sortCode = this.getSortCode(order.customerPincode, order.customerCity, order.customerState);
+
+    const sortCode = isVelocity
+      ? isAmazon
+        ? `AMZN / ${order.customerPincode}`
+        : `VEL / ${order.customerPincode}`
+      : this.getSortCode(order.customerPincode, order.customerCity, order.customerState);
+
     const barcodeSvg = generateCode128Svg(waybillNumber, { width: 330, height: 68 });
-    const orderBarcodeSvg = generateCode128Svg(order.shopifyOrderName.replace('#', ''), { width: 170, height: 38, textBelow: order.shopifyOrderName.replace('#', '') });
+    const orderBarcodeSvg = generateCode128Svg(order.shopifyOrderName.replace('#', ''), {
+      width: 170,
+      height: 38,
+      textBelow: order.shopifyOrderName.replace('#', ''),
+    });
     const formattedDate = new Date(order.shopifyCreatedAt || Date.now()).toLocaleDateString('en-IN', {
       day: '2-digit',
       month: 'short',
       year: 'numeric',
     });
     const currentTime = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+    let carrierBadgeHtml: string;
+    if (isAmazon) {
+      carrierBadgeHtml = `
+        <div class="carrier-badge carrier-amazon">
+          <div class="amazon-wordmark">
+            <span class="amz-text">amazon</span>
+            <svg class="amz-smile" viewBox="0 0 100 24" width="68" height="15">
+              <path d="M5 14 Q50 28 95 6" stroke="#000" stroke-width="4.5" fill="none" stroke-linecap="round"/>
+              <path d="M85 3 L96 7 L93 17 Z" fill="#000"/>
+            </svg>
+          </div>
+          <div class="carrier-sub-text">transportation services</div>
+        </div>
+      `;
+    } else if (isBlueDart) {
+      carrierBadgeHtml = `
+        <div class="carrier-badge carrier-bluedart">
+          <div class="bluedart-wordmark">BLUE DART</div>
+          <div class="carrier-sub-text">apex express</div>
+        </div>
+      `;
+    } else if (isEkart) {
+      carrierBadgeHtml = `
+        <div class="carrier-badge carrier-ekart">
+          <div class="ekart-wordmark">ekart</div>
+          <div class="carrier-sub-text">logistics</div>
+        </div>
+      `;
+    } else if (isVelocity) {
+      carrierBadgeHtml = `
+        <div class="carrier-badge carrier-velocity">
+          <div class="velocity-wordmark">⚡ VELOCITY</div>
+          <div class="carrier-sub-text">shipping network</div>
+        </div>
+      `;
+    } else {
+      carrierBadgeHtml = `<img src="${DELHIVERY_LOGO_BASE64}" alt="Delhivery" class="delhivery-logo-img" />`;
+    }
 
     const itemsRows = (order.items || [])
       .map(
@@ -81,7 +151,7 @@ export class ShippingLabelService {
     return `
     <div class="label-wrapper">
       <div class="label-container">
-        <!-- 1. Header: Youthnic Brand & Official Delhivery Logo -->
+        <!-- 1. Header: Youthnic Brand & Official Carrier Badge -->
         <div class="label-row header-row">
           <div class="header-left">
             <span class="seller-org">V B EXPORT</span>
@@ -90,7 +160,7 @@ export class ShippingLabelService {
             </div>
           </div>
           <div class="header-right">
-            <img src="${DELHIVERY_LOGO_BASE64}" alt="Delhivery" class="delhivery-logo-img" />
+            ${carrierBadgeHtml}
           </div>
         </div>
 
@@ -178,13 +248,19 @@ export class ShippingLabelService {
    * Generates a complete standalone printable page for a single label
    */
   public generatePrintableLabelPage(order: OrderWithDetails, waybillNumber: string): string {
+    const isVelocity = isVelocityCourier(order.shipment?.courier, order.shipment?.labelUrl, waybillNumber);
+    const courierLabel = isVelocity
+      ? /amazon|ats/i.test(order.shipment?.courier || '')
+        ? 'Amazon Transportation'
+        : 'Velocity'
+      : 'Delhivery';
     const labelHtml = this.generateSingleLabelHtml(order, waybillNumber);
 
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Delhivery Shipping Label - ${order.shopifyOrderName} (${waybillNumber})</title>
+  <title>${courierLabel} Shipping Label - ${order.shopifyOrderName} (${waybillNumber})</title>
   <style>
     ${this.getLabelStyles()}
   </style>
@@ -192,7 +268,7 @@ export class ShippingLabelService {
 <body>
   <div class="print-controls no-print">
     <div class="controls-left">
-      <span class="controls-badge">Youthnic · Delhivery 4R Shipping Label</span>
+      <span class="controls-badge">Youthnic · ${courierLabel} 4R Shipping Label</span>
       <span class="controls-info">Order: ${order.shopifyOrderName} · AWB: ${waybillNumber}</span>
     </div>
     <div class="controls-right">
@@ -206,29 +282,50 @@ export class ShippingLabelService {
   }
 
   /**
-   * Generates a complete multi-label printable document for bulk orders
+   * Generates a complete multi-label printable document for bulk orders.
+   * Embeds official carrier PDFs (Amazon Transportation, Velocity, Blue Dart)
+   * with high-res PDF.js canvas rendering and clean HTML fallbacks.
    */
-  public generateBulkPrintableLabelsPage(orderList: Array<{ order: OrderWithDetails; waybillNumber: string }>): string {
+  public generateBulkPrintableLabelsPage(orderList: PrintableLabelItem[]): string {
+    const hasPdfBuffers = orderList.some((item) => Boolean(item.pdfBuffer && item.pdfBuffer.length > 50));
+
     const labelsHtml = orderList
-      .map(
-        ({ order, waybillNumber }) =>
-          `<div class="label-print-page">${this.generateSingleLabelHtml(order, waybillNumber)}</div>`
-      )
+      .map(({ order, waybillNumber, pdfBuffer }) => {
+        const pdfBase64 = pdfBuffer && pdfBuffer.length > 50 ? pdfBuffer.toString('base64') : '';
+        return `
+          <div class="label-print-page" data-order-name="${order.shopifyOrderName}" data-awb="${waybillNumber}" ${
+          pdfBase64 ? `data-pdf-base64="${pdfBase64}"` : ''
+        }>
+            ${
+              pdfBase64
+                ? `
+              <div class="pdf-canvas-container" style="display:none; text-align:center; width:100mm; height:150mm; margin:0 auto 20px auto;">
+                <canvas class="official-label-canvas" style="width:100mm; height:150mm; border:2px solid #000; box-shadow:0 4px 15px rgba(0,0,0,0.15); box-sizing:border-box; background:#fff; display:block; margin:0 auto;"></canvas>
+              </div>`
+                : ''
+            }
+            <div class="html-label-fallback">
+              ${this.generateSingleLabelHtml(order, waybillNumber)}
+            </div>
+          </div>
+        `;
+      })
       .join('');
 
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Bulk Delhivery Shipping Labels (${orderList.length} Orders)</title>
+  <title>Bulk Shipping Labels (${orderList.length} Orders)</title>
   <style>
     ${this.getLabelStyles()}
   </style>
+  ${hasPdfBuffers ? `<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>` : ''}
 </head>
 <body>
   <div class="print-controls no-print">
     <div class="controls-left">
-      <span class="controls-badge">Youthnic · Bulk Delhivery 4R Shipping Labels</span>
+      <span class="controls-badge">Youthnic · Bulk 4R Shipping Labels</span>
       <span class="controls-info">Total Packages: ${orderList.length}</span>
     </div>
     <div class="controls-right">
@@ -237,6 +334,53 @@ export class ShippingLabelService {
     </div>
   </div>
   ${labelsHtml}
+  ${
+    hasPdfBuffers
+      ? `
+  <script>
+    (function() {
+      if (typeof pdfjsLib === 'undefined') return;
+      try {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        var pages = document.querySelectorAll('.label-print-page[data-pdf-base64]');
+        pages.forEach(async function(pageEl) {
+          var base64 = pageEl.getAttribute('data-pdf-base64');
+          if (!base64) return;
+          try {
+            var raw = atob(base64);
+            var uint8 = new Uint8Array(raw.length);
+            for (var i = 0; i < raw.length; i++) {
+              uint8[i] = raw.charCodeAt(i);
+            }
+            var loadingTask = pdfjsLib.getDocument({ data: uint8 });
+            var pdf = await loadingTask.promise;
+            var page = await pdf.getPage(1);
+
+            var container = pageEl.querySelector('.pdf-canvas-container');
+            var canvas = pageEl.querySelector('.official-label-canvas');
+            var fallback = pageEl.querySelector('.html-label-fallback');
+            if (!container || !canvas) return;
+
+            var viewport = page.getViewport({ scale: 3.0 });
+            canvas.height = viewport.height;
+            canvas.width = viewport.width;
+
+            var ctx = canvas.getContext('2d');
+            await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+
+            container.style.display = 'block';
+            if (fallback) fallback.style.display = 'none';
+          } catch (err) {
+            console.warn('PDF.js render fallback to HTML:', err);
+          }
+        });
+      } catch (e) {
+        console.warn('PDF.js init error:', e);
+      }
+    })();
+  </script>`
+      : ''
+  }
 </body>
 </html>`;
   }
@@ -245,6 +389,12 @@ export class ShippingLabelService {
    * Generates a printable page with Shipping Label, then Invoice (in that exact sequence)
    */
   public generateLabelAndInvoiceHtml(order: OrderWithDetails, waybillNumber: string): string {
+    const isVelocity = isVelocityCourier(order.shipment?.courier, order.shipment?.labelUrl, waybillNumber);
+    const courierLabel = isVelocity
+      ? /amazon|ats/i.test(order.shipment?.courier || '')
+        ? 'Amazon Transportation'
+        : 'Velocity'
+      : 'Delhivery';
     const labelHtml = this.generateSingleLabelHtml(order, waybillNumber);
     const invoiceHtml = invoiceService.generateInvoiceHtml(order);
 
@@ -260,7 +410,7 @@ export class ShippingLabelService {
 <body>
   <div class="print-controls no-print">
     <div class="controls-left">
-      <span class="controls-badge">Youthnic · Shipping Label + GST Tax Invoice</span>
+      <span class="controls-badge">Youthnic · ${courierLabel} Label + GST Tax Invoice</span>
       <span class="controls-info">Order ${order.shopifyOrderName} · Label then Invoice</span>
     </div>
     <div class="controls-right">
@@ -283,15 +433,30 @@ export class ShippingLabelService {
    * Order 1 Label -> Order 1 Invoice -> Order 2 Label -> Order 2 Invoice -> ...
    * strictly "label then invoice label then invoice"
    */
-  public generateBulkLabelsAndInvoicesHtml(orderList: Array<{ order: OrderWithDetails; waybillNumber: string }>): string {
+  public generateBulkLabelsAndInvoicesHtml(orderList: PrintableLabelItem[]): string {
+    const hasPdfBuffers = orderList.some((item) => Boolean(item.pdfBuffer && item.pdfBuffer.length > 50));
+
     const pagesHtml = orderList
-      .map(({ order, waybillNumber }) => {
+      .map(({ order, waybillNumber, pdfBuffer }) => {
+        const pdfBase64 = pdfBuffer && pdfBuffer.length > 50 ? pdfBuffer.toString('base64') : '';
         const labelHtml = this.generateSingleLabelHtml(order, waybillNumber);
         const invoiceHtml = invoiceService.generateInvoiceHtml(order);
         return `
           <div class="order-pair-wrapper">
-            <div class="label-page-wrapper">
-              ${labelHtml}
+            <div class="label-page-wrapper" data-order-name="${order.shopifyOrderName}" data-awb="${waybillNumber}" ${
+          pdfBase64 ? `data-pdf-base64="${pdfBase64}"` : ''
+        }>
+              ${
+                pdfBase64
+                  ? `
+                <div class="pdf-canvas-container" style="display:none; text-align:center; width:100mm; height:150mm; margin:0 auto 20px auto;">
+                  <canvas class="official-label-canvas" style="width:100mm; height:150mm; border:2px solid #000; box-shadow:0 4px 15px rgba(0,0,0,0.15); box-sizing:border-box; background:#fff; display:block; margin:0 auto;"></canvas>
+                </div>`
+                  : ''
+              }
+              <div class="html-label-fallback">
+                ${labelHtml}
+              </div>
             </div>
             <div class="invoice-page-wrapper">
               ${invoiceHtml}
@@ -309,6 +474,7 @@ export class ShippingLabelService {
   <style>
     ${this.getCombinedStyles()}
   </style>
+  ${hasPdfBuffers ? `<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>` : ''}
 </head>
 <body>
   <div class="print-controls no-print">
@@ -322,6 +488,53 @@ export class ShippingLabelService {
     </div>
   </div>
   ${pagesHtml}
+  ${
+    hasPdfBuffers
+      ? `
+  <script>
+    (function() {
+      if (typeof pdfjsLib === 'undefined') return;
+      try {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        var pages = document.querySelectorAll('.label-page-wrapper[data-pdf-base64]');
+        pages.forEach(async function(pageEl) {
+          var base64 = pageEl.getAttribute('data-pdf-base64');
+          if (!base64) return;
+          try {
+            var raw = atob(base64);
+            var uint8 = new Uint8Array(raw.length);
+            for (var i = 0; i < raw.length; i++) {
+              uint8[i] = raw.charCodeAt(i);
+            }
+            var loadingTask = pdfjsLib.getDocument({ data: uint8 });
+            var pdf = await loadingTask.promise;
+            var page = await pdf.getPage(1);
+
+            var container = pageEl.querySelector('.pdf-canvas-container');
+            var canvas = pageEl.querySelector('.official-label-canvas');
+            var fallback = pageEl.querySelector('.html-label-fallback');
+            if (!container || !canvas) return;
+
+            var viewport = page.getViewport({ scale: 3.0 });
+            canvas.height = viewport.height;
+            canvas.width = viewport.width;
+
+            var ctx = canvas.getContext('2d');
+            await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+
+            container.style.display = 'block';
+            if (fallback) fallback.style.display = 'none';
+          } catch (err) {
+            console.warn('PDF.js render fallback to HTML:', err);
+          }
+        });
+      } catch (e) {
+        console.warn('PDF.js init error:', e);
+      }
+    })();
+  </script>`
+      : ''
+  }
 </body>
 </html>`;
   }
@@ -329,7 +542,6 @@ export class ShippingLabelService {
   public getCombinedStyles(): string {
     return `
       ${this.getLabelStyles()}
-      ${invoiceService.getInvoiceStyles()}
 
       .label-page-wrapper {
         display: flex;
@@ -342,6 +554,13 @@ export class ShippingLabelService {
         justify-content: center;
         width: 100%;
         margin-top: 10px;
+      }
+
+      /* Invoice styles integration for combined document */
+      .invoice-page-wrapper .invoice-container {
+        margin: 0 auto;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+        background: #fff;
       }
 
       .order-pair-wrapper {
@@ -360,32 +579,29 @@ export class ShippingLabelService {
       @media print {
         body { background: #fff !important; padding: 0 !important; margin: 0 !important; }
         .no-print { display: none !important; }
+        .label-wrapper { box-shadow: none !important; margin: 0 !important; }
+        .pdf-canvas-container { margin: 0 !important; page-break-after: always; break-after: page; }
+        .official-label-canvas { width: 100mm !important; height: 150mm !important; max-width: 100mm !important; max-height: 150mm !important; border: none !important; box-shadow: none !important; }
+        .invoice-container { box-shadow: none !important; margin: 0 !important; }
+        
         .label-page-wrapper {
-          page-break-inside: avoid;
-          break-inside: avoid;
-          margin: 0 auto !important;
-          page-break-after: always !important;
-          break-after: page !important;
+          page-break-after: always;
+          break-after: page;
         }
-        .label-wrapper {
-          box-shadow: none !important;
-          margin: 0 auto !important;
-        }
+        
         .invoice-page-wrapper {
-          page-break-inside: avoid;
-          break-inside: avoid;
-          margin: 0 auto !important;
-          page-break-after: always !important;
-          break-after: page !important;
+          page-break-after: always;
+          break-after: page;
+          margin-top: 0 !important;
         }
-        .order-pair-wrapper:last-child .invoice-page-wrapper {
-          page-break-after: auto !important;
-          break-after: auto !important;
+
+        .order-pair-wrapper {
+          page-break-inside: auto;
+          break-inside: auto;
         }
-        .invoice-container {
-          box-shadow: none !important;
-          margin: 0 auto !important;
-          border: none !important;
+
+        @page {
+          margin: 0;
         }
       }
     `;
@@ -426,8 +642,6 @@ export class ShippingLabelService {
       }
       .btn-primary { background: #0284c7; color: #fff; }
       .btn-primary:hover { background: #0369a1; }
-      .btn-delhivery { background: #dc2626; color: #fff; }
-      .btn-delhivery:hover { background: #b91c1c; }
       .btn-secondary { background: #475569; color: #fff; }
       .btn-secondary:hover { background: #334155; }
 
@@ -491,6 +705,58 @@ export class ShippingLabelService {
         max-width: 130px;
         object-fit: contain;
         display: block;
+      }
+
+      /* Carrier Badges (Amazon Transportation, Velocity, Blue Dart, Ekart) */
+      .carrier-badge {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        justify-content: center;
+      }
+      .amazon-wordmark {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        line-height: 1;
+      }
+      .amz-text {
+        font-size: 20px;
+        font-weight: 900;
+        letter-spacing: -0.5px;
+        color: #000;
+        font-family: Arial, Helvetica, sans-serif;
+      }
+      .amz-smile {
+        display: block;
+        margin-top: -3px;
+      }
+      .carrier-sub-text {
+        font-size: 8px;
+        font-weight: 800;
+        letter-spacing: 0.6px;
+        text-transform: uppercase;
+        color: #111;
+        margin-top: 1px;
+      }
+      .bluedart-wordmark {
+        font-size: 15px;
+        font-weight: 900;
+        font-style: italic;
+        letter-spacing: 0.5px;
+        color: #000;
+      }
+      .ekart-wordmark {
+        font-size: 17px;
+        font-weight: 900;
+        letter-spacing: -0.5px;
+        color: #000;
+      }
+      .velocity-wordmark {
+        font-size: 14px;
+        font-weight: 900;
+        letter-spacing: 0.5px;
+        color: #000;
       }
 
       /* 2. Barcode & Routing */
@@ -717,6 +983,19 @@ export class ShippingLabelService {
         .label-wrapper {
           box-shadow: none;
           margin: 0;
+        }
+        .pdf-canvas-container {
+          margin: 0 !important;
+          page-break-after: always;
+          break-after: page;
+        }
+        .official-label-canvas {
+          width: 100mm !important;
+          height: 150mm !important;
+          max-width: 100mm !important;
+          max-height: 150mm !important;
+          border: none !important;
+          box-shadow: none !important;
         }
         .label-print-page {
           page-break-inside: avoid;

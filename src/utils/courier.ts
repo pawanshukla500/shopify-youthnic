@@ -11,7 +11,7 @@
  * must never be polled against the Delhivery tracking API.
  */
 export const DELHIVERY_COURIER_PATTERN = /delhivery/i;
-export const VELOCITY_COURIER_PATTERN = /velocity|shipfastt/i;
+export const VELOCITY_COURIER_PATTERN = /velocity|shipfastt|amazon|ats/i;
 
 /**
  * True when the courier name, tracking URL, or waybill number matches Velocity Shipping.
@@ -23,7 +23,14 @@ export function isVelocityCourier(
 ): boolean {
   if (VELOCITY_COURIER_PATTERN.test(courier || '')) return true;
   if (VELOCITY_COURIER_PATTERN.test(trackingUrl || '')) return true;
-  if (trackingUrl && /velocityshipping\.in|shipfastt\.in/i.test(trackingUrl)) return true;
+  if (
+    trackingUrl &&
+    /velocityshipping\.in|shipfastt\.in|shazam\.velocity\.in|velocity-shazam|labels\/amazon|labels\/velocity/i.test(
+      trackingUrl
+    )
+  ) {
+    return true;
+  }
   if (waybillNumber && /^(PD|VEHR|VEL)[0-9A-Z]+$/i.test(waybillNumber.trim())) return true;
   return false;
 }
@@ -92,6 +99,7 @@ export function normalizeCourierName(
   }
 
   if (isVelocityCourier(courier, trackingUrl, waybillNumber)) {
+    if (courier && /amazon|ats/i.test(courier)) return 'Amazon Transportation';
     return 'Velocity';
   }
 

@@ -36,6 +36,7 @@ import returnScanService from '../modules/returns/return-scan.service';
 import shippingRouterService, { CarrierPriority, CourierChoice } from '../modules/shipping/shipping-router.service';
 import velocityService from '../modules/velocity/velocity.service';
 import { isVelocityCourier } from '../utils/courier';
+import { mergePdfBuffers } from '../utils/pdf-merger';
 
 const router = Router();
 
@@ -1194,7 +1195,7 @@ router.get('/orders/:id/label', async (req: Request, res: Response): Promise<voi
       return;
     }
 
-    const isVelocity = isVelocityCourier(order.shipment?.courier);
+    const isVelocity = isVelocityCourier(order.shipment?.courier, order.shipment?.labelUrl, waybillNumber);
 
     // Refresh the packing-slip URL for Delhivery when it is missing or the S3 signature has expired.
     // Velocity provides a direct immutable label_url PDF at orchestration time.
@@ -1270,8 +1271,8 @@ router.get('/orders/:id/label/download', async (req: Request, res: Response): Pr
       res.status(404).json({ error: 'Order not found' });
       return;
     }
-    const isVelocity = isVelocityCourier(order.shipment?.courier);
     const waybill = order.shipment?.waybillNumber || `PENDING-${order.shopifyOrderName.replace('#', '')}`;
+    const isVelocity = isVelocityCourier(order.shipment?.courier, order.shipment?.labelUrl, waybill);
     const pdf = await loadFreshLabelPdf(waybill, order.shipment?.labelUrl, order.shipment?.id, order.shipment?.courier);
     if (pdf) {
       const prefix = isVelocity ? 'velocity' : 'delhivery';
@@ -1315,8 +1316,8 @@ router.post('/orders/bulk-labels', async (req: Request, res: Response): Promise<
       return;
     }
 
-    const orderList: Array<{ order: any; waybillNumber: string }> = [];
     const skippedOrders: string[] = [];
+    const validOrders: typeof orders = [];
 
     for (const order of orders) {
       const waybill = order.shipment?.waybillNumber;
@@ -1324,10 +1325,10 @@ router.post('/orders/bulk-labels', async (req: Request, res: Response): Promise<
         skippedOrders.push(order.shopifyOrderName);
         continue;
       }
-      orderList.push({ order, waybillNumber: waybill });
+      validOrders.push(order);
     }
 
-    if (!orderList.length) {
+    if (!validOrders.length) {
       res.status(400).send(`
         <!DOCTYPE html>
         <html>
@@ -1335,8 +1336,8 @@ router.post('/orders/bulk-labels', async (req: Request, res: Response): Promise<
         <body style="font-family:sans-serif; text-align:center; padding: 50px 20px; background:#f8fafc;">
           <div style="max-width:500px; margin:0 auto; background:#fff; padding:30px; border-radius:12px; box-shadow:0 4px 12px rgba(0,0,0,0.08); border:1px solid #e2e8f0;">
             <h2 style="color:#ef4444; margin-top:0;">⚠️ No Manifested Orders Selected</h2>
-            <p style="color:#334155; font-size:15px; line-height:1.5;">The selected orders (${skippedOrders.join(', ')}) do not have active Delhivery waybills yet.</p>
-            <p style="color:#64748b; font-size:13px;">Please dispatch them first to generate genuine Delhivery shipping labels.</p>
+            <p style="color:#334155; font-size:15px; line-height:1.5;">The selected orders (${skippedOrders.join(', ')}) do not have active shipping waybills yet.</p>
+            <p style="color:#64748b; font-size:13px;">Please dispatch them first to generate official shipping labels.</p>
             <button onclick="window.close()" style="margin-top:15px; padding:8px 20px; background:#0f172a; color:#fff; border:none; border-radius:6px; cursor:pointer; font-weight:600;">Close Window</button>
           </div>
         </body>
@@ -1344,6 +1345,31 @@ router.post('/orders/bulk-labels', async (req: Request, res: Response): Promise<
       `);
       return;
     }
+
+    // Parallel fetch of official label PDFs (especially for Velocity / Amazon orders)
+    const orderList = await Promise.all(
+      validOrders.map(async (order) => {
+        const waybillNumber = order.shipment!.waybillNumber!;
+        let pdfBuffer: Buffer | null = null;
+        const isVel = isVelocityCourier(order.shipment?.courier, order.shipment?.labelUrl, waybillNumber);
+        if (isVel) {
+          try {
+            pdfBuffer = await loadFreshLabelPdf(
+              waybillNumber,
+              order.shipment?.labelUrl,
+              order.shipment?.id,
+              order.shipment?.courier
+            );
+          } catch (err: any) {
+            logger.warn('Could not load official Velocity PDF in bulk view', {
+              waybillNumber,
+              error: err.message,
+            });
+          }
+        }
+        return { order: order as any, waybillNumber, pdfBuffer };
+      })
+    );
 
     const html = shippingLabelService.generateBulkPrintableLabelsPage(orderList);
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -1353,7 +1379,7 @@ router.post('/orders/bulk-labels', async (req: Request, res: Response): Promise<
   }
 });
 
-// Bulk Shipping Labels Download (Direct file download as HTML attachment without opening tab)
+// Bulk Shipping Labels Download (Direct file download - Official Merged PDF if all have PDF / format=pdf, or HTML)
 router.post('/orders/bulk-labels/download', async (req: Request, res: Response): Promise<void> => {
   try {
     const { orderIds } = req.body;
@@ -1371,13 +1397,45 @@ router.post('/orders/bulk-labels/download', async (req: Request, res: Response):
       return;
     }
 
-    const orderList: Array<{ order: any; waybillNumber: string }> = [];
-    for (const order of orders) {
-      const waybill = order.shipment?.waybillNumber || `PENDING-${order.shopifyOrderName.replace('#', '')}`;
-      orderList.push({ order, waybillNumber: waybill });
+    const orderListWithPdfs = await Promise.all(
+      orders.map(async (order) => {
+        const waybill = order.shipment?.waybillNumber || `PENDING-${order.shopifyOrderName.replace('#', '')}`;
+        let pdfBuffer: Buffer | null = null;
+        if (order.shipment?.waybillNumber) {
+          try {
+            pdfBuffer = await loadFreshLabelPdf(
+              waybill,
+              order.shipment?.labelUrl,
+              order.shipment?.id,
+              order.shipment?.courier
+            );
+          } catch (err: any) {
+            logger.warn('Could not load label PDF for bulk download', { waybill, error: err.message });
+          }
+        }
+        return { order: order as any, waybillNumber: waybill, pdfBuffer };
+      })
+    );
+
+    const validPdfBuffers = orderListWithPdfs
+      .map((item) => item.pdfBuffer)
+      .filter((buf): buf is Buffer => Boolean(buf && buf.length > 50));
+
+    const forcePdf = req.query.pdf === 'true' || req.query.format === 'pdf';
+    const allHavePdfs = validPdfBuffers.length === orders.length;
+
+    if ((allHavePdfs || forcePdf) && validPdfBuffers.length > 0) {
+      const mergedPdf = await mergePdfBuffers(validPdfBuffers);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="Bulk-Labels-${orders.length}-Orders.pdf"`
+      );
+      res.send(mergedPdf);
+      return;
     }
 
-    const html = shippingLabelService.generateBulkPrintableLabelsPage(orderList);
+    const html = shippingLabelService.generateBulkPrintableLabelsPage(orderListWithPdfs);
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader(
       'Content-Disposition',
@@ -1451,10 +1509,30 @@ router.post('/orders/bulk-labels-and-invoices', async (req: Request, res: Respon
       return;
     }
 
-    const orderList = orders.map((order) => ({
-      order: order as any,
-      waybillNumber: order.shipment?.waybillNumber || `PENDING-${order.shopifyOrderName.replace('#', '')}`,
-    }));
+    const orderList = await Promise.all(
+      orders.map(async (order) => {
+        const waybillNumber = order.shipment?.waybillNumber || `PENDING-${order.shopifyOrderName.replace('#', '')}`;
+        let pdfBuffer: Buffer | null = null;
+        const isVel = isVelocityCourier(order.shipment?.courier, order.shipment?.labelUrl, waybillNumber);
+        if (isVel && order.shipment?.waybillNumber) {
+          try {
+            pdfBuffer = await loadFreshLabelPdf(
+              waybillNumber,
+              order.shipment?.labelUrl,
+              order.shipment?.id,
+              order.shipment?.courier
+            );
+          } catch (err: any) {
+            logger.warn('Could not load Velocity label PDF for bulk label+invoice', { waybillNumber, error: err.message });
+          }
+        }
+        return {
+          order: order as any,
+          waybillNumber,
+          pdfBuffer,
+        };
+      })
+    );
 
     const html = shippingLabelService.generateBulkLabelsAndInvoicesHtml(orderList);
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -1482,10 +1560,30 @@ router.post('/orders/bulk-labels-and-invoices/download', async (req: Request, re
       return;
     }
 
-    const orderList = orders.map((order) => ({
-      order: order as any,
-      waybillNumber: order.shipment?.waybillNumber || `PENDING-${order.shopifyOrderName.replace('#', '')}`,
-    }));
+    const orderList = await Promise.all(
+      orders.map(async (order) => {
+        const waybillNumber = order.shipment?.waybillNumber || `PENDING-${order.shopifyOrderName.replace('#', '')}`;
+        let pdfBuffer: Buffer | null = null;
+        const isVel = isVelocityCourier(order.shipment?.courier, order.shipment?.labelUrl, waybillNumber);
+        if (isVel && order.shipment?.waybillNumber) {
+          try {
+            pdfBuffer = await loadFreshLabelPdf(
+              waybillNumber,
+              order.shipment?.labelUrl,
+              order.shipment?.id,
+              order.shipment?.courier
+            );
+          } catch (err: any) {
+            logger.warn('Could not load Velocity label PDF for bulk label+invoice download', { waybillNumber, error: err.message });
+          }
+        }
+        return {
+          order: order as any,
+          waybillNumber,
+          pdfBuffer,
+        };
+      })
+    );
 
     const html = shippingLabelService.generateBulkLabelsAndInvoicesHtml(orderList);
     res.setHeader('Content-Type', 'text/html; charset=utf-8');

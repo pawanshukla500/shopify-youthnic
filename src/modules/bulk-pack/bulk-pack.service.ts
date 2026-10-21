@@ -20,7 +20,7 @@ export class BulkPackService {
       'State',
       'Pincode',
       'Payment Method',
-      'Delhivery Waybill',
+      'Waybill / AWB',
       'Items Count',
       'SKUs Summary',
       'Total Amount (INR)',

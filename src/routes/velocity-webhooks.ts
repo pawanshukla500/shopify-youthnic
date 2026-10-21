@@ -153,7 +153,7 @@ export async function handleVelocityWebhook(req: Request, res: Response): Promis
         expectedDeliveryDate: data.estimated_delivery_date
           ? new Date(data.estimated_delivery_date)
           : undefined,
-        labelUrl: shipment.labelUrl || data.tracking_url || undefined,
+        labelUrl: shipment.labelUrl || data.label_url || undefined,
       },
     });
 

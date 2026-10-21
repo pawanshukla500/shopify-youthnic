@@ -1,6 +1,8 @@
 import prisma from '../../database/prisma';
 import { config } from '../../config';
 import delhiveryService from '../delhivery/delhivery.service';
+import velocityService from '../velocity/velocity.service';
+import { isVelocityCourier } from '../../utils/courier';
 import shopifyService, { matchShopifyLineItem } from '../shopify/shopify.service';
 import notificationEngine from '../notifications/notification.service';
 import { recordAccountTrailEvent, type AccountTrailActor } from '../accounts/account-trail.service';
@@ -134,6 +136,9 @@ class ReturnService {
 
     let finalReturnWaybill = typedWaybill;
     let pickupAutomatic = false;
+    let labelUrl: string | null = null;
+
+    const isVel = isVelocityCourier(carrierName, null, typedWaybill);
 
     if (isDelhivery && !finalReturnWaybill) {
       if (!forwardDelivered) {
@@ -153,13 +158,40 @@ class ReturnService {
       );
       finalReturnWaybill = created.waybillNumber;
       pickupAutomatic = true;
+    } else if (isVel && !finalReturnWaybill) {
+      const selectedLines = items.map((item) => {
+        const line = order.items.find((row) => row.id === item.orderItemId)!;
+        return {
+          name: line.title,
+          sku: line.sku || `SKU-${line.id}`,
+          units: item.quantity,
+          selling_price: Math.max(1, Math.round(line.price || 0)),
+        };
+      });
+      const rawName = (order.customerName || 'Customer').trim();
+      const parts = rawName.split(/\s+/);
+      const velReturn = await velocityService.createReverseShipment({
+        orderId: order.shopifyOrderName,
+        pickupCustomerName: parts[0] || 'Customer',
+        pickupLastName: parts.slice(1).join(' ') || '.',
+        pickupAddress: (order.customerAddress || 'Address').substring(0, 200),
+        pickupCity: order.customerCity || 'City',
+        pickupState: order.customerState || 'State',
+        pickupPincode: order.customerPincode?.trim() || '000000',
+        pickupPhone: order.customerPhone || '9999999999',
+        pickupEmail: order.customerEmail || undefined,
+        items: selectedLines,
+        totalAmount: Math.max(1, Math.round(order.totalAmount || 0)),
+      });
+      finalReturnWaybill = velReturn.awbCode;
+      labelUrl = velReturn.labelUrl || null;
+      pickupAutomatic = Boolean(finalReturnWaybill);
     } else if (!finalReturnWaybill) {
-      throw new Error(`Enter the ${carrierName} return waybill. Automatic reverse pickup is available for Delhivery.`);
+      throw new Error(`Enter the ${carrierName} return waybill. Automatic reverse pickup is available for Delhivery and Velocity.`);
     } else if (isDelhivery && !/^\d{8,}$/.test(finalReturnWaybill)) {
       throw new Error('A Delhivery return AWB is the numeric waybill from Delhivery. Leave the field blank to create one automatically.');
     }
 
-    let labelUrl: string | null = null;
     if (isDelhivery && pickupAutomatic) {
       try {
         const generated = await delhiveryService.generateLabel(finalReturnWaybill);
@@ -332,17 +364,32 @@ class ReturnService {
     let updated = 0;
     for (const row of rows) {
       if (!row.returnWaybillNumber) continue;
+      const isVel = isVelocityCourier(row.carrier, null, row.returnWaybillNumber);
       try {
-        const tracking = await delhiveryService.trackShipment(row.returnWaybillNumber);
-        const handled = await applyReturnCarrierScan(row.returnWaybillNumber, {
-          statusType: tracking.statusType,
-          status: tracking.status,
-          location: tracking.location,
-          remarks: tracking.remarks,
-          scannedAt: tracking.scanDateTime ? new Date(tracking.scanDateTime) : new Date(),
-          history: tracking.history,
-        });
-        if (handled === 'updated') updated += 1;
+        if (isVel) {
+          const vTracking = await velocityService.trackShipment(row.returnWaybillNumber);
+          const mapped = velocityService.mapTrackingToShipmentStatus(vTracking.shipmentStatus);
+          const handled = await applyReturnCarrierScan(row.returnWaybillNumber, {
+            statusType: vTracking.shipmentStatus,
+            status: mapped.description,
+            location: vTracking.destination || vTracking.origin,
+            remarks: vTracking.currentStatus,
+            scannedAt: new Date(),
+            history: vTracking.activities as any,
+          });
+          if (handled === 'updated') updated += 1;
+        } else {
+          const tracking = await delhiveryService.trackShipment(row.returnWaybillNumber);
+          const handled = await applyReturnCarrierScan(row.returnWaybillNumber, {
+            statusType: tracking.statusType,
+            status: tracking.status,
+            location: tracking.location,
+            remarks: tracking.remarks,
+            scannedAt: tracking.scanDateTime ? new Date(tracking.scanDateTime) : new Date(),
+            history: tracking.history,
+          });
+          if (handled === 'updated') updated += 1;
+        }
       } catch (err: any) {
         logger.warn('Reverse tracking poll failed', {
           returnId: row.id,

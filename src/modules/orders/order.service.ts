@@ -4,7 +4,7 @@ import shopifyService from '../shopify/shopify.service';
 import delhiveryService from '../delhivery/delhivery.service';
 import velocityService from '../velocity/velocity.service';
 import shippingRouterService, { CourierChoice } from '../shipping/shipping-router.service';
-import { isVelocityCourier } from '../../utils/courier';
+import { isVelocityCourier, isDelhiveryCourier } from '../../utils/courier';
 import notificationEngine from '../notifications/notification.service';
 import paymentService from '../payments/payment.service';
 import { recordAccountTrailEvent, type AccountTrailActor } from '../accounts/account-trail.service';
@@ -852,13 +852,22 @@ class OrderService {
 
     // Sync fulfillment and tracking number directly to Shopify order
     try {
-      await shopifyService.fulfillOrderOnShopify(verifiedOrder.shopifyOrderId, waybillNumber, courierNameForShopify);
+      await shopifyService.fulfillOrderOnShopify(
+        verifiedOrder.shopifyOrderId,
+        waybillNumber,
+        courierNameForShopify,
+        chosenCourier === 'Velocity' ? `https://www.velocityshipping.in/track/${waybillNumber}` : undefined
+      );
     } catch (shopifyErr: any) {
       logger.warn('Could not sync fulfillment to Shopify (non-critical)', { error: shopifyErr.message });
     }
 
     // Send "order shipped" WhatsApp notification
-    await notificationEngine.notifyOrderShipped(verifiedOrder, waybillNumber);
+    await notificationEngine.notifyOrderShipped(
+      verifiedOrder,
+      waybillNumber,
+      chosenCourier === 'Velocity' ? 'Velocity' : 'Delhivery Express'
+    );
 
     // Record sync log
     await prisma.syncLog.create({
@@ -1011,8 +1020,17 @@ class OrderService {
       !['CANCELLED', 'ERROR', 'DELIVERED', 'RTO', 'RTO_DELIVERED'].includes(shipment.status);
     if (!shipment || !live) return 'none';
 
-    const shipCourier = (shipment as any)?.courier;
-    const isVelocity = isVelocityCourier(shipCourier, null, shipment.waybillNumber);
+    let shipCourier = (shipment as any)?.courier;
+    let shipLabelUrl = (shipment as any)?.labelUrl;
+    if (shipCourier === undefined && shipment.id) {
+      const full = await prisma.shipment.findUnique({
+        where: { id: shipment.id },
+        select: { courier: true, labelUrl: true },
+      });
+      shipCourier = full?.courier;
+      shipLabelUrl = full?.labelUrl;
+    }
+    const isVelocity = isVelocityCourier(shipCourier, shipLabelUrl, shipment.waybillNumber);
     let accepted = false;
 
     if (isVelocity) {
@@ -1659,12 +1677,27 @@ class OrderService {
       throw new Error(`Order ${orderId} not found`);
     }
 
+    const shipCourier = order.shipment?.courier;
+    const isVelocity = isVelocityCourier(shipCourier, order.shipment?.labelUrl, order.shipment?.waybillNumber);
+
     if (action === 'RE-ATTEMPT') {
-      if (order.shipment?.waybillNumber && order.shipment.courier?.toLowerCase() === 'delhivery') {
-        try {
-          await delhiveryService.ndrAction(order.shipment.waybillNumber, 'RE-ATTEMPT');
-        } catch (delhErr: any) {
-          logger.warn('Delhivery NDR action failed (courier may be offline)', { error: delhErr.message });
+      if (order.shipment?.waybillNumber) {
+        if (isVelocity) {
+          try {
+            await velocityService.submitNdrAction({
+              awb: order.shipment.waybillNumber,
+              action: 'reattempt',
+              remarks: notes || 'Customer requested reattempt',
+            });
+          } catch (velErr: any) {
+            logger.warn('Velocity NDR reattempt action failed', { error: velErr.message });
+          }
+        } else if (isDelhiveryCourier(shipCourier, order.shipment?.labelUrl, order.shipment?.waybillNumber)) {
+          try {
+            await delhiveryService.ndrAction(order.shipment.waybillNumber, 'RE-ATTEMPT');
+          } catch (delhErr: any) {
+            logger.warn('Delhivery NDR action failed (courier may be offline)', { error: delhErr.message });
+          }
         }
       }
 
@@ -1685,6 +1718,18 @@ class OrderService {
       return { success: true, message: `Re-attempt scheduled for ${order.shopifyOrderName}. Customer notified on WhatsApp.` };
     } else {
       // Mark RTO Initiated
+      if (order.shipment?.waybillNumber && isVelocity) {
+        try {
+          await velocityService.submitNdrAction({
+            awb: order.shipment.waybillNumber,
+            action: 'rto',
+            remarks: notes || 'Marked RTO by merchant',
+          });
+        } catch (velErr: any) {
+          logger.warn('Velocity NDR RTO action failed', { error: velErr.message });
+        }
+      }
+
       await prisma.order.update({
         where: { id: order.id },
         data: { status: 'RTO_INITIATED' },

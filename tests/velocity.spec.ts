@@ -32,6 +32,7 @@ const { prismaStub } = vi.hoisted(() => ({
     },
     trackingLog: {
       create: vi.fn(),
+      createMany: vi.fn(),
     },
   },
 }));
@@ -175,7 +176,8 @@ describe('Velocity Shipping Integration', () => {
       expect(mockAxios.post).toHaveBeenCalledWith(
         '/custom/api/v1/forward-order-orchestration',
         expect.objectContaining({
-          order_id: '1001-101',
+          order_id: '#1001',
+          external_id: '1001',
           payment_method: 'COD',
           sub_total: 999,
           payment_mode: 'cod',
@@ -222,6 +224,8 @@ describe('Velocity Shipping Integration', () => {
       expect(mockAxios.post).toHaveBeenCalledWith(
         '/custom/api/v1/forward-order-orchestration',
         expect.objectContaining({
+          order_id: '#1002',
+          external_id: '1002',
           payment_method: 'PREPAID',
           payment_mode: 'prepaid',
           cod_amount: 0,

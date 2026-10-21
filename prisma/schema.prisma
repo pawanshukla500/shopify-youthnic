@@ -122,6 +122,26 @@ model Order {
 
   @@index([status])
   @@index([shopifyUpdatedAt])
+  // Order lists filter by status and order by shopifyCreatedAt desc (order.service
+  // getOrders / autoDispatchPendingOrders / reconcilePendingChannelOrders).
+  @@index([status, shopifyCreatedAt])
+  // Monthly / date-range accounts reports range-scan on shopifyCreatedAt.
+  @@index([shopifyCreatedAt])
+  // Accounts maintenance: backfillDeliveredAt (deliveredAt IS NULL) and
+  // closeSettledOrders (deliveredAt <= return-window cutoff) run on the hourly cron.
+  @@index([deliveredAt])
+  // closeSettledOrders scans accountsClosedAt IS NULL candidates hourly.
+  @@index([accountsClosedAt])
+  // Hourly RTO-refund retry cron filters supportFlag = 'RTO_REFUND_FAILED'.
+  @@index([supportFlag])
+  // Dashboard payment aggregates and the daily COD refund digest filter by
+  // paymentMethod + status (api.ts /payments/summary, return-scan digest).
+  @@index([paymentMethod, status])
+  // /payments/summary unverified count and the orders list paymentVerified filter.
+  @@index([paymentVerified, status])
+  // Reconciliation uploads and return-scan sync look orders up by exact order
+  // name (#1001 / 1001 variants) — reconciliation.service findOrderByReference.
+  @@index([shopifyOrderName])
 }
 
 model OrderItem {
@@ -240,6 +260,12 @@ model Shipment {
 
   @@index([status])
   @@index([waybillNumber])
+  // Tracking cron (every 30 min) batches live shipments by status, ordered by
+  // trackingUpdatedAt asc (nulls first) with a stale-before cutoff.
+  @@index([status, trackingUpdatedAt])
+  // COD ledger dashboard: aggregates and outstanding lists filter
+  // paymentMode = 'COD' with codCollected / codRemitted flags.
+  @@index([paymentMode, codCollected, codRemitted])
 }
 
 // NOTE: DelhiveryLedgerTransaction removed 2026-09-28 — Delhivery has no
@@ -342,6 +368,15 @@ model Return {
   @@index([returnStatus])
   @@index([refundStatus])
   @@index([returnWaybillNumber])
+  // FK index (not automatic for one-to-many): returns are loaded per order on
+  // order detail, accounts closing, and the COD refund digest.
+  @@index([orderId])
+  // Reverse-tracking cron batches open returns by status, ordered by
+  // trackingUpdatedAt with a stale-before cutoff (return.service syncActiveReturns).
+  @@index([returnStatus, trackingUpdatedAt])
+  // Hourly retryFailedRefunds cron: refundStatus = FAILED and
+  // refundAttempts < cap.
+  @@index([refundStatus, refundAttempts])
 }
 
 // One open warehouse pickup per location per day. Delhivery's pickup API
@@ -496,6 +531,9 @@ model EmailLog {
   @@index([status])
   @@index([converted])
   @@index([createdAt])
+  // Transit-delay cooldown check runs per shipment on every tracking poll:
+  // orderId + templateType + createdAt >= 24h ago (tracking.service).
+  @@index([orderId, templateType, createdAt])
 }
 
 // ─── Inbound Customer Support Emails & AI Triage ──────────
@@ -570,6 +608,9 @@ model SyncLog {
 
   @@index([syncType])
   @@index([status])
+  // Hourly RTO-refund retry counts failures per order
+  // (orderId + syncType + status) inside its retry loop.
+  @@index([orderId, syncType, status])
 }
 
 // ─── Accounts: uploaded reconciliation files ──────────────

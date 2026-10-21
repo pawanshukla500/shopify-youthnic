@@ -17,7 +17,7 @@ const { prismaStub, delhiveryStub, notifyStub } = vi.hoisted(() => ({
   prismaStub: {
     shipment: { findMany: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
     order: { update: vi.fn() },
-    trackingLog: { findMany: vi.fn(), create: vi.fn() },
+    trackingLog: { findMany: vi.fn(), create: vi.fn(), createMany: vi.fn() },
     syncLog: { create: vi.fn() },
     emailLog: { findFirst: vi.fn() },
   },

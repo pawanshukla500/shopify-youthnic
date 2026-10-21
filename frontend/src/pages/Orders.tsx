@@ -30,6 +30,7 @@ import { Button, EmptyState, ErrorBox, FormField, Icon, LoadingState, PageIntro,
 import { OrderLogisticsActions } from '../components/OrderLogisticsActions'
 import type { Order, OrderStatus } from '../types'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import './Orders.css'
 
 export type PaymentChannelFilter = 'ALL' | 'DELHIVERY_PENDING_AWB' | 'NEEDS_DISPATCH' | 'DELAYED_DISPATCH' | 'NDR' | 'PREPAID_PENDING' | 'COD' | 'GOKWIK' | 'PHONEPE'
 
@@ -91,7 +92,7 @@ export function ShopifyTagList({ tags }: { tags?: string | null }) {
   if (!tagList.length) return null
 
   return (
-    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', flexWrap: 'wrap' }}>
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
       {tagList.slice(0, 2).map((tag) => {
         const lower = tag.toLowerCase()
         let modifier = 'tag-default'
@@ -102,13 +103,13 @@ export function ShopifyTagList({ tags }: { tags?: string | null }) {
         else if (lower.includes('refund') || lower.includes('cancelled')) modifier = 'tag-refund'
 
         return (
-          <span key={tag} className={`shopify-tag-pill ${modifier}`} style={{ fontSize: '9px', padding: '1px 5px', height: '17px', lineHeight: '15px' }} title={`Shopify Tag: ${tag}`}>
+          <span key={tag} className={`shopify-tag-pill ${modifier}`} title={`Shopify Tag: ${tag}`}>
             {tag}
           </span>
         )
       })}
       {tagList.length > 2 && (
-        <span className="shopify-tag-pill tag-default" style={{ fontSize: '9px', padding: '1px 5px', height: '17px', lineHeight: '15px' }} title={tagList.slice(2).join(', ')}>
+        <span className="shopify-tag-pill tag-default" title={tagList.slice(2).join(', ')}>
           +{tagList.length - 2}
         </span>
       )}
@@ -138,6 +139,8 @@ export function Orders() {
   const [activeTab, setActiveTab] = useState<OrderTabKey>(initialTab)
   const [selectedState, setSelectedState] = useState<string>('')
   const [search, setSearch] = useState('')
+  // Slim SLA strip — dismissed by the user until the next reload / count change
+  const [slaDismissed, setSlaDismissed] = useState(false)
   // Every order with a dispatch request in flight. One shared id let a click on
   // row B re-enable row A's button while A was still manifesting.
   const [dispatchingIds, setDispatchingIds] = useState<Set<number>>(() => new Set())
@@ -1021,21 +1024,23 @@ export function Orders() {
       const courierLabel = courierLower.includes('cod') ? courier : `${courier} COD`
 
       return (
-        <div className="payment-cell">
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontWeight: 700, color: '#b45309' }}>
+        <div className="pay-cell">
+          <span className="pay-pill is-cod" title="Cash on Delivery order">
             {courierLower === 'delhivery' ? (
-              <img
-                src="/logos/delhivery.png"
-                alt="Delhivery"
-                style={{ height: '11px', maxWidth: '55px', objectFit: 'contain' }}
-              />
+              <img src="/logos/delhivery.png" alt="Delhivery" />
             ) : (
-              <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#f59e0b' }} />
+              <span className="pay-dot" />
             )}
             {courierLabel}
           </span>
-          <span className="cell-muted">
-            {isRemitted ? (order.paymentReceivedUtr ? 'Bank UTR recorded' : 'Remittance recorded / UTR missing') : isCollected ? 'Collected at Door' : 'Collection Pending'}
+          <span className={`pay-sub ${isRemitted ? 'is-ok' : isCollected ? 'is-ok' : 'is-warn'}`}>
+            {isRemitted
+              ? order.paymentReceivedUtr
+                ? 'Remitted · UTR recorded'
+                : 'Remitted · UTR missing'
+              : isCollected
+                ? 'Collected at door'
+                : 'Collection pending'}
           </span>
         </div>
       )
@@ -1044,267 +1049,200 @@ export function Orders() {
     if (agg.includes('gokwik') || gw.includes('gokwik') || gw.includes('kwik') || sc.includes('gokwik')) {
       const isEasebuzz = (provider || '').toLowerCase().includes('easebuzz')
       return (
-        <div className="payment-cell">
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontWeight: 700, color: '#034694' }}>
-              <img
-                src="/logos/gokwik.png"
-                alt="GoKwik"
-                style={{ height: '13px', maxWidth: '55px', objectFit: 'contain' }}
-              />
-            </span>
-            {isEasebuzz && (
-              <>
-                <span style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 600 }}>via</span>
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontWeight: 700, color: '#0f172a' }}>
-                  <img
-                    src="/logos/easebuzz.png"
-                    alt="Easebuzz"
-                    style={{ height: '12px', maxWidth: '55px', objectFit: 'contain' }}
-                  />
-                </span>
-              </>
+        <div className="pay-cell">
+          <span className="pay-pill is-gokwik" title={`GoKwik 1-click checkout${provider ? ` · ${provider}` : ''}`}>
+            <img src="/logos/gokwik.png" alt="GoKwik" />
+            {isEasebuzz ? (
+              <span className="pay-pill-via">
+                via <img src="/logos/easebuzz.png" alt="Easebuzz" />
+              </span>
+            ) : (
+              provider && <span className="pay-pill-via">({provider})</span>
             )}
-            {!isEasebuzz && provider && (
-              <span style={{ fontSize: '10px', color: '#475569', fontWeight: 600 }}>({provider})</span>
-            )}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginTop: '2px' }}>
-            <span className={`verified-badge ${order.paymentVerified ? 'verified' : 'unverified'}`}>
-              {order.paymentVerified ? 'Captured & Verified' : 'Verification Pending'}
-            </span>
+          </span>
+          <span className={`pay-sub ${order.paymentVerified ? 'is-ok' : 'is-warn'}`}>
+            {order.paymentVerified ? 'Captured & verified' : 'Verification pending'}
             {order.paymentProviderPaymentId && (
-              <span
-                style={{ fontSize: '9.5px', color: '#64748b', fontFamily: 'monospace' }}
-                title={`Easebuzz Payment ID: ${order.paymentProviderPaymentId}`}
-              >
+              <span className="pay-ref" title={`Easebuzz Payment ID: ${order.paymentProviderPaymentId}`}>
                 {order.paymentProviderPaymentId.length > 10
                   ? `${order.paymentProviderPaymentId.slice(0, 10)}…`
                   : order.paymentProviderPaymentId}
               </span>
             )}
-          </div>
+          </span>
         </div>
       )
     }
 
     if (gw.includes('phonepe') || gw.includes('phone_pe')) {
       return (
-        <div className="payment-cell">
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontWeight: 700, color: '#6d28d9' }}>
-            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#8b5cf6' }} />
+        <div className="pay-cell">
+          <span className="pay-pill is-phonepe" title="PhonePe payment gateway">
+            <span className="pay-dot" />
             PhonePe PG
           </span>
-          <span className={`verified-badge ${order.paymentVerified ? 'verified' : 'unverified'}`}>
-            {order.paymentVerified ? 'Captured & Verified' : 'Verification Pending'}
+          <span className={`pay-sub ${order.paymentVerified ? 'is-ok' : 'is-warn'}`}>
+            {order.paymentVerified ? 'Captured & verified' : 'Verification pending'}
           </span>
         </div>
       )
     }
 
     return (
-      <div className="payment-cell">
-        <span>{order.paymentMethod || 'Prepaid'}</span>
-        <span className="cell-muted">{order.paymentGateway || 'Standard Gateway'}</span>
+      <div className="pay-cell">
+        <span className="pay-pill">{order.paymentMethod || 'Prepaid'}</span>
+        <span className="pay-sub">{order.paymentGateway || 'Standard gateway'}</span>
       </div>
     )
   }
 
   return (
-    <>
+    <div className="orders-page">
       <PageIntro
         eyebrow="Order management"
         title="Orders"
         description="Comprehensive order lifecycle, Delhivery dispatch, line item SKUs & imagery, and 3-way payment reconciliation."
       />
 
-      {/* 3-way money receipt summary chips */}
-      <div className="metric-grid" style={{ marginBottom: '16px' }}>
-        <div
-          className={`metric-card clickable-row ${channelFilter === 'ALL' ? 'selected-metric' : ''}`}
+      {/* Uniform single-row KPI stat strip — every card shares one typography scale */}
+      <div className="kpi-strip" role="group" aria-label="Order payment stream summary">
+        <button
+          type="button"
+          className={`kpi-stat ${channelFilter === 'ALL' ? 'is-active' : ''}`}
           onClick={() => setChannelFilter('ALL')}
-          style={{ cursor: 'pointer', border: channelFilter === 'ALL' ? '2px solid #2f6df6' : undefined }}
+          title="Show all orders"
         >
-          <div className="metric-icon" style={{ background: '#eaf1ff', color: '#2f6df6' }}>
-            <Icon name="box" size={19} />
-          </div>
-          <div>
-            <span className="metric-label">All Orders</span>
-            <strong>{formatMoney(metrics.totalAmt)}</strong>
-            <span className="metric-sub">{metrics.totalCount} orders total</span>
-          </div>
-        </div>
+          <span className="kpi-stat-label">All Orders</span>
+          <span className="kpi-stat-value">{formatMoney(metrics.totalAmt)}</span>
+          <span className="kpi-stat-sub">{metrics.totalCount} orders total</span>
+        </button>
 
-        {/* ⚡ Urgent Needs Dispatch Filter Chip (Prepaid & Confirmed COD) */}
-        <div
-          className={`metric-card clickable-row ${channelFilter === 'NEEDS_DISPATCH' || channelFilter === 'PREPAID_PENDING' ? 'selected-metric' : ''}`}
+        {/* ⚡ Urgent Needs Dispatch (Prepaid & Confirmed COD) */}
+        <button
+          type="button"
+          className={`kpi-stat ${channelFilter === 'NEEDS_DISPATCH' || channelFilter === 'PREPAID_PENDING' ? 'is-active' : ''}`}
           onClick={() => setChannelFilter((channelFilter === 'NEEDS_DISPATCH' || channelFilter === 'PREPAID_PENDING') ? 'ALL' : 'NEEDS_DISPATCH')}
-          style={{
-            cursor: 'pointer',
-            border: (channelFilter === 'NEEDS_DISPATCH' || channelFilter === 'PREPAID_PENDING') ? '2px solid #ef4444' : '1px solid #fee2e2',
-            background: (channelFilter === 'NEEDS_DISPATCH' || channelFilter === 'PREPAID_PENDING') ? '#fef2f2' : '#fff5f5',
-          }}
+          title="Prepaid & confirmed-COD orders awaiting AWB generation"
         >
-          <div className="metric-icon" style={{ background: '#fee2e2', color: '#dc2626' }}>
-            <Icon name="package" size={19} />
-          </div>
-          <div>
-            <span className="metric-label" style={{ color: '#b91c1c', display: 'flex', alignItems: 'center', gap: '5px' }}>
-              <span className="pulsing-red-dot" /> ⚡ Needs Dispatch
-            </span>
-            <strong style={{ color: '#991b1b' }}>{metrics.needsDispatchCount} pending</strong>
-            <span className="metric-sub" style={{ color: '#b91c1c' }}>Prepaid & Confirmed COD</span>
-          </div>
-        </div>
+          <span className="kpi-stat-label">
+            <span className="kpi-dot is-red" /> Needs Dispatch
+          </span>
+          <span className="kpi-stat-value is-danger">{metrics.needsDispatchCount} pending</span>
+          <span className="kpi-stat-sub">Prepaid & confirmed COD</span>
+        </button>
 
-        {/* 🛍️ Delhivery One Channel: Pending AWB Chip */}
-        <div
-          className={`metric-card clickable-row ${channelFilter === 'DELHIVERY_PENDING_AWB' ? 'selected-metric' : ''}`}
+        {/* 🛍️ Delhivery One Channel: Pending AWB */}
+        <button
+          type="button"
+          className={`kpi-stat ${channelFilter === 'DELHIVERY_PENDING_AWB' ? 'is-active' : ''}`}
           onClick={() => setChannelFilter(channelFilter === 'DELHIVERY_PENDING_AWB' ? 'ALL' : 'DELHIVERY_PENDING_AWB')}
-          style={{
-            cursor: 'pointer',
-            border: channelFilter === 'DELHIVERY_PENDING_AWB' ? '2px solid #059669' : undefined,
-          }}
+          title="Shopify channel orders still awaiting a Delhivery AWB"
         >
-          <div className="metric-icon" style={{ background: '#ecfdf5', color: '#16a34a' }}>
-            <Icon name="truck" size={17} />
-          </div>
-          <div>
-            <span className="metric-label" style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-              <span className="pulsing-green-dot" /> Delhivery Channel
-            </span>
-            <strong>{metrics.pendingAwbCount} Pending AWB</strong>
-            <span className="metric-sub" style={{ color: '#16a34a' }}>Shopify: youthnic2024</span>
-          </div>
-        </div>
+          <span className="kpi-stat-label">
+            <span className="kpi-dot is-green" /> Delhivery Channel
+          </span>
+          <span className="kpi-stat-value">{metrics.pendingAwbCount} Pending AWB</span>
+          <span className="kpi-stat-sub">Shopify: youthnic2024</span>
+        </button>
 
-        <div
-          className={`metric-card clickable-row ${channelFilter === 'COD' ? 'selected-metric' : ''}`}
-          onClick={() => setChannelFilter('COD')}
-          style={{ cursor: 'pointer', border: channelFilter === 'COD' ? '2px solid #f59e0b' : undefined }}
+        <button
+          type="button"
+          className={`kpi-stat ${channelFilter === 'COD' ? 'is-active' : ''}`}
+          onClick={() => setChannelFilter(channelFilter === 'COD' ? 'ALL' : 'COD')}
+          title="Cash on Delivery orders"
         >
-          <div className="metric-icon" style={{ background: '#fffbeb', color: '#d97706' }}>
-            <Icon name="package" size={19} />
-          </div>
-          <div>
-            <span className="metric-label">Cash on Delivery (COD)</span>
-            <strong>{formatMoney(metrics.codAmt)}</strong>
-            <span className="metric-sub">{metrics.codCount} COD orders</span>
-          </div>
-        </div>
+          <span className="kpi-stat-label">Cash on Delivery</span>
+          <span className="kpi-stat-value">{formatMoney(metrics.codAmt)}</span>
+          <span className="kpi-stat-sub">{metrics.codCount} COD orders</span>
+        </button>
 
-        <div
-          className={`metric-card clickable-row ${channelFilter === 'GOKWIK' ? 'selected-metric' : ''}`}
-          onClick={() => setChannelFilter('GOKWIK')}
-          style={{ cursor: 'pointer', border: channelFilter === 'GOKWIK' ? '2px solid #3b82f6' : undefined }}
+        <button
+          type="button"
+          className={`kpi-stat ${channelFilter === 'GOKWIK' ? 'is-active' : ''}`}
+          onClick={() => setChannelFilter(channelFilter === 'GOKWIK' ? 'ALL' : 'GOKWIK')}
+          title="GoKwik 1-click prepaid orders"
         >
-          <div className="metric-icon" style={{ background: '#eff6ff', color: '#2563eb' }}>
-            <Icon name="shield" size={19} />
-          </div>
-          <div>
-            <span className="metric-label">GoKwik Prepaid</span>
-            <strong>{formatMoney(metrics.gokwikAmt)}</strong>
-            <span className="metric-sub">{metrics.gokwikCount} 1-click orders</span>
-          </div>
-        </div>
+          <span className="kpi-stat-label">GoKwik Prepaid</span>
+          <span className="kpi-stat-value">{formatMoney(metrics.gokwikAmt)}</span>
+          <span className="kpi-stat-sub">{metrics.gokwikCount} 1-click orders</span>
+        </button>
 
-        <div
-          className={`metric-card clickable-row ${channelFilter === 'PHONEPE' ? 'selected-metric' : ''}`}
-          onClick={() => setChannelFilter('PHONEPE')}
-          style={{ cursor: 'pointer', border: channelFilter === 'PHONEPE' ? '2px solid #8b5cf6' : undefined }}
+        <button
+          type="button"
+          className={`kpi-stat ${channelFilter === 'PHONEPE' ? 'is-active' : ''}`}
+          onClick={() => setChannelFilter(channelFilter === 'PHONEPE' ? 'ALL' : 'PHONEPE')}
+          title="PhonePe payment gateway orders"
         >
-          <div className="metric-icon" style={{ background: '#f5f3ff', color: '#7c3aed' }}>
-            <Icon name="check" size={19} />
-          </div>
-          <div>
-            <span className="metric-label">PhonePe Prepaid</span>
-            <strong>{formatMoney(metrics.phonepeAmt)}</strong>
-            <span className="metric-sub">{metrics.phonepeCount} PG orders</span>
-          </div>
-        </div>
+          <span className="kpi-stat-label">PhonePe Prepaid</span>
+          <span className="kpi-stat-value">{formatMoney(metrics.phonepeAmt)}</span>
+          <span className="kpi-stat-sub">{metrics.phonepeCount} PG orders</span>
+        </button>
 
-        {/* 5. Delayed Dispatch SLA Alert Chip */}
+        {/* ⚠️ SLA Overdue (conditional) */}
         {metrics.delayedDispatchCount > 0 && (
-          <div
-            className={`metric-card clickable-row ${channelFilter === 'DELAYED_DISPATCH' ? 'selected-metric' : ''}`}
+          <button
+            type="button"
+            className={`kpi-stat ${channelFilter === 'DELAYED_DISPATCH' ? 'is-active' : ''}`}
             onClick={() => setChannelFilter(channelFilter === 'DELAYED_DISPATCH' ? 'ALL' : 'DELAYED_DISPATCH')}
-            style={{
-              cursor: 'pointer',
-              border: channelFilter === 'DELAYED_DISPATCH' ? '2px solid #e11d48' : '1px solid #fecdd3',
-              background: channelFilter === 'DELAYED_DISPATCH' ? '#ffe4e6' : '#fff1f2',
-            }}
+            title="Orders past the 24-hour dispatch SLA"
           >
-            <div className="metric-icon" style={{ background: '#ffe4e6', color: '#e11d48' }}>
-              <Icon name="alert" size={19} />
-            </div>
-            <div>
-              <span className="metric-label" style={{ color: '#be123c', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                <span className="pulsing-red-dot" /> ⚠️ SLA Overdue
-              </span>
-              <strong style={{ color: '#9f1239' }}>{metrics.delayedDispatchCount} orders</strong>
-              <span className="metric-sub" style={{ color: '#be123c' }}>&gt;24h Dispatch SLA</span>
-            </div>
-          </div>
+            <span className="kpi-stat-label">
+              <span className="kpi-dot is-red" /> SLA Overdue
+            </span>
+            <span className="kpi-stat-value is-danger">{metrics.delayedDispatchCount} orders</span>
+            <span className="kpi-stat-sub">&gt;24h dispatch SLA</span>
+          </button>
         )}
 
-        {/* 6. NDR Exceptions Chip */}
+        {/* 🚨 NDR Exceptions (conditional) */}
         {metrics.ndrCount > 0 && (
-          <div
-            className={`metric-card clickable-row ${channelFilter === 'NDR' ? 'selected-metric' : ''}`}
+          <button
+            type="button"
+            className={`kpi-stat ${channelFilter === 'NDR' ? 'is-active' : ''}`}
             onClick={() => setChannelFilter(channelFilter === 'NDR' ? 'ALL' : 'NDR')}
-            style={{
-              cursor: 'pointer',
-              border: channelFilter === 'NDR' ? '2px solid #ea580c' : '1px solid #ffedd5',
-              background: channelFilter === 'NDR' ? '#ffedd5' : '#fff7ed',
-            }}
+            title="Non-delivery reports needing action"
           >
-            <div className="metric-icon" style={{ background: '#ffedd5', color: '#ea580c' }}>
-              <Icon name="route" size={19} />
-            </div>
-            <div>
-              <span className="metric-label" style={{ color: '#c2410c', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                <span className="pulsing-red-dot" /> 🚨 NDR Exceptions
-              </span>
-              <strong style={{ color: '#9a3412' }}>{metrics.ndrCount} failed</strong>
-              <span className="metric-sub" style={{ color: '#c2410c' }}>Action Needed</span>
-            </div>
-          </div>
+            <span className="kpi-stat-label">
+              <span className="kpi-dot is-red" /> NDR Exceptions
+            </span>
+            <span className="kpi-stat-value is-warning">{metrics.ndrCount} failed</span>
+            <span className="kpi-stat-sub">Action needed</span>
+          </button>
         )}
 
-        {/* 7. AWB Logistics Total Cost Metric */}
-        <div className="metric-card" style={{ background: '#f8fafc', border: '1px solid #e2e8f0' }}>
-          <div className="metric-icon" style={{ background: '#ecfdf5', color: '#059669' }}>
-            <Icon name="truck" size={19} />
-          </div>
-          <div>
-            <span className="metric-label">AWB Logistics Cost</span>
-            <strong style={{ color: '#0f172a' }}>{formatMoney(metrics.totalShippingCost, 'INR')}</strong>
-            <span className="metric-sub">avg {formatMoney(metrics.avgShippingCost, 'INR')} / AWB</span>
-          </div>
+        {/* AWB logistics cost — informational, not a filter */}
+        <div className="kpi-stat kpi-stat-static" title="Total estimated AWB freight across the current order set">
+          <span className="kpi-stat-label">AWB Logistics Cost</span>
+          <span className="kpi-stat-value">{formatMoney(metrics.totalShippingCost, 'INR')}</span>
+          <span className="kpi-stat-sub">avg {formatMoney(metrics.avgShippingCost, 'INR')} / AWB</span>
         </div>
       </div>
 
-      {/* Delayed Dispatch SLA Warning Banner */}
-      {metrics.delayedDispatchCount > 0 && (
-        <div className="sla-warning-banner">
-          <div className="sla-warning-left">
-            <div className="sla-warning-icon">⚠️</div>
-            <div>
-              <h4 className="sla-warning-title">
-                {metrics.delayedDispatchCount} Order{metrics.delayedDispatchCount > 1 ? 's' : ''} Overdue for Dispatch (&gt;24h SLA)
-              </h4>
-              <p className="sla-warning-desc">
-                These orders have exceeded the 24-hour dispatch SLA without Delhivery AWB generation. Expedite dispatch to safeguard customer delivery timelines.
-              </p>
-            </div>
-          </div>
+      {/* Slim dismissible SLA strip — replaces the old heavy red banner */}
+      {metrics.delayedDispatchCount > 0 && !slaDismissed && channelFilter !== 'DELAYED_DISPATCH' && (
+        <div className="sla-strip" role="alert">
+          <span className="sla-strip-icon">
+            <Icon name="alert" size={15} />
+          </span>
+          <span className="sla-strip-text">
+            <strong>{metrics.delayedDispatchCount} order{metrics.delayedDispatchCount > 1 ? 's' : ''} overdue for dispatch</strong>
+            {' '}— past the 24h SLA without AWB generation. Expedite to protect delivery timelines.
+          </span>
           <button
             type="button"
-            className="btn-row-action danger"
-            style={{ height: '32px', padding: '0 12px', fontSize: '12px' }}
-            onClick={() => setChannelFilter(channelFilter === 'DELAYED_DISPATCH' ? 'ALL' : 'DELAYED_DISPATCH')}
+            className="sla-strip-action"
+            onClick={() => setChannelFilter('DELAYED_DISPATCH')}
           >
-            {channelFilter === 'DELAYED_DISPATCH' ? 'Show All Orders' : `View ${metrics.delayedDispatchCount} Overdue Orders`}
+            View {metrics.delayedDispatchCount} overdue
+          </button>
+          <button
+            type="button"
+            className="sla-strip-dismiss"
+            onClick={() => setSlaDismissed(true)}
+            title="Dismiss warning"
+            aria-label="Dismiss SLA warning"
+          >
+            <Icon name="close" size={12} />
           </button>
         </div>
       )}
@@ -1457,7 +1395,7 @@ export function Orders() {
         {query.isLoading ? (
           <LoadingState label="Loading orders with SKUs and images…" />
         ) : filtered.length ? (
-          <div className="table-wrap">
+          <div className="table-wrap orders-table-wrap">
             <table className="data-table orders-table">
               <thead>
                 <tr>
@@ -1473,20 +1411,19 @@ export function Orders() {
                       title="Select / Deselect all"
                     />
                   </th>
-                  <th>Order & Date</th>
-                  <th>Product & SKU</th>
-                  <th>Customer & Destination</th>
-                  <th>Order Value & Freight</th>
-                  <th>Payment Stream</th>
-                  <th>Status</th>
-                  <th>Logistics & Actions</th>
+                  <th className="col-order">Order</th>
+                  <th className="col-product">Product</th>
+                  <th className="col-customer">Customer</th>
+                  <th className="col-value">Value & Freight</th>
+                  <th className="col-pay">Payment</th>
+                  <th className="col-status">Status</th>
+                  <th className="col-logistics">Logistics & Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((order) => {
                   const isChecked = selectedOrderIds.has(order.id)
                   const primaryItem = order.items && order.items.length > 0 ? order.items[0] : null
-                  const isPrepaid = isPrepaidOrder(order)
                   const isCodConf = isCodConfirmed(order)
                   const needsDispatch = isDispatchNeeded(order)
 
@@ -1508,72 +1445,56 @@ export function Orders() {
                         />
                       </td>
 
-                      {/* 1. Order & Date */}
-                      <td style={{ verticalAlign: 'top', minWidth: '190px' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
-                            <a className="order-link">{order.shopifyOrderName}</a>
+                      {/* 1. Order — name, alert flags, date line, one manifest-state pill,
+                          hover-reveal extras (RTO risk, Shopify tags) */}
+                      <td>
+                        <div className="order-cell">
+                          <div className="order-cell-top">
+                            <a className="order-name">{order.shopifyOrderName}</a>
                             {order.isDispatchOverdue && (
-                              <span className="sla-delayed-badge" style={{ fontSize: '9px', padding: '1px 5px' }} title={`Overdue for dispatch by ${order.dispatchOverdueHours}h (>24h SLA). Expedite shipping.`}>
-                                ⚠️ +{order.dispatchOverdueHours}h
+                              <span className="flag-chip is-warning" title={`Overdue for dispatch by ${order.dispatchOverdueHours}h (>24h SLA). Expedite shipping.`}>
+                                +{order.dispatchOverdueHours}h
                               </span>
                             )}
                             {(order.hasNdrException || order.status === 'FAILED_DELIVERY') && (
-                              <span className="ndr-badge" style={{ fontSize: '9px', padding: '1px 5px' }} title="Delivery attempt failed. Action needed with courier / customer.">
-                                🚨 NDR
+                              <span className="flag-chip is-danger" title="Delivery attempt failed. Action needed with courier / customer.">
+                                NDR
                               </span>
                             )}
                             {order.hasUrgentSupport && (
                               <span
-                                className="sla-delayed-badge"
-                                style={{ background: '#fee2e2', color: '#b91c1c', borderColor: '#fca5a5', cursor: 'pointer', fontSize: '9px', padding: '1px 5px' }}
+                                className="flag-chip is-support"
                                 onClick={(e) => {
                                   e.stopPropagation()
                                   navigate(`/support?search=${order.shopifyOrderName}`)
                                 }}
                                 title={`Urgent customer support inquiry: ${order.supportFlag || 'Action needed'}. Click to view in Support Desk.`}
                               >
-                                🚨 Support
+                                Support
                               </span>
                             )}
                           </div>
-                          <span className="cell-muted" style={{ fontSize: '10.5px', display: 'block', margin: '1px 0 2px' }}>
-                            {formatDate(order.shopifyCreatedAt || order.createdAt)} · #{order.shopifyOrderId}
+                          <span className="order-cell-sub">
+                            {formatDate(order.shopifyCreatedAt || order.createdAt)} · #{order.shopifyOrderId} · Shopify
                           </span>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '3px', flexWrap: 'wrap' }}>
-                            <span className="micro-badge micro-badge-channel" title="Store: youthnic2024.myshopify.com">
-                              🛍️ Shopify
+                          {order.shipment?.status === 'CANCELLED' ? (
+                            <span className="order-state-pill is-cancelled" title="Delhivery shipment cancelled by seller">
+                              <span className="state-dot" /> Cancelled
                             </span>
-                            {order.shipment?.status === 'CANCELLED' ? (
-                              <span className="micro-badge micro-badge-gray" title="Delhivery shipment cancelled by seller">
-                                ✕ Cancelled
-                              </span>
-                            ) : order.shipment?.status === 'ERROR' ? (
-                              <span
-                                className="micro-badge"
-                                style={{ background: '#fee2e2', color: '#991b1b', border: '1px solid #f87171' }}
-                                title={order.shipment.errorMessage || 'Manifest failed'}
-                              >
-                                ⚠️ Manifest Failed
-                              </span>
-                            ) : order.shipment?.waybillNumber ? (
-                              <span className="micro-badge micro-badge-green" title={`AWB: ${order.shipment.waybillNumber}`}>
-                                ✓ Manifested
-                              </span>
-                            ) : order.fulfillmentStatus !== 'fulfilled' && order.status !== 'CANCELLED' ? (
-                              <span className="micro-badge micro-badge-blue" title="Pending Delhivery AWB assignment">
-                                📦 Pending AWB
-                              </span>
-                            ) : null}
-                            {isPrepaid ? (
-                              <span className="micro-badge micro-badge-blue" title="Prepaid order">
-                                ⚡ Prepaid
-                              </span>
-                            ) : (
-                              <span className="micro-badge micro-badge-amber" title="Cash on Delivery">
-                                COD
-                              </span>
-                            )}
+                          ) : order.shipment?.status === 'ERROR' ? (
+                            <span className="order-state-pill is-failed" title={order.shipment.errorMessage || 'Manifest failed'}>
+                              <span className="state-dot" /> Manifest failed
+                            </span>
+                          ) : order.shipment?.waybillNumber ? (
+                            <span className="order-state-pill is-manifested" title={`AWB: ${order.shipment.waybillNumber}`}>
+                              <span className="state-dot" /> Manifested
+                            </span>
+                          ) : order.fulfillmentStatus !== 'fulfilled' && order.status !== 'CANCELLED' ? (
+                            <span className="order-state-pill is-pending" title="Pending Delhivery AWB assignment">
+                              <span className="state-dot" /> Pending AWB
+                            </span>
+                          ) : null}
+                          <div className="order-cell-extras">
                             {renderRtoRiskBadge(order)}
                             <ShopifyTagList tags={order.tags} />
                           </div>
@@ -1618,53 +1539,55 @@ export function Orders() {
                         )}
                       </td>
 
-                      {/* 3. Customer & Destination (Merged clean 2-line layout) */}
-                      <td className="customer-cell">
-                        <strong>{order.customerName}</strong>
-                        <span className="cell-muted" style={{ fontSize: '11px', display: 'block' }}>{order.customerPhone || 'No phone'}</span>
-                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', marginTop: '3px', fontSize: '11px', color: '#475569' }}>
+                      {/* 3. Customer & Destination */}
+                      <td>
+                        <span className="customer-name" title={order.customerName}>{order.customerName}</span>
+                        <span className="customer-sub">{order.customerPhone || 'No phone'}</span>
+                        <span className="customer-loc">
                           <Icon name="pin" size={11} />
                           <span>{order.customerCity ? `${order.customerCity}, ` : ''}{order.customerState || 'Other'}</span>
-                          <span className="mono" style={{ fontSize: '10px', color: '#64748b' }}>({order.customerPincode})</span>
-                        </div>
+                          <span className="pincode">({order.customerPincode})</span>
+                        </span>
                       </td>
 
-                      {/* 4. Order Value & Freight (Merged) */}
+                      {/* 4. Order Value & Freight */}
                       <td>
-                        <div className="amount-cell" style={{ fontWeight: 800 }}>{formatMoney(order.totalAmount, order.currency)}</div>
-                        <div className="shipping-cost-cell" style={{ marginTop: '2px' }}>
-                          <span className="shipping-cost-val" style={{ fontSize: '11px' }}>
-                            Est: {formatMoney(order.estimatedShippingCost || 106.44, 'INR')}
-                          </span>
+                        <span className="order-value">{formatMoney(order.totalAmount, order.currency)}</span>
+                        <div className="order-value-sub">
+                          <span>Est. {formatMoney(order.estimatedShippingCost || 106.44, 'INR')}</span>
                           {(order.actualShippingCost && order.actualShippingCost > 0) || (order.shipment?.netBilledCost && order.shipment.netBilledCost > 0) ? (
-                            <span style={{ fontSize: '10px', color: (order.weightDiscrepancy || order.shipment?.weightMismatch) ? '#b91c1c' : '#047857', fontWeight: 750 }}>
-                              Billed: {formatMoney(order.actualShippingCost ?? order.shipment?.netBilledCost ?? 0, 'INR')}
-                              {(order.weightDiscrepancy || order.shipment?.weightMismatch) ? ' ⚠️' : ''}
+                            <span
+                              className={`billed ${(order.weightDiscrepancy || order.shipment?.weightMismatch) ? 'is-mismatch' : ''}`}
+                              title={(order.weightDiscrepancy || order.shipment?.weightMismatch) ? 'Billed freight differs from estimate — weight mismatch flagged' : 'Final billed freight'}
+                            >
+                              Billed {formatMoney(order.actualShippingCost ?? order.shipment?.netBilledCost ?? 0, 'INR')}
                             </span>
                           ) : null}
-                          <span className="shipping-zone-tag">
+                          <span className="zone-tag">
                             {order.shipment?.chargedZone ? `Zone ${order.shipment.chargedZone}` : order.shippingZoneCode ? `Zone ${order.shippingZoneCode}` : 'Surface'}
                           </span>
                         </div>
                       </td>
 
-                      {/* 5. Payment Stream */}
+                      {/* 5. Payment */}
                       <td>{renderPaymentBadge(order)}</td>
 
                       {/* 6. Status + pickup state (Ready tab: label generated → awaiting pickup vs picked) */}
                       <td>
-                        <StatusBadge status={order.status} />
-                        {(activeTab === 'ready' || activeTab === 'transit' || activeTab === 'all') && order.shipment?.waybillNumber && (
-                          order.shipment?.status === 'CREATED' || /manifest/i.test(order.shipment?.trackingStatus || '') ? (
-                            <span className="micro-badge micro-badge-amber" title={`Label generated ${order.shipment?.waybillNumber} — courier has not picked up yet (Delhivery: ${order.shipment?.trackingStatus || 'Manifested'}). Hand over the parcel + refresh tracking.`}>
-                              ⏳ Awaiting pickup
-                            </span>
-                          ) : ['PICKED_UP', 'IN_TRANSIT', 'OUT_FOR_DELIVERY', 'DELIVERED'].includes(order.shipment?.status || '') ? (
-                            <span className="micro-badge micro-badge-emerald" title={`Courier picked up ${order.shipment?.waybillNumber}${order.shipment?.trackingLocation ? ` — ${order.shipment.trackingLocation}` : ''}.`}>
-                              ✓ Picked up
-                            </span>
-                          ) : null
-                        )}
+                        <div className="status-cell">
+                          <StatusBadge status={order.status} />
+                          {(activeTab === 'ready' || activeTab === 'transit' || activeTab === 'all') && order.shipment?.waybillNumber && (
+                            order.shipment?.status === 'CREATED' || /manifest/i.test(order.shipment?.trackingStatus || '') ? (
+                              <span className="status-sub" title={`Label generated ${order.shipment?.waybillNumber} — courier has not picked up yet (Delhivery: ${order.shipment?.trackingStatus || 'Manifested'}). Hand over the parcel + refresh tracking.`}>
+                                <span className="status-dot is-amber" /> Awaiting pickup
+                              </span>
+                            ) : ['PICKED_UP', 'IN_TRANSIT', 'OUT_FOR_DELIVERY', 'DELIVERED'].includes(order.shipment?.status || '') ? (
+                              <span className="status-sub" title={`Courier picked up ${order.shipment?.waybillNumber}${order.shipment?.trackingLocation ? ` — ${order.shipment.trackingLocation}` : ''}.`}>
+                                <span className="status-dot is-green" /> Picked up
+                              </span>
+                            ) : null
+                          )}
+                        </div>
                       </td>
 
                       {/* 7. Logistics — compact pack actions. Extra documents live in More. */}
@@ -1706,7 +1629,7 @@ export function Orders() {
             icon="box"
           />
         )}
-        {selectedOrderIds.size > 0 && <div style={{ height: '90px', transition: 'height 0.2s ease' }} />}
+        {selectedOrderIds.size > 0 && <div className="bulk-spacer" />}
       </Panel>
 
       {/* Floating Bulk Action Toolbar */}
@@ -2377,7 +2300,7 @@ export function Orders() {
           </div>
         </div>
       )}
-    </>
+    </div>
   )
 }
 

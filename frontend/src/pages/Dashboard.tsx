@@ -18,6 +18,85 @@ import {
   useToast,
 } from '../components/UI'
 import type { DashboardStats } from '../types'
+import './Dashboard.css'
+
+type CarrierMetric = { label: string; value: number; tone: 'default' | 'inTransit' | 'delivered' | 'ndr' | 'muted' }
+
+function CarrierPulseCard({
+  logo,
+  logoAlt,
+  logoFallback,
+  name,
+  role,
+  primary,
+  statusLabel,
+  statusTone,
+  metrics,
+}: {
+  logo: string
+  logoAlt: string
+  logoFallback?: string
+  name: string
+  role: string
+  primary: boolean
+  statusLabel: string
+  statusTone: 'active' | 'standby'
+  metrics: CarrierMetric[]
+}) {
+  const dispatched = metrics[0]?.value ?? 0
+
+  return (
+    <div className="carrier-card">
+      <div className="carrier-card-head">
+        <div className="carrier-id">
+          <div className="carrier-logo">
+            <img
+              src={logo}
+              alt={logoAlt}
+              style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+              onError={(e) => {
+                if (logoFallback && !e.currentTarget.src.endsWith(logoFallback)) {
+                  e.currentTarget.src = logoFallback
+                } else {
+                  e.currentTarget.style.display = 'none'
+                }
+              }}
+            />
+          </div>
+          <div>
+            <strong className="carrier-name">{name}</strong>
+            <span className="carrier-role">{role}</span>
+          </div>
+        </div>
+        <div className="carrier-badges">
+          {primary && <span className="carrier-badge primary">Primary</span>}
+          <span className={`carrier-badge ${statusTone}`}>{statusLabel}</span>
+        </div>
+      </div>
+
+      {dispatched > 0 ? (
+        <div className="carrier-metrics">
+          {metrics.map((metric) => (
+            <div key={metric.label}>
+              <span className="carrier-metric-label">{metric.label}</span>
+              <strong className={`carrier-metric-value tone-${metric.tone}`}>{metric.value}</strong>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="carrier-empty">
+          <div className="carrier-empty-icon">
+            <Icon name="truck" size={15} />
+          </div>
+          <div>
+            <div className="carrier-empty-title">No dispatches yet</div>
+            <div className="carrier-empty-desc">Shipments appear here once orders are routed to this carrier.</div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 
 export function Dashboard() {
   useDocumentTitle('Dashboard')
@@ -197,62 +276,64 @@ export function Dashboard() {
 
         return (
           <div className="action-center">
-            <div className="action-center-header">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div className="dash-section-head">
+              <div className="dash-section-title-wrap">
                 <span className="live-dot" />
-                <strong style={{ fontSize: '12px', letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--ink)' }}>
-                  Operational Attention Items ({actionItems.length})
-                </strong>
+                <h2 className="dash-section-title">
+                  Operational Attention · {actionItems.length} item{actionItems.length === 1 ? '' : 's'}
+                </h2>
               </div>
 
-              {/* Filter Pills */}
-              <div className="action-filter-pills">
-                <button
-                  type="button"
-                  className={`filter-pill ${alertFilter === 'ALL' ? 'active' : ''}`}
-                  onClick={() => setAlertFilter('ALL')}
-                >
-                  All ({actionItems.length})
-                </button>
-                {criticalCount > 0 && (
+              <div className="dash-section-actions">
+                {/* Segmented filter control */}
+                <div className="action-filter-pills dash-segmented">
                   <button
                     type="button"
-                    className={`filter-pill critical ${alertFilter === 'CRITICAL' ? 'active' : ''}`}
-                    onClick={() => setAlertFilter('CRITICAL')}
+                    className={`filter-pill ${alertFilter === 'ALL' ? 'active' : ''}`}
+                    onClick={() => setAlertFilter('ALL')}
                   >
-                    Critical ({criticalCount})
+                    All ({actionItems.length})
                   </button>
-                )}
-                {fulfillmentCount > 0 && (
+                  {criticalCount > 0 && (
+                    <button
+                      type="button"
+                      className={`filter-pill critical ${alertFilter === 'CRITICAL' ? 'active' : ''}`}
+                      onClick={() => setAlertFilter('CRITICAL')}
+                    >
+                      Critical ({criticalCount})
+                    </button>
+                  )}
+                  {fulfillmentCount > 0 && (
+                    <button
+                      type="button"
+                      className={`filter-pill ${alertFilter === 'FULFILLMENT' ? 'active' : ''}`}
+                      onClick={() => setAlertFilter('FULFILLMENT')}
+                    >
+                      Fulfillment ({fulfillmentCount})
+                    </button>
+                  )}
+                  {financeCount > 0 && (
+                    <button
+                      type="button"
+                      className={`filter-pill ${alertFilter === 'FINANCE' ? 'active' : ''}`}
+                      onClick={() => setAlertFilter('FINANCE')}
+                    >
+                      Finance ({financeCount})
+                    </button>
+                  )}
+                </div>
+
+                {filteredAlerts.length > 3 && (
                   <button
                     type="button"
-                    className={`filter-pill ${alertFilter === 'FULFILLMENT' ? 'active' : ''}`}
-                    onClick={() => setAlertFilter('FULFILLMENT')}
+                    className="dash-viewall"
+                    onClick={() => setAlertsExpanded(!alertsExpanded)}
                   >
-                    Fulfillment ({fulfillmentCount})
-                  </button>
-                )}
-                {financeCount > 0 && (
-                  <button
-                    type="button"
-                    className={`filter-pill ${alertFilter === 'FINANCE' ? 'active' : ''}`}
-                    onClick={() => setAlertFilter('FINANCE')}
-                  >
-                    Finance ({financeCount})
+                    <span>{alertsExpanded ? 'Show Top 3' : `View All (${filteredAlerts.length})`}</span>
+                    <Icon name="arrow" size={12} />
                   </button>
                 )}
               </div>
-
-              {filteredAlerts.length > 3 && (
-                <button
-                  type="button"
-                  className="expand-alerts-btn"
-                  onClick={() => setAlertsExpanded(!alertsExpanded)}
-                >
-                  <span>{alertsExpanded ? 'Show Top 3' : `View All (${filteredAlerts.length})`}</span>
-                  <Icon name="arrow" size={12} />
-                </button>
-              )}
             </div>
 
             <div className="action-center-grid">
@@ -360,7 +441,7 @@ export function Dashboard() {
           <div className="dash-kpi-top">
             <span className="dash-kpi-label">AWB Logistics Cost</span>
             <div className="dash-kpi-icon transit">
-              <Icon name="truck" size={18} />
+              <Icon name="creditCard" size={18} />
             </div>
           </div>
           <h3 className="dash-kpi-val">
@@ -426,94 +507,41 @@ export function Dashboard() {
               </Link>
             }
           />
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px', marginTop: '14px' }}>
-            {/* Delhivery Express */}
-            <div style={{ background: 'var(--panel-subtle, #f8fafc)', border: '1px solid var(--border-color, #e2e8f0)', borderRadius: '10px', padding: '16px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <div style={{ width: '32px', height: '32px', borderRadius: '6px', background: '#ffffff', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px' }}>
-                    <img src="/logos/delhivery.png" alt="Delhivery" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none' }} />
-                  </div>
-                  <div>
-                    <strong style={{ fontSize: '13.5px', color: 'var(--ink, #1e293b)' }}>Delhivery Express B2C</strong>
-                    <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>Primary Carrier Partner</span>
-                  </div>
-                </div>
-                <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                  {(stats.carriers.activePriority || stats.carriers.priority) === 'DELHIVERY_FIRST' && (
-                    <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '10px', background: '#dbeafe', color: '#1d4ed8' }}>
-                      PRIMARY
-                    </span>
-                  )}
-                  <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '10px', background: '#dcfce7', color: '#15803d' }}>
-                    ACTIVE
-                  </span>
-                </div>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px', textAlign: 'center', background: 'var(--panel, #ffffff)', borderRadius: '8px', padding: '10px 8px', border: '1px solid var(--border-color, #edf2f7)' }}>
-                <div>
-                  <span style={{ fontSize: '10.5px', color: '#64748b', display: 'block' }}>Dispatched</span>
-                  <strong style={{ fontSize: '15px', color: 'var(--ink, #1e293b)' }}>{stats.carriers.delhivery.totalShipments ?? stats.carriers.delhivery.total}</strong>
-                </div>
-                <div>
-                  <span style={{ fontSize: '10.5px', color: '#64748b', display: 'block' }}>In-Transit</span>
-                  <strong style={{ fontSize: '15px', color: '#2563eb' }}>{stats.carriers.delhivery.inTransit}</strong>
-                </div>
-                <div>
-                  <span style={{ fontSize: '10.5px', color: '#64748b', display: 'block' }}>Delivered</span>
-                  <strong style={{ fontSize: '15px', color: '#16a34a' }}>{stats.carriers.delhivery.delivered}</strong>
-                </div>
-                <div>
-                  <span style={{ fontSize: '10.5px', color: '#64748b', display: 'block' }}>NDR</span>
-                  <strong style={{ fontSize: '15px', color: stats.carriers.delhivery.ndr > 0 ? '#dc2626' : '#64748b' }}>{stats.carriers.delhivery.ndr}</strong>
-                </div>
-              </div>
-            </div>
+          <div className="carrier-grid">
+            <CarrierPulseCard
+              logo="/logos/delhivery.png"
+              logoAlt="Delhivery"
+              name="Delhivery Express B2C"
+              role="Primary Carrier Partner"
+              primary={(stats.carriers.activePriority || stats.carriers.priority) === 'DELHIVERY_FIRST'}
+              statusLabel="Active"
+              statusTone="active"
+              metrics={[
+                { label: 'Dispatched', value: stats.carriers.delhivery.totalShipments ?? stats.carriers.delhivery.total, tone: 'default' },
+                { label: 'In-Transit', value: stats.carriers.delhivery.inTransit, tone: 'inTransit' },
+                { label: 'Delivered', value: stats.carriers.delhivery.delivered, tone: 'delivered' },
+                { label: 'NDR', value: stats.carriers.delhivery.ndr, tone: stats.carriers.delhivery.ndr > 0 ? 'ndr' : 'muted' },
+              ]}
+            />
 
-            {/* Velocity Shipping */}
-            <div style={{ background: 'var(--panel-subtle, #f8fafc)', border: '1px solid var(--border-color, #e2e8f0)', borderRadius: '10px', padding: '16px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <div style={{ width: '32px', height: '32px', borderRadius: '6px', background: '#ffffff', border: '1px solid #ddd6fe', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px' }}>
-                    <img src="/logos/velocity.png" alt="Velocity" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} onError={(e) => { (e.currentTarget as HTMLImageElement).src = '/velocity-logo.png' }} />
-                  </div>
-                  <div>
-                    <strong style={{ fontSize: '13.5px', color: 'var(--ink, #1e293b)' }}>Velocity Shipping Network</strong>
-                    <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>Multi-Carrier Partner</span>
-                  </div>
-                </div>
-                <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                  {(stats.carriers.activePriority || stats.carriers.priority) === 'VELOCITY_FIRST' && (
-                    <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '10px', background: '#ede9fe', color: '#6d28d9' }}>
-                      PRIMARY
-                    </span>
-                  )}
-                  <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '10px', background: (stats.carriers.velocity.status === 'CONNECTED' || stats.carriers.velocity.configured) ? '#dcfce7' : '#fef3c7', color: (stats.carriers.velocity.status === 'CONNECTED' || stats.carriers.velocity.configured) ? '#15803d' : '#b45309' }}>
-                    {stats.carriers.velocity.status || (stats.carriers.velocity.configured ? 'CONNECTED' : 'STANDBY')}
-                  </span>
-                </div>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px', textAlign: 'center', background: 'var(--panel, #ffffff)', borderRadius: '8px', padding: '10px 8px', border: '1px solid var(--border-color, #edf2f7)' }}>
-                <div>
-                  <span style={{ fontSize: '10.5px', color: '#64748b', display: 'block' }}>Dispatched</span>
-                  <strong style={{ fontSize: '15px', color: 'var(--ink, #1e293b)' }}>{stats.carriers.velocity.totalShipments ?? stats.carriers.velocity.total}</strong>
-                </div>
-                <div>
-                  <span style={{ fontSize: '10.5px', color: '#64748b', display: 'block' }}>In-Transit</span>
-                  <strong style={{ fontSize: '15px', color: '#7c3aed' }}>{stats.carriers.velocity.inTransit}</strong>
-                </div>
-                <div>
-                  <span style={{ fontSize: '10.5px', color: '#64748b', display: 'block' }}>Delivered</span>
-                  <strong style={{ fontSize: '15px', color: '#16a34a' }}>{stats.carriers.velocity.delivered}</strong>
-                </div>
-                <div>
-                  <span style={{ fontSize: '10.5px', color: '#64748b', display: 'block' }}>NDR</span>
-                  <strong style={{ fontSize: '15px', color: stats.carriers.velocity.ndr > 0 ? '#dc2626' : '#64748b' }}>{stats.carriers.velocity.ndr}</strong>
-                </div>
-              </div>
-            </div>
+            <CarrierPulseCard
+              logo="/logos/velocity.png"
+              logoAlt="Velocity"
+              logoFallback="/velocity-logo.png"
+              name="Velocity Shipping Network"
+              role="Multi-Carrier Partner"
+              primary={(stats.carriers.activePriority || stats.carriers.priority) === 'VELOCITY_FIRST'}
+              statusLabel={stats.carriers.velocity.status || (stats.carriers.velocity.configured ? 'Connected' : 'Standby')}
+              statusTone={(stats.carriers.velocity.status === 'CONNECTED' || stats.carriers.velocity.configured) ? 'active' : 'standby'}
+              metrics={[
+                { label: 'Dispatched', value: stats.carriers.velocity.totalShipments ?? stats.carriers.velocity.total, tone: 'default' },
+                { label: 'In-Transit', value: stats.carriers.velocity.inTransit, tone: 'inTransit' },
+                { label: 'Delivered', value: stats.carriers.velocity.delivered, tone: 'delivered' },
+                { label: 'NDR', value: stats.carriers.velocity.ndr, tone: stats.carriers.velocity.ndr > 0 ? 'ndr' : 'muted' },
+              ]}
+            />
           </div>
-          <div style={{ marginTop: '12px', fontSize: '11.5px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <div className="carrier-footnote">
             <span className="live-dot" style={{ width: '6px', height: '6px' }} />
             <span>
               Routing Engine: <strong>{(stats.carriers.activePriority || stats.carriers.priority) === 'VELOCITY_FIRST' ? 'Velocity First' : 'Delhivery First'}</strong> · Auto-Failover: <strong>{stats.carriers.autoFailover ? 'Active' : 'Disabled'}</strong> · Official Label Direct Streaming: <strong>Active</strong>

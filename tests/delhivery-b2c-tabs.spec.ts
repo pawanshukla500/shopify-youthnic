@@ -25,7 +25,7 @@ vi.mock('../src/database/prisma', () => ({
     },
     order: { update: vi.fn() },
     syncLog: { create: vi.fn() },
-    trackingLog: { findMany: vi.fn().mockResolvedValue([]), create: vi.fn() },
+    trackingLog: { findMany: vi.fn().mockResolvedValue([]), create: vi.fn(), createMany: vi.fn() },
   },
 }));
 

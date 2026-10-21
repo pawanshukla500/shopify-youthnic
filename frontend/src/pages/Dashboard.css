@@ -1,0 +1,391 @@
+/* ────────────────────────────────────────────────────────────────
+   Dashboard polish layer.
+   Loaded after index.css; every rule here is Dashboard-scoped
+   (class names are only used by Dashboard.tsx) and theme-aware
+   via the shared CSS variables, with color-mix tints so both
+   light and dark themes stay consistent.
+   ──────────────────────────────────────────────────────────────── */
+
+/* ─── Unified section header system ─────────────────────────── */
+.dash-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 0 0 12px;
+  padding: 0 2px;
+}
+
+.dash-section-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.dash-section-title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+.dash-section-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* ─── Filter chips → segmented control ──────────────────────── */
+.dash-segmented {
+  gap: 2px;
+  background: var(--line-subtle);
+  border: 1px solid var(--line);
+  padding: 3px;
+  border-radius: 9px;
+}
+
+.dash-segmented .filter-pill {
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 7px;
+  padding: 4px 11px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.dash-segmented .filter-pill:hover {
+  border-color: transparent;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+}
+
+.dash-segmented .filter-pill.active {
+  background: var(--panel);
+  border-color: var(--line);
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.1);
+}
+
+.dash-segmented .filter-pill.critical.active {
+  background: #e11d48;
+  border-color: #e11d48;
+  color: #ffffff;
+  box-shadow: none;
+}
+
+/* ─── Prominent "View All" action ───────────────────────────── */
+.dash-viewall {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 750;
+  color: var(--blue);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 7px;
+  transition: background 0.15s ease;
+  white-space: nowrap;
+}
+
+.dash-viewall:hover {
+  background: color-mix(in srgb, var(--blue) 9%, transparent);
+}
+
+/* ─── Attention cards: calm severity treatment ──────────────── */
+.alert-card {
+  border-radius: 12px;
+  border-left-width: 3px;
+  background: var(--panel);
+  box-shadow: var(--shadow-xs);
+}
+
+/* Remove alarm-fatiguing gradient washes; severity lives in the
+   left accent bar and the small icon only. */
+.alert-card.critical,
+.alert-card.high,
+.alert-card.medium {
+  background: var(--panel);
+}
+
+.alert-card.critical { border-left-color: #e11d48; }
+.alert-card.high { border-left-color: #d97706; }
+.alert-card.medium { border-left-color: #10b981; }
+
+.alert-card.critical .alert-icon-wrap {
+  background: color-mix(in srgb, #e11d48 12%, transparent);
+  color: #e11d48;
+}
+
+.alert-card.high .alert-icon-wrap {
+  background: color-mix(in srgb, #d97706 14%, transparent);
+  color: #b45309;
+}
+
+.alert-card.medium .alert-icon-wrap {
+  background: color-mix(in srgb, #10b981 13%, transparent);
+  color: #059669;
+}
+
+/* Category badge: quiet pill, severity only in the text color */
+.alert-card .alert-badge {
+  background: var(--line-subtle);
+  color: var(--muted);
+}
+
+.alert-card.critical .alert-badge {
+  background: color-mix(in srgb, #e11d48 9%, transparent);
+  color: #e11d48;
+}
+
+.alert-card.high .alert-badge {
+  background: color-mix(in srgb, #d97706 11%, transparent);
+  color: #b45309;
+}
+
+.alert-card.medium .alert-badge {
+  background: color-mix(in srgb, #10b981 10%, transparent);
+  color: #059669;
+}
+
+/* Action buttons: one neutral secondary style for all severities */
+.alert-card.critical .alert-btn,
+.alert-card.high .alert-btn,
+.alert-card.medium .alert-btn {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  font-weight: 700;
+  border-radius: 8px;
+  padding: 5px 10px;
+}
+
+.alert-card.critical .alert-btn:hover,
+.alert-card.high .alert-btn:hover,
+.alert-card.medium .alert-btn:hover {
+  background: color-mix(in srgb, var(--blue) 6%, var(--panel));
+  border-color: var(--blue);
+  color: var(--blue);
+}
+
+/* ─── Stat cards: uniform treatment ─────────────────────────── */
+.dash-kpi-card {
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.dash-kpi-label {
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.dash-kpi-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+}
+
+/* Theme-proof icon tints */
+.dash-kpi-icon.revenue { background: color-mix(in srgb, #059669 12%, transparent); color: #059669; }
+.dash-kpi-icon.orders { background: color-mix(in srgb, #2563eb 12%, transparent); color: #2563eb; }
+.dash-kpi-icon.dispatch { background: color-mix(in srgb, #d97706 14%, transparent); color: #b45309; }
+.dash-kpi-icon.transit { background: color-mix(in srgb, #3b82f6 12%, transparent); color: #2563eb; }
+.dash-kpi-icon.delivered { background: color-mix(in srgb, #10b981 13%, transparent); color: #059669; }
+.dash-kpi-icon.returns { background: color-mix(in srgb, #db2777 11%, transparent); color: #be185d; }
+
+.dash-kpi-val {
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.dash-kpi-sub {
+  font-size: 12px;
+  gap: 6px;
+  color: var(--muted-light);
+  margin-top: 8px;
+}
+
+.dash-kpi-tag {
+  font-size: 9.5px;
+  padding: 3px 7px;
+  border-radius: 6px;
+}
+
+/* ─── Carrier pulse cards ───────────────────────────────────── */
+.carrier-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.carrier-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: var(--shadow-xs);
+  display: flex;
+  flex-direction: column;
+}
+
+.carrier-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.carrier-id {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.carrier-logo {
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  flex-shrink: 0;
+}
+
+.carrier-name {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 750;
+  color: var(--ink);
+  line-height: 1.25;
+}
+
+.carrier-role {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 1px;
+}
+
+.carrier-badges {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-shrink: 0;
+  padding-top: 2px;
+}
+
+.carrier-badge {
+  font-size: 10px;
+  font-weight: 750;
+  padding: 2px 8px;
+  border-radius: 999px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.carrier-badge.primary {
+  background: color-mix(in srgb, #2563eb 12%, transparent);
+  color: #2563eb;
+}
+
+.carrier-badge.active {
+  background: color-mix(in srgb, #16a34a 12%, transparent);
+  color: #15803d;
+}
+
+.carrier-badge.standby {
+  background: color-mix(in srgb, #d97706 14%, transparent);
+  color: #b45309;
+}
+
+.carrier-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  text-align: center;
+  background: var(--canvas);
+  border: 1px solid var(--line-subtle);
+  border-radius: 10px;
+  padding: 12px 8px;
+  margin-top: auto;
+}
+
+.carrier-metric-label {
+  display: block;
+  font-size: 10.5px;
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+
+.carrier-metric-value {
+  font-size: 15px;
+  font-weight: 750;
+  color: var(--ink);
+}
+
+.carrier-metric-value.tone-inTransit { color: #2563eb; }
+.carrier-metric-value.tone-delivered { color: #16a34a; }
+.carrier-metric-value.tone-ndr { color: #dc2626; }
+.carrier-metric-value.tone-muted { color: var(--muted); }
+
+/* Zero state — no raw 0 grids for inactive carriers */
+.carrier-empty {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  background: var(--line-subtle);
+  margin-top: auto;
+}
+
+.carrier-empty-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--muted-light);
+  flex-shrink: 0;
+}
+
+.carrier-empty-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-secondary);
+}
+
+.carrier-empty-desc {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 1px;
+}
+
+.carrier-footnote {
+  margin-top: 12px;
+  font-size: 11.5px;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}

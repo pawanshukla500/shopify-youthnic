@@ -94,7 +94,7 @@ export function Remittances() {
     const text = [r.fileName, r.uploadedBy, summary.remittanceNumber, ...rows.flatMap((row) => [row.shopifyOrderName, row.waybillNumber, row.utr])].join(' ').toLowerCase()
     return (provider === 'All history' || provider === source) && (!search || text.includes(search.toLowerCase())) && (filter === 'All statuses' || filter === state)
   }), [query.data, provider, search, filter])
-  const metric = (name: string) => query.data?.summary.find((r) => r.label === name)?.value ?? '—'
+  const metric = (name: string) => query.data?.summary?.find((r) => r.label === name)?.value ?? '—'
   return <div className="remittance-workspace">
     <header className="remittance-header"><div>
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>

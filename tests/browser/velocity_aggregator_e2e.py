@@ -143,6 +143,15 @@ ORDER_1884 = {
 }
 
 # Baseline Order 1885: NDR Failed Delivery Order
+# Baseline Order 1886: Unserviceable Destination Order
+ORDER_1886 = copy.deepcopy(ORDER_1883)
+ORDER_1886.update({
+    "id": 1886,
+    "shopifyOrderId": "18951876083914",
+    "shopifyOrderName": "#26YOU6064",
+    "customerPincode": "999999",
+})
+
 ORDER_1885 = copy.deepcopy(ORDER_1883)
 ORDER_1885.update({
     "id": 1885,
@@ -201,7 +210,7 @@ def run():
                 # Setup test context scripts
                 context.add_init_script("""
                     localStorage.setItem('youthnic_theme', 'light');
-                    window.__copied = [];
+                    window.__copied = []; window.confirm = () => true;
                     Object.defineProperty(navigator, 'clipboard', {
                         value: {
                             writeText: async (text) => {
@@ -229,7 +238,7 @@ def run():
                 state = {
                     1883: copy.deepcopy(ORDER_1883),
                     1884: copy.deepcopy(ORDER_1884),
-                    1885: copy.deepcopy(ORDER_1885),
+                    1885: copy.deepcopy(ORDER_1885), 1886: copy.deepcopy(ORDER_1886),
                 }
 
                 def handle_api(route):
@@ -345,8 +354,86 @@ def run():
                         )
                         return
 
+                    # Shipment cancellation
+                    if "shipment/VEL1883AMZAWB/cancel" in path and method == "POST":
+                        state[1883]["shipment"]["status"] = "CANCELLED"
+                        state[1883]["shipment"]["trackingStatus"] = "Shipment Cancelled"
+                        route.fulfill(
+                            content_type="application/json",
+                            body=json.dumps({"success": True}),
+                        )
+                        return
+
+                    # Velocity Remittance Status & Sync
+                    if path == "velocity/remittance/status" and method == "GET":
+                        route.fulfill(
+                            content_type="application/json",
+                            body=json.dumps({
+                                "success": True,
+                                "configured": True,
+                                "lastSync": "2026-10-22T10:00:00Z",
+                                "matchedCount": 42,
+                                "totalRemittance": 128500.00,
+                                "totalBilledCharges": 14200.00,
+                                "latestBatch": "VEL-BATCH-2026-10-22",
+                                "summaryReport": {
+                                    "ready_to_ship": {"count": 12, "sum_of_prepaid_orders": 7200, "sum_of_cod_orders": 0},
+                                    "in_transit": {"count": 18, "sum_of_prepaid_orders": 9500, "sum_of_cod_orders": 2400},
+                                    "out_for_delivery": {"count": 5, "sum_of_prepaid_orders": 3000, "sum_of_cod_orders": 1200},
+                                    "delivered": {"count": 85, "sum_of_prepaid_orders": 51000, "sum_of_cod_orders": 48000},
+                                    "ndr": {"count": 2, "sum_of_prepaid_orders": 0, "sum_of_cod_orders": 1200},
+                                    "rto_in_transit": {"count": 1, "sum_of_prepaid_orders": 0, "sum_of_cod_orders": 600},
+                                    "rto_delivered": {"count": 3, "sum_of_prepaid_orders": 0, "sum_of_cod_orders": 1800},
+                                    "total_shipments": 126,
+                                },
+                            }),
+                        )
+                        return
+
+                    if path == "velocity/remittance/sync" and method == "POST":
+                        route.fulfill(
+                            content_type="application/json",
+                            body=json.dumps({
+                                "success": True,
+                                "message": "Velocity remittances synchronized successfully.",
+                                "result": {"synced": 42, "amount": 128500.00},
+                            }),
+                        )
+                        return
+
+                    if path.startswith("accounts/overview"):
+                        route.fulfill(
+                            content_type="application/json",
+                            body=json.dumps({
+                                "imports": [],
+                                "summary": [{"label": "Orders placed", "value": 42}, {"label": "Received in bank (₹)", "value": 128500}],
+                                "unmatchedRows": [],
+                                "payoutOrders": [],
+                                "openOrders": [],
+                                "recipients": [],
+                                "connectors": {},
+                                "reportDay": 8,
+                                "stats": {"totalRemittance": 128500, "matchedCount": 42, "unmatchedCount": 0},
+                            }),
+                        )
+                        return
+
+                    # Unserviceable order 1886 options
+                    if path == "orders/1886/shipping-options" and method == "GET":
+                        route.fulfill(
+                            content_type="application/json",
+                            body=json.dumps({
+                                "success": True,
+                                "orderId": 1886,
+                                "options": [],
+                                "delhivery": {"serviceable": False, "remark": "Out of delivery area"},
+                                "velocity": {"serviceable": False, "remark": "Pincode unserviceable by any partner"},
+                            }),
+                        )
+                        return
+
                     # Single order retrieval
-                    for oid in [1883, 1884, 1885]:
+                    for oid in [1883, 1884, 1885, 1886]:
                         if path == f"orders/{oid}" and method == "GET":
                             route.fulfill(
                                 content_type="application/json",
@@ -487,6 +574,57 @@ def run():
 
                 page.screenshot(path=str(ARTIFACTS_DIR / "08_dark_mode_velocity.png"), full_page=True)
                 print("[PASS] Step 8 passed: Dark mode rendered flawlessly.")
+
+                # ─────────────────────────────────────────────────────────────
+                # STEP 9: Operator tests shipment cancellation on Velocity order
+                # ─────────────────────────────────────────────────────────────
+                print("[*] Step 9: Testing shipment cancellation workflow on Velocity order...")
+                page.goto(f"{BASE}/orders/1883")
+                page.get_by_role("tab", name="Shipment").click()
+                cancel_btn = page.get_by_role("button", name="Cancel shipment")
+                expect(cancel_btn).to_be_visible()
+                cancel_btn.click()
+
+                expect(page.get_by_text("Shipment cancellation requested.")).to_be_visible()
+                page.screenshot(path=str(ARTIFACTS_DIR / "09_velocity_cancellation.png"), full_page=True)
+                print("[PASS] Step 9 passed: Shipment cancellation flow verified.")
+
+                # ─────────────────────────────────────────────────────────────
+                # STEP 10: Remittance Dashboard & Velocity Live Sync
+                # ─────────────────────────────────────────────────────────────
+                print("[*] Step 10: Testing Remittance Dashboard and Velocity API Sync...")
+                page.goto(f"{BASE}/remittance")
+                expect(page.get_by_role("heading", name="Payments & remittance")).to_be_visible()
+
+                # Click Velocity provider filter
+                page.get_by_role("button", name="Velocity", exact=True).click()
+                expect(page.get_by_text("Velocity Direct Finance & Remittance Sync")).to_be_visible()
+                expect(page.get_by_text("₹1,28,500.00").first).to_be_visible()
+                expect(page.get_by_text("₹14,200.00").first).to_be_visible()
+
+                # Trigger Live Sync
+                sync_remit_btn = page.get_by_role("button", name="Sync Velocity API").first
+                expect(sync_remit_btn).to_be_visible()
+                sync_remit_btn.click()
+
+                expect(page.get_by_text("Velocity remittances synchronized successfully.")).to_be_visible()
+                page.screenshot(path=str(ARTIFACTS_DIR / "10_velocity_remittance_sync.png"), full_page=True)
+                print("[PASS] Step 10 passed: Velocity remittance reconciliation & reports dashboard verified.")
+
+                # ─────────────────────────────────────────────────────────────
+                # STEP 11: Unserviceable Destination Pincode Resilience
+                # ─────────────────────────────────────────────────────────────
+                print("[*] Step 11: Testing unserviceable pincode handling...")
+                page.goto(f"{BASE}/orders/1886")
+                expect(page.get_by_role("heading", name="#26YOU6064")).to_be_visible()
+                page.get_by_role("button", name="Choose courier").click()
+
+                expect(page.get_by_text("● Unserviceable").first).to_be_visible()
+                expect(page.get_by_text("Pincode unserviceable by any partner")).to_be_visible()
+                expect(page.get_by_role("button", name="Dispatch with Delhivery (Surface)")).to_be_disabled()
+                page.screenshot(path=str(ARTIFACTS_DIR / "11_api_resilience_unserviceable.png"))
+                page.get_by_role("button", name="Cancel").click()
+                print("[PASS] Step 11 passed: Unserviceable destination handled gracefully.")
 
                 assert not errors, f"Unexpected browser errors: {errors}"
                 browser.close()

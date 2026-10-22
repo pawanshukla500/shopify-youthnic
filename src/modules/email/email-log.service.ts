@@ -1,5 +1,6 @@
 import prisma from '../../database/prisma';
 import logger from '../../utils/logger';
+import { getTrackingUrl } from '../../utils/courier';
 
 export interface CreateEmailLogInput {
   orderId?: number | null;
@@ -152,7 +153,9 @@ class EmailLogService {
 
       const waybill = log?.waybillNumber || log?.order?.shipment?.waybillNumber;
       if (waybill) {
-        return `https://www.delhivery.com/track/package/${waybill}`;
+        const courier = log?.courier || log?.order?.shipment?.courier || (log?.order as any)?.courierPartner;
+        const labelUrl = log?.order?.shipment?.labelUrl;
+        return getTrackingUrl(courier, waybill, labelUrl) || `https://www.delhivery.com/track/package/${waybill}`;
       }
       return 'https://youthnic2024.myshopify.com';
     } catch (error) {

@@ -1052,7 +1052,7 @@ export function Dashboard() {
                     <td className="mono">
                       {order.waybillNumber ? (
                         <a
-                          href={`https://www.delhivery.com/track/package/${order.waybillNumber}`}
+                          href={carrierTrackingUrl(order.courierPartner, order.waybillNumber)}
                           target="_blank"
                           rel="noreferrer"
                           onClick={(e) => e.stopPropagation()}

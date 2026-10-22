@@ -4,7 +4,7 @@ import shopifyService from '../shopify/shopify.service';
 import delhiveryService from '../delhivery/delhivery.service';
 import velocityService from '../velocity/velocity.service';
 import shippingRouterService, { CourierChoice } from '../shipping/shipping-router.service';
-import { isVelocityCourier, isDelhiveryCourier } from '../../utils/courier';
+import { isVelocityCourier, isDelhiveryCourier, getTrackingUrl } from '../../utils/courier';
 import notificationEngine from '../notifications/notification.service';
 import paymentService from '../payments/payment.service';
 import { recordAccountTrailEvent, type AccountTrailActor } from '../accounts/account-trail.service';
@@ -434,7 +434,12 @@ class OrderService {
       // Push fulfillment to Shopify if Shopify does not have it yet
       if (!order.fulfillmentStatus || order.fulfillmentStatus !== 'fulfilled') {
         try {
-          await shopifyService.fulfillOrderOnShopify(order.shopifyOrderId, awb, 'Delhivery');
+          const isVelAWB = isVelocityCourier((order as any).courierPartner, (order as any).shipment?.labelUrl, awb);
+          if (isVelAWB) {
+            await shopifyService.fulfillOrderOnShopify(order.shopifyOrderId, awb, 'Velocity', `https://www.velocityshipping.in/track/${awb}`);
+          } else {
+            await shopifyService.fulfillOrderOnShopify(order.shopifyOrderId, awb, 'Delhivery');
+          }
           logger.info('Synced Delhivery ONE fulfillment back to Shopify', {
             orderId: order.id,
             shopifyOrderId: order.shopifyOrderId,
@@ -598,7 +603,12 @@ class OrderService {
           // Sync fulfillment back to Shopify if Shopify is unfulfilled
           if (!order.fulfillmentStatus || order.fulfillmentStatus !== 'fulfilled') {
             try {
-              await shopifyService.fulfillOrderOnShopify(order.shopifyOrderId, awb, 'Delhivery');
+              const isVelDirect = isVelocityCourier((order as any).courierPartner, (order as any).shipment?.labelUrl, awb);
+              if (isVelDirect) {
+                await shopifyService.fulfillOrderOnShopify(order.shopifyOrderId, awb, 'Velocity', `https://www.velocityshipping.in/track/${awb}`);
+              } else {
+                await shopifyService.fulfillOrderOnShopify(order.shopifyOrderId, awb, 'Delhivery');
+              }
               logger.info('Synced Delhivery ONE direct fulfillment to Shopify', {
                 orderId: order.id,
                 shopifyOrderId: order.shopifyOrderId,
@@ -858,7 +868,7 @@ class OrderService {
         verifiedOrder.shopifyOrderId,
         waybillNumber,
         courierNameForShopify,
-        chosenCourier === 'Velocity' ? `https://www.velocityshipping.in/track/${waybillNumber}` : undefined
+        chosenCourier === 'Velocity' || isVelocityCourier(courierNameForShopify, null, waybillNumber) ? `https://www.velocityshipping.in/track/${waybillNumber}` : undefined
       );
     } catch (shopifyErr: any) {
       logger.warn('Could not sync fulfillment to Shopify (non-critical)', { error: shopifyErr.message });

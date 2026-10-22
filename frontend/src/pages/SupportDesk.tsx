@@ -572,7 +572,7 @@ export function SupportDesk() {
                       <span style={{ fontSize: '11px', color: '#64748b' }}>Delhivery Waybill:</span>
                       <div>
                         <a
-                          href={`https://www.delhivery.com/track/package/${activeTicket.order.shipment.waybillNumber}`}
+                          href={carrierTrackingUrl(activeTicket.order.shipment.courier || activeTicket.order.courierPartner, activeTicket.order.shipment.waybillNumber)}
                           target="_blank"
                           rel="noreferrer"
                           style={{ color: '#2563eb', fontWeight: 700, fontSize: '12px', textDecoration: 'none' }}

@@ -3,7 +3,7 @@ import { config } from '../../config';
 import prisma from '../../database/prisma';
 import logger from '../../utils/logger';
 import { withRetry } from '../../utils/retry';
-import { isDelhiveryCourier, normalizeCourierName } from '../../utils/courier';
+import { isDelhiveryCourier, isVelocityCourier, getTrackingUrl, normalizeCourierName } from '../../utils/courier';
 import { ShopifyOrderWebhook } from '../../types';
 import { extractOrderFinancials } from '../orders/order-financials';
 import { OrderStatus } from '@prisma/client';
@@ -933,7 +933,7 @@ class ShopifyService {
       })),
       trackingInput: {
         number: trackingNumber,
-        url: `https://www.delhivery.com/track/package/${encodeURIComponent(trackingNumber)}`,
+        url: getTrackingUrl(carrier, trackingNumber) || `https://www.delhivery.com/track/package/${encodeURIComponent(trackingNumber)}`,
       },
       notifyCustomer: false,
     });
@@ -1147,12 +1147,13 @@ class ShopifyService {
       let fulfillmentId: string | undefined;
 
       const effectiveCourier = normalizeCourierName(courier, trackingUrl, waybillNumber);
+      const isVel = isVelocityCourier(effectiveCourier, trackingUrl, waybillNumber);
       const effectiveUrl =
         trackingUrl ||
-        (effectiveCourier.toLowerCase().includes('delhivery')
-          ? `https://www.delhivery.com/track/package/${waybillNumber}`
-          : effectiveCourier.toLowerCase().includes('velocity')
+        (isVel
           ? `https://www.velocityshipping.in/track/${waybillNumber}`
+          : effectiveCourier.toLowerCase().includes('delhivery')
+          ? `https://www.delhivery.com/track/package/${waybillNumber}`
           : effectiveCourier.toLowerCase().includes('ekart')
           ? `https://t.proship.in/${waybillNumber}`
           : undefined);

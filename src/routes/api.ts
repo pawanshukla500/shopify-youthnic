@@ -35,7 +35,7 @@ import { addStaffNote, getOrderActivity, recordOrderAction } from '../modules/or
 import returnScanService from '../modules/returns/return-scan.service';
 import shippingRouterService, { CarrierPriority, CourierChoice } from '../modules/shipping/shipping-router.service';
 import velocityService from '../modules/velocity/velocity.service';
-import { isVelocityCourier } from '../utils/courier';
+import { isVelocityCourier, getTrackingUrl } from '../utils/courier';
 import { mergePdfBuffers, create4x6FallbackPdf } from '../utils/pdf-merger';
 
 const router = Router();
@@ -2227,7 +2227,7 @@ router.post('/orders/:id/returns', async (req: AuthenticatedRequest, res: Respon
               imageUrl: i.imageUrl,
             })),
             totalAmount: order.totalAmount,
-            trackingUrl: `https://www.delhivery.com/track/package/${result.returnWaybill}`,
+            trackingUrl: getTrackingUrl(carrierName, result.returnWaybill) || `https://www.delhivery.com/track/package/${result.returnWaybill}`,
           },
         });
         emailDispatched = emailResult?.success ?? false;
@@ -4930,7 +4930,7 @@ router.post('/communications/notify-delayed-transit', async (req: Request, res: 
         totalAmount: order.totalAmount,
         customMessage,
         trackingUrl: shipment?.waybillNumber
-          ? `https://www.delhivery.com/track/package/${shipment.waybillNumber}`
+          ? (getTrackingUrl(shipment?.courier || (order as any).courierPartner, shipment.waybillNumber, shipment?.labelUrl) || `https://www.delhivery.com/track/package/${shipment.waybillNumber}`)
           : undefined,
       };
 

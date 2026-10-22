@@ -192,12 +192,12 @@ export function Tracking() {
               </Button>
               <a
                 className="button button-secondary button-small"
-                href={`https://www.delhivery.com/track/package/${encodeURIComponent(waybill)}`}
+                href={carrierTrackingUrl(data?.shipment?.courier, waybill)}
                 target="_blank"
                 rel="noopener noreferrer"
               >
                 <Icon name="external" size={13} />
-                Open on Delhivery
+                Open on Carrier
               </a>
             </div>
           </div>

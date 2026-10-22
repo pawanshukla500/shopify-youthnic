@@ -147,8 +147,20 @@ export function formatMoney(amount: number | null | undefined, currency = 'INR')
 /** Public carrier tracking page. Never use a packing-slip URL here — those S3 links expire. */
 export function carrierTrackingUrl(courier: string | null | undefined, waybill: string): string {
   const name = (courier || '').toLowerCase()
-  if (name.includes('ekart') || name.includes('proship')) return `https://t.proship.in/${encodeURIComponent(waybill)}`
-  return `https://www.delhivery.com/track/package/${encodeURIComponent(waybill)}`
+  const wb = (waybill || '').trim()
+  if (
+    name.includes('velocity') ||
+    name.includes('shipfastt') ||
+    name.includes('amazon') ||
+    name.includes('ats') ||
+    /^(pd|vehr|vel)/i.test(wb)
+  ) {
+    return `https://www.velocityshipping.in/track/${encodeURIComponent(wb)}`
+  }
+  if (name.includes('ekart') || name.includes('proship')) return `https://t.proship.in/${encodeURIComponent(wb)}`
+  if (name.includes('bluedart')) return `https://www.bluedart.com/tracking?trackNumber=${encodeURIComponent(wb)}`
+  if (name.includes('dtdc')) return `https://www.dtdc.in/tracking/shipment-tracking.asp?trackingNo=${encodeURIComponent(wb)}`
+  return `https://www.delhivery.com/track/package/${encodeURIComponent(wb)}`
 }
 
 export function formatDate(value: string | null | undefined): string {

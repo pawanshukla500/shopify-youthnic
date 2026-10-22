@@ -80,7 +80,7 @@ function nextStep(p: OrderNextStepProps): Step {
       tone: order.isDispatchOverdue ? 'danger' : 'info',
       title: p.isPrepaid ? 'Paid: ready to dispatch' : 'COD confirmed: ready to dispatch',
       text: `${p.isPrepaid ? `Paid online${order.paymentProvider ? ` via ${order.paymentProvider}` : ''}.` : 'The customer confirmed the COD order.'} Book shipment with courier partner.${overdue}`,
-      action: { label: 'Dispatch order', icon: 'package', onClick: p.onDispatch, loading: p.dispatching, disabled: !p.canDispatch || p.dispatching },
+      action: { label: `Dispatch with ${order.shipment?.courier?.toLowerCase().includes('velocity') ? 'Velocity' : 'Delhivery'}`, icon: 'package', onClick: p.onDispatch, loading: p.dispatching, disabled: !p.canDispatch || p.dispatching },
     }
   }
   if (tab === 'new' && order.paymentMethod === 'COD' && !p.isCodConfirmed) {

@@ -22,6 +22,7 @@ import {
   useToast,
 } from '../components/UI'
 import type { EmailLog, EmailTemplateType, DelayedInTransitShipment } from '../types'
+import { carrierTrackingUrl } from '../lib'
 
 const TEMPLATE_PREVIEWS: Record<
   EmailTemplateType,

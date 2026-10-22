@@ -22,6 +22,7 @@ import {
   downloadSingleInvoiceFile,
   downloadBulkPackZip,
   syncExternalOrderFulfillment,
+  getOrderShippingOptions,
 } from '../api'
 import { ORDER_TABS, carrierTrackingUrl, formatDate, formatMoney, labelize, isVelocityCourier } from '../lib'
 import { classifyOrderTab, isCodConfirmed, isPrepaidOrder } from '../../../src/modules/orders/order-tabs'
@@ -97,6 +98,23 @@ export function OrderDetail() {
   const [whatsAppCustomText, setWhatsAppCustomText] = useState('')
   const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false)
 
+  // Courier partner selection state
+  const [showCarrierModal, setShowCarrierModal] = useState(false)
+  const [shippingOptions, setShippingOptions] = useState<Array<{
+    courier: string
+    carrierId?: string
+    carrierName: string
+    serviceable: boolean
+    rate: number
+    freightCharge?: number
+    codCharge?: number
+    estimatedDays?: number
+    description: string
+    isRecommended?: boolean
+  }>>([])
+  const [loadingShippingOptions, setLoadingShippingOptions] = useState(false)
+  const [selectedOptionIndex, setSelectedOptionIndex] = useState<number>(0)
+
   const order = orderQuery.data
   const refreshShopify = useMutation({
     mutationFn: () => api.post(`/api/orders/${id}/refresh-shopify`),
@@ -109,20 +127,25 @@ export function OrderDetail() {
   })
 
   const action = useMutation({
-    mutationFn: async (kind: 'dispatch' | 'verify' | 'label' | 'cancel') => {
-      if (kind === 'dispatch') return (await api.post(`/api/orders/${id}/dispatch`)).data
-      if (kind === 'verify') return (await api.post(`/api/orders/${id}/payment/verify`)).data
-      if (kind === 'label') return (await api.get(`/api/delhivery/label/${order?.shipment?.waybillNumber}`)).data
+    mutationFn: async (kind: 'dispatch' | 'verify' | 'label' | 'cancel' | { kind: 'dispatch'; courier?: string; velocityCarrierId?: string }) => {
+      const actionKind = typeof kind === 'object' ? kind.kind : kind
+      if (actionKind === 'dispatch') {
+        const body = typeof kind === 'object' ? { courier: kind.courier, velocityCarrierId: kind.velocityCarrierId } : undefined
+        return (await api.post(`/api/orders/${id}/dispatch`, body)).data
+      }
+      if (actionKind === 'verify') return (await api.post(`/api/orders/${id}/payment/verify`)).data
+      if (actionKind === 'label') return (await api.get(`/api/delhivery/label/${order?.shipment?.waybillNumber}`)).data
       return (await api.post(`/api/delhivery/shipment/${order?.shipment?.waybillNumber}/cancel`)).data
     },
     onSuccess: async (data, kind) => {
-      if (kind === 'label') {
+      const actionKind = typeof kind === 'object' ? kind.kind : kind
+      if (actionKind === 'label') {
         if (order?.id) openPrintableOrderLabel(order.id)
         toast.toast('success', 'Printable label opened. Packing-slip links expire, so this stays inside Youthnic.')
-      } else if (kind === 'verify') {
+      } else if (actionKind === 'verify') {
         toast.toast(data.verified ? 'success' : 'error', data.reason ?? (data.verified ? 'Payment verified.' : 'Payment could not be verified.'))
-      } else if (kind === 'dispatch') {
-        toast.toast('success', `Order dispatched${data.waybillNumber ? ` · Waybill ${data.waybillNumber}` : ''}.`)
+      } else if (actionKind === 'dispatch') {
+        toast.toast('success', `Order dispatched${data.waybillNumber ? ` · Waybill ${data.waybillNumber}` : ''}${data.courier ? ` via ${data.courier}` : ''}.`)
       } else toast.toast('success', 'Shipment cancellation requested.')
       await queryClient.invalidateQueries({ queryKey: ['order', id] })
       await queryClient.invalidateQueries({ queryKey: ['orders'] })
@@ -204,13 +227,14 @@ export function OrderDetail() {
       if (!isDeleting) setShowDeleteModal(false)
       if (!isSubmittingNdr) setShowNdrModal(false)
       if (!isSendingWhatsApp) setShowWhatsAppModal(false)
+      if (!action.isPending) setShowCarrierModal(false)
     }
     document.addEventListener('keydown', escape)
     return () => document.removeEventListener('keydown', escape)
-  }, [moreOpen, isCancelling, isDeleting, isSubmittingNdr, isSendingWhatsApp])
+  }, [moreOpen, isCancelling, isDeleting, isSubmittingNdr, isSendingWhatsApp, action.isPending])
 
   useEffect(() => {
-    if (!showCancelModal && !showDeleteModal && !showNdrModal && !showWhatsAppModal) return
+    if (!showCancelModal && !showDeleteModal && !showNdrModal && !showWhatsAppModal && !showCarrierModal) return
     const previous = document.activeElement as HTMLElement | null
     const dialog = document.querySelector<HTMLElement>('.shopify-order-page .modal-card')
     const controls = () => Array.from(dialog?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href]') || [])
@@ -225,7 +249,7 @@ export function OrderDetail() {
     }
     dialog?.addEventListener('keydown', trap)
     return () => { dialog?.removeEventListener('keydown', trap); previous?.focus() }
-  }, [showCancelModal, showDeleteModal, showNdrModal, showWhatsAppModal])
+  }, [showCancelModal, showDeleteModal, showNdrModal, showWhatsAppModal, showCarrierModal])
 
   useEffect(() => {
     if (!moreOpen) return
@@ -411,6 +435,78 @@ export function OrderDetail() {
     } finally {
       setIsSendingWhatsApp(false)
     }
+  }
+
+  // Carrier partner discovery and dispatch
+  const handleOpenCarrierModal = async () => {
+    if (!order?.id) return
+    setShowCarrierModal(true)
+    setLoadingShippingOptions(true)
+    try {
+      const res = await getOrderShippingOptions(order.id)
+      let opts = res.options || []
+      if (!opts.length) {
+        opts = []
+        if (res.delhivery) {
+          opts.push({
+            courier: 'Delhivery',
+            carrierName: `Delhivery (${res.delhivery.shippingMode || 'Surface'})`,
+            serviceable: res.delhivery.serviceable,
+            rate: res.delhivery.estimatedCost || 0,
+            estimatedDays: 4,
+            description: res.delhivery.remark || 'Delhivery direct surface',
+            isRecommended: res.recommendedCarrier === 'Delhivery',
+          })
+        }
+        if (res.velocity?.rates?.length) {
+          for (const r of res.velocity.rates) {
+            opts.push({
+              courier: 'Velocity',
+              carrierId: r.carrierId,
+              carrierName: `Velocity (${r.carrierName})`,
+              serviceable: res.velocity.serviceable,
+              rate: r.totalCharge || 0,
+              freightCharge: r.freightCharge,
+              codCharge: r.codCharge,
+              estimatedDays: r.expectedDeliveryDays,
+              description: r.zone ? `Zone: ${r.zone}` : 'Velocity Aggregator Partner',
+              isRecommended: res.recommendedCarrier === 'Velocity',
+            })
+          }
+        } else if (res.velocity) {
+          opts.push({
+            courier: 'Velocity',
+            carrierName: 'Velocity (Best Available Partner)',
+            serviceable: res.velocity.serviceable,
+            rate: 0,
+            description: res.velocity.remark || 'Velocity aggregator routing',
+            isRecommended: res.recommendedCarrier === 'Velocity',
+          })
+        }
+      }
+      const normalized = opts.map((o: any) => ({
+        ...o,
+        carrierName: o.carrierName || o.courier,
+      }))
+      setShippingOptions(normalized)
+      const firstServiceable = opts.findIndex((o: any) => o.serviceable)
+      setSelectedOptionIndex(firstServiceable >= 0 ? firstServiceable : 0)
+    } catch (err: any) {
+      toast.toast('error', apiError(err))
+    } finally {
+      setLoadingShippingOptions(false)
+    }
+  }
+
+  const handleDispatchSelectedCarrier = () => {
+    const selected = shippingOptions[selectedOptionIndex]
+    if (!selected) return
+    setShowCarrierModal(false)
+    action.mutate({
+      kind: 'dispatch',
+      courier: selected.courier,
+      velocityCarrierId: selected.carrierId,
+    })
   }
 
   // EPOD viewer is used twice on this page (shipment actions + verified
@@ -699,10 +795,11 @@ export function OrderDetail() {
       isCodConfirmed={isCodConf}
       isDispatchNeeded={isDispatchNeeded}
       canDispatch={Boolean(canDispatch)}
-      dispatching={action.isPending && action.variables === 'dispatch'}
+      dispatching={action.isPending && (action.variables === 'dispatch' || (typeof action.variables === 'object' && action.variables.kind === 'dispatch'))}
       confirmingCod={isConfirmingCod}
       refundingRto={isRefundingRto}
       onDispatch={() => action.mutate('dispatch')}
+      onChooseCarrier={handleOpenCarrierModal}
       onConfirmCod={handleConfirmCod}
       onPrintLabel={() => openPrintableOrderLabel(order.id)}
       onResolveNdr={() => setShowNdrModal(true)}
@@ -2030,6 +2127,123 @@ export function OrderDetail() {
               <Icon name="message" size={14} />
               {isSendingWhatsApp ? 'Sending via KwikEngage…' : 'Send WhatsApp Message'}
             </button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ─── Courier Partner Selection Modal ─── */}
+    {showCarrierModal && (
+      <div className="modal-backdrop" onClick={() => !action.isPending && setShowCarrierModal(false)}>
+        <div className="modal-card" role="dialog" aria-modal="true" aria-label="Select courier partner" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '640px' }}>
+          <div className="modal-header">
+            <div className="modal-header-left">
+              <div className="modal-icon-badge info">
+                <Icon name="truck" size={20} />
+              </div>
+              <div>
+                <h3 className="modal-title">Select Courier Partner</h3>
+                <p className="modal-desc">Compare real-time shipping rate cards and delivery SLAs for {order?.shopifyOrderName}.</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="modal-close-btn"
+              disabled={action.isPending}
+              onClick={() => setShowCarrierModal(false)}
+            >
+              <Icon name="close" size={16} />
+            </button>
+          </div>
+
+          <div className="modal-body">
+            {loadingShippingOptions ? (
+              <div style={{ padding: '32px 16px', textAlign: 'center' }}>
+                <LoadingState label="Discovering serviceability & carrier rate cards…" />
+              </div>
+            ) : shippingOptions.length === 0 ? (
+              <EmptyState title="No couriers available" description="Could not discover serviceable courier partners for this pincode." icon="alert" />
+            ) : (
+              <div className="carrier-options-list" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {shippingOptions.map((opt, idx) => {
+                  const isSelected = selectedOptionIndex === idx
+                  return (
+                    <div
+                      key={idx}
+                      onClick={() => opt.serviceable && setSelectedOptionIndex(idx)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '12px 16px',
+                        borderRadius: '8px',
+                        border: `2px solid ${isSelected ? 'var(--color-primary, #6366f1)' : 'var(--color-border, #e2e8f0)'}`,
+                        background: isSelected ? 'var(--color-primary-light, #f5f7ff)' : opt.serviceable ? 'var(--color-bg-card, #ffffff)' : 'var(--color-bg-subtle, #f8fafc)',
+                        cursor: opt.serviceable ? 'pointer' : 'not-allowed',
+                        opacity: opt.serviceable ? 1 : 0.6,
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <input
+                          type="radio"
+                          name="carrier-choice"
+                          checked={isSelected}
+                          disabled={!opt.serviceable}
+                          onChange={() => setSelectedOptionIndex(idx)}
+                          style={{ margin: 0 }}
+                        />
+                        <div>
+                          <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            {opt.carrierName || opt.courier}
+                            {opt.isRecommended && (
+                              <span style={{ fontSize: '11px', background: '#dcfce7', color: '#166534', padding: '2px 6px', borderRadius: '4px', fontWeight: 500 }}>
+                                Recommended
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: '12px', color: 'var(--color-text-muted, #64748b)' }}>
+                            {opt.description}
+                            {opt.estimatedDays ? ` · SLA: ~${opt.estimatedDays} days` : ''}
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        {opt.serviceable ? (
+                          <>
+                            <div style={{ fontWeight: 700, fontSize: '15px' }}>
+                              {opt.rate > 0 ? formatMoney(opt.rate) : 'Live Rate'}
+                            </div>
+                            <span style={{ fontSize: '11px', color: '#16a34a' }}>● Serviceable</span>
+                          </>
+                        ) : (
+                          <span style={{ fontSize: '11px', color: '#dc2626' }}>● Unserviceable</span>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="modal-footer" style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', padding: '16px 20px', borderTop: '1px solid var(--color-border, #e2e8f0)' }}>
+            <button
+              type="button"
+              className="button-secondary"
+              disabled={action.isPending}
+              onClick={() => setShowCarrierModal(false)}
+            >
+              Cancel
+            </button>
+            <Button
+              className="button-primary"
+              loading={action.isPending}
+              disabled={loadingShippingOptions || !shippingOptions[selectedOptionIndex]?.serviceable}
+              onClick={handleDispatchSelectedCarrier}
+            >
+              <Icon name="package" size={15} />
+              Dispatch with {shippingOptions[selectedOptionIndex]?.carrierName || 'Courier'}
+            </Button>
           </div>
         </div>
       </div>

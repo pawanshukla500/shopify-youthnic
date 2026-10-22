@@ -207,6 +207,18 @@ export class ShippingRouterService {
       rates?: any[];
       remark?: string;
     };
+    options: Array<{
+      courier: CourierChoice;
+      carrierId?: string;
+      carrierName: string;
+      serviceable: boolean;
+      rate: number;
+      freightCharge?: number;
+      codCharge?: number;
+      estimatedDays?: number;
+      description: string;
+      isRecommended: boolean;
+    }>;
   }> {
     const order = await prisma.order.findUnique({
       where: { id: orderId },
@@ -290,6 +302,57 @@ export class ShippingRouterService {
       }
     }
 
+    const options: Array<{
+      courier: CourierChoice;
+      carrierId?: string;
+      carrierName: string;
+      serviceable: boolean;
+      rate: number;
+      freightCharge?: number;
+      codCharge?: number;
+      estimatedDays?: number;
+      description: string;
+      isRecommended: boolean;
+    }> = [];
+
+    // Delhivery option
+    options.push({
+      courier: 'Delhivery',
+      carrierName: `Delhivery (${config.delhivery.shippingMode || 'Surface'})`,
+      serviceable: delhiveryServiceable,
+      rate: delhiveryEstimatedCost,
+      estimatedDays: 4,
+      description: delhiveryRemark,
+      isRecommended: recommendedCarrier === 'Delhivery',
+    });
+
+    // Velocity options
+    if (velocityRates.length > 0) {
+      for (const r of velocityRates) {
+        options.push({
+          courier: 'Velocity',
+          carrierId: r.carrierId,
+          carrierName: `Velocity (${r.carrierName})`,
+          serviceable: velocityServiceable,
+          rate: r.totalCharge,
+          freightCharge: r.freightCharge,
+          codCharge: r.codCharge,
+          estimatedDays: r.expectedDeliveryDays,
+          description: r.zone ? `Zone: ${r.zone}` : 'Velocity Aggregator Partner',
+          isRecommended: recommendedCarrier === 'Velocity' && options.filter(o => o.courier === 'Velocity').length === 0,
+        });
+      }
+    } else if (velocityServiceable) {
+      options.push({
+        courier: 'Velocity',
+        carrierName: 'Velocity (Best Available Partner)',
+        serviceable: true,
+        rate: 0,
+        description: 'Auto-selected by Velocity routing engine',
+        isRecommended: recommendedCarrier === 'Velocity',
+      });
+    }
+
     return {
       orderId: order.id,
       shopifyOrderName: order.shopifyOrderName,
@@ -309,6 +372,7 @@ export class ShippingRouterService {
         rates: velocityRates,
         remark: velocityRemark,
       },
+      options,
     };
   }
 

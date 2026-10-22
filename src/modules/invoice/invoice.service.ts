@@ -1,5 +1,6 @@
 import { Order, OrderItem } from '@prisma/client';
 import { config } from '../../config';
+import { isVelocityCourier, normalizeCourierName } from '../../utils/courier';
 
 export interface OrderWithDetails extends Order {
   items: OrderItem[];
@@ -104,7 +105,7 @@ export class InvoiceService {
   }
 
   /**
-   * Generates single GST Tax Invoice HTML for an order
+   * Generates single GST Tax Invoice HTML for an order formatted strictly for 4x6" (100mm x 150mm) thermal label printers.
    */
   public generateInvoiceHtml(order: OrderWithDetails): string {
     const invoiceNumber = `INV-2026-${order.shopifyOrderNumber || order.id}`;
@@ -113,7 +114,6 @@ export class InvoiceService {
       month: 'short',
       year: 'numeric',
     });
-    const orderDate = invoiceDate;
     const destStateCode = this.getStateCode(order.customerState);
     const isIntraState = destStateCode === '24'; // Gujarat seller to Gujarat buyer
 
@@ -130,184 +130,131 @@ export class InvoiceService {
 
     const amountInWords = this.numberToWords(totalAmount);
 
+    const waybill = order.shipment?.waybillNumber || '';
+    const courierName = order.shipment?.courier || (order as any).courierPartner;
+    const isVel = isVelocityCourier(courierName, order.shipment?.labelUrl, waybill);
+    const carrierLabel = isVel
+      ? 'Velocity'
+      : courierName
+      ? normalizeCourierName(courierName, order.shipment?.labelUrl, waybill)
+      : 'Delhivery';
+
     const itemsHtml = (order.items || [])
       .map((item, idx) => {
         const itemGross = item.price * item.quantity;
         const itemTaxable = Math.round((itemGross / 1.05) * 100) / 100;
         const itemTax = Math.round((itemGross - itemTaxable) * 100) / 100;
+        const titleSnippet = item.title.length > 38 ? `${item.title.substring(0, 36)}…` : item.title;
         return `
         <tr>
           <td style="text-align: center;">${idx + 1}</td>
           <td>
-            <strong>${item.title}</strong>
-            ${item.variantTitle ? `<div class="item-meta">Size / Variant: ${item.variantTitle}</div>` : ''}
-            <div class="item-meta">SKU: ${item.sku || 'N/A'}</div>
+            <div class="thermal-item-title">${titleSnippet}</div>
+            <div class="thermal-item-meta">${item.variantTitle ? `Size: ${item.variantTitle} · ` : ''}SKU: ${item.sku || 'N/A'}</div>
           </td>
           <td style="text-align: center;">6204</td>
-          <td style="text-align: center;">${item.quantity}</td>
+          <td style="text-align: center;"><strong>${item.quantity}</strong></td>
           <td style="text-align: right;">₹${(itemTaxable / item.quantity).toFixed(2)}</td>
-          <td style="text-align: right;">₹${itemTaxable.toFixed(2)}</td>
           <td style="text-align: center;">5%</td>
-          <td style="text-align: right;">₹${itemTax.toFixed(2)}</td>
           <td style="text-align: right; font-weight: 700;">₹${itemGross.toFixed(2)}</td>
         </tr>`;
       })
       .join('');
 
     return `
-    <div class="invoice-container">
-      <!-- Invoice Header -->
-      <div class="invoice-header">
-        <div class="header-left">
-          <div class="brand-title">YOUTHNIC</div>
-          <div class="legal-name">VB EXPORTS</div>
-          <div class="company-details">
-            7004, Hi-tech Textile Centre (HTC Market - 1),<br>
-            Anjana Farm, Near Raghukul Market, Ring Road,<br>
-            Surat, Gujarat - 395002<br>
-            <strong>GSTIN:</strong> 24AAFFV1234P1Z8 &nbsp;|&nbsp; <strong>State Code:</strong> 24 (Gujarat)<br>
-            <strong>Email:</strong> returnorders@vbexports.co.in &nbsp;|&nbsp; <strong>Support:</strong> +91 7984984563
+    <div class="invoice-wrapper">
+      <div class="invoice-container">
+        <!-- 1. Compact Header -->
+        <div class="invoice-header">
+          <div class="header-left">
+            <div class="brand-title">YOUTHNIC</div>
+            <div class="legal-name">VB EXPORTS</div>
+            <div class="company-details">
+              7004, HTC Market-1, Ring Rd, Surat - 395002<br>
+              <strong>GSTIN:</strong> 24AAFFV1234P1Z8 (State: 24)<br>
+              <strong>Support:</strong> +91 7984984563
+            </div>
           </div>
-        </div>
-        <div class="header-right">
-          <div class="tax-invoice-badge">TAX INVOICE</div>
-          <div class="invoice-meta-table">
-            <div class="meta-row">
-              <span class="meta-label">Invoice No:</span>
-              <span class="meta-value"><strong>${invoiceNumber}</strong></span>
-            </div>
-            <div class="meta-row">
-              <span class="meta-label">Invoice Date:</span>
-              <span class="meta-value">${invoiceDate}</span>
-            </div>
-            <div class="meta-row">
-              <span class="meta-label">Order No:</span>
-              <span class="meta-value">${order.shopifyOrderName}</span>
-            </div>
-            <div class="meta-row">
-              <span class="meta-label">Delhivery AWB:</span>
-              <span class="meta-value"><strong>${order.shipment?.waybillNumber || 'Pending AWB'}</strong></span>
-            </div>
-            <div class="meta-row">
-              <span class="meta-label">Place of Supply:</span>
-              <span class="meta-value">${order.customerState} (${destStateCode})</span>
+          <div class="header-right">
+            <div class="tax-invoice-badge">TAX INVOICE</div>
+            <div class="invoice-meta-table">
+              <div class="meta-row"><span class="meta-label">Inv No:</span> <strong>${invoiceNumber}</strong></div>
+              <div class="meta-row"><span class="meta-label">Date:</span> ${invoiceDate}</div>
+              <div class="meta-row"><span class="meta-label">Order:</span> <strong>${order.shopifyOrderName}</strong></div>
+              <div class="meta-row"><span class="meta-label">${carrierLabel} AWB:</span> <strong>${waybill || 'Pending AWB'}</strong></div>
             </div>
           </div>
         </div>
-      </div>
 
-      <!-- Customer Address & Payment Block -->
-      <div class="customer-section">
-        <div class="customer-box bill-to">
-          <div class="box-title">BILLED TO (BUYER):</div>
-          <div class="customer-name">${order.customerName}</div>
-          <div class="customer-address">${order.customerAddress}</div>
-          <div class="customer-city-state">${order.customerCity}, ${order.customerState} - ${order.customerPincode}</div>
-          <div class="customer-phone"><strong>Phone:</strong> ${order.customerPhone}</div>
-          <div class="customer-state-code">State Code: ${destStateCode}</div>
-        </div>
-        <div class="customer-box ship-to">
-          <div class="box-title">SHIPPED TO (CONSIGNEE):</div>
-          <div class="customer-name">${order.customerName}</div>
-          <div class="customer-address">${order.customerAddress}</div>
-          <div class="customer-city-state">${order.customerCity}, ${order.customerState} - ${order.customerPincode}</div>
-          <div class="customer-phone"><strong>Phone:</strong> ${order.customerPhone}</div>
-          <div class="payment-badge-inline ${isCod ? 'cod-mode' : 'prepaid-mode'}">
-            ${isCod ? 'PAYMENT: CASH ON DELIVERY (COD)' : 'PAYMENT: PREPAID (ONLINE)'}
-          </div>
-        </div>
-      </div>
-
-      <!-- Items Table -->
-      <table class="table-items">
-        <thead>
-          <tr>
-            <th style="width: 25px;">#</th>
-            <th>Item Description</th>
-            <th style="width: 55px; text-align: center;">HSN</th>
-            <th style="width: 35px; text-align: center;">Qty</th>
-            <th style="width: 75px; text-align: right;">Unit Price</th>
-            <th style="width: 80px; text-align: right;">Taxable Value</th>
-            <th style="width: 45px; text-align: center;">Tax Rate</th>
-            <th style="width: 65px; text-align: right;">Tax Amount</th>
-            <th style="width: 85px; text-align: right;">Total (INR)</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${itemsHtml}
-        </tbody>
-      </table>
-
-      <!-- Summary & Tax Breakdown -->
-      <div class="summary-section">
-        <div class="words-and-terms">
-          <div class="words-title">AMOUNT IN WORDS:</div>
-          <div class="words-text"><strong>${amountInWords}</strong></div>
-
-          <div class="tax-breakdown-box">
-            <div class="breakdown-title">GST Tax Breakdown:</div>
-            <div class="breakdown-content">
-              ${
-                isIntraState
-                  ? `CGST (2.5%): ₹${cgstAmount.toFixed(2)} &nbsp;|&nbsp; SGST (2.5%): ₹${sgstAmount.toFixed(2)} &nbsp;|&nbsp; Total Tax: ₹${taxTotal.toFixed(2)}`
-                  : `Integrated GST (IGST 5%): ₹${igstAmount.toFixed(2)} &nbsp;|&nbsp; Total Tax: ₹${taxTotal.toFixed(2)}`
-              }
+        <!-- 2. Customer & Place of Supply Block -->
+        <div class="customer-section">
+          <div class="customer-box">
+            <div class="box-title">SOLD & SHIPPED TO:</div>
+            <div class="customer-name">${order.customerName} <span class="customer-phone">· 📞 ${order.customerPhone}</span></div>
+            <div class="customer-address">${order.customerAddress}, ${order.customerCity}, ${order.customerState} - ${order.customerPincode}</div>
+            <div class="customer-footer-row">
+              <span class="supply-state">Place of Supply: <strong>${order.customerState} (${destStateCode})</strong></span>
+              <span class="payment-badge-inline ${isCod ? 'cod-mode' : 'prepaid-mode'}">
+                ${isCod ? `CASH ON DELIVERY: COLLECT ₹${totalAmount.toFixed(2)}` : 'PREPAID (ONLINE) — DO NOT COLLECT'}
+              </span>
             </div>
           </div>
-
-          <div class="terms-text">
-            <strong>Terms & Conditions:</strong><br>
-            1. Goods once sold are covered under Youthnic 7-day hassle-free return and exchange policy.<br>
-            2. All disputes subject to Surat, Gujarat jurisdiction.<br>
-            3. This is a computer generated commercial tax invoice.
-          </div>
         </div>
 
-        <div class="totals-table-wrap">
-          <table class="totals-table">
-            <tr>
-              <td>Total Taxable Value:</td>
-              <td style="text-align: right;">₹${taxableTotal.toFixed(2)}</td>
-            </tr>
-            ${
-              isIntraState
-                ? `<tr>
-                    <td>CGST @ 2.5%:</td>
-                    <td style="text-align: right;">₹${cgstAmount.toFixed(2)}</td>
-                  </tr>
-                  <tr>
-                    <td>SGST @ 2.5%:</td>
-                    <td style="text-align: right;">₹${sgstAmount.toFixed(2)}</td>
-                  </tr>`
-                : `<tr>
-                    <td>IGST @ 5.0%:</td>
-                    <td style="text-align: right;">₹${igstAmount.toFixed(2)}</td>
-                  </tr>`
-            }
-            <tr>
-              <td>Shipping / Courier Charges:</td>
-              <td style="text-align: right;">FREE</td>
-            </tr>
-            <tr class="grand-total-row">
-              <td><strong>Invoice Total (INR):</strong></td>
-              <td style="text-align: right;"><strong>₹${totalAmount.toFixed(2)}</strong></td>
-            </tr>
+        <!-- 3. Items Table -->
+        <div class="table-items-wrapper">
+          <table class="table-items">
+            <thead>
+              <tr>
+                <th style="width: 14px; text-align: center;">#</th>
+                <th>Item Description / SKU</th>
+                <th style="width: 28px; text-align: center;">HSN</th>
+                <th style="width: 18px; text-align: center;">Qty</th>
+                <th style="width: 42px; text-align: right;">Rate</th>
+                <th style="width: 24px; text-align: center;">GST</th>
+                <th style="width: 48px; text-align: right;">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${itemsHtml}
+            </tbody>
           </table>
+        </div>
 
+        <!-- 4. Summary & Tax Breakdown -->
+        <div class="summary-section">
+          <div class="summary-left">
+            <div class="tax-breakdown-row">
+              <strong>Taxable:</strong> ₹${taxableTotal.toFixed(2)} &nbsp;|&nbsp;
+              ${isIntraState ? `<strong>CGST+SGST (5%):</strong> ₹${taxTotal.toFixed(2)}` : `<strong>IGST (5%):</strong> ₹${igstAmount.toFixed(2)}`}
+            </div>
+            <div class="words-text"><strong>In Words:</strong> ${amountInWords}</div>
+          </div>
+          <div class="summary-right">
+            <div class="grand-total-row">
+              <span class="grand-label">INVOICE TOTAL:</span>
+              <span class="grand-value">₹${totalAmount.toFixed(2)}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 5. Footer & Signatory -->
+        <div class="invoice-footer">
+          <div class="terms-text">
+            Goods covered under Youthnic 7-day hassle-free return/exchange policy.<br>
+            Disputes subject to Surat, Gujarat jurisdiction. Computer generated invoice.
+          </div>
           <div class="signatory-box">
             <div class="sign-for">For <strong>VB EXPORTS (YOUTHNIC)</strong></div>
-            <div class="sign-stamp">
-              <span class="auth-stamp">AUTHORISED SIGNATORY</span>
-            </div>
+            <div class="auth-stamp">AUTHORISED SIGNATORY</div>
           </div>
         </div>
       </div>
-    </div>
-    `;
+    </div>`;
   }
 
   /**
-   * Generates a printable single invoice page
+   * Generates a printable single invoice page strictly formatted for 4x6" (100mm x 150mm) thermal printers
    */
   public generatePrintableInvoicePage(order: OrderWithDetails): string {
     const invoiceHtml = this.generateInvoiceHtml(order);
@@ -323,11 +270,11 @@ export class InvoiceService {
 <body>
   <div class="print-controls no-print">
     <div class="controls-left">
-      <span class="controls-badge">GST Commercial Tax Invoice</span>
+      <span class="controls-badge">GST Commercial Tax Invoice (4x6" Thermal)</span>
       <span class="controls-info">Order: ${order.shopifyOrderName} · Invoice: INV-2026-${order.shopifyOrderNumber || order.id}</span>
     </div>
     <div class="controls-right">
-      <button class="btn btn-primary" onclick="window.print()">🖨️ Print Invoice</button>
+      <button class="btn btn-primary" onclick="window.print()">🖨️ Print 4x6" Invoice</button>
       <button class="btn btn-secondary" onclick="window.close()">✕ Close</button>
     </div>
   </div>
@@ -337,7 +284,7 @@ export class InvoiceService {
   }
 
   /**
-   * Generates a bulk printable page for multiple invoices
+   * Generates a bulk printable page for multiple invoices strictly formatted for 4x6" (100mm x 150mm) thermal printers
    */
   public generateBulkPrintableInvoicesPage(orders: OrderWithDetails[]): string {
     const invoicesHtml = orders
@@ -356,7 +303,7 @@ export class InvoiceService {
 <body>
   <div class="print-controls no-print">
     <div class="controls-left">
-      <span class="controls-badge">Bulk GST Tax Invoices</span>
+      <span class="controls-badge">Bulk GST Tax Invoices (4x6" Thermal)</span>
       <span class="controls-info">Total Invoices: ${orders.length}</span>
     </div>
     <div class="controls-right">
@@ -372,13 +319,13 @@ export class InvoiceService {
   public getInvoiceStyles(): string {
     return `
       * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
-      body { background: #f3f4f6; color: #1e293b; padding: 20px 0; display: flex; flex-direction: column; align-items: center; }
+      body { background: #f3f4f6; color: #000; padding: 20px 0; display: flex; flex-direction: column; align-items: center; }
 
       .no-print {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        width: 210mm;
+        width: 100mm;
         max-width: 95vw;
         margin-bottom: 16px;
         padding: 10px 16px;
@@ -404,187 +351,207 @@ export class InvoiceService {
       .btn-secondary { background: #334155; color: #fff; }
       .btn-secondary:hover { background: #1e293b; }
 
-      .invoice-container {
-        width: 210mm;
-        min-height: 280mm;
+      .invoice-wrapper {
+        width: 100mm;
+        height: 150mm;
+        max-height: 150mm;
         background: #fff;
-        padding: 14mm 16mm;
         box-shadow: 0 4px 15px rgba(0,0,0,0.15);
         margin: 0 auto 20px auto;
-        border: 1px solid #cbd5e1;
+        overflow: hidden;
+        page-break-after: always;
+        break-after: page;
+        page-break-inside: avoid;
+        break-inside: avoid;
       }
 
+      .invoice-container {
+        width: 100%;
+        height: 100%;
+        max-height: 100%;
+        border: 2px solid #000;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        padding: 2.5mm 3.5mm;
+        box-sizing: border-box;
+        overflow: hidden;
+      }
+
+      /* 1. Header */
       .invoice-header {
         display: flex;
         justify-content: space-between;
-        border-bottom: 2px solid #0f172a;
-        padding-bottom: 12px;
+        border-bottom: 1.5px solid #000;
+        padding-bottom: 4px;
+      }
+      .header-left {
+        flex: 1.2;
       }
       .brand-title {
-        font-size: 24px;
+        font-size: 14px;
         font-weight: 900;
-        letter-spacing: 2px;
-        color: #0f172a;
+        letter-spacing: 1px;
+        color: #000;
+        line-height: 1.1;
       }
       .legal-name {
-        font-size: 13px;
-        font-weight: 700;
-        color: #64748b;
-        letter-spacing: 1px;
+        font-size: 9px;
+        font-weight: 800;
+        color: #333;
+        letter-spacing: 0.5px;
       }
       .company-details {
-        font-size: 11px;
-        color: #334155;
-        line-height: 1.4;
-        margin-top: 5px;
+        font-size: 7.5px;
+        color: #222;
+        line-height: 1.25;
+        margin-top: 2px;
       }
 
       .header-right {
+        flex: 1.1;
         text-align: right;
       }
       .tax-invoice-badge {
-        font-size: 18px;
-        font-weight: 900;
-        letter-spacing: 1.5px;
-        color: #0f172a;
-        background: #f1f5f9;
-        display: inline-block;
-        padding: 4px 12px;
-        border: 1px solid #cbd5e1;
-        border-radius: 4px;
-        margin-bottom: 8px;
-      }
-      .invoice-meta-table {
         font-size: 11px;
-        text-align: right;
-      }
-      .meta-row {
+        font-weight: 900;
+        letter-spacing: 1px;
+        color: #000;
+        border: 1px solid #000;
+        display: inline-block;
+        padding: 1px 6px;
         margin-bottom: 3px;
       }
-      .meta-label { color: #64748b; margin-right: 6px; }
-      .meta-value { color: #0f172a; }
+      .invoice-meta-table {
+        font-size: 8px;
+        line-height: 1.25;
+      }
+      .meta-row {
+        margin-bottom: 1px;
+      }
+      .meta-label { color: #444; }
 
+      /* 2. Customer Section */
       .customer-section {
-        display: flex;
-        justify-content: space-between;
-        gap: 16px;
-        margin: 14px 0;
+        margin: 3px 0;
       }
       .customer-box {
-        flex: 1;
-        border: 1px solid #e2e8f0;
-        background: #f8fafc;
-        border-radius: 6px;
-        padding: 10px 12px;
-        font-size: 11px;
-        line-height: 1.4;
+        border: 1px solid #000;
+        padding: 3px 5px;
+        font-size: 8px;
+        line-height: 1.25;
       }
       .box-title {
-        font-size: 10px;
+        font-size: 7.5px;
         font-weight: 800;
-        color: #64748b;
+        color: #444;
         letter-spacing: 0.5px;
-        margin-bottom: 4px;
       }
-      .customer-name { font-size: 13px; font-weight: 800; color: #0f172a; }
-      .customer-address { margin-top: 3px; }
-      .customer-city-state { font-weight: 600; margin-top: 2px; }
-      .customer-phone { margin-top: 2px; }
+      .customer-name { font-size: 9.5px; font-weight: 800; color: #000; }
+      .customer-phone { font-weight: 700; color: #111; }
+      .customer-address { margin-top: 1px; color: #111; }
+      .customer-footer-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 2px;
+        padding-top: 2px;
+        border-top: 0.5px dashed #666;
+      }
+      .supply-state { font-size: 7.5px; }
       .payment-badge-inline {
-        margin-top: 6px;
-        display: inline-block;
-        font-size: 10px;
-        font-weight: 800;
-        padding: 2px 8px;
-        border-radius: 4px;
+        font-size: 8px;
+        font-weight: 900;
+        padding: 1px 5px;
+        border-radius: 3px;
+        letter-spacing: 0.2px;
       }
-      .prepaid-mode { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
-      .cod-mode { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+      .prepaid-mode { background: #dcfce7; color: #15803d; border: 1px solid #86efac; }
+      .cod-mode { background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; }
 
+      /* 3. Items Table */
+      .table-items-wrapper {
+        flex: 1;
+        overflow: hidden;
+        margin: 2px 0;
+      }
       .table-items {
         width: 100%;
         border-collapse: collapse;
-        margin: 14px 0;
-        font-size: 11px;
+        font-size: 8px;
+        line-height: 1.15;
       }
       .table-items th {
-        background: #0f172a;
+        background: #000;
         color: #fff;
-        padding: 6px 8px;
+        padding: 2.5px 3px;
         font-weight: 700;
         text-align: left;
+        font-size: 7.5px;
       }
       .table-items td {
-        padding: 8px;
-        border-bottom: 1px solid #e2e8f0;
+        padding: 2.5px 3px;
+        border-bottom: 0.5px solid #ccc;
         vertical-align: top;
       }
-      .item-meta { font-size: 10px; color: #64748b; margin-top: 2px; }
+      .thermal-item-title { font-weight: 700; color: #000; }
+      .thermal-item-meta { font-size: 7px; color: #555; }
 
+      /* 4. Summary Section */
       .summary-section {
         display: flex;
         justify-content: space-between;
-        gap: 20px;
-        margin-top: 10px;
+        align-items: center;
+        border-top: 1.5px solid #000;
+        border-bottom: 1.5px solid #000;
+        padding: 3px 0;
+        margin: 2px 0;
       }
-      .words-and-terms {
-        flex: 1.2;
-        font-size: 11px;
+      .summary-left {
+        flex: 1.4;
+        font-size: 7.5px;
+        line-height: 1.25;
       }
-      .words-title { font-size: 10px; font-weight: 700; color: #64748b; }
-      .words-text { font-size: 12px; color: #0f172a; margin-top: 2px; padding: 4px 8px; background: #f8fafc; border-left: 3px solid #0284c7; }
-      
-      .tax-breakdown-box {
-        margin-top: 10px;
-        padding: 6px 8px;
-        background: #f1f5f9;
-        border-radius: 4px;
-        font-size: 10.5px;
-      }
-      .breakdown-title { font-weight: 700; color: #475569; }
-      .breakdown-content { margin-top: 2px; font-weight: 600; color: #0f172a; }
-
-      .terms-text {
-        margin-top: 12px;
-        font-size: 10px;
-        color: #64748b;
-        line-height: 1.4;
-      }
-
-      .totals-table-wrap {
-        flex: 0.9;
-      }
-      .totals-table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 11.5px;
-      }
-      .totals-table td {
-        padding: 4px 6px;
-      }
-      .grand-total-row td {
-        border-top: 2px solid #0f172a;
-        border-bottom: 2px solid #0f172a;
-        padding: 6px;
-        font-size: 13px;
-        color: #0f172a;
-      }
-
-      .signatory-box {
-        margin-top: 25px;
+      .tax-breakdown-row { color: #111; }
+      .words-text { font-size: 7px; color: #333; margin-top: 1px; }
+      .summary-right {
+        flex: 1;
         text-align: right;
       }
-      .sign-for { font-size: 11px; color: #334155; }
-      .sign-stamp {
-        margin-top: 25px;
+      .grand-total-row {
+        display: flex;
+        justify-content: flex-end;
+        align-items: baseline;
+        gap: 4px;
       }
+      .grand-label { font-size: 8.5px; font-weight: 800; color: #000; }
+      .grand-value { font-size: 13px; font-weight: 900; color: #000; }
+
+      /* 5. Footer & Signatory */
+      .invoice-footer {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+        padding-top: 2px;
+      }
+      .terms-text {
+        font-size: 6.5px;
+        color: #444;
+        line-height: 1.2;
+        max-width: 62%;
+      }
+      .signatory-box {
+        text-align: right;
+      }
+      .sign-for { font-size: 7.5px; color: #222; }
       .auth-stamp {
         display: inline-block;
-        border-top: 1px dashed #475569;
-        padding-top: 4px;
-        font-size: 10px;
-        font-weight: 700;
-        color: #475569;
+        border-top: 0.5px dashed #000;
+        padding-top: 1px;
+        margin-top: 12px;
+        font-size: 7px;
+        font-weight: 800;
+        color: #000;
       }
 
       .page-break {
@@ -594,18 +561,34 @@ export class InvoiceService {
       }
 
       @media print {
-        body { background: #fff; padding: 0; }
+        body { background: #fff !important; padding: 0 !important; margin: 0 !important; }
         .no-print { display: none !important; }
+        .invoice-wrapper {
+          box-shadow: none !important;
+          margin: 0 !important;
+          width: 100mm !important;
+          height: 150mm !important;
+          max-width: 100mm !important;
+          max-height: 150mm !important;
+          page-break-after: always !important;
+          break-after: page !important;
+          page-break-inside: avoid !important;
+          break-inside: avoid !important;
+          overflow: hidden !important;
+        }
         .invoice-container {
-          box-shadow: none;
-          margin: 0;
-          border: none;
-          page-break-after: always;
-          break-after: page;
+          border: 1.5px solid #000 !important;
+          box-shadow: none !important;
+          margin: 0 !important;
+          width: 100% !important;
+          height: 100% !important;
+          max-height: 100% !important;
+          box-sizing: border-box !important;
+          overflow: hidden !important;
         }
         @page {
-          size: A4 portrait;
-          margin: 10mm;
+          size: 100mm 150mm;
+          margin: 0;
         }
       }
     `;

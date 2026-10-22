@@ -1344,6 +1344,45 @@ export async function syncWaybillTrackingLive(waybillNumber: string): Promise<{
   return response.data
 }
 
+
+/**
+ * Synchronize live Velocity tracking, itemized shipping charges, and COD remittance for a single order.
+ */
+export async function syncOrderVelocityDetails(orderId: number): Promise<{
+  success: boolean
+  orderId: number
+  waybillNumber: string
+  courier: string
+  trackingStatus?: string
+  deliveredDate?: string | null
+  pickupDate?: string | null
+  shippingCharges?: any
+  codRemittance?: any
+  message?: string
+}> {
+  const response = await api.post(`/api/orders/${orderId}/velocity/sync`)
+  return response.data
+}
+
+/**
+ * Discover rate cards, SLA delivery times, and serviceability for an order across Delhivery and Velocity aggregators.
+ */
+export async function getOrderShippingOptions(orderId: number): Promise<{
+  success: boolean
+  orderId: number
+  options: Array<{
+    courier: string
+    carrierId?: string
+    serviceable: boolean
+    rate: number
+    estimatedDays?: number
+    description: string
+  }>
+}> {
+  const response = await api.get(`/api/orders/${orderId}/shipping-options`)
+  return response.data
+}
+
 /**
  * Automatically fetch and synchronize fulfillment details for an order
  * from external sources (Shopify / OMS Guru or Delhivery ONE portal manifest).

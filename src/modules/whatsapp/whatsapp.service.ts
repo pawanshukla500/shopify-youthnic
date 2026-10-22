@@ -3,6 +3,7 @@ import prisma from '../../database/prisma';
 import logger from '../../utils/logger';
 import { NotificationType } from '@prisma/client';
 import { NotificationPayload } from '../../types';
+import { isVelocityCourier } from '../../utils/courier';
 import kwikengageService, { KwikEngageService } from './kwikengage.service';
 
 /**
@@ -95,12 +96,18 @@ class KwiKenageService {
           fallbackMessage: `Hi ${payload.customerName}, your order ${payload.orderNumber} has been confirmed! We'll dispatch it soon. Thank you for shopping with us.`,
         };
 
-      case 'ORDER_SHIPPED':
+      case 'ORDER_SHIPPED': {
+        const isVel = isVelocityCourier(payload.courierName, payload.trackingUrl, payload.trackingNumber);
+        const resolvedTrackingUrl = payload.trackingUrl || (isVel
+          ? `https://www.velocityshipping.in/track/${payload.trackingNumber}`
+          : `https://www.delhivery.com/track/package/${payload.trackingNumber}`);
+        const resolvedCourier = isVel ? 'Velocity' : (payload.courierName || 'Delhivery Express');
         return {
           templateName: t.orderDispatched,
-          parameters: [payload.customerName, payload.orderNumber, payload.trackingNumber || 'N/A'],
-          fallbackMessage: `Hi ${payload.customerName}, your order ${payload.orderNumber} has been shipped! Track your package with AWB: ${payload.trackingNumber || 'N/A'}`,
+          parameters: [payload.customerName, payload.orderNumber, resolvedCourier, payload.trackingNumber || 'N/A'],
+          fallbackMessage: `Hi ${payload.customerName}, your order ${payload.orderNumber} has been shipped via ${resolvedCourier}! Track live: ${resolvedTrackingUrl}`,
         };
+      }
 
       case 'OUT_FOR_DELIVERY':
         return {

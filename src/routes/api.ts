@@ -35,7 +35,7 @@ import { addStaffNote, getOrderActivity, recordOrderAction } from '../modules/or
 import returnScanService from '../modules/returns/return-scan.service';
 import shippingRouterService, { CarrierPriority, CourierChoice } from '../modules/shipping/shipping-router.service';
 import velocityService from '../modules/velocity/velocity.service';
-import { isVelocityCourier } from '../utils/courier';
+import { isVelocityCourier, getTrackingUrl } from '../utils/courier';
 import { mergePdfBuffers, create4x6FallbackPdf } from '../utils/pdf-merger';
 
 const router = Router();
@@ -1044,7 +1044,13 @@ router.post('/orders/:id/dispatch', async (req: Request, res: Response): Promise
   try {
     const orderId = parseInt(req.params.id, 10);
     const courierChoice = (req.body?.courier || req.query?.courier) as CourierChoice | 'auto' | undefined;
-    const result = await orderService.dispatchOrder(orderId, (req as AuthenticatedRequest).user, courierChoice);
+    const velocityCarrierId = req.body?.velocityCarrierId || req.body?.carrierId;
+    const result = await orderService.dispatchOrder(
+      orderId,
+      (req as AuthenticatedRequest).user,
+      courierChoice,
+      velocityCarrierId ? { velocityCarrierId } : undefined
+    );
     res.json({ success: true, waybillNumber: result.waybillNumber, courier: result.courier });
   } catch (error: any) {
     res.status(400).json({ error: error.message });
@@ -1054,7 +1060,8 @@ router.post('/orders/:id/dispatch', async (req: Request, res: Response): Promise
 // Bulk dispatch multiple orders with priority: Prepaid first (FIFO), then COD (FIFO)
 router.post('/orders/bulk-dispatch', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { orderIds, courier } = req.body;
+    const { orderIds, courier, carrierId, velocityCarrierId } = req.body;
+    const selectedCarrierId = velocityCarrierId || carrierId;
     if (!Array.isArray(orderIds) || !orderIds.length) {
       res.status(400).json({ error: 'orderIds array is required' });
       return;
@@ -1084,7 +1091,12 @@ router.post('/orders/bulk-dispatch', async (req: Request, res: Response): Promis
       const paymentMode = order ? (isPrepaid ? 'Prepaid' : 'COD') : undefined;
 
       try {
-        const result = await orderService.dispatchOrder(Number(id), (req as AuthenticatedRequest).user, courierChoice);
+        const result = await orderService.dispatchOrder(
+          Number(id),
+          (req as AuthenticatedRequest).user,
+          courierChoice,
+          selectedCarrierId ? { velocityCarrierId: selectedCarrierId } : undefined
+        );
         results.push({ orderId: Number(id), success: true, waybillNumber: result.waybillNumber, courier: result.courier, paymentMode });
       } catch (err: any) {
         results.push({ orderId: Number(id), success: false, error: err.message, paymentMode });
@@ -1504,7 +1516,21 @@ router.get('/orders/:id/label-and-invoice', async (req: Request, res: Response):
       return;
     }
     const waybill = order.shipment?.waybillNumber || `PENDING-${order.shopifyOrderName.replace('#', '')}`;
-    const html = shippingLabelService.generateLabelAndInvoiceHtml(order as any, waybill);
+    let pdfBuffer: Buffer | null = null;
+    const isVel = isVelocityCourier(order.shipment?.courier, order.shipment?.labelUrl, waybill);
+    if (isVel && order.shipment?.waybillNumber) {
+      try {
+        pdfBuffer = await loadFreshLabelPdf(
+          waybill,
+          order.shipment?.labelUrl,
+          order.shipment?.id,
+          order.shipment?.courier
+        );
+      } catch (err: any) {
+        logger.warn('Could not load Velocity label PDF for single label+invoice', { waybill, error: err.message });
+      }
+    }
+    const html = shippingLabelService.generateLabelAndInvoiceHtml(order as any, waybill, pdfBuffer);
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(html);
   } catch (error: any) {
@@ -1525,7 +1551,21 @@ router.get('/orders/:id/label-and-invoice/download', async (req: Request, res: R
       return;
     }
     const waybill = order.shipment?.waybillNumber || `PENDING-${order.shopifyOrderName.replace('#', '')}`;
-    const html = shippingLabelService.generateLabelAndInvoiceHtml(order as any, waybill);
+    let pdfBuffer: Buffer | null = null;
+    const isVel = isVelocityCourier(order.shipment?.courier, order.shipment?.labelUrl, waybill);
+    if (isVel && order.shipment?.waybillNumber) {
+      try {
+        pdfBuffer = await loadFreshLabelPdf(
+          waybill,
+          order.shipment?.labelUrl,
+          order.shipment?.id,
+          order.shipment?.courier
+        );
+      } catch (err: any) {
+        logger.warn('Could not load Velocity label PDF for single label+invoice download', { waybill, error: err.message });
+      }
+    }
+    const html = shippingLabelService.generateLabelAndInvoiceHtml(order as any, waybill, pdfBuffer);
     const filename = `Label-Invoice-${order.shopifyOrderName.replace('#', '')}.html`;
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -1760,8 +1800,52 @@ router.post('/orders/:id/track', async (req: Request, res: Response): Promise<vo
       return;
     }
 
+    const isVel = isVelocityCourier(order.shipment.courier, order.shipment.labelUrl, order.shipment.waybillNumber);
+    if (isVel) {
+      const { velocityFinancialSyncService } = await import('../modules/velocity/velocity-financial-sync.service');
+      const vResult = await velocityFinancialSyncService.syncSingleOrderVelocityDetails(order.id, (req as AuthenticatedRequest).user);
+      const refreshedOrder = await orderService.getOrder(orderId);
+      res.json({
+        success: true,
+        tracking: {
+          status: vResult.trackingStatus,
+          courier: vResult.courier,
+          waybill: vResult.waybillNumber,
+          trackUrl: `https://www.velocityshipping.in/track/${encodeURIComponent(vResult.waybillNumber)}`,
+        },
+        shipment: refreshedOrder?.shipment,
+        order: refreshedOrder,
+        charges: vResult.shippingCharges,
+        remittance: vResult.codRemittance,
+      });
+      return;
+    }
+
     const result = await trackingService.syncShipmentTracking(order.shipment.waybillNumber);
     res.json({ success: true, tracking: result?.tracking, shipment: result?.shipment, order });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Direct Velocity Live Sync (tracking, shipping charges ledger, and COD remittance)
+router.post(['/orders/:id/velocity/sync', '/api/orders/:id/velocity/sync'], async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const orderId = parseInt(req.params.id, 10);
+    const { velocityFinancialSyncService } = await import('../modules/velocity/velocity-financial-sync.service');
+    const result = await velocityFinancialSyncService.syncSingleOrderVelocityDetails(orderId, req.user);
+    res.json(result);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Evaluates available shipping options across courier partners for an order
+router.get(['/orders/:id/shipping-options', '/api/orders/:id/shipping-options'], async (req: Request, res: Response): Promise<void> => {
+  try {
+    const orderId = parseInt(req.params.id, 10);
+    const options = await shippingRouterService.getShippingOptionsForOrder(orderId);
+    res.json({ success: true, ...options });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -2227,7 +2311,7 @@ router.post('/orders/:id/returns', async (req: AuthenticatedRequest, res: Respon
               imageUrl: i.imageUrl,
             })),
             totalAmount: order.totalAmount,
-            trackingUrl: `https://www.delhivery.com/track/package/${result.returnWaybill}`,
+            trackingUrl: getTrackingUrl(carrierName, result.returnWaybill) || `https://www.delhivery.com/track/package/${result.returnWaybill}`,
           },
         });
         emailDispatched = emailResult?.success ?? false;
@@ -3134,12 +3218,29 @@ router.get('/delhivery/label/:waybill/download', async (req: Request, res: Respo
 // Per-AWB estimates still come from the live kinko rate API + local matrix.
 
 // Update supported shipment fields
-router.patch('/delhivery/shipment/:waybill', async (req: Request, res: Response): Promise<void> => {
+router.patch(['/delhivery/shipment/:waybill', '/api/shipments/:waybill'], async (req: Request, res: Response): Promise<void> => {
   try {
-    const result = await delhiveryService.updateShipment(req.params.waybill, req.body);
-    const shipment = await prisma.shipment.findUnique({ where: { waybillNumber: req.params.waybill } });
+    const waybill = req.params.waybill;
+    const shipment = await prisma.shipment.findUnique({ where: { waybillNumber: waybill } });
+    const isVel = isVelocityCourier(shipment?.courier, shipment?.labelUrl, waybill);
+
+    let result: any;
+    if (isVel) {
+      result = await velocityService.updateOrder({
+        awb: waybill,
+        phone: Array.isArray(req.body.phone) ? req.body.phone[0] : req.body.phone,
+        address: req.body.address,
+        city: req.body.city,
+        state: req.body.state,
+        pincode: req.body.pincode,
+      });
+    } else {
+      result = await delhiveryService.updateShipment(waybill, req.body);
+    }
+
     if (shipment) await recordOrderAction(shipment.orderId, 'SHIPMENT_DETAILS_UPDATED', (req as AuthenticatedRequest).user, {
-      note: 'Delivery phone/address correction submitted to Delhivery.', status: result.success === false ? 'FAILED' : 'COMPLETED',
+      note: `Delivery phone/address correction submitted to ${isVel ? 'Velocity' : 'Delhivery'}.`,
+      status: result.success === false ? 'FAILED' : 'COMPLETED',
     });
     res.json(result);
   } catch (error: any) {
@@ -3215,16 +3316,40 @@ router.get('/delhivery/shipping-cost', async (req: Request, res: Response): Prom
   }
 });
 
-// Cancel a shipment within Delhivery's allowed status window
-router.post('/delhivery/shipment/:waybill/cancel', async (req: Request, res: Response): Promise<void> => {
+// Cancel a shipment within carrier's allowed status window
+router.post(['/delhivery/shipment/:waybill/cancel', '/api/shipments/:waybill/cancel'], async (req: Request, res: Response): Promise<void> => {
   try {
-    const success = await delhiveryService.cancelShipment(req.params.waybill);
-    const shipment = await prisma.shipment.findUnique({ where: { waybillNumber: req.params.waybill } });
-    if (shipment) await recordOrderAction(shipment.orderId, 'SHIPMENT_CANCEL_REQUESTED', (req as AuthenticatedRequest).user, {
-      note: success ? 'Delhivery accepted shipment cancellation.' : 'Delhivery did not accept cancellation; parcel remains tracked.',
-      status: success ? 'COMPLETED' : 'REVIEW',
-    });
-    res.status(success ? 200 : 409).json(success ? { success } : { success: false, error: 'Delhivery did not accept cancellation; keep tracking this parcel.' });
+    const waybill = req.params.waybill;
+    const shipment = await prisma.shipment.findUnique({ where: { waybillNumber: waybill } });
+    const isVel = isVelocityCourier(shipment?.courier, shipment?.labelUrl, waybill);
+
+    let success = false;
+    if (isVel) {
+      const velRes = await velocityService.cancelShipment(waybill);
+      success = Boolean(velRes.success || velRes.cancelled);
+    } else {
+      success = await delhiveryService.cancelShipment(waybill);
+    }
+
+    if (shipment) {
+      if (success) {
+        await prisma.shipment.update({
+          where: { id: shipment.id },
+          data: { status: 'CANCELLED' },
+        });
+      }
+      await recordOrderAction(shipment.orderId, 'SHIPMENT_CANCEL_REQUESTED', (req as AuthenticatedRequest).user, {
+        note: success
+          ? `${isVel ? 'Velocity' : 'Delhivery'} accepted shipment cancellation.`
+          : `${isVel ? 'Velocity' : 'Delhivery'} did not accept cancellation; parcel remains tracked.`,
+        status: success ? 'COMPLETED' : 'REVIEW',
+      });
+    }
+    res.status(success ? 200 : 409).json(
+      success
+        ? { success }
+        : { success: false, error: `${isVel ? 'Velocity' : 'Delhivery'} did not accept cancellation; keep tracking this parcel.` }
+    );
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -4930,7 +5055,7 @@ router.post('/communications/notify-delayed-transit', async (req: Request, res: 
         totalAmount: order.totalAmount,
         customMessage,
         trackingUrl: shipment?.waybillNumber
-          ? `https://www.delhivery.com/track/package/${shipment.waybillNumber}`
+          ? (getTrackingUrl(shipment?.courier || (order as any).courierPartner, shipment.waybillNumber, shipment?.labelUrl) || `https://www.delhivery.com/track/package/${shipment.waybillNumber}`)
           : undefined,
       };
 

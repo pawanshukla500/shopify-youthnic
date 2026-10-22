@@ -252,12 +252,14 @@ class NotificationEngine {
    * NDR alert — delivery attempt failed (customer unreachable, address issue).
    * Dispatches WhatsApp NDR alert + Email NDR notice.
    */
-  async notifyNDR(order: Order, remark: string, waybillNumber?: string): Promise<void> {
+  async notifyNDR(order: Order, remark: string, waybillNumber?: string, courierName?: string): Promise<void> {
+    const isVel = isVelocityCourier(courierName, null, waybillNumber);
+    const resolvedCourier = courierName || (isVel ? 'Velocity' : 'Delhivery Express');
     try {
       await kwikengageService.sendCriticalTrigger('NDR_ALERT', order, {
         ndrReason: remark,
         waybillNumber,
-        courierName: 'Delhivery Express',
+        courierName: resolvedCourier,
       });
     } catch (err) {
       logger.warn('KwikEngage send failed for NDR_ALERT', { err });
@@ -265,7 +267,7 @@ class NotificationEngine {
     await this.sendLifecycleEmail(order, 'NDR_ALERT', {
       waybillNumber,
       delayReason: remark,
-      courier: 'Delhivery Express',
+      courier: resolvedCourier,
     });
   }
 

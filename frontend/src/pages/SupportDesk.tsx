@@ -19,7 +19,7 @@ import {
 } from '../api'
 import { ErrorBox, Icon, LoadingState, PageIntro, Panel, PanelHeading, useDocumentTitle, useToast } from '../components/UI'
 import type { InboundEmail, CustomerHistoryEvent } from '../types'
-import { formatDate, formatMoney } from '../lib'
+import { formatDate, formatMoney, carrierTrackingUrl } from '../lib'
 
 type FilterTab = 'ALL' | 'URGENT' | 'RETURNS' | 'DELAYS' | 'RESOLVED'
 
@@ -569,10 +569,10 @@ export function SupportDesk() {
                   </div>
                   {activeTicket.order.shipment?.waybillNumber && (
                     <div>
-                      <span style={{ fontSize: '11px', color: '#64748b' }}>Delhivery Waybill:</span>
+                      <span style={{ fontSize: '11px', color: '#64748b' }}>{activeTicket.order.shipment?.courier || 'Carrier'} Waybill:</span>
                       <div>
                         <a
-                          href={`https://www.delhivery.com/track/package/${activeTicket.order.shipment.waybillNumber}`}
+                          href={carrierTrackingUrl(activeTicket.order.shipment?.courier || (activeTicket.order as any).courierPartner, activeTicket.order.shipment.waybillNumber)}
                           target="_blank"
                           rel="noreferrer"
                           style={{ color: '#2563eb', fontWeight: 700, fontSize: '12px', textDecoration: 'none' }}

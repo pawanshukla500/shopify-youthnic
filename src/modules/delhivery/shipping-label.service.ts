@@ -400,15 +400,29 @@ export class ShippingLabelService {
   /**
    * Generates a printable page with Shipping Label, then Invoice (in that exact sequence)
    */
-  public generateLabelAndInvoiceHtml(order: OrderWithDetails, waybillNumber: string): string {
+  public generateLabelAndInvoiceHtml(order: OrderWithDetails, waybillNumber: string, pdfBuffer?: Buffer | null): string {
     const isVelocity = isVelocityCourier(order.shipment?.courier, order.shipment?.labelUrl, waybillNumber);
     const courierLabel = isVelocity
       ? /amazon|ats/i.test(order.shipment?.courier || '')
         ? 'Amazon Transportation'
         : 'Velocity'
       : 'Delhivery';
-    const labelHtml = this.generateSingleLabelHtml(order, waybillNumber);
     const invoiceHtml = invoiceService.generateInvoiceHtml(order);
+    const pdfBase64 = isVelocity && pdfBuffer && pdfBuffer.length > 20 ? pdfBuffer.toString('base64') : '';
+
+    const labelHtml = isVelocity
+      ? (pdfBase64
+          ? `
+          <div class="pdf-canvas-container" style="text-align:center; width:100mm; height:150mm; margin:0 auto 20px auto;">
+            <canvas class="official-label-canvas" style="width:100mm; height:150mm; border:2px solid #000; box-shadow:0 4px 15px rgba(0,0,0,0.15); box-sizing:border-box; background:#fff; display:block; margin:0 auto;"></canvas>
+          </div>`
+          : `
+          <div class="velocity-label-pending" style="width:100mm; height:150mm; display:flex; flex-direction:column; align-items:center; justify-content:center; border:2px dashed #7c3aed; padding:20px; box-sizing:border-box; text-align:center; font-family:sans-serif; background:#faf5ff;">
+            <h3 style="color:#7c3aed; margin:0 0 8px 0;">⚡ Official Velocity Label</h3>
+            <p style="font-size:12px; color:#475569; margin:0 0 6px 0;">AWB: <strong>${waybillNumber}</strong></p>
+            <p style="font-size:11px; color:#64748b; margin:0;">Official PDF label is being fetched from the Velocity Shipping Network. Click Reload or Print to refresh.</p>
+          </div>`)
+      : this.generateSingleLabelHtml(order, waybillNumber);
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -418,6 +432,7 @@ export class ShippingLabelService {
   <style>
     ${this.getCombinedStyles()}
   </style>
+  ${pdfBase64 ? `<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>` : ''}
 </head>
 <body>
   <div class="print-controls no-print">
@@ -430,12 +445,50 @@ export class ShippingLabelService {
       <button class="btn btn-secondary" onclick="window.close()">✕ Close</button>
     </div>
   </div>
-  <div class="label-page-wrapper">
+  <div class="label-page-wrapper" data-order-name="${order.shopifyOrderName}" data-awb="${waybillNumber}" ${pdfBase64 ? `data-pdf-base64="${pdfBase64}"` : ''}>
     ${labelHtml}
   </div>
   <div class="invoice-page-wrapper">
     ${invoiceHtml}
   </div>
+  ${pdfBase64 ? `
+  <script>
+    (function() {
+      if (typeof pdfjsLib === 'undefined') return;
+      try {
+        if (window.location.protocol === 'file:') {
+          pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+        } else {
+          pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        }
+        var pageEl = document.querySelector('.label-page-wrapper[data-pdf-base64]');
+        if (!pageEl) return;
+        var base64 = pageEl.getAttribute('data-pdf-base64');
+        if (!base64) return;
+        var raw = atob(base64);
+        var uint8 = new Uint8Array(raw.length);
+        for (var i = 0; i < raw.length; i++) uint8[i] = raw.charCodeAt(i);
+        pdfjsLib.getDocument({ data: uint8 }).promise.then(function(pdf) {
+          return pdf.getPage(1);
+        }).then(function(page) {
+          var container = pageEl.querySelector('.pdf-canvas-container');
+          var canvas = pageEl.querySelector('.official-label-canvas');
+          if (!container || !canvas) return;
+          var viewport = page.getViewport({ scale: 3.0 });
+          canvas.height = viewport.height;
+          canvas.width = viewport.width;
+          var ctx = canvas.getContext('2d');
+          return page.render({ canvasContext: ctx, viewport: viewport }).promise.then(function() {
+            container.style.display = 'block';
+          });
+        }).catch(function(err) {
+          console.warn('PDF.js render error:', err);
+        });
+      } catch (e) {
+        console.warn('PDF.js init error:', e);
+      }
+    })();
+  </script>` : ''}
 </body>
 </html>`;
   }
@@ -559,6 +612,7 @@ export class ShippingLabelService {
   public getCombinedStyles(): string {
     return `
       ${this.getLabelStyles()}
+      ${invoiceService.getInvoiceStyles()}
 
       .label-page-wrapper {
         display: flex;
@@ -571,13 +625,6 @@ export class ShippingLabelService {
         justify-content: center;
         width: 100%;
         margin-top: 10px;
-      }
-
-      /* Invoice styles integration for combined document */
-      .invoice-page-wrapper .invoice-container {
-        margin: 0 auto;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.15);
-        background: #fff;
       }
 
       .order-pair-wrapper {
@@ -599,7 +646,31 @@ export class ShippingLabelService {
         .label-wrapper { box-shadow: none !important; margin: 0 !important; }
         .pdf-canvas-container { margin: 0 !important; page-break-after: always; break-after: page; }
         .official-label-canvas { width: 100mm !important; height: 150mm !important; max-width: 100mm !important; max-height: 150mm !important; border: none !important; box-shadow: none !important; }
-        .invoice-container { box-shadow: none !important; margin: 0 !important; }
+        
+        .invoice-wrapper {
+          box-shadow: none !important;
+          margin: 0 !important;
+          width: 100mm !important;
+          height: 150mm !important;
+          max-width: 100mm !important;
+          max-height: 150mm !important;
+          page-break-after: always !important;
+          break-after: page !important;
+          page-break-inside: avoid !important;
+          break-inside: avoid !important;
+          overflow: hidden !important;
+        }
+
+        .invoice-container {
+          box-shadow: none !important;
+          margin: 0 !important;
+          width: 100% !important;
+          height: 100% !important;
+          max-height: 100% !important;
+          box-sizing: border-box !important;
+          border: 1.5px solid #000 !important;
+          overflow: hidden !important;
+        }
         
         .label-page-wrapper {
           page-break-after: always;
@@ -618,6 +689,7 @@ export class ShippingLabelService {
         }
 
         @page {
+          size: 100mm 150mm;
           margin: 0;
         }
       }

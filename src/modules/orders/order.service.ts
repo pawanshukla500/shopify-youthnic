@@ -4,7 +4,7 @@ import shopifyService from '../shopify/shopify.service';
 import delhiveryService from '../delhivery/delhivery.service';
 import velocityService from '../velocity/velocity.service';
 import shippingRouterService, { CourierChoice } from '../shipping/shipping-router.service';
-import { isVelocityCourier, isDelhiveryCourier } from '../../utils/courier';
+import { isVelocityCourier, isDelhiveryCourier, getTrackingUrl } from '../../utils/courier';
 import notificationEngine from '../notifications/notification.service';
 import paymentService from '../payments/payment.service';
 import { recordAccountTrailEvent, type AccountTrailActor } from '../accounts/account-trail.service';
@@ -434,7 +434,12 @@ class OrderService {
       // Push fulfillment to Shopify if Shopify does not have it yet
       if (!order.fulfillmentStatus || order.fulfillmentStatus !== 'fulfilled') {
         try {
-          await shopifyService.fulfillOrderOnShopify(order.shopifyOrderId, awb, 'Delhivery');
+          const isVelAWB = isVelocityCourier((order as any).courierPartner, (order as any).shipment?.labelUrl, awb);
+          if (isVelAWB) {
+            await shopifyService.fulfillOrderOnShopify(order.shopifyOrderId, awb, 'Velocity', `https://www.velocityshipping.in/track/${awb}`);
+          } else {
+            await shopifyService.fulfillOrderOnShopify(order.shopifyOrderId, awb, 'Delhivery');
+          }
           logger.info('Synced Delhivery ONE fulfillment back to Shopify', {
             orderId: order.id,
             shopifyOrderId: order.shopifyOrderId,
@@ -598,7 +603,12 @@ class OrderService {
           // Sync fulfillment back to Shopify if Shopify is unfulfilled
           if (!order.fulfillmentStatus || order.fulfillmentStatus !== 'fulfilled') {
             try {
-              await shopifyService.fulfillOrderOnShopify(order.shopifyOrderId, awb, 'Delhivery');
+              const isVelDirect = isVelocityCourier((order as any).courierPartner, (order as any).shipment?.labelUrl, awb);
+              if (isVelDirect) {
+                await shopifyService.fulfillOrderOnShopify(order.shopifyOrderId, awb, 'Velocity', `https://www.velocityshipping.in/track/${awb}`);
+              } else {
+                await shopifyService.fulfillOrderOnShopify(order.shopifyOrderId, awb, 'Delhivery');
+              }
               logger.info('Synced Delhivery ONE direct fulfillment to Shopify', {
                 orderId: order.id,
                 shopifyOrderId: order.shopifyOrderId,
@@ -663,7 +673,8 @@ class OrderService {
   async dispatchOrder(
     orderId: number,
     actor?: AccountTrailActor,
-    preferredCourier?: CourierChoice | 'auto'
+    preferredCourier?: CourierChoice | 'auto',
+    options?: { velocityCarrierId?: string }
   ): Promise<{ waybillNumber: string; courier?: string }> {
     const order = await prisma.order.findUnique({
       where: { id: orderId },
@@ -739,7 +750,7 @@ class OrderService {
     }
 
     try {
-      return await this.dispatchClaimedOrder(order, actor, preferredCourier);
+      return await this.dispatchClaimedOrder(order, actor, preferredCourier, options);
     } finally {
       await prisma.order
         .updateMany({ where: { id: order.id, dispatchLockedAt: claimedAt }, data: { dispatchLockedAt: null } })
@@ -753,7 +764,8 @@ class OrderService {
   private async dispatchClaimedOrder(
     order: Order,
     actor?: AccountTrailActor,
-    preferredCourier?: CourierChoice | 'auto'
+    preferredCourier?: CourierChoice | 'auto',
+    options?: { velocityCarrierId?: string }
   ): Promise<{ waybillNumber: string; courier?: string }> {
     const orderId = order.id;
 
@@ -792,11 +804,17 @@ class OrderService {
     let courierToSave = chosenCourier as string;
 
     if (chosenCourier === 'Velocity') {
-      const result = await velocityService.createForwardShipment(verifiedOrder);
+      const result = await velocityService.createForwardShipment(verifiedOrder, {
+        carrierId: options?.velocityCarrierId,
+      });
       waybillNumber = result.awbCode;
       labelUrl = result.labelUrl || null;
       courierNameForShopify = result.courierName || 'Velocity';
-      courierToSave = result.courierName || 'Velocity';
+      courierToSave = result.courierName
+        ? (result.courierName.toLowerCase().includes('velocity')
+            ? result.courierName
+            : `Velocity (${result.courierName})`)
+        : 'Velocity';
     } else {
       // Create shipment on Delhivery
       const result = await delhiveryService.createShipment(verifiedOrder, {
@@ -858,7 +876,7 @@ class OrderService {
         verifiedOrder.shopifyOrderId,
         waybillNumber,
         courierNameForShopify,
-        chosenCourier === 'Velocity' ? `https://www.velocityshipping.in/track/${waybillNumber}` : undefined
+        chosenCourier === 'Velocity' || isVelocityCourier(courierNameForShopify, null, waybillNumber) ? `https://www.velocityshipping.in/track/${waybillNumber}` : undefined
       );
     } catch (shopifyErr: any) {
       logger.warn('Could not sync fulfillment to Shopify (non-critical)', { error: shopifyErr.message });

@@ -286,13 +286,19 @@ export class ShippingRouterService {
       }
 
       try {
+        const itemCount = order.items?.reduce((sum, item) => sum + (item.quantity || 1), 0) || 1;
+        const deadWeightGrams = itemCount > 1 ? 500 : 350;
+        const lengthCm = 28;
+        const widthCm = 20;
+        const heightCm = itemCount > 1 ? 5 : 3;
+
         const rates = await velocityService.calculateCourierRates({
           originPincode,
           destinationPincode,
-          deadWeightGrams: 400,
-          lengthCm: 20,
-          widthCm: 15,
-          heightCm: 3,
+          deadWeightGrams,
+          lengthCm,
+          widthCm,
+          heightCm,
           paymentMethod: paymentMode,
           shipmentValue: order.totalAmount,
         });

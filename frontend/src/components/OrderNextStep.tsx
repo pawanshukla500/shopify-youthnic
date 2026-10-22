@@ -159,7 +159,7 @@ export function OrderNextStep(props: OrderNextStepProps) {
         <span>{step.text}</span>
       </div>
       <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-        {props.onChooseCarrier && props.isDispatchNeeded && (
+        {props.onChooseCarrier && props.isDispatchNeeded && props.order.supportFlag !== 'MANIFEST_REVIEW' && (
           <Button className="button-secondary" disabled={!props.canDispatch || props.dispatching} onClick={props.onChooseCarrier} title="Compare rates and select courier partner">
             <Icon name="truck" size={14} />
             Choose courier

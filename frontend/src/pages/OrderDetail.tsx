@@ -274,7 +274,7 @@ export function OrderDetail() {
     }
   }, [moreOpen])
 
-  const canDispatch = order && ['NEW', 'DISPATCH_PENDING'].includes(order.status)
+  const canDispatch = order && ['NEW', 'DISPATCH_PENDING'].includes(order.status) && order.supportFlag !== 'MANIFEST_REVIEW'
   if (orderQuery.isLoading) return <LoadingState label="Loading order detail…" />
   if (orderQuery.isError || !order) return <><PageIntro eyebrow="Order detail" title="Order not found" /><ErrorBox message={orderQuery.error ? apiError(orderQuery.error) : 'The requested order could not be found.'} /></>
   const payment = paymentQuery.data
@@ -489,8 +489,9 @@ export function OrderDetail() {
         carrierName: o.carrierName || o.courier,
       }))
       setShippingOptions(normalized)
-      const firstServiceable = opts.findIndex((o: any) => o.serviceable)
-      setSelectedOptionIndex(firstServiceable >= 0 ? firstServiceable : 0)
+      const recommendedIdx = normalized.findIndex((o: any) => o.isRecommended && o.serviceable)
+      const firstServiceable = normalized.findIndex((o: any) => o.serviceable)
+      setSelectedOptionIndex(recommendedIdx >= 0 ? recommendedIdx : (firstServiceable >= 0 ? firstServiceable : 0))
     } catch (err: any) {
       toast.toast('error', apiError(err))
     } finally {

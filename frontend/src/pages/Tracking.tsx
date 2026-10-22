@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import { api, apiError, getOrders, syncWaybillTrackingLive } from '../api'
-import { formatDate } from '../lib'
+import { formatDate, carrierTrackingUrl } from '../lib'
 import { Button, EmptyState, ErrorBox, Icon, LoadingState, PageIntro, Panel, PanelHeading, useDocumentTitle, useToast } from '../components/UI'
 
 type ScanEvent = {
@@ -192,12 +192,12 @@ export function Tracking() {
               </Button>
               <a
                 className="button button-secondary button-small"
-                href={`https://www.delhivery.com/track/package/${encodeURIComponent(waybill)}`}
+                href={carrierTrackingUrl(typeof detail?.courier === 'string' ? detail.courier : undefined, waybill)}
                 target="_blank"
                 rel="noopener noreferrer"
               >
                 <Icon name="external" size={13} />
-                Open on Delhivery
+                Open on {typeof detail?.courier === 'string' && detail.courier.toLowerCase().includes('velocity') ? 'Velocity' : 'Carrier'}
               </a>
             </div>
           </div>

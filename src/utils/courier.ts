@@ -146,3 +146,33 @@ export function normalizeCourierName(
 
   return c;
 }
+
+/**
+ * Resolves standard customer-facing live tracking URL.
+ * For Velocity shipments (including Amazon / ATS / Shipfastt via Velocity):
+ * returns `https://www.velocityshipping.in/track/${waybillNumber}`
+ * For Delhivery shipments:
+ * returns `https://www.delhivery.com/track/package/${waybillNumber}`
+ */
+export function getTrackingUrl(
+  courier?: string | null,
+  waybillNumber?: string | null,
+  existingUrl?: string | null
+): string | undefined {
+  const wb = (waybillNumber || '').trim();
+  if (isVelocityCourier(courier, existingUrl, wb)) {
+    return wb ? `https://www.velocityshipping.in/track/${encodeURIComponent(wb)}` : (existingUrl || undefined);
+  }
+  if (isDelhiveryCourier(courier, existingUrl, wb)) {
+    return wb ? `https://www.delhivery.com/track/package/${encodeURIComponent(wb)}` : (existingUrl || undefined);
+  }
+  if (existingUrl) return existingUrl;
+  if (!wb) return undefined;
+
+  const c = (courier || '').toLowerCase();
+  if (c.includes('ekart') || c.includes('proship')) return `https://t.proship.in/${encodeURIComponent(wb)}`;
+  if (c.includes('bluedart')) return `https://www.bluedart.com/tracking?trackNumber=${encodeURIComponent(wb)}`;
+  if (c.includes('dtdc')) return `https://www.dtdc.in/tracking/shipment-tracking.asp?trackingNo=${encodeURIComponent(wb)}`;
+
+  return undefined;
+}

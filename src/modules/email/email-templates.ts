@@ -5,6 +5,19 @@
  */
 
 import { config } from '../../config';
+import { getTrackingUrl, isVelocityCourier } from '../../utils/courier';
+
+function resolveTrackingLink(data: any): { url: string; courierName: string; isVelocity: boolean } {
+  const d: Partial<EmailTemplateData> = (data && typeof data === 'object') ? data : {};
+  const isVel = isVelocityCourier(d.courier, d.trackingUrl, d.waybillNumber);
+  const fallbackUrl = getTrackingUrl(d.courier, d.waybillNumber, d.trackingUrl) ||
+    (isVel && d.waybillNumber
+      ? `https://www.velocityshipping.in/track/${encodeURIComponent(d.waybillNumber)}`
+      : `https://www.delhivery.com/track/package/${encodeURIComponent(d.waybillNumber || '')}`);
+  const url = d.trackingUrl || fallbackUrl;
+  const courierName = isVel ? 'Velocity' : (d.courier || 'Delhivery');
+  return { url, courierName, isVelocity: isVel };
+}
 
 export interface EmailTemplateData {
   orderName: string;
@@ -257,11 +270,11 @@ export function renderTransitDelayEmail(data: EmailTemplateData): { subject: str
 
     <!-- Centered Blue CTA Button matching media_1790339742746.png -->
     <div style="text-align: center; margin: 24px 0 8px 0;">
-      <a href="${data.trackingUrl || 'https://www.delhivery.com/track/package/' + (data.waybillNumber || '')}" target="_blank" rel="noopener noreferrer" style="display: inline-block; background-color: #2563eb; color: #ffffff; font-size: 13.5px; font-weight: 700; text-decoration: none; padding: 12px 28px; border-radius: 8px; box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25); font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
-        Track on Delhivery →
+      <a href="${resolveTrackingLink(data).url}" target="_blank" rel="noopener noreferrer" style="display: inline-block; background-color: #2563eb; color: #ffffff; font-size: 13.5px; font-weight: 700; text-decoration: none; padding: 12px 28px; border-radius: 8px; box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25); font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+        Track on ${resolveTrackingLink(data).isVelocity ? 'Velocity' : 'Delhivery'} →
       </a>
       <div style="font-size: 11px; color: #64748b; margin-top: 8px;">
-        Live tracking powered by Delhivery Express
+        Live tracking powered by ${resolveTrackingLink(data).isVelocity ? 'Velocity Shipping Network' : 'Delhivery Express'}
       </div>
     </div>
 
@@ -538,10 +551,10 @@ ${data.customMessage || 'Thank you for contacting Youthnic. Our customer care de
       <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
         <tr>
           <td>
-            <strong>Shipment Tracking:</strong> Delhivery AWB <code style="background: #e2e8f0; padding: 2px 6px; border-radius: 4px; font-family: monospace;">${data.waybillNumber}</code>
+            <strong>Shipment Tracking:</strong> ${resolveTrackingLink(data).courierName} AWB <code style="background: #e2e8f0; padding: 2px 6px; border-radius: 4px; font-family: monospace;">${data.waybillNumber}</code>
           </td>
           <td align="right">
-            <a href="${data.trackingUrl || 'https://www.delhivery.com/track/package/' + data.waybillNumber}" target="_blank" style="color: #2563eb; text-decoration: none; font-weight: 750;">
+            <a href="${resolveTrackingLink(data).url}" target="_blank" style="color: #2563eb; text-decoration: none; font-weight: 750;">
               Track Live ↗
             </a>
           </td>
@@ -699,7 +712,7 @@ export function renderInTransitEmail(data: EmailTemplateData): { subject: string
         </tr>
         <tr>
           <td style="color: #64748b; padding-bottom: 8px;">Courier:</td>
-          <td align="right" style="font-weight: 600; color: #0f172a; padding-bottom: 8px;">${data.courier || 'Delhivery Express'}</td>
+          <td align="right" style="font-weight: 600; color: #0f172a; padding-bottom: 8px;">${resolveTrackingLink(data).courierName}</td>
         </tr>
         <tr>
           <td style="color: #64748b;">Latest Hub Location:</td>
@@ -709,7 +722,7 @@ export function renderInTransitEmail(data: EmailTemplateData): { subject: string
     </div>
 
     <div style="text-align: center; margin-bottom: 28px;">
-      <a href="${data.trackingUrl || 'https://www.delhivery.com/track/package/' + data.waybillNumber}" target="_blank" style="display: inline-block; background-color: #2563eb; color: #ffffff; font-size: 14px; font-weight: 700; text-decoration: none; padding: 14px 28px; border-radius: 8px;">
+      <a href="${resolveTrackingLink(data).url}" target="_blank" style="display: inline-block; background-color: #2563eb; color: #ffffff; font-size: 14px; font-weight: 700; text-decoration: none; padding: 14px 28px; border-radius: 8px;">
         Track Shipment Live →
       </a>
     </div>
@@ -770,7 +783,7 @@ export function renderOutForDeliveryEmail(data: EmailTemplateData): { subject: s
     </div>
 
     <div style="text-align: center; margin-bottom: 28px;">
-      <a href="${data.trackingUrl || 'https://www.delhivery.com/track/package/' + data.waybillNumber}" target="_blank" style="display: inline-block; background-color: #059669; color: #ffffff; font-size: 14px; font-weight: 700; text-decoration: none; padding: 14px 28px; border-radius: 8px;">
+      <a href="${resolveTrackingLink(data).url}" target="_blank" style="display: inline-block; background-color: #059669; color: #ffffff; font-size: 14px; font-weight: 700; text-decoration: none; padding: 14px 28px; border-radius: 8px;">
         View Delivery Agent Status →
       </a>
     </div>
@@ -794,7 +807,7 @@ export function renderOutForDeliveryEmail(data: EmailTemplateData): { subject: s
  */
 export function renderNdrEmail(data: EmailTemplateData): { subject: string; html: string } {
   const subject = `⚠️ Delivery Attempt Unsuccessful: Order ${data.orderName}`;
-  const preheader = `Delhivery could not complete delivery today. Confirm your address to reschedule.`;
+  const preheader = `${resolveTrackingLink(data).courierName} could not complete delivery today. Confirm your address to reschedule.`;
 
   const content = `
     <div style="background-color: #fef2f2; border: 1px solid #fecaca; border-radius: 12px; padding: 18px 20px; margin-bottom: 24px;">
@@ -808,12 +821,12 @@ export function renderNdrEmail(data: EmailTemplateData): { subject: string; html
     </div>
 
     <p style="font-size: 14px; line-height: 1.6; color: #475569; margin-bottom: 20px;">
-      Hi ${data.customerName || 'Customer'}, Delhivery attempted to deliver your order <strong>${data.orderName}</strong> today but was unable to complete the handover.
+      Hi ${data.customerName || 'Customer'}, ${resolveTrackingLink(data).courierName} attempted to deliver your order <strong>${data.orderName}</strong> today but was unable to complete the handover.
       To prevent this order from being returned to our Surat warehouse, please verify your details or request a re-attempt.
     </p>
 
     <div style="text-align: center; margin-bottom: 24px;">
-      <a href="${data.actionUrl || data.trackingUrl || 'https://www.delhivery.com/track/package/' + data.waybillNumber}" target="_blank" style="display: inline-block; background-color: #dc2626; color: #ffffff; font-size: 14px; font-weight: 700; text-decoration: none; padding: 14px 28px; border-radius: 8px;">
+      <a href="${data.actionUrl || resolveTrackingLink(data).url}" target="_blank" style="display: inline-block; background-color: #dc2626; color: #ffffff; font-size: 14px; font-weight: 700; text-decoration: none; padding: 14px 28px; border-radius: 8px;">
         Confirm Address & Request Re-Attempt →
       </a>
     </div>

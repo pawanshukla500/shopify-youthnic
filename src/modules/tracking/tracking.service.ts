@@ -506,7 +506,8 @@ class TrackingService {
         await notificationEngine.notifyInTransit?.(
           order,
           shipment.waybillNumber || undefined,
-          location
+          location,
+          shipment.courier || order.courierPartner
         );
         break;
 
@@ -515,7 +516,12 @@ class TrackingService {
           where: { id: order.id },
           data: { status: 'OUT_FOR_DELIVERY' },
         });
-        await notificationEngine.notifyOutForDelivery(order);
+        await notificationEngine.notifyOutForDelivery(
+          order,
+          shipment.waybillNumber || undefined,
+          location,
+          shipment.courier || order.courierPartner
+        );
         break;
 
       case 'DELIVERED':
@@ -533,7 +539,11 @@ class TrackingService {
             codAmount: shipment.codAmount,
           });
         }
-        await notificationEngine.notifyDelivered(order);
+        await notificationEngine.notifyDelivered(
+          order,
+          shipment.waybillNumber || undefined,
+          shipment.courier || order.courierPartner
+        );
         break;
 
       case 'FAILED':
@@ -543,7 +553,9 @@ class TrackingService {
         });
         await notificationEngine.notifyNDR(
           order,
-          `Delivery attempt failed at ${location || 'location unknown'}. Status: ${delhiveryStatusText}`
+          `Delivery attempt failed at ${location || 'location unknown'}. Status: ${delhiveryStatusText}`,
+          shipment.waybillNumber || undefined,
+          shipment.courier || order.courierPartner
         );
         break;
 

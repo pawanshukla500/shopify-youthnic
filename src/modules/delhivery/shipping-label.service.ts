@@ -559,6 +559,7 @@ export class ShippingLabelService {
   public getCombinedStyles(): string {
     return `
       ${this.getLabelStyles()}
+      ${invoiceService.getInvoiceStyles()}
 
       .label-page-wrapper {
         display: flex;
@@ -571,13 +572,6 @@ export class ShippingLabelService {
         justify-content: center;
         width: 100%;
         margin-top: 10px;
-      }
-
-      /* Invoice styles integration for combined document */
-      .invoice-page-wrapper .invoice-container {
-        margin: 0 auto;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.15);
-        background: #fff;
       }
 
       .order-pair-wrapper {
@@ -599,7 +593,31 @@ export class ShippingLabelService {
         .label-wrapper { box-shadow: none !important; margin: 0 !important; }
         .pdf-canvas-container { margin: 0 !important; page-break-after: always; break-after: page; }
         .official-label-canvas { width: 100mm !important; height: 150mm !important; max-width: 100mm !important; max-height: 150mm !important; border: none !important; box-shadow: none !important; }
-        .invoice-container { box-shadow: none !important; margin: 0 !important; }
+        
+        .invoice-wrapper {
+          box-shadow: none !important;
+          margin: 0 !important;
+          width: 100mm !important;
+          height: 150mm !important;
+          max-width: 100mm !important;
+          max-height: 150mm !important;
+          page-break-after: always !important;
+          break-after: page !important;
+          page-break-inside: avoid !important;
+          break-inside: avoid !important;
+          overflow: hidden !important;
+        }
+
+        .invoice-container {
+          box-shadow: none !important;
+          margin: 0 !important;
+          width: 100% !important;
+          height: 100% !important;
+          max-height: 100% !important;
+          box-sizing: border-box !important;
+          border: 1.5px solid #000 !important;
+          overflow: hidden !important;
+        }
         
         .label-page-wrapper {
           page-break-after: always;
@@ -618,6 +636,7 @@ export class ShippingLabelService {
         }
 
         @page {
+          size: 100mm 150mm;
           margin: 0;
         }
       }

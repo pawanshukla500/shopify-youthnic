@@ -22,6 +22,7 @@ import {
   useToast,
 } from '../components/UI'
 import type { EmailLog, EmailTemplateType, DelayedInTransitShipment } from '../types'
+import { carrierTrackingUrl } from '../lib'
 
 const TEMPLATE_PREVIEWS: Record<
   EmailTemplateType,
@@ -608,7 +609,7 @@ export function Communications() {
                     <td>
                       {shipment.waybillNumber ? (
                         <a
-                          href={`https://www.delhivery.com/track/package/${shipment.waybillNumber}`}
+                          href={carrierTrackingUrl(shipment.courier, shipment.waybillNumber)}
                           target="_blank"
                           rel="noreferrer"
                           style={{ color: '#2563eb', fontWeight: 700, fontSize: '12px', textDecoration: 'none' }}

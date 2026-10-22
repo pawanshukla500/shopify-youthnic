@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, apiError, getDashboardStats } from '../api'
-import { formatDate, formatMoney } from '../lib'
+import { formatDate, formatMoney, carrierTrackingUrl } from '../lib'
 import { useAuth } from '../context/AuthContext'
 import {
   Button,
@@ -1052,7 +1052,7 @@ export function Dashboard() {
                     <td className="mono">
                       {order.waybillNumber ? (
                         <a
-                          href={`https://www.delhivery.com/track/package/${order.waybillNumber}`}
+                          href={carrierTrackingUrl((order as any).courierPartner, order.waybillNumber)}
                           target="_blank"
                           rel="noreferrer"
                           onClick={(e) => e.stopPropagation()}

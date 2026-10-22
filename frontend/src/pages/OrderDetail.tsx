@@ -1506,18 +1506,18 @@ export function OrderDetail() {
           </div>
           <div className="customer-quick-actions">
             {cleanPhone ? (
-              <a className="quick-action-btn quick-action-wa" href={`https://wa.me/${cleanPhone}?text=${encodeURIComponent(`Hi ${order.customerName}, this is regarding your order ${order.shopifyOrderName} from our store.`)}`} target="_blank" rel="noopener noreferrer">
+              <a className="quick-action-btn quick-action-wa" aria-label="WhatsApp Chat" href={`https://wa.me/${cleanPhone}?text=${encodeURIComponent(`Hi ${order.customerName}, this is regarding your order ${order.shopifyOrderName} from our store.`)}`} target="_blank" rel="noopener noreferrer">
                 <Icon name="message" size={14} /> WhatsApp
               </a>
             ) : (
-              <button className="quick-action-btn quick-action-wa" disabled><Icon name="message" size={14} /> WhatsApp</button>
+              <button className="quick-action-btn quick-action-wa" aria-label="WhatsApp Chat" disabled><Icon name="message" size={14} /> WhatsApp</button>
             )}
             {cleanPhone ? (
-              <a className="quick-action-btn quick-action-call" href={`tel:${cleanPhone}`}><Icon name="phone" size={14} /> Call</a>
+              <a className="quick-action-btn quick-action-call" aria-label="Call Customer" href={`tel:${cleanPhone}`}><Icon name="phone" size={14} /> Call</a>
             ) : (
-              <button className="quick-action-btn quick-action-call" disabled><Icon name="phone" size={14} /> Call</button>
+              <button className="quick-action-btn quick-action-call" aria-label="Call Customer" disabled><Icon name="phone" size={14} /> Call</button>
             )}
-            <button className="quick-action-btn quick-action-copy" onClick={copyAddress}><Icon name="copy" size={14} /> Copy</button>
+            <button className="quick-action-btn quick-action-copy" aria-label="Copy Address" onClick={copyAddress}><Icon name="copy" size={14} /> Copy</button>
           </div>
         </Panel>
 

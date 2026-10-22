@@ -144,6 +144,12 @@ export function formatMoney(amount: number | null | undefined, currency = 'INR')
   }
 }
 
+export function isVelocityCourier(courier?: string | null, waybill?: string | null): boolean {
+  const c = (courier || '').toLowerCase()
+  const w = (waybill || '').trim()
+  return c.includes('velocity') || c.includes('shipfastt') || /^(pd|vehr|vel)/i.test(w)
+}
+
 /** Public carrier tracking page. Never use a packing-slip URL here — those S3 links expire. */
 export function carrierTrackingUrl(courier: string | null | undefined, waybill: string): string {
   const name = (courier || '').toLowerCase()

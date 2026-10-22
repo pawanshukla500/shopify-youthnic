@@ -23,7 +23,7 @@ import {
   downloadBulkPackZip,
   syncExternalOrderFulfillment,
 } from '../api'
-import { ORDER_TABS, carrierTrackingUrl, formatDate, formatMoney, labelize } from '../lib'
+import { ORDER_TABS, carrierTrackingUrl, formatDate, formatMoney, labelize, isVelocityCourier } from '../lib'
 import { classifyOrderTab, isCodConfirmed, isPrepaidOrder } from '../../../src/modules/orders/order-tabs'
 import { Button, ButtonGroup, CopyableBadge, EmptyState, ErrorBox, FormField, Icon, InfoCard, LoadingState, PageIntro, Panel, PanelHeading, StatCard, StatusBadge, useDocumentTitle, useToast } from '../components/UI'
 import { OrderNextStep } from '../components/OrderNextStep'
@@ -1018,7 +1018,12 @@ export function OrderDetail() {
         <Panel id="shipment-panel">
           <PanelHeading
             title={
-              order.shipment?.courier?.toLowerCase() === 'delhivery' ? (
+              isVelocityCourier(order.shipment?.courier, order.shipment?.waybillNumber) ? (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '22px', height: '22px', borderRadius: '5px', background: '#7c3aed', color: '#fff', fontSize: '12px', fontWeight: 900 }}>⚡</span>
+                  <span style={{ fontWeight: 700 }}>{order.shipment?.courier || 'Velocity'} Aggregator Logistics</span>
+                </span>
+              ) : order.shipment?.courier?.toLowerCase() === 'delhivery' ? (
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
                   <img src="/logos/delhivery.png" alt="Delhivery" style={{ height: '14px', objectFit: 'contain' }} />
                   <span>Shipment details</span>
@@ -1035,11 +1040,11 @@ export function OrderDetail() {
                     onClick={handleSyncTracking}
                     disabled={isSyncingTracking}
                     loading={isSyncingTracking}
-                    title="Poll Delhivery API in real-time for latest parcel tracking events"
+                    title={isVelocityCourier(order.shipment?.courier, order.shipment?.waybillNumber) ? "Poll Velocity Aggregator in real-time for live tracking, freight debits & COD remittance" : "Poll Delhivery API in real-time for latest parcel tracking events"}
                     style={{ height: '28px', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
                   >
                     <Icon name="refresh" size={12} />
-                    <span>{isSyncingTracking ? 'Syncing Delhivery…' : 'Refresh Live Tracking'}</span>
+                    <span>{isSyncingTracking ? 'Syncing Tracking…' : isVelocityCourier(order.shipment?.courier, order.shipment?.waybillNumber) ? 'Sync Velocity Details' : 'Refresh Live Tracking'}</span>
                   </Button>
                 ) : (
                   <Button
@@ -1162,6 +1167,50 @@ export function OrderDetail() {
                 />
               </div>
 
+              {/* Velocity Aggregator Telemetry: Multi-Courier Partner, Freight Charges & COD Remittance */}
+              {isVelocityCourier(order.shipment?.courier, order.shipment?.waybillNumber) && (
+                <div style={{ background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: '8px', padding: '12px 16px', marginTop: '14px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', fontSize: '12px' }}>
+                  <div>
+                    <div style={{ color: '#6d28d9', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>⚡ Aggregator Partner</div>
+                    <div style={{ fontWeight: 800, fontSize: '14px', color: '#1e1b4b', marginTop: '2px' }}>{order.shipment.courier || 'Velocity'}</div>
+                    <div style={{ color: '#6b7280', fontSize: '11px' }}>AWB: <span style={{ fontFamily: 'monospace' }}>{order.shipment.waybillNumber}</span></div>
+                  </div>
+                  <div>
+                    <div style={{ color: '#6d28d9', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>💰 Freight Billing</div>
+                    <div style={{ fontWeight: 800, fontSize: '14px', color: '#1e1b4b', marginTop: '2px' }}>
+                      {order.shipment.netBilledCost != null && order.shipment.netBilledCost > 0
+                        ? formatMoney(order.shipment.netBilledCost, order.currency)
+                        : order.shipment.forwardCharge != null
+                        ? `${formatMoney(order.shipment.forwardCharge, order.currency)} (Est)`
+                        : 'Pending Audit'}
+                    </div>
+                    <div style={{ color: '#6b7280', fontSize: '11px' }}>
+                      Status: <strong>{order.shipment.billingStatus || 'ESTIMATED'}</strong>
+                      {order.shipment.totalDebited ? ` · Debited: ${formatMoney(order.shipment.totalDebited, order.currency)}` : ''}
+                    </div>
+                  </div>
+                  {order.shipment.paymentMode === 'COD' && (
+                    <div>
+                      <div style={{ color: '#6d28d9', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>🏦 COD Remittance & Settlement</div>
+                      <div style={{ fontWeight: 800, fontSize: '14px', color: order.shipment.codRemitted ? '#047857' : '#b45309', marginTop: '2px' }}>
+                        {order.shipment.codRemitted
+                          ? `Remitted: ${formatMoney(order.shipment.codRemittedAmount ?? order.shipment.codAmount ?? 0, order.currency)}`
+                          : order.shipment.codCollected
+                          ? 'Collected · Bank Settlement Pending'
+                          : 'Awaiting Delivery Collection'}
+                      </div>
+                      <div style={{ color: '#6b7280', fontSize: '11px' }}>
+                        {order.shipment.codRemittanceRef ? (
+                          <>Bank UTR / Ref: <CopyableBadge text={order.shipment.codRemittanceRef} monospace={true} /></>
+                        ) : (
+                          'Bank UTR appears upon Velocity settlement'
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Shipping Logistics Actions (Document downloads available in More Actions menu) */}
               <div className="shipment-actions" style={{ marginTop: '14px', flexWrap: 'wrap', gap: '8px' }}>
                 {isReturnOrder && returnAwb ? (
@@ -1192,13 +1241,13 @@ export function OrderDetail() {
                   </a>
                 )}
 
-                {order.shipment.courier?.toLowerCase() === 'delhivery' && !['DELIVERED', 'RTO_DELIVERED', 'CANCELLED'].includes(order.shipment.status) && (
+                {!['DELIVERED', 'RTO_DELIVERED', 'CANCELLED'].includes(order.shipment.status) && (
                   <Button
                     className="button-danger-ghost"
                     disabled={!order.shipment.waybillNumber || action.isPending || order.shipment.status === 'CANCELLED'}
                     loading={action.isPending && action.variables === 'cancel'}
                     onClick={() => {
-                      if (window.confirm('Cancel this Delhivery shipment?')) {
+                      if (window.confirm(`Cancel this ${order.shipment?.courier || 'carrier'} shipment?`)) {
                         action.mutate('cancel')
                       }
                     }}
@@ -1218,7 +1267,7 @@ export function OrderDetail() {
                   </Button>
                 )}
 
-                {order.shipment.courier?.toLowerCase() === 'delhivery' && order.shipment.waybillNumber && !['DELIVERED', 'RTO_DELIVERED', 'CANCELLED'].includes(order.shipment.status) && (
+                {order.shipment.waybillNumber && !['DELIVERED', 'RTO_DELIVERED', 'CANCELLED'].includes(order.shipment.status) && (
                   <Button
                     className="button-secondary"
                     onClick={() => {
@@ -1261,7 +1310,9 @@ export function OrderDetail() {
               {showEditDetails && order.shipment?.waybillNumber && (
                 <div style={{ background: 'var(--line-subtle)', border: '1px solid var(--line)', borderRadius: '8px', padding: '12px', marginTop: '10px', display: 'grid', gap: '8px' }}>
                   <span style={{ fontSize: '11px', color: 'var(--muted)' }}>
-                    Pushes corrected details to Delhivery (Edit Order API — allowed while Manifested / In Transit / Pending).
+                    {isVelocityCourier(order.shipment?.courier, order.shipment?.waybillNumber)
+                      ? 'Pushes corrected details to Velocity Shipping Network (Edit Order API).'
+                      : 'Pushes corrected details to Delhivery (Edit Order API — allowed while Manifested / In Transit / Pending).'}
                   </span>
                   <label className="form-field"><span className="field-label">Corrected phone</span><input
                     type="text"

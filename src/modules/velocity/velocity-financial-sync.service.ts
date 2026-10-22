@@ -1,7 +1,7 @@
 import prisma from '../../database/prisma';
 import logger from '../../utils/logger';
 import { config } from '../../config';
-import velocityService from './velocity.service';
+import velocityService, { VelocityService, VelocityShippingChargeEntry, VelocityCodRemittanceEntry } from './velocity.service';
 import { findOrderByReference, recordPaymentReceived } from '../accounts/reconciliation.service';
 import { type AccountTrailActor } from '../accounts/account-trail.service';
 import { isVelocityCourier } from '../../utils/courier';
@@ -54,6 +54,8 @@ function sleep(ms: number) {
 }
 
 export class VelocityFinancialSyncService {
+  constructor(private vService: VelocityService = velocityService) {}
+
   /**
    * Main synchronization routine:
    * 1. Identifies candidate Velocity AWBs (from DB + Velocity Shipments API).
@@ -147,7 +149,7 @@ export class VelocityFinancialSyncService {
 
       // 1b. Query Velocity live shipments API to discover any orders manifested in Velocity
       try {
-        const liveList = await velocityService.getShipmentsList({
+        const liveList = await this.vService.getShipmentsList({
           page: 1,
           per_page: 50,
         });
@@ -219,7 +221,7 @@ export class VelocityFinancialSyncService {
     for (let i = 0; i < candidateAwbs.length; i += batchSize) {
       const batch = candidateAwbs.slice(i, i + batchSize);
       try {
-        const remittanceResults = await velocityService.getCodRemittance(batch);
+        const remittanceResults = await this.vService.getCodRemittance(batch);
 
         for (const item of remittanceResults) {
           const awb = item.trackingNumber?.trim();
@@ -282,7 +284,7 @@ export class VelocityFinancialSyncService {
             remittancesMatched++;
             totalRemittanceAmount += remittedVal;
 
-            const existing = matchedMap.get(order.id) || {
+            const existing: MatchedVelocityOrderFinancials = matchedMap.get(order.id) || {
               orderId: order.id,
               shopifyOrderName: order.shopifyOrderName,
               waybillNumber: awb,
@@ -319,7 +321,7 @@ export class VelocityFinancialSyncService {
     for (let i = 0; i < candidateAwbs.length; i += batchSize) {
       const batch = candidateAwbs.slice(i, i + batchSize);
       try {
-        const chargesResults = await velocityService.getShippingCharges(batch);
+        const chargesResults = await this.vService.getShippingCharges(batch);
 
         for (const item of chargesResults) {
           const awb = item.trackingNumber?.trim();
@@ -360,7 +362,7 @@ export class VelocityFinancialSyncService {
 
           const netCost = Math.round((debits - credits) * 100) / 100;
 
-          const walletTransactions = charges.map((c, idx) => ({
+          const walletTransactions = charges.map((c: any, idx: number) => ({
             txnId: `VEL-CHG-${awb}-${idx + 1}`,
             date: new Date().toISOString(),
             type: (c.amountWithGst >= 0 ? 'debit' : 'credit') as 'debit' | 'credit',
@@ -391,7 +393,7 @@ export class VelocityFinancialSyncService {
           chargesAudited++;
           totalBilledCharges += netCost;
 
-          const existing = matchedMap.get(order.id) || {
+          const existing: MatchedVelocityOrderFinancials = matchedMap.get(order.id) || {
             orderId: order.id,
             shopifyOrderName: order.shopifyOrderName,
             waybillNumber: awb,
@@ -425,7 +427,7 @@ export class VelocityFinancialSyncService {
     try {
       const now = new Date();
       const past30 = new Date(Date.now() - 30 * 86400000);
-      forwardSummary = await velocityService.getSummaryReport({
+      forwardSummary = await this.vService.getSummaryReport({
         startDateTime: past30.toISOString(),
         endDateTime: now.toISOString(),
         shipmentType: 'forward',
@@ -536,7 +538,7 @@ export class VelocityFinancialSyncService {
       try {
         const start = params?.startDate || new Date(Date.now() - 30 * 86400000).toISOString();
         const end = params?.endDate || new Date().toISOString();
-        const report = await velocityService.getSummaryReport({
+        const report = await this.vService.getSummaryReport({
           startDateTime: start,
           endDateTime: end,
           shipmentType: 'forward',
@@ -555,6 +557,257 @@ export class VelocityFinancialSyncService {
       totalBilledCharges: (lastRecord?.summary as any)?.totalBilledCharges ?? null,
       latestBatch: lastRecord?.fileName || null,
       summaryReport,
+    };
+  }
+
+  /**
+   * Syncs all available live Velocity details for a single order:
+   * 1. Live Tracking events & delivery status (/custom/api/v1/order-tracking)
+   * 2. Itemized shipping charges ledger (/custom/api/v1/shipping-charges)
+   * 3. COD collection & remittance status, bank UTR, and remittance date (/custom/api/v1/cod-remittance)
+   * 4. Updates Shipment and Order records and writes audit trail
+   */
+  async syncSingleOrderVelocityDetails(
+    orderIdOrWaybill: number | string,
+    actor?: AccountTrailActor
+  ): Promise<{
+    success: boolean;
+    orderId: number;
+    waybillNumber: string;
+    courier: string;
+    trackingStatus?: string;
+    deliveredDate?: string | null;
+    pickupDate?: string | null;
+    shippingCharges?: {
+      netBilledCost: number;
+      forwardFreight: number;
+      rtoFreight: number;
+      totalDebited: number;
+      totalCredited: number;
+      billingStatus: string;
+    };
+    codRemittance?: {
+      codCollected: boolean;
+      codRemitted: boolean;
+      utr?: string | null;
+      remittedAmount?: number;
+      remittanceDate?: string | null;
+    };
+    message: string;
+  }> {
+    const isId = typeof orderIdOrWaybill === 'number' || /^\d+$/.test(String(orderIdOrWaybill));
+    const order = await prisma.order.findFirst({
+      where: isId ? { id: Number(orderIdOrWaybill) } : { shipment: { waybillNumber: String(orderIdOrWaybill).trim() } },
+      include: { shipment: true, items: true },
+    });
+    if (!order || !order.shipment?.waybillNumber) {
+      throw new Error(`Order or waybill not found for Velocity sync: ${orderIdOrWaybill}`);
+    }
+
+    const waybill = order.shipment.waybillNumber.trim();
+    let trackingStatus = order.shipment.trackingStatus || undefined;
+    let deliveredDate: string | null = null;
+    let pickupDate: string | null = null;
+    let courierToSave = order.shipment.courier || 'Velocity';
+
+    // 1. Live Tracking Sync
+    try {
+      const vTracking = await this.vService.trackShipment(waybill);
+      const mapped = this.vService.mapTrackingToShipmentStatus(vTracking.shipmentStatus || vTracking.currentStatus);
+      trackingStatus = mapped.description;
+      deliveredDate = vTracking.deliveredDate || null;
+      pickupDate = vTracking.pickupDate || null;
+
+      const subCourier = vTracking.raw?.courier_name || vTracking.raw?.carrier_name;
+      if (subCourier && typeof subCourier === 'string') {
+        courierToSave = subCourier.toLowerCase().includes('velocity') ? subCourier : `Velocity (${subCourier})`;
+      }
+
+      // Appending new tracking logs
+      if (vTracking.activities && vTracking.activities.length > 0) {
+        const existingLogs = await prisma.trackingLog.findMany({
+          where: { shipmentId: order.shipment.id },
+          select: { scannedAt: true, status: true },
+        });
+
+        const newScans: Array<{ status: string; location: string | null; remark: string | null; scannedAt: Date }> = [];
+        for (const act of vTracking.activities) {
+          const actDate = new Date(act.date);
+          const exists = existingLogs.some(
+            (log) => log.status === act.activity && log.scannedAt.getTime() === actDate.getTime()
+          );
+          if (!exists) {
+            newScans.push({
+              status: act.activity,
+              location: act.location || null,
+              remark: null,
+              scannedAt: actDate,
+            });
+          }
+        }
+        if (newScans.length > 0) {
+          await prisma.trackingLog.createMany({
+            data: newScans.map((s) => ({
+              shipmentId: order.shipment!.id,
+              status: s.status,
+              location: s.location,
+              remark: s.remark,
+              scannedAt: s.scannedAt,
+            })),
+          });
+        }
+      }
+
+      const updateData: any = {
+        trackingStatus: mapped.description,
+        trackingLocation: vTracking.destination || vTracking.origin || order.shipment.trackingLocation,
+        trackingUpdatedAt: new Date(),
+        trackingHistory: vTracking.activities as any,
+        courier: courierToSave,
+      };
+
+      if (vTracking.pickupDate && !order.shipment.omsManifestedAt) {
+        updateData.omsManifestedAt = new Date(vTracking.pickupDate);
+      }
+      if (vTracking.deliveredDate) {
+        updateData.codCollected = true;
+        if (!order.shipment.codCollectedAt) {
+          updateData.codCollectedAt = new Date(vTracking.deliveredDate);
+        }
+      }
+      if (mapped.shipmentStatus !== order.shipment.status) {
+        updateData.status = mapped.shipmentStatus;
+      }
+
+      await prisma.shipment.update({
+        where: { id: order.shipment.id },
+        data: updateData,
+      });
+
+      if (vTracking.deliveredDate && order.status !== 'DELIVERED') {
+        await prisma.order.update({
+          where: { id: order.id },
+          data: { status: 'DELIVERED', deliveredAt: new Date(vTracking.deliveredDate) },
+        });
+      }
+    } catch (trackErr: any) {
+      logger.warn('Velocity single order live tracking failed', { waybill, error: trackErr.message });
+    }
+
+    // 2. Shipping Charges Sync
+    let chargesSummary: any = undefined;
+    try {
+      const chargesRes = await this.vService.getShippingCharges([waybill]);
+      const item = chargesRes[0];
+      if (item && item.charges && item.charges.length > 0) {
+        let debits = 0;
+        let credits = 0;
+        let forwardFreight = 0;
+        let rtoFreight = 0;
+
+        for (const c of item.charges) {
+          const amountWithGst = Number(c.amountWithGst || 0);
+          const event = String(c.eventType || '').toLowerCase();
+          const txn = String(c.transactionType || '').toLowerCase();
+
+          if (txn.includes('rto') || event.includes('rto')) {
+            rtoFreight += Math.abs(amountWithGst);
+          } else if (txn.includes('forward') || txn.includes('freight') || event.includes('debit')) {
+            forwardFreight += Math.abs(amountWithGst);
+          }
+
+          if (txn.includes('credit') || event.includes('credit') || amountWithGst < 0) {
+            credits += Math.abs(amountWithGst);
+          } else {
+            debits += Math.abs(amountWithGst);
+          }
+        }
+
+        const netCost = Math.max(0, debits - credits);
+        chargesSummary = {
+          netBilledCost: Math.round(netCost * 100) / 100,
+          forwardFreight: Math.round(forwardFreight * 100) / 100,
+          rtoFreight: Math.round(rtoFreight * 100) / 100,
+          totalDebited: Math.round(debits * 100) / 100,
+          totalCredited: Math.round(credits * 100) / 100,
+          billingStatus: 'BILLED',
+        };
+
+        await prisma.shipment.update({
+          where: { id: order.shipment.id },
+          data: {
+            initialCost: chargesSummary.forwardFreight,
+            netBilledCost: chargesSummary.netBilledCost,
+            totalDebited: chargesSummary.totalDebited,
+            totalCredited: chargesSummary.totalCredited,
+            billingStatus: 'BILLED',
+          },
+        });
+      }
+    } catch (chargeErr: any) {
+      logger.warn('Velocity single order shipping charges failed', { waybill, error: chargeErr.message });
+    }
+
+    // 3. COD Remittance Sync
+    let codSummary: any = undefined;
+    const isCod = order.paymentMethod === 'COD' || order.shipment.paymentMode === 'COD';
+    if (isCod) {
+      try {
+        const remitRes = await this.vService.getCodRemittance([waybill]);
+        const rItem = remitRes[0];
+        if (rItem && (rItem.utrNo || rItem.remittanceDate || (rItem.codAmount && rItem.codAmount > 0))) {
+          const remittedVal = rItem.codAmount ?? order.shipment.codAmount ?? order.totalAmount;
+          const remittedAtDate = rItem.remittanceDate
+            ? new Date(rItem.remittanceDate)
+            : rItem.deliveryDate
+            ? new Date(rItem.deliveryDate)
+            : new Date();
+
+          codSummary = {
+            codCollected: true,
+            codRemitted: Boolean(rItem.utrNo || rItem.remittanceDate),
+            utr: rItem.utrNo || null,
+            remittedAmount: remittedVal,
+            remittanceDate: rItem.remittanceDate || null,
+          };
+
+          await prisma.shipment.update({
+            where: { id: order.shipment.id },
+            data: {
+              codCollected: true,
+              codCollectedAt: rItem.deliveryDate ? new Date(rItem.deliveryDate) : order.shipment.codCollectedAt || new Date(),
+              codRemitted: codSummary.codRemitted,
+              codRemittedAt: remittedAtDate,
+              codRemittanceRef: rItem.utrNo || order.shipment.codRemittanceRef || 'VELOCITY_REMITTANCE',
+              codRemittedAmount: remittedVal,
+            },
+          });
+
+          await recordPaymentReceived(order.id, {
+            amount: remittedVal,
+            utr: rItem.utrNo || null,
+            ref: rItem.utrNo || 'VELOCITY_REMITTANCE',
+            source: 'Velocity',
+            receivedAt: remittedAtDate,
+            actor: actor || { name: 'Velocity Order Sync' },
+          });
+        }
+      } catch (remitErr: any) {
+        logger.warn('Velocity single order COD remittance sync failed', { waybill, error: remitErr.message });
+      }
+    }
+
+    return {
+      success: true,
+      orderId: order.id,
+      waybillNumber: waybill,
+      courier: courierToSave,
+      trackingStatus,
+      deliveredDate,
+      pickupDate,
+      shippingCharges: chargesSummary,
+      codRemittance: codSummary,
+      message: `Velocity details synced for ${order.shopifyOrderName} (AWB: ${waybill})`,
     };
   }
 }

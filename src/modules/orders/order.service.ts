@@ -673,7 +673,8 @@ class OrderService {
   async dispatchOrder(
     orderId: number,
     actor?: AccountTrailActor,
-    preferredCourier?: CourierChoice | 'auto'
+    preferredCourier?: CourierChoice | 'auto',
+    options?: { velocityCarrierId?: string }
   ): Promise<{ waybillNumber: string; courier?: string }> {
     const order = await prisma.order.findUnique({
       where: { id: orderId },
@@ -749,7 +750,7 @@ class OrderService {
     }
 
     try {
-      return await this.dispatchClaimedOrder(order, actor, preferredCourier);
+      return await this.dispatchClaimedOrder(order, actor, preferredCourier, options);
     } finally {
       await prisma.order
         .updateMany({ where: { id: order.id, dispatchLockedAt: claimedAt }, data: { dispatchLockedAt: null } })
@@ -763,7 +764,8 @@ class OrderService {
   private async dispatchClaimedOrder(
     order: Order,
     actor?: AccountTrailActor,
-    preferredCourier?: CourierChoice | 'auto'
+    preferredCourier?: CourierChoice | 'auto',
+    options?: { velocityCarrierId?: string }
   ): Promise<{ waybillNumber: string; courier?: string }> {
     const orderId = order.id;
 
@@ -802,11 +804,17 @@ class OrderService {
     let courierToSave = chosenCourier as string;
 
     if (chosenCourier === 'Velocity') {
-      const result = await velocityService.createForwardShipment(verifiedOrder);
+      const result = await velocityService.createForwardShipment(verifiedOrder, {
+        carrierId: options?.velocityCarrierId,
+      });
       waybillNumber = result.awbCode;
       labelUrl = result.labelUrl || null;
       courierNameForShopify = result.courierName || 'Velocity';
-      courierToSave = result.courierName || 'Velocity';
+      courierToSave = result.courierName
+        ? (result.courierName.toLowerCase().includes('velocity')
+            ? result.courierName
+            : `Velocity (${result.courierName})`)
+        : 'Velocity';
     } else {
       // Create shipment on Delhivery
       const result = await delhiveryService.createShipment(verifiedOrder, {

@@ -2,6 +2,7 @@ import axios, { AxiosInstance } from 'axios';
 import crypto from 'crypto';
 import { config } from '../../config';
 import logger from '../../utils/logger';
+import prisma from '../../database/prisma';
 import { Order, OrderItem, ShipmentStatus } from '@prisma/client';
 import { isPrepaidOrder } from '../orders/order-tabs';
 
@@ -12,10 +13,21 @@ export interface VelocityServiceabilityParams {
   shipmentType?: 'forward' | 'return';
 }
 
+export interface VelocityCourierOption {
+  carrier_id: string;
+  carrier_name: string;
+  min_weight?: number;
+  max_weight?: number;
+  price?: number;
+  expected_delivery_days?: number;
+  zone?: string;
+  cod_available?: boolean;
+}
+
 export interface VelocityServiceabilityResult {
   serviceable: boolean;
   zone?: string;
-  couriers: Array<{ carrier_id: string; carrier_name: string }>;
+  couriers: VelocityCourierOption[];
   remark?: string;
   raw?: any;
 }
@@ -114,6 +126,28 @@ export interface VelocityReverseShipmentParams {
   weight?: number;
 }
 
+export interface VelocityShippingChargeItem {
+  eventType: string;
+  transactionType: string;
+  amountWithoutGst: number;
+  amountWithGst: number;
+}
+
+export interface VelocityShippingChargeEntry {
+  trackingNumber: string;
+  charges?: VelocityShippingChargeItem[];
+  error?: string;
+}
+
+export interface VelocityCodRemittanceEntry {
+  trackingNumber: string;
+  deliveryDate?: string | null;
+  codAmount?: number;
+  remittanceDate?: string | null;
+  utrNo?: string | null;
+  error?: string;
+}
+
 /**
  * Velocity Shipping API Client & Integration Service
  * Base URL: https://shazam.velocity.in
@@ -208,9 +242,20 @@ export class VelocityService {
 
       const data = response.data;
       const resObj = data?.result || data?.data || data;
-      const couriers = resObj?.serviceability_results || resObj?.couriers || [];
+      const rawCouriers = resObj?.serviceability_results || resObj?.couriers || [];
       const zone = resObj?.zone || data?.zone;
       const isExplicitlyServiceable = resObj?.serviceable === true || data?.status === 'SUCCESS' || data?.success === true;
+
+      const couriers: VelocityCourierOption[] = (Array.isArray(rawCouriers) ? rawCouriers : []).map((c: any) => ({
+        carrier_id: String(c.carrier_id ?? c.id ?? c.courier_id ?? c.code ?? '').trim(),
+        carrier_name: String(c.carrier_name ?? c.name ?? c.courier_name ?? 'Velocity Partner').trim(),
+        min_weight: c.min_weight != null ? Number(c.min_weight) : undefined,
+        max_weight: c.max_weight != null ? Number(c.max_weight) : undefined,
+        price: c.price != null ? Number(c.price) : c.freight_charge != null ? Number(c.freight_charge) : undefined,
+        expected_delivery_days: c.expected_delivery_days != null ? Number(c.expected_delivery_days) : c.tat != null ? Number(c.tat) : undefined,
+        zone: c.zone || zone,
+        cod_available: c.cod_available !== undefined ? Boolean(c.cod_available) : params.paymentMode === 'cod',
+      }));
 
       if (couriers.length > 0 || isExplicitlyServiceable) {
         return {
@@ -645,6 +690,42 @@ export class VelocityService {
     }
   }
 
+  /**
+   * Helper to normalize shipping rate options from Velocity Rates API
+   */
+  async calculateCourierRates(params: VelocityRatesParams): Promise<Array<{
+    carrierId: string;
+    carrierName: string;
+    freightCharge: number;
+    codCharge: number;
+    totalCharge: number;
+    expectedDeliveryDays?: number;
+    zone?: string;
+    raw?: any;
+  }>> {
+    const raw = await this.getRates(params);
+    const list = Array.isArray(raw?.payload)
+      ? raw.payload
+      : Array.isArray(raw?.data)
+      ? raw.data
+      : Array.isArray(raw?.result)
+      ? raw.result
+      : Array.isArray(raw)
+      ? raw
+      : [];
+
+    return list.map((item: any) => ({
+      carrierId: String(item.carrier_id ?? item.id ?? item.courier_id ?? '').trim(),
+      carrierName: String(item.carrier_name ?? item.courier_name ?? item.name ?? 'Velocity Partner').trim(),
+      freightCharge: Number(item.freight_charge ?? item.freight ?? item.rate ?? item.price ?? 0),
+      codCharge: Number(item.cod_charge ?? item.cod_fee ?? 0),
+      totalCharge: Number(item.total_charge ?? item.total_price ?? item.total ?? item.rate ?? 0),
+      expectedDeliveryDays: item.expected_delivery_days != null ? Number(item.expected_delivery_days) : undefined,
+      zone: item.zone,
+      raw: item,
+    }));
+  }
+
   // ═══════════════════════════════════════════════════════════
   // 7. WAREHOUSE REGISTRATION
   // ═══════════════════════════════════════════════════════════
@@ -950,16 +1031,7 @@ export class VelocityService {
    * Fetch shipment-level financial charges breakdown per AWB
    * POST /custom/api/v1/shipping-charges
    */
-  async getShippingCharges(awbs: string[]): Promise<Array<{
-    trackingNumber: string;
-    charges?: Array<{
-      eventType: string;
-      transactionType: string;
-      amountWithoutGst: number;
-      amountWithGst: number;
-    }>;
-    error?: string;
-  }>> {
+  async getShippingCharges(awbs: string[]): Promise<VelocityShippingChargeEntry[]> {
     if (!awbs || awbs.length === 0) return [];
     try {
       const response = await this.client.post('/custom/api/v1/shipping-charges', {
@@ -985,14 +1057,7 @@ export class VelocityService {
    * Fetch shipment-level COD remittance details per AWB
    * POST /custom/api/v1/cod-remittance
    */
-  async getCodRemittance(awbs: string[]): Promise<Array<{
-    trackingNumber: string;
-    deliveryDate?: string | null;
-    codAmount?: number;
-    remittanceDate?: string | null;
-    utrNo?: string | null;
-    error?: string;
-  }>> {
+  async getCodRemittance(awbs: string[]): Promise<VelocityCodRemittanceEntry[]> {
     if (!awbs || awbs.length === 0) return [];
     try {
       const response = await this.client.post('/custom/api/v1/cod-remittance', {
@@ -1088,20 +1153,60 @@ export class VelocityService {
    * Fetch official Velocity shipping label PDF buffer directly from Velocity API or S3 URL
    */
   async fetchOfficialLabelPdf(waybill: string, directUrl?: string | null): Promise<Buffer | null> {
+    const cleanWaybill = (waybill || '').trim();
+    if (!cleanWaybill) return null;
+
     const candidates: string[] = [];
     if (directUrl && directUrl.startsWith('http')) candidates.push(directUrl);
 
-    // If no direct url or expired, probe live order tracking which returns fresh presigned S3 label_url
+    // 1. Probe live order tracking which returns fresh presigned S3 label_url
     try {
-      const track = await this.trackShipment(waybill);
-      const foundUrl = track?.raw?.label_url || (track as any)?.labelUrl;
-      if (foundUrl && !candidates.includes(foundUrl)) candidates.unshift(foundUrl);
+      const track = await this.trackShipment(cleanWaybill);
+      const trackRaw = track?.raw;
+      const urlsFromTrack = [
+        trackRaw?.label_url,
+        trackRaw?.data?.label_url,
+        trackRaw?.payload?.label_url,
+        trackRaw?.shipment_track?.[0]?.label_url,
+        (track as any)?.labelUrl,
+      ].filter((u): u is string => Boolean(u && typeof u === 'string' && u.startsWith('http')));
+
+      for (const u of urlsFromTrack) {
+        if (!candidates.includes(u)) candidates.push(u);
+      }
     } catch {
-      // Fallback: probe order details
+      // ignore
+    }
+
+    // 2. Probe order details
+    try {
+      const details = await this.getForwardOrderDetails({ awb: cleanWaybill });
+      const urlsFromDetails = [
+        details?.label_url,
+        details?.payload?.label_url,
+        details?.data?.label_url,
+        details?.shipment?.label_url,
+        details?.order?.label_url,
+      ].filter((u): u is string => Boolean(u && typeof u === 'string' && u.startsWith('http')));
+
+      for (const u of urlsFromDetails) {
+        if (!candidates.includes(u)) candidates.push(u);
+      }
+    } catch {
+      // ignore
+    }
+
+    // 3. Probe shipments list if candidates still empty
+    if (candidates.length === 0) {
       try {
-        const details = await this.getForwardOrderDetails({ awb: waybill });
-        const foundUrl = details?.label_url || details?.labelUrl || details?.payload?.label_url;
-        if (foundUrl && !candidates.includes(foundUrl)) candidates.unshift(foundUrl);
+        const shipmentsRes = await this.getShipmentsList({ tracking_number: cleanWaybill, per_page: 5 });
+        const items = shipmentsRes?.data || [];
+        for (const item of items) {
+          const u = item?.attributes?.label_url || item?.label_url;
+          if (u && typeof u === 'string' && u.startsWith('http') && !candidates.includes(u)) {
+            candidates.push(u);
+          }
+        }
       } catch {
         // ignore
       }
@@ -1119,9 +1224,17 @@ export class VelocityService {
           } : undefined,
         });
         const buffer = Buffer.from(res.data);
-        if (buffer.length > 50) {
+        if (buffer.length > 20) {
           const head = buffer.subarray(0, 10).toString('utf8');
           if (head.includes('%PDF')) {
+            // Asynchronously update shipment labelUrl in database if different
+            Promise.resolve(
+              prisma.shipment.updateMany({
+                where: { waybillNumber: cleanWaybill },
+                data: { labelUrl: url },
+              })
+            ).catch(() => undefined);
+
             return buffer;
           }
           if (head.startsWith('{')) {
@@ -1129,7 +1242,7 @@ export class VelocityService {
               const json = JSON.parse(buffer.toString('utf8'));
               const nextUrl = json?.label_url || json?.payload?.label_url || json?.url;
               if (nextUrl && nextUrl !== url) {
-                return await this.fetchOfficialLabelPdf(waybill, nextUrl);
+                return await this.fetchOfficialLabelPdf(cleanWaybill, nextUrl);
               }
             } catch {
               // ignore
@@ -1137,7 +1250,7 @@ export class VelocityService {
           }
         }
       } catch (err: any) {
-        logger.warn('Failed to stream official Velocity label candidate', { waybill, url, error: err.message });
+        logger.warn('Failed to stream official Velocity label candidate', { waybill: cleanWaybill, url, error: err.message });
       }
     }
     return null;

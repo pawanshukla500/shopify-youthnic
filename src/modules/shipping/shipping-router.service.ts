@@ -185,6 +185,133 @@ export class ShippingRouterService {
   /**
    * Diagnostic summary of shipping integrations
    */
+  /**
+   * Evaluates available shipping options across courier partners for an order
+   */
+  async getShippingOptionsForOrder(orderId: number): Promise<{
+    orderId: number;
+    shopifyOrderName: string;
+    destinationPincode: string;
+    paymentMode: 'cod' | 'prepaid';
+    recommendedCarrier: CourierChoice;
+    recommendedReason: string;
+    delhivery: {
+      serviceable: boolean;
+      estimatedCost: number;
+      shippingMode: string;
+      remark?: string;
+    };
+    velocity: {
+      serviceable: boolean;
+      couriers: any[];
+      rates?: any[];
+      remark?: string;
+    };
+  }> {
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: { items: true, shipment: true },
+    });
+    if (!order) {
+      throw new Error(`Order not found: ${orderId}`);
+    }
+
+    const { courier: recommendedCarrier, reason: recommendedReason } = await this.resolveCarrierForOrder(order, 'auto');
+    const destinationPincode = order.customerPincode?.trim() || '';
+    const originPincode = config.delhivery.seller.pincode || '395002';
+    const isCod = order.paymentMethod === 'COD';
+    const paymentMode = isCod ? 'cod' : 'prepaid';
+
+    // 1. Delhivery serviceability and rate card
+    let delhiveryServiceable = false;
+    let delhiveryRemark = 'Delhivery credentials missing';
+    let delhiveryEstimatedCost = 0;
+
+    if (config.delhivery.apiToken) {
+      try {
+        const delCheck = await delhiveryService.checkPincodeServiceability(destinationPincode);
+        delhiveryServiceable = isCod ? Boolean(delCheck.codAvailable) : Boolean(delCheck.prepaidAvailable);
+        delhiveryRemark = delCheck.remark || (delhiveryServiceable ? 'Serviceable' : 'Unserviceable');
+      } catch (err: any) {
+        delhiveryRemark = err.message;
+      }
+
+      try {
+        const rate = delhiveryService.calculateRateCardMatrix({
+          mode: (config.delhivery.shippingMode === 'Express' ? 'E' : 'S') as 'E' | 'S',
+          chargeableWeightGrams: 500,
+          originPincode,
+          destinationPincode,
+          shipmentStatus: 'Delivered',
+          paymentType: isCod ? 'COD' : 'Pre-paid',
+          codAmount: isCod ? order.totalAmount : 0,
+        });
+        delhiveryEstimatedCost = rate.totalAmount;
+      } catch {
+        // ignore
+      }
+    }
+
+    // 2. Velocity serviceability and rates
+    let velocityServiceable = false;
+    let velocityCouriers: any[] = [];
+    let velocityRates: any[] = [];
+    let velocityRemark = 'Velocity credentials missing';
+
+    if (config.velocity.apiToken) {
+      try {
+        const velCheck = await velocityService.checkServiceability({
+          fromPincode: originPincode,
+          toPincode: destinationPincode,
+          paymentMode,
+          shipmentType: 'forward',
+        });
+        velocityServiceable = velCheck.serviceable;
+        velocityCouriers = velCheck.couriers || [];
+        velocityRemark = velCheck.remark || (velocityServiceable ? 'Serviceable' : 'Unserviceable');
+      } catch (err: any) {
+        velocityRemark = err.message;
+      }
+
+      try {
+        const rates = await velocityService.calculateCourierRates({
+          originPincode,
+          destinationPincode,
+          deadWeightGrams: 400,
+          lengthCm: 20,
+          widthCm: 15,
+          heightCm: 3,
+          paymentMethod: paymentMode,
+          shipmentValue: order.totalAmount,
+        });
+        velocityRates = rates;
+      } catch {
+        // non-fatal rate calculation
+      }
+    }
+
+    return {
+      orderId: order.id,
+      shopifyOrderName: order.shopifyOrderName,
+      destinationPincode,
+      paymentMode,
+      recommendedCarrier,
+      recommendedReason,
+      delhivery: {
+        serviceable: delhiveryServiceable,
+        estimatedCost: delhiveryEstimatedCost,
+        shippingMode: config.delhivery.shippingMode || 'Surface',
+        remark: delhiveryRemark,
+      },
+      velocity: {
+        serviceable: velocityServiceable,
+        couriers: velocityCouriers,
+        rates: velocityRates,
+        remark: velocityRemark,
+      },
+    };
+  }
+
   async getStatus(): Promise<{
     priority: CarrierPriority;
     delhivery: { configured: boolean; mode: string; hub: string };

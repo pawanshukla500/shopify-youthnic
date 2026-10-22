@@ -1370,13 +1370,31 @@ export async function syncOrderVelocityDetails(orderId: number): Promise<{
 export async function getOrderShippingOptions(orderId: number): Promise<{
   success: boolean
   orderId: number
-  options: Array<{
+  recommendedCarrier?: string
+  recommendedReason?: string
+  delhivery?: {
+    serviceable: boolean
+    estimatedCost: number
+    shippingMode: string
+    remark?: string
+  }
+  velocity?: {
+    serviceable: boolean
+    couriers: any[]
+    rates?: any[]
+    remark?: string
+  }
+  options?: Array<{
     courier: string
     carrierId?: string
+    carrierName?: string
     serviceable: boolean
     rate: number
+    freightCharge?: number
+    codCharge?: number
     estimatedDays?: number
     description: string
+    isRecommended?: boolean
   }>
 }> {
   const response = await api.get(`/api/orders/${orderId}/shipping-options`)

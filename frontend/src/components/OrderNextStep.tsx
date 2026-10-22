@@ -26,6 +26,7 @@ export interface OrderNextStepProps {
   onPrintLabel: () => void
   onResolveNdr: () => void
   onRtoRefund: () => void
+  onChooseCarrier?: () => void
 }
 
 /**
@@ -78,8 +79,8 @@ function nextStep(p: OrderNextStepProps): Step {
     return {
       tone: order.isDispatchOverdue ? 'danger' : 'info',
       title: p.isPrepaid ? 'Paid: ready to dispatch' : 'COD confirmed: ready to dispatch',
-      text: `${p.isPrepaid ? `Paid online${order.paymentProvider ? ` via ${order.paymentProvider}` : ''}.` : 'The customer confirmed the COD order.'} Book the Delhivery shipment.${overdue}`,
-      action: { label: 'Dispatch with Delhivery', icon: 'package', onClick: p.onDispatch, loading: p.dispatching, disabled: !p.canDispatch || p.dispatching },
+      text: `${p.isPrepaid ? `Paid online${order.paymentProvider ? ` via ${order.paymentProvider}` : ''}.` : 'The customer confirmed the COD order.'} Book shipment with courier partner.${overdue}`,
+      action: { label: `Dispatch with ${order.shipment?.courier?.toLowerCase().includes('velocity') ? 'Velocity' : 'Delhivery'}`, icon: 'package', onClick: p.onDispatch, loading: p.dispatching, disabled: !p.canDispatch || p.dispatching },
     }
   }
   if (tab === 'new' && order.paymentMethod === 'COD' && !p.isCodConfirmed) {
@@ -94,14 +95,14 @@ function nextStep(p: OrderNextStepProps): Step {
     return {
       tone: 'info',
       title: 'Label ready: waiting for pickup',
-      text: `AWB ${shipment?.waybillNumber}. Print the label, pack the parcel and hand it to Delhivery.`,
+      text: `AWB ${shipment?.waybillNumber}. Print the label, pack the parcel and hand it to the courier partner.`,
       action: { label: 'Print label', icon: 'download', onClick: p.onPrintLabel },
     }
   }
   if (tab === 'transit') {
     return {
       tone: 'info',
-      title: 'On the way with Delhivery',
+      title: `On the way (${order.shipment?.courier || 'Courier'})`,
       text: [shipment?.trackingStatus, shipment?.trackingLocation].filter(Boolean).join(' · ') || 'In transit.',
     }
   }
@@ -121,7 +122,7 @@ function nextStep(p: OrderNextStepProps): Step {
         order.paymentReceivedAt
           ? 'the bank UTR of the payment is added'
           : order.paymentMethod === 'COD'
-            ? 'the Delhivery COD remittance (with UTR) arrives'
+            ? `the ${order.shipment?.courier || 'Courier'} COD remittance (with UTR) arrives`
             : 'the gateway settlement (with UTR) arrives'
       )
     }
@@ -157,12 +158,20 @@ export function OrderNextStep(props: OrderNextStepProps) {
         <strong>{step.title}</strong>
         <span>{step.text}</span>
       </div>
-      {step.action && (
-        <Button className="button-primary" loading={step.action.loading} disabled={step.action.disabled} onClick={step.action.onClick}>
-          <Icon name={step.action.icon} size={15} />
-          {step.action.label}
-        </Button>
-      )}
+      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+        {props.onChooseCarrier && props.isDispatchNeeded && props.order.supportFlag !== 'MANIFEST_REVIEW' && (
+          <Button className="button-secondary" disabled={!props.canDispatch || props.dispatching} onClick={props.onChooseCarrier} title="Compare rates and select courier partner">
+            <Icon name="truck" size={14} />
+            Choose courier
+          </Button>
+        )}
+        {step.action && (
+          <Button className="button-primary" loading={step.action.loading} disabled={step.action.disabled} onClick={step.action.onClick}>
+            <Icon name={step.action.icon} size={15} />
+            {step.action.label}
+          </Button>
+        )}
+      </div>
     </div>
   )
 }

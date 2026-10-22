@@ -207,6 +207,18 @@ export class ShippingRouterService {
       rates?: any[];
       remark?: string;
     };
+    options: Array<{
+      courier: CourierChoice;
+      carrierId?: string;
+      carrierName: string;
+      serviceable: boolean;
+      rate: number;
+      freightCharge?: number;
+      codCharge?: number;
+      estimatedDays?: number;
+      description: string;
+      isRecommended: boolean;
+    }>;
   }> {
     const order = await prisma.order.findUnique({
       where: { id: orderId },
@@ -274,13 +286,19 @@ export class ShippingRouterService {
       }
 
       try {
+        const itemCount = order.items?.reduce((sum, item) => sum + (item.quantity || 1), 0) || 1;
+        const deadWeightGrams = itemCount > 1 ? 500 : 350;
+        const lengthCm = 28;
+        const widthCm = 20;
+        const heightCm = itemCount > 1 ? 5 : 3;
+
         const rates = await velocityService.calculateCourierRates({
           originPincode,
           destinationPincode,
-          deadWeightGrams: 400,
-          lengthCm: 20,
-          widthCm: 15,
-          heightCm: 3,
+          deadWeightGrams,
+          lengthCm,
+          widthCm,
+          heightCm,
           paymentMethod: paymentMode,
           shipmentValue: order.totalAmount,
         });
@@ -288,6 +306,57 @@ export class ShippingRouterService {
       } catch {
         // non-fatal rate calculation
       }
+    }
+
+    const options: Array<{
+      courier: CourierChoice;
+      carrierId?: string;
+      carrierName: string;
+      serviceable: boolean;
+      rate: number;
+      freightCharge?: number;
+      codCharge?: number;
+      estimatedDays?: number;
+      description: string;
+      isRecommended: boolean;
+    }> = [];
+
+    // Delhivery option
+    options.push({
+      courier: 'Delhivery',
+      carrierName: `Delhivery (${config.delhivery.shippingMode || 'Surface'})`,
+      serviceable: delhiveryServiceable,
+      rate: delhiveryEstimatedCost,
+      estimatedDays: 4,
+      description: delhiveryRemark,
+      isRecommended: recommendedCarrier === 'Delhivery',
+    });
+
+    // Velocity options
+    if (velocityRates.length > 0) {
+      for (const r of velocityRates) {
+        options.push({
+          courier: 'Velocity',
+          carrierId: r.carrierId,
+          carrierName: `Velocity (${r.carrierName})`,
+          serviceable: velocityServiceable,
+          rate: r.totalCharge,
+          freightCharge: r.freightCharge,
+          codCharge: r.codCharge,
+          estimatedDays: r.expectedDeliveryDays,
+          description: r.zone ? `Zone: ${r.zone}` : 'Velocity Aggregator Partner',
+          isRecommended: recommendedCarrier === 'Velocity' && options.filter(o => o.courier === 'Velocity').length === 0,
+        });
+      }
+    } else if (velocityServiceable) {
+      options.push({
+        courier: 'Velocity',
+        carrierName: 'Velocity (Best Available Partner)',
+        serviceable: true,
+        rate: 0,
+        description: 'Auto-selected by Velocity routing engine',
+        isRecommended: recommendedCarrier === 'Velocity',
+      });
     }
 
     return {
@@ -309,6 +378,7 @@ export class ShippingRouterService {
         rates: velocityRates,
         remark: velocityRemark,
       },
+      options,
     };
   }
 

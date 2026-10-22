@@ -593,6 +593,7 @@ export class VelocityFinancialSyncService {
       remittedAmount?: number;
       remittanceDate?: string | null;
     };
+    errors?: string[];
     message: string;
   }> {
     const isId = typeof orderIdOrWaybill === 'number' || /^\d+$/.test(String(orderIdOrWaybill));
@@ -605,6 +606,7 @@ export class VelocityFinancialSyncService {
     }
 
     const waybill = order.shipment.waybillNumber.trim();
+    const syncErrors: string[] = [];
     let trackingStatus = order.shipment.trackingStatus || undefined;
     let deliveredDate: string | null = null;
     let pickupDate: string | null = null;
@@ -660,7 +662,7 @@ export class VelocityFinancialSyncService {
 
       const updateData: any = {
         trackingStatus: mapped.description,
-        trackingLocation: vTracking.destination || vTracking.origin || order.shipment.trackingLocation,
+        trackingLocation: vTracking.activities?.find((a: any) => Boolean(a.location))?.location || vTracking.activities?.[0]?.location || order.shipment.trackingLocation || vTracking.destination || vTracking.origin,
         trackingUpdatedAt: new Date(),
         trackingHistory: vTracking.activities as any,
         courier: courierToSave,
@@ -669,7 +671,8 @@ export class VelocityFinancialSyncService {
       if (vTracking.pickupDate && !order.shipment.omsManifestedAt) {
         updateData.omsManifestedAt = new Date(vTracking.pickupDate);
       }
-      if (vTracking.deliveredDate) {
+      const isCodOrder = order.paymentMethod === 'COD' || order.shipment.paymentMode === 'COD';
+      if (vTracking.deliveredDate && isCodOrder) {
         updateData.codCollected = true;
         if (!order.shipment.codCollectedAt) {
           updateData.codCollectedAt = new Date(vTracking.deliveredDate);
@@ -689,8 +692,24 @@ export class VelocityFinancialSyncService {
           where: { id: order.id },
           data: { status: 'DELIVERED', deliveredAt: new Date(vTracking.deliveredDate) },
         });
+      } else if (mapped.shipmentStatus === 'RTO_DELIVERED' && order.status !== 'RTO_DELIVERED') {
+        await prisma.order.update({
+          where: { id: order.id },
+          data: { status: 'RTO_DELIVERED' },
+        });
+      } else if (mapped.shipmentStatus === 'RTO' && order.status !== 'RTO_INITIATED') {
+        await prisma.order.update({
+          where: { id: order.id },
+          data: { status: 'RTO_INITIATED' },
+        });
+      } else if (mapped.shipmentStatus === 'FAILED' && order.status !== 'FAILED_DELIVERY') {
+        await prisma.order.update({
+          where: { id: order.id },
+          data: { status: 'FAILED_DELIVERY' },
+        });
       }
     } catch (trackErr: any) {
+      syncErrors.push(`Tracking: ${trackErr.message}`);
       logger.warn('Velocity single order live tracking failed', { waybill, error: trackErr.message });
     }
 
@@ -745,6 +764,7 @@ export class VelocityFinancialSyncService {
         });
       }
     } catch (chargeErr: any) {
+      syncErrors.push(`Charges: ${chargeErr.message}`);
       logger.warn('Velocity single order shipping charges failed', { waybill, error: chargeErr.message });
     }
 
@@ -793,12 +813,14 @@ export class VelocityFinancialSyncService {
           });
         }
       } catch (remitErr: any) {
+        syncErrors.push(`Remittance: ${remitErr.message}`);
         logger.warn('Velocity single order COD remittance sync failed', { waybill, error: remitErr.message });
       }
     }
 
+    const hasAnySuccess = Boolean(trackingStatus || chargesSummary || codSummary);
     return {
-      success: true,
+      success: hasAnySuccess,
       orderId: order.id,
       waybillNumber: waybill,
       courier: courierToSave,
@@ -807,7 +829,10 @@ export class VelocityFinancialSyncService {
       pickupDate,
       shippingCharges: chargesSummary,
       codRemittance: codSummary,
-      message: `Velocity details synced for ${order.shopifyOrderName} (AWB: ${waybill})`,
+      errors: syncErrors.length > 0 ? syncErrors : undefined,
+      message: hasAnySuccess
+        ? `Velocity details synced for ${order.shopifyOrderName} (AWB: ${waybill})${syncErrors.length ? ` (warnings: ${syncErrors.join('; ')})` : ''}`
+        : `Velocity sync failed: ${syncErrors.join('; ') || 'No details returned'}`,
     };
   }
 }

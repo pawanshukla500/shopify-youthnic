@@ -563,9 +563,11 @@ export class KwikEngageService {
     const isVelocity = isVelocityCourier(extra?.courierName, null, waybill);
     const courier = extra?.courierName || (isVelocity ? 'Velocity' : 'Delhivery Express');
     const carrierLabel = isVelocity ? 'Velocity' : 'Delhivery';
-    const trackingLink = isVelocity
-      ? `https://www.velocityshipping.in/track/${waybill}`
-      : `https://www.delhivery.com/track/package/${waybill}`;
+    const trackingLink = waybill
+      ? (isVelocity
+          ? `https://www.velocityshipping.in/track/${waybill}`
+          : `https://www.delhivery.com/track/package/${waybill}`)
+      : '';
     const isCod = order.paymentMethod === 'COD';
 
     switch (trigger) {
@@ -647,7 +649,7 @@ export class KwikEngageService {
           `Hi *${customer}*,\n` +
           `${carrierLabel} attempted to deliver your order *${orderNo}*, but could not reach you (${extra?.ndrReason || 'Customer unreachable / premises closed'}).\n\n` +
           `To prevent your package from being returned to Surat:\n` +
-          `👉 *Click here to track or update instructions:* ${trackingLink}\n\n` +
+          (trackingLink ? `👉 *Click here to track or update instructions:* ${trackingLink}\n\n` : '') +
           `Need help? Simply reply to this WhatsApp message.`
         );
 

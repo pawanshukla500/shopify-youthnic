@@ -1052,7 +1052,7 @@ export function Dashboard() {
                     <td className="mono">
                       {order.waybillNumber ? (
                         <a
-                          href={carrierTrackingUrl((order as any).courierPartner, order.waybillNumber)}
+                          href={carrierTrackingUrl((order as any).courier || (order as any).courierPartner || (order as any).shipment?.courier, order.waybillNumber)}
                           target="_blank"
                           rel="noreferrer"
                           onClick={(e) => e.stopPropagation()}

@@ -569,7 +569,7 @@ export function SupportDesk() {
                   </div>
                   {activeTicket.order.shipment?.waybillNumber && (
                     <div>
-                      <span style={{ fontSize: '11px', color: '#64748b' }}>Delhivery Waybill:</span>
+                      <span style={{ fontSize: '11px', color: '#64748b' }}>{activeTicket.order.shipment?.courier || 'Carrier'} Waybill:</span>
                       <div>
                         <a
                           href={carrierTrackingUrl(activeTicket.order.shipment?.courier || (activeTicket.order as any).courierPartner, activeTicket.order.shipment.waybillNumber)}

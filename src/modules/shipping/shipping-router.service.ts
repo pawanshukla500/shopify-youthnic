@@ -230,7 +230,7 @@ export class ShippingRouterService {
     if (config.delhivery.apiToken) {
       try {
         const delCheck = await delhiveryService.checkPincodeServiceability(destinationPincode);
-        delhiveryServiceable = isCod ? Boolean(delCheck.codAvailable) : Boolean(delCheck.prepaidAvailable);
+        delhiveryServiceable = Boolean(delCheck.serviceable) && (isCod ? Boolean(delCheck.codAvailable) : Boolean(delCheck.prepaidAvailable));
         delhiveryRemark = delCheck.remark || (delhiveryServiceable ? 'Serviceable' : 'Unserviceable');
       } catch (err: any) {
         delhiveryRemark = err.message;
@@ -266,7 +266,7 @@ export class ShippingRouterService {
           paymentMode,
           shipmentType: 'forward',
         });
-        velocityServiceable = velCheck.serviceable;
+        velocityServiceable = Boolean(velCheck.serviceable) && (!isCod || (velCheck.couriers || []).length === 0 || (velCheck.couriers || []).some((c: any) => c.cod_available !== false));
         velocityCouriers = velCheck.couriers || [];
         velocityRemark = velCheck.remark || (velocityServiceable ? 'Serviceable' : 'Unserviceable');
       } catch (err: any) {

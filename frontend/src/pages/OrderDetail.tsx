@@ -115,6 +115,33 @@ export function OrderDetail() {
   const [loadingShippingOptions, setLoadingShippingOptions] = useState(false)
   const [selectedOptionIndex, setSelectedOptionIndex] = useState<number>(0)
 
+  // Switch courier partner state
+  const [showSwitchCourierModal, setShowSwitchCourierModal] = useState(false)
+  const [switchCourierName, setSwitchCourierName] = useState('Velocity')
+  const [switchWaybill, setSwitchWaybill] = useState('')
+
+  const clearManifestReview = useMutation({
+    mutationFn: () => api.post(`/api/orders/${id}/clear-manifest-review`),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['order', id] })
+      await queryClient.invalidateQueries({ queryKey: ['orders'] })
+      toast.toast('success', 'Manifest review flag cleared.')
+    },
+    onError: (error) => toast.toast('error', apiError(error)),
+  })
+
+  const updateCourierMutation = useMutation({
+    mutationFn: (data: { courier: string; waybillNumber?: string }) =>
+      api.post(`/api/orders/${id}/update-courier`, data),
+    onSuccess: async (res) => {
+      setShowSwitchCourierModal(false)
+      await queryClient.invalidateQueries({ queryKey: ['order', id] })
+      await queryClient.invalidateQueries({ queryKey: ['orders'] })
+      toast.toast('success', `Courier partner updated to ${res.data.courier || 'selected courier'}.`)
+    },
+    onError: (error) => toast.toast('error', apiError(error)),
+  })
+
   const order = orderQuery.data
   const refreshShopify = useMutation({
     mutationFn: () => api.post(`/api/orders/${id}/refresh-shopify`),
@@ -228,13 +255,14 @@ export function OrderDetail() {
       if (!isSubmittingNdr) setShowNdrModal(false)
       if (!isSendingWhatsApp) setShowWhatsAppModal(false)
       if (!action.isPending) setShowCarrierModal(false)
+      if (!updateCourierMutation.isPending) setShowSwitchCourierModal(false)
     }
     document.addEventListener('keydown', escape)
     return () => document.removeEventListener('keydown', escape)
-  }, [moreOpen, isCancelling, isDeleting, isSubmittingNdr, isSendingWhatsApp, action.isPending])
+  }, [moreOpen, isCancelling, isDeleting, isSubmittingNdr, isSendingWhatsApp, action.isPending, updateCourierMutation.isPending])
 
   useEffect(() => {
-    if (!showCancelModal && !showDeleteModal && !showNdrModal && !showWhatsAppModal && !showCarrierModal) return
+    if (!showCancelModal && !showDeleteModal && !showNdrModal && !showWhatsAppModal && !showCarrierModal && !showSwitchCourierModal) return
     const previous = document.activeElement as HTMLElement | null
     const dialog = document.querySelector<HTMLElement>('.shopify-order-page .modal-card')
     const controls = () => Array.from(dialog?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href]') || [])
@@ -249,7 +277,7 @@ export function OrderDetail() {
     }
     dialog?.addEventListener('keydown', trap)
     return () => { dialog?.removeEventListener('keydown', trap); previous?.focus() }
-  }, [showCancelModal, showDeleteModal, showNdrModal, showWhatsAppModal, showCarrierModal])
+  }, [showCancelModal, showDeleteModal, showNdrModal, showWhatsAppModal, showCarrierModal, showSwitchCourierModal])
 
   useEffect(() => {
     if (!moreOpen) return
@@ -300,7 +328,7 @@ export function OrderDetail() {
 
   const copyWaybill = (awb: string) => {
     navigator.clipboard.writeText(awb)
-    toast.toast('success', `Delhivery Waybill ${awb} copied!`)
+    toast.toast('success', `${order.shipment?.courier || 'Tracking'} AWB ${awb} copied!`)
   }
 
   const isPrepaid = isPrepaidOrder(order)
@@ -725,6 +753,10 @@ export function OrderDetail() {
                 <a role="menuitem" href={carrierTrackingUrl(order.shipment?.courier, order.shipment!.waybillNumber!)} target="_blank" rel="noreferrer" onClick={closeMore}>Track shipment</a>
               )}
               <div className="shopify-more-label">Order</div>
+              <button type="button" role="menuitem" onClick={() => { closeMore(); setSwitchCourierName(order.shipment?.courier || 'Velocity'); setSwitchWaybill(order.shipment?.waybillNumber || ''); setShowSwitchCourierModal(true) }}>Switch courier partner</button>
+              {order.supportFlag === 'MANIFEST_REVIEW' && (
+                <button type="button" role="menuitem" disabled={clearManifestReview.isPending} onClick={() => { closeMore(); clearManifestReview.mutate() }}>Clear manifest review</button>
+              )}
               {!hasWaybill && (
                 <button type="button" role="menuitem" disabled={isFetchingExternalAwb} onClick={() => { closeMore(); handleFetchExternalFulfillment() }}>Fetch Delhivery AWB</button>
               )}
@@ -805,6 +837,8 @@ export function OrderDetail() {
       onPrintLabel={() => openPrintableOrderLabel(order.id)}
       onResolveNdr={() => setShowNdrModal(true)}
       onRtoRefund={handleProcessRtoRefund}
+      onClearManifestReview={() => clearManifestReview.mutate()}
+      clearingManifestReview={clearManifestReview.isPending}
     />
 
     <div className="order-section-nav" role="tablist" aria-label="Order sections">
@@ -834,7 +868,7 @@ export function OrderDetail() {
             <span className={`shopify-pill ${fulfillmentPill.tone}`}>{fulfillmentPill.label}</span>
           </div>
           <div className="shopify-ship-line">
-            {order.shippingTitle || order.shipment?.courier || 'Shipping'}
+            {order.shipment?.courier || (hasWaybill ? 'Standard Shipping' : (order.shippingTitle || 'Shipping'))}
             {hasWaybill ? ` · AWB ${order.shipment?.waybillNumber}` : ' · Not yet fulfilled'}
           </div>
           <ItemsTable items={order.items ?? []} currency={order.currency} order={order} section="lines" />
@@ -1338,6 +1372,19 @@ export function OrderDetail() {
                     <span>Track on {order.shipment.courier || 'Delhivery'}</span>
                   </a>
                 )}
+
+                <Button
+                  className="button-secondary"
+                  onClick={() => {
+                    setSwitchCourierName(order.shipment?.courier || 'Velocity')
+                    setSwitchWaybill(order.shipment?.waybillNumber || '')
+                    setShowSwitchCourierModal(true)
+                  }}
+                  title="Switch courier partner or update tracking details"
+                >
+                  <Icon name="truck" size={15} />
+                  <span>Switch courier partner</span>
+                </Button>
 
                 {!['DELIVERED', 'RTO_DELIVERED', 'CANCELLED'].includes(order.shipment.status) && (
                   <Button
@@ -2244,6 +2291,101 @@ export function OrderDetail() {
             >
               <Icon name="package" size={15} />
               Dispatch with {shippingOptions[selectedOptionIndex]?.carrierName || 'Courier'}
+            </Button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ─── Switch Courier Partner Modal ─── */}
+    {showSwitchCourierModal && order && (
+      <div className="modal-backdrop" onClick={() => !updateCourierMutation.isPending && setShowSwitchCourierModal(false)}>
+        <div className="modal-card" role="dialog" aria-modal="true" aria-label="Switch Courier Partner" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '520px' }}>
+          <div className="modal-header">
+            <div className="modal-header-left">
+              <div className="modal-icon-badge info">
+                <Icon name="truck" size={20} />
+              </div>
+              <div>
+                <h3 className="modal-title">Switch Courier Partner</h3>
+                <p className="modal-desc">Assign or override the shipping partner for {order.shopifyOrderName}.</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="modal-close-btn"
+              disabled={updateCourierMutation.isPending}
+              onClick={() => setShowSwitchCourierModal(false)}
+            >
+              <Icon name="close" size={16} />
+            </button>
+          </div>
+
+          <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <FormField label="Courier Partner">
+              <select
+                className="input-select"
+                value={switchCourierName}
+                onChange={(e) => setSwitchCourierName(e.target.value)}
+                disabled={updateCourierMutation.isPending}
+                style={{ width: '100%' }}
+              >
+                <option value="Velocity">Velocity (Aggregator)</option>
+                <option value="Delhivery">Delhivery Express</option>
+                <option value="Amazon Transportation">Amazon ATS</option>
+                <option value="Ekart">Ekart Logistics</option>
+                <option value="Blue Dart">Blue Dart</option>
+                <option value="Shadowfax">Shadowfax</option>
+                <option value="DTDC">DTDC</option>
+                <option value="Smartr">Smartr Logistics</option>
+                <option value="Ecom Express">Ecom Express</option>
+                <option value="India Post">India Post</option>
+              </select>
+            </FormField>
+
+            <FormField label="AWB / Tracking Number">
+              <input
+                type="text"
+                className="input-text"
+                value={switchWaybill}
+                onChange={(e) => setSwitchWaybill(e.target.value)}
+                placeholder="Enter waybill / tracking number"
+                disabled={updateCourierMutation.isPending}
+                style={{ width: '100%', fontFamily: 'monospace' }}
+              />
+            </FormField>
+
+            <div style={{ background: 'var(--line-subtle, #f8fafc)', border: '1px solid var(--line, #e2e8f0)', borderRadius: '8px', padding: '12px', fontSize: '12px', color: 'var(--ink-secondary, #64748b)' }}>
+              {switchCourierName.toLowerCase().includes('velocity') ? (
+                <span>⚡ Switching to <strong>Velocity</strong> automatically links tracking at <code>velocityshipping.in</code>, clears any Delhivery manifest errors, and connects live financial reconciliation.</span>
+              ) : (
+                <span>📦 Updating courier will refresh live tracking links and update customer notifications.</span>
+              )}
+            </div>
+          </div>
+
+          <div className="modal-footer" style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', padding: '16px 20px', borderTop: '1px solid var(--color-border, #e2e8f0)' }}>
+            <button
+              type="button"
+              className="button-secondary"
+              disabled={updateCourierMutation.isPending}
+              onClick={() => setShowSwitchCourierModal(false)}
+            >
+              Cancel
+            </button>
+            <Button
+              className="button-primary"
+              loading={updateCourierMutation.isPending}
+              disabled={updateCourierMutation.isPending}
+              onClick={() => {
+                updateCourierMutation.mutate({
+                  courier: switchCourierName,
+                  waybillNumber: switchWaybill,
+                })
+              }}
+            >
+              <Icon name="check" size={15} />
+              Save Courier Partner
             </Button>
           </div>
         </div>

@@ -27,6 +27,8 @@ export interface OrderNextStepProps {
   onResolveNdr: () => void
   onRtoRefund: () => void
   onChooseCarrier?: () => void
+  onClearManifestReview?: () => void
+  clearingManifestReview?: boolean
 }
 
 /**
@@ -38,8 +40,17 @@ function nextStep(p: OrderNextStepProps): Step {
   const { order } = p
   const shipment = order.shipment
   const tab = classifyOrderTab(order)
-  if (order.supportFlag === 'MANIFEST_REVIEW') {
-    return { tone: 'warn', title: 'Manifest needs review', text: 'Delhivery did not confirm the previous manifest. Check the order in Delhivery ONE before another dispatch; no duplicate AWB will be requested automatically.' }
+  if (order.supportFlag === 'MANIFEST_REVIEW' && !shipment?.waybillNumber && order.fulfillmentStatus !== 'fulfilled') {
+    return {
+      tone: 'warn',
+      title: 'Manifest needs review',
+      text: 'Delhivery did not confirm the previous manifest. Check Delhivery ONE, or switch to Velocity / clear this flag to dispatch.',
+      action: p.onChooseCarrier
+        ? { label: 'Ship with Velocity / Choose courier', icon: 'package', onClick: p.onChooseCarrier }
+        : p.onClearManifestReview
+        ? { label: 'Clear review', icon: 'check', onClick: p.onClearManifestReview, loading: p.clearingManifestReview }
+        : undefined,
+    }
   }
 
   if (order.status === 'CANCELLED') {
@@ -159,10 +170,16 @@ export function OrderNextStep(props: OrderNextStepProps) {
         <span>{step.text}</span>
       </div>
       <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-        {props.onChooseCarrier && props.isDispatchNeeded && props.order.supportFlag !== 'MANIFEST_REVIEW' && (
-          <Button className="button-secondary" disabled={!props.canDispatch || props.dispatching} onClick={props.onChooseCarrier} title="Compare rates and select courier partner">
+        {props.onChooseCarrier && (props.isDispatchNeeded || props.order.supportFlag === 'MANIFEST_REVIEW') && !props.order.shipment?.waybillNumber && props.order.fulfillmentStatus !== 'fulfilled' && (
+          <Button className="button-secondary" disabled={(!props.canDispatch && props.order.supportFlag !== 'MANIFEST_REVIEW') || props.dispatching} onClick={props.onChooseCarrier} title="Compare rates and select courier partner">
             <Icon name="truck" size={14} />
             Choose courier
+          </Button>
+        )}
+        {props.onClearManifestReview && props.order.supportFlag === 'MANIFEST_REVIEW' && !props.order.shipment?.waybillNumber && (
+          <Button className="button-secondary" loading={props.clearingManifestReview} onClick={props.onClearManifestReview} title="Clear manifest review flag">
+            <Icon name="check" size={14} />
+            Clear review
           </Button>
         )}
         {step.action && (

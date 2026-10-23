@@ -2155,6 +2155,13 @@ class ShopifyService {
         }
       }
 
+      if ((activeFulfillments.length > 0 || order.fulfillment_status === 'fulfilled') && (dbOrder as any).supportFlag === 'MANIFEST_REVIEW') {
+        await prisma.order.update({
+          where: { id: dbOrder.id },
+          data: { supportFlag: null, hasUrgentSupport: false },
+        });
+      }
+
       logger.info('Order synced to DB', {
         shopifyOrderId: order.id,
         orderName: order.name,

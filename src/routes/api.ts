@@ -1039,6 +1039,33 @@ router.get('/orders/:id/shipping-estimate', async (req: Request, res: Response):
   }
 });
 
+// Clear unconfirmed Delhivery manifest review lock
+router.post('/orders/:id/clear-manifest-review', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const orderId = parseInt(req.params.id, 10);
+    const result = await orderService.clearManifestReview(orderId);
+    res.json(result);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update or switch courier partner on order shipment (e.g. switch to Velocity on Delhivery NSZ)
+router.post('/orders/:id/update-courier', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const orderId = parseInt(req.params.id, 10);
+    const { courier, waybillNumber } = req.body;
+    if (!courier || !String(courier).trim()) {
+      res.status(400).json({ error: 'Courier name is required' });
+      return;
+    }
+    const result = await orderService.updateShipmentCourier(orderId, String(courier), waybillNumber ? String(waybillNumber) : undefined);
+    res.json(result);
+  } catch (error: any) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
 // Manually dispatch an order
 router.post('/orders/:id/dispatch', async (req: Request, res: Response): Promise<void> => {
   try {

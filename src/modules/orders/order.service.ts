@@ -502,6 +502,12 @@ class OrderService {
 
         if (waybill) {
           await shopifyService.syncOrderToDb(shopifyOrder);
+          if (order.supportFlag === 'MANIFEST_REVIEW') {
+            await prisma.order.update({
+              where: { id: orderId },
+              data: { supportFlag: null, hasUrgentSupport: false },
+            });
+          }
           const updated = await prisma.order.findUnique({
             where: { id: orderId },
             include: { shipment: true },
@@ -685,7 +691,19 @@ class OrderService {
       throw new Error(`Order not found: ${orderId}`);
     }
 
-    if (order.supportFlag === 'MANIFEST_REVIEW') throw new Error('Previous manifest requires review in Delhivery ONE before dispatching again.');
+    if (order.supportFlag === 'MANIFEST_REVIEW') {
+      const isVel = preferredCourier === 'Velocity' || Boolean(options?.velocityCarrierId);
+      if (isVel) {
+        await prisma.order.update({
+          where: { id: order.id },
+          data: { supportFlag: null, hasUrgentSupport: false },
+        });
+        order.supportFlag = null;
+        order.hasUrgentSupport = false;
+      } else {
+        throw new Error('Previous manifest requires review in Delhivery ONE before dispatching again. Review the order, or switch courier to Velocity.');
+      }
+    }
     if (order.status !== 'NEW' && order.status !== 'DISPATCH_PENDING') {
       throw new Error(`Order ${order.shopifyOrderName} is not in dispatchable state (current: ${order.status})`);
     }
@@ -1353,6 +1371,16 @@ class OrderService {
 
     const hoursSincePlaced = (Date.now() - new Date(order.shopifyCreatedAt).getTime()) / (1000 * 60 * 60);
     const hasWaybill = Boolean(order.shipment?.waybillNumber);
+    // If order already has an assigned AWB or is fulfilled, clear stale MANIFEST_REVIEW
+    if (publicOrder.supportFlag === 'MANIFEST_REVIEW' && (hasWaybill || order.fulfillmentStatus === 'fulfilled')) {
+      publicOrder.supportFlag = null;
+      publicOrder.hasUrgentSupport = false;
+      prisma.order
+        .update({ where: { id: order.id }, data: { supportFlag: null, hasUrgentSupport: false } })
+        .catch((err: any) =>
+          logger.warn('Failed to clear stale MANIFEST_REVIEW in enrichOrderMetadata', { id: order.id, err: err?.message })
+        );
+    }
     const operationalTab = classifyOrderTab(order);
     // SLA applies only to orders that are actually waiting for a label.
     const isDispatchOverdue = operationalTab === 'dispatch' && !hasWaybill && hoursSincePlaced > 24;
@@ -1776,6 +1804,100 @@ class OrderService {
     }
   }
 
+  async clearManifestReview(orderId: number): Promise<{ success: boolean; message: string }> {
+    await prisma.order.update({
+      where: { id: orderId },
+      data: { supportFlag: null, hasUrgentSupport: false },
+    });
+    return { success: true, message: 'Manifest review flag cleared successfully.' };
+  }
+
+  async updateShipmentCourier(
+    orderId: number,
+    courierName: string,
+    waybillNumber?: string
+  ): Promise<{ success: boolean; courier: string; waybillNumber?: string }> {
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: { shipment: true },
+    });
+    if (!order) throw new Error(`Order #${orderId} not found`);
+
+    const finalAwb = waybillNumber?.trim() || order.shipment?.waybillNumber || null;
+    const normCourier = courierName.trim();
+    const isVel = isVelocityCourier(normCourier, undefined, finalAwb);
+    const trackingUrl = isVel
+      ? (finalAwb ? `https://www.velocityshipping.in/track/${encodeURIComponent(finalAwb)}` : null)
+      : (finalAwb ? `https://www.delhivery.com/track/package/${encodeURIComponent(finalAwb)}` : null);
+
+    if (order.shipment) {
+      await prisma.shipment.update({
+        where: { id: order.shipment.id },
+        data: {
+          courier: normCourier,
+          ...(finalAwb ? { waybillNumber: finalAwb } : {}),
+          ...(trackingUrl ? { labelUrl: trackingUrl } : {}),
+          ...(isVel
+            ? {
+                weightMismatch: false,
+                mismatchDetails: null,
+                declaredWeightGrams: null,
+                billedWeightGrams: null,
+                chargedZone: null,
+                initialCost: 0,
+                reversalAmount: 0,
+                revisedCost: 0,
+                hasReversal: false,
+                reversalReason: null,
+                totalDebited: 0,
+                totalCredited: 0,
+                netBilledCost: 0,
+                billingStatus: null,
+                lastBilledAt: null,
+              }
+            : {}),
+        },
+      });
+    } else if (finalAwb) {
+      await prisma.shipment.create({
+        data: {
+          orderId: order.id,
+          courier: normCourier,
+          waybillNumber: finalAwb,
+          labelUrl: trackingUrl,
+          paymentMode: order.paymentMethod === 'COD' ? 'COD' : 'Pre-paid',
+          codAmount: order.paymentMethod === 'COD' ? order.totalAmount : 0,
+          status: 'CREATED',
+          trackingStatus: 'Label generated',
+        },
+      });
+    }
+
+    // Always clear manifest review flag and urgent support flag when switching courier
+    await prisma.order.update({
+      where: { id: order.id },
+      data: {
+        ...(order.supportFlag === 'MANIFEST_REVIEW' ? { supportFlag: null, hasUrgentSupport: false } : {}),
+      },
+    });
+
+    // Queue background tracking sync if AWB is present
+    if (finalAwb) {
+      if (isVel) {
+        import('../velocity/velocity-financial-sync.service')
+          .then(({ velocityFinancialSyncService }) =>
+            velocityFinancialSyncService.syncSingleOrderVelocityDetails(order.id)
+          )
+          .catch((err) => logger.warn('Background Velocity sync after courier switch failed', { err: err?.message }));
+      } else {
+        import('../tracking/tracking.service')
+          .then(({ default: trackingService }) => trackingService.syncShipmentTracking(finalAwb))
+          .catch((err) => logger.warn('Background Delhivery sync after courier switch failed', { err: err?.message }));
+      }
+    }
+
+    return { success: true, courier: normCourier, waybillNumber: finalAwb || undefined };
+  }
 }
 
 export default new OrderService();

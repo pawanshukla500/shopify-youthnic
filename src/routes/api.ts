@@ -3348,7 +3348,20 @@ router.post(['/delhivery/shipment/:waybill/cancel', '/api/shipments/:waybill/can
   try {
     const waybill = req.params.waybill;
     const shipment = await prisma.shipment.findUnique({ where: { waybillNumber: waybill } });
-    const isVel = isVelocityCourier(shipment?.courier, shipment?.labelUrl, waybill);
+    if (!shipment) {
+      res.status(404).json({ success: false, error: 'Shipment not found' });
+      return;
+    }
+
+    if (shipment.status === 'OUT_FOR_DELIVERY' || shipment.status === 'DELIVERED') {
+      res.status(409).json({
+        success: false,
+        error: `Cannot cancel shipment in status ${shipment.status}. Parcel is already out for delivery or delivered.`,
+      });
+      return;
+    }
+
+    const isVel = isVelocityCourier(shipment.courier, shipment.labelUrl, waybill);
 
     let success = false;
     if (isVel) {
@@ -3358,23 +3371,33 @@ router.post(['/delhivery/shipment/:waybill/cancel', '/api/shipments/:waybill/can
       success = await delhiveryService.cancelShipment(waybill);
     }
 
-    if (shipment) {
-      if (success) {
-        await prisma.shipment.update({
+    if (success) {
+      await prisma.$transaction([
+        prisma.shipment.update({
           where: { id: shipment.id },
           data: { status: 'CANCELLED' },
-        });
-      }
-      await recordOrderAction(shipment.orderId, 'SHIPMENT_CANCEL_REQUESTED', (req as AuthenticatedRequest).user, {
-        note: success
-          ? `${isVel ? 'Velocity' : 'Delhivery'} accepted shipment cancellation.`
-          : `${isVel ? 'Velocity' : 'Delhivery'} did not accept cancellation; parcel remains tracked.`,
-        status: success ? 'COMPLETED' : 'REVIEW',
-      });
+        }),
+        prisma.order.update({
+          where: { id: shipment.orderId },
+          data: {
+            status: 'DISPATCH_PENDING',
+            supportFlag: null,
+            hasUrgentSupport: false,
+          },
+        }),
+      ]);
     }
+
+    await recordOrderAction(shipment.orderId, 'SHIPMENT_CANCEL_REQUESTED', (req as AuthenticatedRequest).user, {
+      note: success
+        ? `${isVel ? 'Velocity' : 'Delhivery'} accepted shipment cancellation. Order reset to DISPATCH_PENDING for re-routing.`
+        : `${isVel ? 'Velocity' : 'Delhivery'} did not accept cancellation; parcel remains tracked.`,
+      status: success ? 'COMPLETED' : 'REVIEW',
+    });
+
     res.status(success ? 200 : 409).json(
       success
-        ? { success }
+        ? { success: true, message: 'Shipment cancelled and order reset for re-routing.' }
         : { success: false, error: `${isVel ? 'Velocity' : 'Delhivery'} did not accept cancellation; keep tracking this parcel.` }
     );
   } catch (error: any) {

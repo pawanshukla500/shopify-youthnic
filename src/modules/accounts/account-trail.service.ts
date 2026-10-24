@@ -51,10 +51,11 @@ export interface ManualRefundInput {
 }
 
 const MAX_EVIDENCE_BYTES = 5 * 1024 * 1024;
-const IMAGE_TYPES = {
+export const ALLOWED_EVIDENCE_TYPES = {
   'image/png': 'png',
   'image/jpeg': 'jpg',
   'image/webp': 'webp',
+  'application/pdf': 'pdf',
 } as const;
 
 function actorSnapshot(actor: AccountTrailActor | null | undefined) {
@@ -194,9 +195,14 @@ function decodeEvidence(evidence: NonNullable<ManualRefundInput['evidence']>): {
   extension: string;
   fileName: string;
 } {
-  const extension = IMAGE_TYPES[evidence.contentType as keyof typeof IMAGE_TYPES];
-  if (!extension) throw new Error('Refund proof must be a PNG, JPEG, or WebP image.');
-  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(evidence.contentBase64)) {
+  const extension = ALLOWED_EVIDENCE_TYPES[evidence.contentType as keyof typeof ALLOWED_EVIDENCE_TYPES];
+  if (!extension) throw new Error('Refund proof must be a PNG, JPEG, WebP image, or PDF document.');
+  // Bound check base64 length first to prevent ReDoS stack overflow
+  const maxBase64Chars = Math.ceil((MAX_EVIDENCE_BYTES * 4) / 3) + 8;
+  if (!evidence.contentBase64 || evidence.contentBase64.length > maxBase64Chars) {
+    throw new Error('Refund proof must be smaller than 5 MB.');
+  }
+  if (evidence.contentBase64.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(evidence.contentBase64)) {
     throw new Error('Refund proof is not valid base64 data.');
   }
 
@@ -208,12 +214,14 @@ function decodeEvidence(evidence: NonNullable<ManualRefundInput['evidence']>): {
   const isPng = buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
   const isJpeg = buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
   const isWebp = buffer.length >= 12 && buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP';
+  const isPdf = buffer.length >= 5 && buffer.subarray(0, 5).equals(Buffer.from([0x25, 0x50, 0x44, 0x46, 0x2d])); // %PDF-
   if (
     (evidence.contentType === 'image/png' && !isPng) ||
     (evidence.contentType === 'image/jpeg' && !isJpeg) ||
-    (evidence.contentType === 'image/webp' && !isWebp)
+    (evidence.contentType === 'image/webp' && !isWebp) ||
+    (evidence.contentType === 'application/pdf' && !isPdf)
   ) {
-    throw new Error('Refund proof content does not match its image type.');
+    throw new Error('Refund proof content does not match its file type.');
   }
 
   const fileName = evidence.fileName.replace(/[^a-zA-Z0-9._-]/g, '_').slice(-120) || `refund-proof.${extension}`;
@@ -295,7 +303,7 @@ export async function recordManualRefund(input: ManualRefundInput) {
     evidenceStoragePath = uploaded.path;
   }
 
-  return recordAccountTrailEvent({
+  const event = await recordAccountTrailEvent({
     orderId: input.orderId,
     returnId: input.returnId,
     eventType: 'REFUND_MANUAL',
@@ -313,6 +321,33 @@ export async function recordManualRefund(input: ManualRefundInput) {
     evidenceFileName,
     evidenceContentType,
   });
+
+  try {
+    await prisma.order.update({
+      where: { id: input.orderId },
+      data: { financialStatus: 'refunded' },
+    });
+  } catch (err: any) {
+    logger.warn('Failed to update order financialStatus on manual refund', { orderId: input.orderId, error: err?.message });
+  }
+
+  if (input.returnId) {
+    try {
+      await prisma.return.update({
+        where: { id: input.returnId },
+        data: {
+          refundStatus: 'PROCESSED',
+          returnStatus: 'REFUNDED',
+          refundAmount: amount,
+          refundProcessedAt: new Date(),
+        },
+      });
+    } catch (err: any) {
+      logger.warn('Failed to update return refundStatus on manual refund', { returnId: input.returnId, error: err?.message });
+    }
+  }
+
+  return event;
 }
 
 export async function presentAccountTrailEvent(event: any) {

@@ -660,7 +660,7 @@ export function OrderDetail() {
         : paid
           ? { label: 'Paid', tone: 'shopify-pill-neutral' }
           : { label: order.paymentMethod === 'COD' ? 'Payment pending' : 'Unpaid', tone: 'shopify-pill-pending' }
-  const hasWaybill = Boolean(order.shipment?.waybillNumber)
+  const hasWaybill = Boolean(order.shipment?.waybillNumber && order.shipment.status !== 'CANCELLED')
   const fulfillmentPill = (() => {
     if (order.status === 'CANCELLED') return { label: 'Cancelled', tone: 'shopify-pill-alert' }
     if (order.status === 'DELIVERED') return { label: 'Delivered', tone: 'shopify-pill-paid' }
@@ -2607,10 +2607,19 @@ function AccountTrailPanel({
             </FormField>
           </div>
           <FormField label="Payout screenshot (optional)">
-            <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => setEvidenceFile(event.target.files?.[0] ?? null)} />
-            <small className="field-hint">PNG, JPEG, or WebP; up to 5 MB. Stored privately; the audit view uses a short-lived link.</small>
+            <input type="file" accept="image/png,image/jpeg,image/webp,application/pdf" onChange={(event) => setEvidenceFile(event.target.files?.[0] ?? null)} />
+            <small className="field-hint">PNG, JPEG, WebP, or PDF; up to 5 MB. Stored privately; the audit view uses a short-lived link.</small>
           </FormField>
-          {proofPreview && evidenceFile ? <img className="account-trail-proof-preview" src={proofPreview} alt={`Preview of ${evidenceFile.name}`} /> : null}
+          {proofPreview && evidenceFile ? (
+            evidenceFile.type === 'application/pdf' ? (
+              <div className="account-trail-proof-pdf-preview">
+                <span>📄 {evidenceFile.name}</span>
+                <iframe src={proofPreview} title={`Preview of ${evidenceFile.name}`} />
+              </div>
+            ) : (
+              <img className="account-trail-proof-preview" src={proofPreview} alt={`Preview of ${evidenceFile.name}`} />
+            )
+          ) : null}
           <div className="account-trail-form-actions">
             <Button className="button-primary" loading={manualRefundMutation.isPending} onClick={() => manualRefundMutation.mutate()}>
               Save refund audit record
@@ -2645,7 +2654,12 @@ function AccountTrailPanel({
             {event.returnId ? <span className="account-trail-reference">Return #{event.returnId}</span> : null}
             {event.externalReference ? <span className="account-trail-reference">Reference: {event.externalReference}</span> : null}
             {event.note ? <p className="account-trail-note">{event.note}</p> : null}
-            {event.evidenceUrl ? <a className="account-trail-evidence" href={event.evidenceUrl} target="_blank" rel="noreferrer">View payout screenshot{event.evidenceFileName ? ` · ${event.evidenceFileName}` : ''}</a> : null}
+            {event.evidenceUrl ? (
+            <a className="account-trail-evidence" href={event.evidenceUrl} target="_blank" rel="noreferrer">
+              {event.evidenceContentType === 'application/pdf' ? '📄 View payout PDF' : '🔍 View payout screenshot'}
+              {event.evidenceFileName ? ` · ${event.evidenceFileName}` : ''}
+            </a>
+          ) : null}
           </article>
         ))}
       </div>

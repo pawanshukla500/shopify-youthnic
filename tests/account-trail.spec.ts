@@ -2,8 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { prismaStub, firebaseStub } = vi.hoisted(() => ({
   prismaStub: {
-    order: { findUnique: vi.fn() },
-    return: { findUnique: vi.fn(), findMany: vi.fn() },
+    order: { findUnique: vi.fn(), update: vi.fn() },
+    return: { findUnique: vi.fn(), findMany: vi.fn(), update: vi.fn() },
     accountTrailEvent: { create: vi.fn(), findMany: vi.fn(), findFirst: vi.fn() },
     syncLog: { create: vi.fn() },
   },

@@ -24,7 +24,7 @@ import {
   syncExternalOrderFulfillment,
   getOrderShippingOptions,
 } from '../api'
-import { ORDER_TABS, carrierTrackingUrl, formatDate, formatMoney, labelize, isVelocityCourier } from '../lib'
+import { ORDER_TABS, carrierTrackingUrl, formatDate, formatMoney, labelize, isVelocityCourier, getCourierLogoUrl } from '../lib'
 import { classifyOrderTab, isCodConfirmed, isPrepaidOrder } from '../../../src/modules/orders/order-tabs'
 import { Button, ButtonGroup, CopyableBadge, EmptyState, ErrorBox, FormField, Icon, InfoCard, LoadingState, PageIntro, Panel, PanelHeading, StatCard, StatusBadge, useDocumentTitle, useToast } from '../components/UI'
 import { OrderNextStep } from '../components/OrderNextStep'
@@ -1302,10 +1302,18 @@ export function OrderDetail() {
               {/* Velocity Aggregator Telemetry: Multi-Courier Partner, Freight Charges & COD Remittance */}
               {isVelocityCourier(order.shipment?.courier, order.shipment?.waybillNumber) && (
                 <div style={{ background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: '8px', padding: '12px 16px', marginTop: '14px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', fontSize: '12px' }}>
-                  <div>
-                    <div style={{ color: '#6d28d9', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>⚡ Aggregator Partner</div>
-                    <div style={{ fontWeight: 800, fontSize: '14px', color: '#1e1b4b', marginTop: '2px' }}>{order.shipment.courier || 'Velocity'}</div>
-                    <div style={{ color: '#6b7280', fontSize: '11px' }}>AWB: <span style={{ fontFamily: 'monospace' }}>{order.shipment.waybillNumber}</span></div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <img
+                      src={getCourierLogoUrl(order.shipment.courier)}
+                      alt=""
+                      style={{ height: '24px', maxWidth: '80px', objectFit: 'contain' }}
+                      onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none' }}
+                    />
+                    <div>
+                      <div style={{ color: '#6d28d9', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>⚡ Aggregator Partner</div>
+                      <div style={{ fontWeight: 800, fontSize: '14px', color: '#1e1b4b', marginTop: '2px' }}>{order.shipment.courier || 'Velocity'}</div>
+                      <div style={{ color: '#6b7280', fontSize: '11px' }}>AWB: <span style={{ fontFamily: 'monospace' }}>{order.shipment.waybillNumber}</span></div>
+                    </div>
                   </div>
                   <div>
                     <div style={{ color: '#6d28d9', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>💰 Freight Billing</div>
@@ -2239,6 +2247,12 @@ export function OrderDetail() {
                           disabled={!opt.serviceable}
                           onChange={() => setSelectedOptionIndex(idx)}
                           style={{ margin: 0 }}
+                        />
+                        <img
+                          src={getCourierLogoUrl(opt.carrierName || opt.courier)}
+                          alt=""
+                          style={{ height: '20px', maxWidth: '75px', objectFit: 'contain' }}
+                          onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none' }}
                         />
                         <div>
                           <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>

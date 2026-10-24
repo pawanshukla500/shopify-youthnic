@@ -223,6 +223,176 @@ describe('Velocity Aggregator Integration & Business Rules', () => {
       expect(result.awbCode).toBe('VEL-ATS-999');
       expect(result.courierName).toBe('Amazon Transportation');
     });
+
+    it('ranks courier rates strictly according to priority: Amazon -> Ekart -> Delhivery -> Shadowfax', async () => {
+      (velocityService as any).client.post = vi.fn().mockResolvedValueOnce({
+        data: {
+          status: 'SUCCESS',
+          result: {
+            serviceable_couriers: [
+              {
+                carrier_id: 'CAR2FZNOLGJ2X',
+                carrier_name: 'Bluedart Standard',
+                carrier_code: 'bluedart',
+                charges: { forward_freight_charges: 59, cod_charges: 0, total_forward_charges: 59 },
+              },
+              {
+                carrier_id: 'CARR5H4WQY3PM',
+                carrier_name: 'Ekart Standard',
+                carrier_code: 'ekart',
+                charges: { forward_freight_charges: 45, cod_charges: 0, total_forward_charges: 45 },
+              },
+              {
+                carrier_id: 'CARPGK29DN9ZW',
+                carrier_name: 'Amazon Transportation',
+                carrier_code: 'ats',
+                charges: { forward_freight_charges: 45, cod_charges: 0, total_forward_charges: 45 },
+              },
+              {
+                carrier_id: 'CAR7RFCSBPAV7',
+                carrier_name: 'Shadowfax Standard',
+                carrier_code: 'shadowfax',
+                charges: { forward_freight_charges: 49, cod_charges: 0, total_forward_charges: 49 },
+              },
+              {
+                carrier_id: 'CARO0ZZQH1H6U',
+                carrier_name: 'Delhivery Standard',
+                carrier_code: 'delhivery',
+                charges: { forward_freight_charges: 48, cod_charges: 0, total_forward_charges: 48 },
+              },
+            ],
+          },
+        },
+      });
+
+      const rates = await velocityService.calculateCourierRates({
+        originPincode: '395002',
+        destinationPincode: '411009',
+        deadWeightGrams: 350,
+        lengthCm: 22,
+        widthCm: 20,
+        heightCm: 3,
+        paymentMethod: 'prepaid',
+      });
+
+      expect(rates.map((r: any) => r.carrierName)).toEqual([
+        'Amazon Transportation',
+        'Ekart Standard',
+        'Delhivery Standard',
+        'Shadowfax Standard',
+        'Bluedart Standard',
+      ]);
+    });
+
+    it('automatically fails forward to Ekart when Amazon Transportation is unserviceable for destination address', async () => {
+      (velocityService as any).client.post = vi
+        .fn()
+        .mockRejectedValueOnce({
+          response: {
+            status: 400,
+            data: {
+              meta: {
+                message: {
+                  error: {
+                    message: 'No shipping services available for recipient address. Please verify address or contact support. (A-306)',
+                    code: 'NO_SERVICE_FOR_DESTINATION',
+                  },
+                },
+              },
+            },
+          },
+        })
+        .mockResolvedValueOnce({
+          data: {
+            status: 1,
+            payload: {
+              order_id: '#26YOU6156',
+              awb_code: 'VELP1504737675',
+              courier_name: 'Ekart Standard',
+              courier_company_id: 'CARR5H4WQY3PM',
+              label_url: 'https://velocity-labels.s3.amazonaws.com/VELP1504737675.pdf',
+            },
+          },
+        });
+
+      const mockOrder: any = {
+        id: 1978,
+        shopifyOrderId: '18963752583367',
+        shopifyOrderName: '#26YOU6156',
+        customerName: 'Sonia Pingale',
+        customerPhone: '9423093306',
+        customerAddress: 'Pune',
+        customerCity: 'Pune',
+        customerState: 'Maharashtra',
+        customerPincode: '411009',
+        paymentMethod: 'Pre-paid',
+        totalAmount: 1254.6,
+        items: [{ id: 1, title: 'Kurta', sku: 'BT206', quantity: 1, price: 1254.6 }],
+      };
+
+      const result = await velocityService.createForwardShipment(mockOrder, {
+        carrierId: 'CARPGK29DN9ZW',
+      });
+
+      expect((velocityService as any).client.post).toHaveBeenCalledTimes(2);
+      expect((velocityService as any).client.post).toHaveBeenNthCalledWith(
+        1,
+        '/custom/api/v1/forward-order-orchestration',
+        expect.objectContaining({ carrier_id: 'CARPGK29DN9ZW' })
+      );
+      expect((velocityService as any).client.post).toHaveBeenNthCalledWith(
+        2,
+        '/custom/api/v1/forward-order-orchestration',
+        expect.objectContaining({ carrier_id: 'CARR5H4WQY3PM' })
+      );
+      expect(result.awbCode).toBe('VELP1504737675');
+      expect(result.courierName).toBe('Ekart Standard');
+    });
+
+    it('appends revision suffix to order_id when re-routing an order with a previously cancelled shipment', async () => {
+      (velocityService as any).client.post = vi.fn().mockResolvedValueOnce({
+        data: {
+          status: 1,
+          payload: {
+            order_id: '#26YOU6156-R1',
+            awb_code: 'VELP1504737675',
+            courier_name: 'Ekart Standard',
+            label_url: 'https://velocity-labels.s3.amazonaws.com/VELP1504737675.pdf',
+          },
+        },
+      });
+
+      const mockOrderWithCancelledShipment: any = {
+        id: 1978,
+        shopifyOrderId: '18963752583367',
+        shopifyOrderName: '#26YOU6156',
+        customerName: 'Sonia Pingale',
+        customerPhone: '9423093306',
+        customerAddress: 'Pune',
+        customerCity: 'Pune',
+        customerState: 'Maharashtra',
+        customerPincode: '411009',
+        paymentMethod: 'Pre-paid',
+        totalAmount: 1254.6,
+        items: [{ id: 1, title: 'Kurta', sku: 'BT206', quantity: 1, price: 1254.6 }],
+        shipment: {
+          status: 'CANCELLED',
+          waybillNumber: '77258553330',
+        },
+      };
+
+      await velocityService.createForwardShipment(mockOrderWithCancelledShipment, {
+        carrierId: 'CARR5H4WQY3PM',
+      });
+
+      expect((velocityService as any).client.post).toHaveBeenCalledWith(
+        '/custom/api/v1/forward-order-orchestration',
+        expect.objectContaining({
+          order_id: '#26YOU6156-R1',
+          carrier_id: 'CARR5H4WQY3PM',
+        })
+      );
+    });
   });
 
   describe('Official API Labels (Zero Custom HTML Labels)', () => {

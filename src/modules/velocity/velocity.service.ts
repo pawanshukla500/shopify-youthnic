@@ -6,6 +6,29 @@ import prisma from '../../database/prisma';
 import { Order, OrderItem, ShipmentStatus } from '@prisma/client';
 import { isPrepaidOrder } from '../orders/order-tabs';
 
+export const VELOCITY_CARRIER_PRIORITY: Record<string, number> = {
+  ats: 1,
+  amazon: 1,
+  ekart: 2,
+  delhivery: 3,
+  shadowfax: 4,
+};
+
+export function getVelocityCarrierRank(carrierNameOrCode?: string): number {
+  const lower = (carrierNameOrCode || '').toLowerCase();
+  for (const [key, rank] of Object.entries(VELOCITY_CARRIER_PRIORITY)) {
+    if (lower.includes(key)) return rank;
+  }
+  return 99;
+}
+
+export const VELOCITY_PRIORITY_CARRIERS = [
+  { id: 'CARPGK29DN9ZW', name: 'Amazon Transportation', code: 'ats' },
+  { id: 'CARR5H4WQY3PM', name: 'Ekart Standard', code: 'ekart' },
+  { id: 'CARO0ZZQH1H6U', name: 'Delhivery Standard', code: 'delhivery' },
+  { id: 'CAR7RFCSBPAV7', name: 'Shadowfax Standard', code: 'shadowfax' },
+];
+
 export interface VelocityServiceabilityParams {
   fromPincode: string;
   toPincode: string;
@@ -369,95 +392,142 @@ export class VelocityService {
     const totalAmount = Math.max(1, Math.round(order.totalAmount || 0));
 
     // Order ID for Velocity: Shopify orders synced into Velocity use the exact display_id (e.g. #26YOU6001).
-    // Using order.shopifyOrderName directly targets and fulfills the synced Shopify order.
-    const orderId = order.shopifyOrderName.startsWith('#')
+    // If order already had a cancelled shipment and is being re-routed, append rerun suffix to allow clean Velocity allocation.
+    const baseOrderId = order.shopifyOrderName.startsWith('#')
       ? order.shopifyOrderName
       : `#${order.shopifyOrderName}`;
+    const hasCancelledShipment = Boolean(
+      (order as any).shipment?.status === 'CANCELLED' && (order as any).shipment?.waybillNumber
+    );
+    const orderId = hasCancelledShipment ? `${baseOrderId}-R1` : baseOrderId;
 
-    // Payload strictly matching Velocity Forward Order Orchestration API specification.
-    // NOTE: Forward orders must NOT send `pickup_customer_name` or `pickup_address`
-    // (which Velocity interprets as reverse logistics / customer return pickups).
-    // The pickup origin is designated by `pickup_location` and `warehouse_id`.
-    const payload: any = {
-      order_id: orderId,
-      external_id: order.shopifyOrderId ? String(order.shopifyOrderId) : orderId,
-      store_name: storeName,
-      order_date: orderDateStr,
-      carrier_id: options?.carrierId || '', // Empty for Velocity rule-based auto-assignment
-      billing_customer_name: firstName,
-      billing_last_name: lastName,
-      billing_address: customerAddress,
-      billing_city: customerCity,
-      billing_state: customerState,
-      billing_country: customerCountry,
-      billing_pincode: customerPincode,
-      billing_phone: phone,
-      billing_email: order.customerEmail || undefined,
-      shipping_is_billing: true,
-      shipping_customer_name: firstName,
-      shipping_last_name: lastName,
-      shipping_address: customerAddress,
-      shipping_city: customerCity,
-      shipping_state: customerState,
-      shipping_country: customerCountry,
-      shipping_pincode: customerPincode,
-      shipping_phone: phone,
-      shipping_email: order.customerEmail || undefined,
-      pickup_location: pickupLocation,
-      warehouse_id: warehouseId,
-      order_items: orderItems,
-      payment_method: isCod ? 'COD' : 'PREPAID',
-      payment_mode: isCod ? 'cod' : 'prepaid',
-      cod_amount: isCod ? totalAmount : 0,
-      cod_collectible: isCod ? totalAmount : 0,
-      sub_total: totalAmount,
-      total_discount: Math.round(order.totalDiscounts || 0),
-      length,
-      breadth,
-      height,
-      weight: weightKg,
-      request_pickup: true,
-      print_label: true,
-    };
+    // Carrier priority list: 1. Amazon Transportation, 2. Ekart Standard, 3. Delhivery Standard, 4. Shadowfax Standard
+    let carriersToTry: string[] = [];
+    if (options?.carrierId) {
+      carriersToTry.push(options.carrierId);
+      for (const p of VELOCITY_PRIORITY_CARRIERS) {
+        if (!carriersToTry.includes(p.id)) {
+          carriersToTry.push(p.id);
+        }
+      }
+    } else {
+      carriersToTry = VELOCITY_PRIORITY_CARRIERS.map((p) => p.id);
+      carriersToTry.push('');
+    }
 
-    logger.info('Creating Velocity forward shipment', {
-      orderId: order.id,
-      shopifyOrderName: order.shopifyOrderName,
-      warehouseId,
-      paymentMethod: payload.payment_method,
-      paymentMode: payload.payment_mode,
-      codAmount: payload.cod_amount,
-    });
+    let lastError: any = null;
 
     try {
-      const response = await this.client.post('/custom/api/v1/forward-order-orchestration', payload);
-      const data = response.data;
+      for (let i = 0; i < carriersToTry.length; i++) {
+        const candidateCarrierId = carriersToTry[i];
 
-      const isSuccess = data?.status === 1 || data?.status === 'SUCCESS' || data?.success === true || Boolean(data?.payload) || Boolean(data?.data);
-      const p = data?.payload || data?.data || data?.result;
-
-      if (isSuccess && p && (p.awb_code || p.awb)) {
-        const awbCode = p.awb_code || p.awb;
-        return {
-          orderId: p.order_id || payload.order_id,
-          shipmentId: String(p.shipment_id || p.order_id || ''),
-          awbCode,
-          courierName: p.courier_name || p.carrier_name || 'Velocity Standard',
-          courierCompanyId: p.courier_company_id || p.carrier_id,
-          labelUrl: p.label_url || '',
-          assignedDateTime: p.assigned_date_time?.date || p.assigned_date_time,
-          charges: p.charges,
-          raw: data,
+        const payload: any = {
+          order_id: orderId,
+          external_id: order.shopifyOrderId ? String(order.shopifyOrderId) : orderId,
+          store_name: storeName,
+          order_date: orderDateStr,
+          carrier_id: candidateCarrierId,
+          billing_customer_name: firstName,
+          billing_last_name: lastName,
+          billing_address: customerAddress,
+          billing_city: customerCity,
+          billing_state: customerState,
+          billing_country: customerCountry,
+          billing_pincode: customerPincode,
+          billing_phone: phone,
+          billing_email: order.customerEmail || undefined,
+          shipping_is_billing: true,
+          shipping_customer_name: firstName,
+          shipping_last_name: lastName,
+          shipping_address: customerAddress,
+          shipping_city: customerCity,
+          shipping_state: customerState,
+          shipping_country: customerCountry,
+          shipping_pincode: customerPincode,
+          shipping_phone: phone,
+          shipping_email: order.customerEmail || undefined,
+          pickup_location: pickupLocation,
+          warehouse_id: warehouseId,
+          order_items: orderItems,
+          payment_method: isCod ? 'COD' : 'PREPAID',
+          payment_mode: isCod ? 'cod' : 'prepaid',
+          cod_amount: isCod ? totalAmount : 0,
+          cod_collectible: isCod ? totalAmount : 0,
+          sub_total: totalAmount,
+          total_discount: Math.round(order.totalDiscounts || 0),
+          length,
+          breadth,
+          height,
+          weight: weightKg,
+          request_pickup: true,
+          print_label: true,
         };
+
+        logger.info('Creating Velocity forward shipment', {
+          orderId: order.id,
+          shopifyOrderName: order.shopifyOrderName,
+          warehouseId,
+          carrierId: candidateCarrierId || 'AUTO_DEFAULT',
+          paymentMethod: payload.payment_method,
+          paymentMode: payload.payment_mode,
+          codAmount: payload.cod_amount,
+          attempt: i + 1,
+          totalCandidates: carriersToTry.length,
+        });
+
+        try {
+          const response = await this.client.post('/custom/api/v1/forward-order-orchestration', payload);
+          const data = response.data;
+
+          const isSuccess = data?.status === 1 || data?.status === 'SUCCESS' || data?.success === true || Boolean(data?.payload) || Boolean(data?.data);
+          const p = data?.payload || data?.data || data?.result;
+
+          if (isSuccess && p && (p.awb_code || p.awb)) {
+            const awbCode = p.awb_code || p.awb;
+            return {
+              orderId: p.order_id || payload.order_id,
+              shipmentId: String(p.shipment_id || p.order_id || ''),
+              awbCode,
+              courierName: p.courier_name || p.carrier_name || 'Velocity Standard',
+              courierCompanyId: p.courier_company_id || p.carrier_id,
+              labelUrl: p.label_url || '',
+              assignedDateTime: p.assigned_date_time?.date || p.assigned_date_time,
+              charges: p.charges,
+              raw: data,
+            };
+          }
+
+          const errMsg =
+            data?.meta?.message ||
+            data?.meta?.details ||
+            data?.message ||
+            data?.error ||
+            JSON.stringify(data);
+          throw new Error(`Velocity shipment creation failed: ${errMsg}`);
+        } catch (err: any) {
+          lastError = err;
+          const errPayload = err.response?.data;
+          const errStr = JSON.stringify(errPayload || err.message || '');
+          const isUnserviceableCarrier =
+            errStr.includes('NO_SERVICE_FOR_DESTINATION') ||
+            errStr.includes('ALL_CARRIERS_FAILED') ||
+            errStr.includes('A-306') ||
+            errStr.includes('not serviceable');
+
+          if (isUnserviceableCarrier && i < carriersToTry.length - 1) {
+            logger.warn('Velocity candidate carrier unserviceable, falling forward to next preference', {
+              attemptedCarrierId: candidateCarrierId,
+              nextCarrierId: carriersToTry[i + 1],
+              pincode: customerPincode,
+            });
+            continue;
+          }
+
+          throw err;
+        }
       }
 
-      const errMsg =
-        data?.meta?.message ||
-        data?.meta?.details ||
-        data?.message ||
-        data?.error ||
-        JSON.stringify(data);
-      throw new Error(`Velocity shipment creation failed: ${errMsg}`);
+      throw lastError || new Error('All Velocity candidate couriers failed');
     } catch (error: any) {
       const respData = error.response?.data;
       const msg =
@@ -704,7 +774,11 @@ export class VelocityService {
     raw?: any;
   }>> {
     const raw = await this.getRates(params);
-    const list = Array.isArray(raw?.payload)
+    const list = Array.isArray(raw?.result?.serviceable_couriers)
+      ? raw.result.serviceable_couriers
+      : Array.isArray(raw?.payload?.serviceable_couriers)
+      ? raw.payload.serviceable_couriers
+      : Array.isArray(raw?.payload)
       ? raw.payload
       : Array.isArray(raw?.data)
       ? raw.data
@@ -714,16 +788,57 @@ export class VelocityService {
       ? raw
       : [];
 
-    return list.map((item: any) => ({
-      carrierId: String(item.carrier_id ?? item.id ?? item.courier_id ?? '').trim(),
-      carrierName: String(item.carrier_name ?? item.courier_name ?? item.name ?? 'Velocity Partner').trim(),
-      freightCharge: Number(item.freight_charge ?? item.freight ?? item.rate ?? item.price ?? 0),
-      codCharge: Number(item.cod_charge ?? item.cod_fee ?? 0),
-      totalCharge: Number(item.total_charge ?? item.total_price ?? item.total ?? item.rate ?? 0),
-      expectedDeliveryDays: item.expected_delivery_days != null ? Number(item.expected_delivery_days) : undefined,
-      zone: item.zone,
-      raw: item,
-    }));
+    const mapped = list.map((item: any) => {
+      const freight = Number(
+        item.charges?.forward_freight_charges ??
+        item.charges?.freight_charges ??
+        item.freight_charge ??
+        item.freight ??
+        item.rate ??
+        item.price ??
+        0
+      );
+      const cod = Number(
+        item.charges?.cod_charges ??
+        item.charges?.cod_fee ??
+        item.cod_charge ??
+        item.cod_fee ??
+        0
+      );
+      const total = Number(
+        item.charges?.total_forward_charges ??
+        item.total_charge ??
+        item.total_price ??
+        item.total ??
+        (freight + cod)
+      );
+
+      let deliveryDays: number | undefined = undefined;
+      if (item.expected_delivery_days != null) {
+        deliveryDays = Number(item.expected_delivery_days);
+      } else if (item.expected_delivery?.delivery?.human_readable) {
+        const match = String(item.expected_delivery.delivery.human_readable).match(/\d+/);
+        if (match) deliveryDays = parseInt(match[0], 10);
+      }
+
+      return {
+        carrierId: String(item.carrier_id ?? item.id ?? item.courier_id ?? '').trim(),
+        carrierName: String(item.carrier_name ?? item.courier_name ?? item.name ?? 'Velocity Partner').trim(),
+        freightCharge: freight,
+        codCharge: cod,
+        totalCharge: total,
+        expectedDeliveryDays: deliveryDays,
+        zone: item.zone || raw?.result?.shipment_details?.zone || undefined,
+        raw: item,
+      };
+    });
+
+    return mapped.sort((a: any, b: any) => {
+      const rankA = getVelocityCarrierRank(a.carrierName || a.raw?.carrier_code);
+      const rankB = getVelocityCarrierRank(b.carrierName || b.raw?.carrier_code);
+      if (rankA !== rankB) return rankA - rankB;
+      return a.totalCharge - b.totalCharge;
+    });
   }
 
   // ═══════════════════════════════════════════════════════════

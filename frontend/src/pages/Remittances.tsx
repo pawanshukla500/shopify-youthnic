@@ -133,11 +133,38 @@ export function Remittances() {
       <p className="remittance-explainer">ZIP, XLSX or CSV, up to 7 MB. A typed UTR applies only to a single settlement; mixed files need row-wise UTRs. Duplicate payment guards remain active.</p><Button className="button-primary" loading={upload.isPending} disabled={!file} onClick={() => upload.mutate(false)}>Upload & reconcile</Button>
       {duplicate && <div className="remittance-warning"><p>This report already exists. Add missing UTRs in history rather than crediting the same rows again.</p><Button className="button-secondary" disabled={upload.isPending} onClick={() => { if (window.confirm('Reprocess this report? Existing payment duplicate guards still apply.')) upload.mutate(true) }}>Reprocess matching data</Button></div>}{outcome && <p role="status">{outcome}</p>}</Panel>}
     <nav className="remittance-provider-nav" aria-label="Settlement providers">{providers.map((name) => <button type="button" key={name} aria-pressed={provider === name} onClick={() => { setProvider(name); setFilter('All statuses'); setExpanded(null) }}>{name}</button>)}</nav>
+    {provider === 'GoKwik' && (
+      <div style={{ display: 'flex', alignItems: 'center', padding: '14px 18px', background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '10px', marginBottom: '14px', gap: '14px' }}>
+        <img src="/logos/gokwik.svg" alt="GoKwik" style={{ height: '26px', objectFit: 'contain' }} onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none' }} />
+        <div>
+          <strong style={{ display: 'block', fontSize: '14px', fontWeight: 650 }}>GoKwik Checkout & Payment Settlements</strong>
+          <span style={{ fontSize: '12px', color: 'var(--muted)' }}>Prepaid orders processed through GoKwik checkout. Upload settlement reports to match bank credits with customer payments.</span>
+        </div>
+      </div>
+    )}
+    {provider === 'PhonePe' && (
+      <div style={{ display: 'flex', alignItems: 'center', padding: '14px 18px', background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '10px', marginBottom: '14px', gap: '14px' }}>
+        <img src="/logos/phonepe.svg" alt="PhonePe" style={{ height: '26px', objectFit: 'contain' }} onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none' }} />
+        <div>
+          <strong style={{ display: 'block', fontSize: '14px', fontWeight: 650 }}>PhonePe Payment Gateway Settlements</strong>
+          <span style={{ fontSize: '12px', color: 'var(--muted)' }}>Direct UPI and PhonePe gateway settlements. Reconcile transaction IDs, merchant fees, and bank UTRs.</span>
+        </div>
+      </div>
+    )}
+    {provider === 'Delhivery' && (
+      <div style={{ display: 'flex', alignItems: 'center', padding: '14px 18px', background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '10px', marginBottom: '14px', gap: '14px' }}>
+        <img src="/logos/delhivery.svg" alt="Delhivery" style={{ height: '26px', objectFit: 'contain' }} onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none' }} />
+        <div>
+          <strong style={{ display: 'block', fontSize: '14px', fontWeight: 650 }}>Delhivery Courier Remittances & Freight Ledgers</strong>
+          <span style={{ fontSize: '12px', color: 'var(--muted)' }}>Reconcile COD remittance credits, client remittances (CRN), and freight deductions from Delhivery ONE.</span>
+        </div>
+      </div>
+    )}
     {provider === 'Velocity' && (
       <>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '10px', marginBottom: '14px', gap: '16px', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-            <img src="/logos/velocity.png" alt="Velocity" style={{ height: '26px', objectFit: 'contain' }} onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none' }} />
+            <img src="/logos/velocity.svg" alt="Velocity" style={{ height: '26px', objectFit: 'contain' }} onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none' }} />
             <div>
               <strong style={{ display: 'block', fontSize: '14px', fontWeight: 650 }}>Velocity Direct Finance & Remittance Sync</strong>
               <span style={{ fontSize: '12px', color: 'var(--muted)' }}>

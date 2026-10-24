@@ -150,6 +150,38 @@ export function isVelocityCourier(courier?: string | null, waybill?: string | nu
   return c.includes('velocity') || c.includes('shipfastt') || /^(pd|vehr|vel)/i.test(w)
 }
 
+/** Official brand logo URL for couriers and logistics partners (Brandfetch) */
+export function getCourierLogoUrl(courier?: string | null): string {
+  const c = (courier || '').toLowerCase()
+  if (c.includes('amazon') || c.includes('ats')) return '/logos/amazon.svg'
+  if (c.includes('bluedart')) return '/logos/bluedart.png'
+  if (c.includes('dtdc')) return '/logos/dtdc.png'
+  if (c.includes('xpressbee')) return '/logos/xpressbees.png'
+  if (c.includes('ekart') || c.includes('proship')) return '/logos/ekart.png'
+  if (c.includes('shadowfax')) return '/logos/shadowfax.svg'
+  if (c.includes('ecom')) return '/logos/ecomexpress.svg'
+  if (c.includes('velocity') || c.includes('shipfastt') || c.includes('shazam')) return '/logos/velocity.svg'
+  return '/logos/delhivery.svg'
+}
+
+/** Official brand logo URL for payment gateways and remittance providers (Brandfetch) */
+export function getPaymentLogoUrl(
+  provider?: string | null,
+  gateway?: string | null,
+  method?: string | null,
+  source?: string | null
+): string | null {
+  const p = `${provider || ''} ${gateway || ''} ${method || ''} ${source || ''}`.toLowerCase()
+  if (p.includes('velocity')) return '/logos/velocity.svg'
+  if (p.includes('gokwik') || p.includes('kwik')) return '/logos/gokwik.svg'
+  if (p.includes('phonepe') || p.includes('phone_pe')) return '/logos/phonepe.svg'
+  if (p.includes('easebuzz')) return '/logos/easebuzz.svg'
+  if (p.includes('razorpay')) return '/logos/razorpay.svg'
+  if (p.includes('cashfree')) return '/logos/cashfree.svg'
+  if (p.includes('delhivery')) return '/logos/delhivery.svg'
+  return null
+}
+
 /** Public carrier tracking page. Never use a packing-slip URL here — those S3 links expire. */
 export function carrierTrackingUrl(courier: string | null | undefined, waybill: string): string {
   const name = (courier || '').toLowerCase()

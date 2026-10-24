@@ -1,17 +1,21 @@
 import { Link } from 'react-router-dom'
-import { formatDate, formatMoney, labelize, getPaymentLogoUrl } from '../lib'
+import { formatDate, formatMoney, labelize, getPaymentLogoUrl, isVelocityCourier } from '../lib'
 import { orderFinancialSummary } from '../../../src/modules/orders/order-financials'
 import type { Order } from '../types'
 import { CopyableBadge, Panel, PanelHeading } from './UI'
 
 export function OrderPaymentEvidence({ order }: { order: Order }) {
   const paid = orderFinancialSummary(order, order.items || []).paid
-  const isCod = order.paymentMethod === 'COD' || /cod|cash/i.test(order.paymentMethod || '')
+  const isCod =
+    order.paymentMethod === 'COD' ||
+    /cod|cash/i.test(order.paymentMethod || '') ||
+    order.shipment?.paymentMode === 'COD' ||
+    /cod|cash/i.test(order.shipment?.paymentMode || '')
+
   const isVelocityShipment = Boolean(
-    order.shipment?.courier &&
-      (order.shipment.courier.toLowerCase().includes('velocity') ||
-        order.shipment.labelUrl?.includes('velocity') ||
-        order.paymentReceivedSource === 'Velocity')
+    isVelocityCourier(order.shipment?.courier, order.shipment?.waybillNumber) ||
+    order.shipment?.labelUrl?.includes('velocity') ||
+    order.paymentReceivedSource === 'Velocity'
   )
 
   const paymentLogo = getPaymentLogoUrl(order.paymentProvider, order.paymentGateway, order.paymentMethod)

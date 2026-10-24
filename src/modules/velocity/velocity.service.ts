@@ -396,18 +396,34 @@ export class VelocityService {
     const baseOrderId = order.shopifyOrderName.startsWith('#')
       ? order.shopifyOrderName
       : `#${order.shopifyOrderName}`;
-    const hasCancelledShipment = Boolean(
+    let hasCancelledShipment = Boolean(
       (order as any).shipment?.status === 'CANCELLED' && (order as any).shipment?.waybillNumber
     );
+    if (!hasCancelledShipment && order.id) {
+      try {
+        const existingShipment = await prisma.shipment.findUnique({ where: { orderId: order.id } });
+        if (existingShipment?.status === 'CANCELLED' && existingShipment?.waybillNumber) {
+          hasCancelledShipment = true;
+        }
+      } catch {
+        // non-fatal DB query fallback
+      }
+    }
     const orderId = hasCancelledShipment ? `${baseOrderId}-R1` : baseOrderId;
 
     // Carrier priority list: 1. Amazon Transportation, 2. Ekart Standard, 3. Delhivery Standard, 4. Shadowfax Standard
     let carriersToTry: string[] = [];
     if (options?.carrierId) {
       carriersToTry.push(options.carrierId);
-      for (const p of VELOCITY_PRIORITY_CARRIERS) {
-        if (!carriersToTry.includes(p.id)) {
-          carriersToTry.push(p.id);
+      const chosenIndex = VELOCITY_PRIORITY_CARRIERS.findIndex((p) => p.id === options.carrierId);
+      if (chosenIndex >= 0) {
+        // Fall forward only to downstream priority carriers, never backwards to a higher-ranked one
+        for (let idx = chosenIndex + 1; idx < VELOCITY_PRIORITY_CARRIERS.length; idx++) {
+          carriersToTry.push(VELOCITY_PRIORITY_CARRIERS[idx].id);
+        }
+      } else {
+        for (const p of VELOCITY_PRIORITY_CARRIERS) {
+          if (!carriersToTry.includes(p.id)) carriersToTry.push(p.id);
         }
       }
     } else {

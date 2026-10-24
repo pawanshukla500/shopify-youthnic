@@ -798,7 +798,7 @@ class OrderService {
     // Refresh order after payment verification may have updated it
     const verifiedOrder = await prisma.order.findUnique({
       where: { id: orderId },
-      include: { items: true },
+      include: { items: true, shipment: true },
     });
     if (!verifiedOrder) {
       throw new Error(`Order not found after verification: ${orderId}`);

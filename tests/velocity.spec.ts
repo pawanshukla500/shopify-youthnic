@@ -653,6 +653,50 @@ describe('Velocity Shipping Integration', () => {
         'Velocity'
       );
     });
+
+    it('ignores webhook for a superseded waybill when matched via order fallback to protect active shipment', async () => {
+      // 1. Shipment findFirst by waybillNumber returns null (old waybill not bound to shipment)
+      prismaStub.shipment.findFirst.mockResolvedValueOnce(null);
+      // 2. Order findFirst by orderRef fallback returns order with active, different shipment waybill
+      prismaStub.order.findFirst.mockResolvedValueOnce({
+        id: 1978,
+        shopifyOrderName: '#26YOU6156',
+        shipment: {
+          id: 1486,
+          waybillNumber: 'VELP1504737675', // active shipment with different waybill
+          status: 'CREATED',
+          trackingStatus: 'Ready for Pickup / Manifested',
+        },
+      });
+
+      const req: any = {
+        body: {
+          event: 'status_change',
+          event_id: 'evt-superseded',
+          data: {
+            tracking_number: '77258553330', // old cancelled waybill
+            order_display_id: '#26YOU6156',
+            status: 'cancelled',
+            carrier_name: 'Bluedart Standard',
+          },
+        },
+        headers: {},
+      };
+      const res: any = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn(),
+      };
+
+      await handleVelocityWebhook(req, res);
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+        success: true,
+        message: expect.stringContaining('superseded waybill'),
+      }));
+      // Must NOT update shipment or trigger handleStatusChange for superseded waybill!
+      expect(prismaStub.shipment.update).not.toHaveBeenCalled();
+      expect(trackingServiceStub.handleStatusChange).not.toHaveBeenCalled();
+    });
   });
 
   describe('Velocity Reports & Finance APIs', () => {

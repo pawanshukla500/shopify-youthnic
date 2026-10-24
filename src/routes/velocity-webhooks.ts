@@ -116,6 +116,19 @@ export async function handleVelocityWebhook(req: Request, res: Response): Promis
       });
 
       if (order?.shipment) {
+        if (order.shipment.waybillNumber && order.shipment.waybillNumber !== trackingNumber) {
+          logger.warn('Velocity webhook ignored: matches superseded waybill on order with active shipment', {
+            trackingNumber,
+            activeWaybill: order.shipment.waybillNumber,
+            orderName: order.shopifyOrderName,
+            status: rawStatus,
+          });
+          res.status(200).json({
+            success: true,
+            message: 'Webhook received for superseded waybill, ignored to protect active shipment',
+          });
+          return;
+        }
         shipment = { ...order.shipment, order } as any;
       }
     }

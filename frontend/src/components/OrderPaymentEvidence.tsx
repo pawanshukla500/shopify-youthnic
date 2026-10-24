@@ -85,7 +85,7 @@ export function OrderPaymentEvidence({ order }: { order: Order }) {
               ? isVelocityShipment
                 ? 'COD order handled via Velocity. Cash is collected at doorstep by the delivery agent and remitted directly to Youthnic.'
                 : 'Customer payment is collected at doorstep in cash by the courier partner upon delivery.'
-              : 'Prepaid order: payment was captured at checkout via GoKwik / PhonePe.'}
+              : `Prepaid order: payment was captured at checkout via ${order.paymentProvider || order.paymentGateway || 'online payment gateway'}.`}
           </p>
         </div>
         <div>
@@ -107,7 +107,9 @@ export function OrderPaymentEvidence({ order }: { order: Order }) {
               <dt>Remittance Status</dt>
               <dd>
                 {isCod && isVelocityShipment && order.shipment?.codRemitted
-                  ? 'Remitted by Velocity via Bank UTR'
+                  ? (order.paymentReceivedUtr || (order.shipment?.codRemittanceRef && order.shipment.codRemittanceRef !== 'VELOCITY_REMITTANCE'))
+                    ? 'Remitted by Velocity via Bank UTR'
+                    : 'Remitted by Velocity · Bank UTR in transit'
                   : isCod && isVelocityShipment && order.shipment?.codCollected
                   ? 'Cash Collected · Awaiting Velocity Remittance Cycle'
                   : !order.paymentReceivedAt

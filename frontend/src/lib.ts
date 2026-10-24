@@ -154,7 +154,7 @@ export function isVelocityCourier(courier?: string | null, waybill?: string | nu
 export function getCourierLogoUrl(courier?: string | null): string {
   const c = (courier || '').toLowerCase()
   if (c.includes('amazon') || c.includes('ats')) return '/logos/amazon.svg'
-  if (c.includes('bluedart')) return '/logos/bluedart.png'
+  if (c.includes('bluedart') || c.includes('blue dart')) return '/logos/bluedart.png'
   if (c.includes('dtdc')) return '/logos/dtdc.png'
   if (c.includes('xpressbee')) return '/logos/xpressbees.png'
   if (c.includes('ekart') || c.includes('proship')) return '/logos/ekart.png'

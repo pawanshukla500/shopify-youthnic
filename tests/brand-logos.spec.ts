@@ -8,6 +8,8 @@ describe('Brandfetch Logos & Payment Partner Mapping', () => {
     expect(getCourierLogoUrl('Velocity')).toBe('/logos/velocity.svg');
     expect(getCourierLogoUrl('Velocity (Amazon Transportation)')).toBe('/logos/amazon.svg');
     expect(getCourierLogoUrl('BlueDart Standard')).toBe('/logos/bluedart.png');
+    expect(getCourierLogoUrl('Blue Dart Express')).toBe('/logos/bluedart.png');
+    expect(getCourierLogoUrl('Velocity (Blue Dart)')).toBe('/logos/bluedart.png');
     expect(getCourierLogoUrl('DTDC Express')).toBe('/logos/dtdc.png');
     expect(getCourierLogoUrl('XpressBees Air')).toBe('/logos/xpressbees.png');
     expect(getCourierLogoUrl('Ekart Standard')).toBe('/logos/ekart.png');

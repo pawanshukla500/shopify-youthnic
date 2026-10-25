@@ -559,7 +559,7 @@ class OrderService {
    */
   async fetchAndReconcileOrderFulfillment(orderId: number): Promise<{
     found: boolean;
-    source?: 'shopify' | 'delhivery_one' | 'existing';
+    source?: 'shopify' | 'delhivery_one' | 'velocity' | 'existing';
     waybillNumber?: string;
     courier?: string;
     order?: any;
@@ -817,7 +817,7 @@ class OrderService {
 
           return {
             found: true,
-            source: 'velocity' as any,
+            source: 'velocity',
             waybillNumber: awb,
             courier: carrierName,
             order: updated,

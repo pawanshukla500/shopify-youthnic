@@ -115,21 +115,41 @@ export async function handleVelocityWebhook(req: Request, res: Response): Promis
         include: { shipment: true, items: true },
       });
 
-      if (order?.shipment) {
-        if (order.shipment.waybillNumber && order.shipment.waybillNumber !== trackingNumber) {
-          logger.warn('Velocity webhook ignored: matches superseded waybill on order with active shipment', {
-            trackingNumber,
-            activeWaybill: order.shipment.waybillNumber,
-            orderName: order.shopifyOrderName,
-            status: rawStatus,
+      if (order) {
+        if (order.shipment) {
+          if (order.shipment.waybillNumber && order.shipment.waybillNumber !== trackingNumber) {
+            logger.warn('Velocity webhook ignored: matches superseded waybill on order with active shipment', {
+              trackingNumber,
+              activeWaybill: order.shipment.waybillNumber,
+              orderName: order.shopifyOrderName,
+              status: rawStatus,
+            });
+            res.status(200).json({
+              success: true,
+              message: 'Webhook received for superseded waybill, ignored to protect active shipment',
+            });
+            return;
+          }
+          shipment = { ...order.shipment, order } as any;
+        } else {
+          const createdShipment = await prisma.shipment.create({
+            data: {
+              orderId: order.id,
+              waybillNumber: trackingNumber,
+              courier: data.carrier_name ? `Velocity (${data.carrier_name})` : 'Velocity',
+              paymentMode: order.paymentMethod === 'COD' ? 'COD' : 'Pre-paid',
+              codAmount: order.paymentMethod === 'COD' ? order.totalAmount || 0 : 0,
+              status: 'CREATED',
+              trackingStatus: 'Label generated',
+              labelUrl: data.label_url || undefined,
+            },
           });
-          res.status(200).json({
-            success: true,
-            message: 'Webhook received for superseded waybill, ignored to protect active shipment',
+          await prisma.order.update({
+            where: { id: order.id },
+            data: { status: 'DISPATCHED', dispatchedAt: order.dispatchedAt || new Date() },
           });
-          return;
+          shipment = { ...createdShipment, order } as any;
         }
-        shipment = { ...order.shipment, order } as any;
       }
     }
 

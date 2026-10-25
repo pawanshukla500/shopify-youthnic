@@ -330,6 +330,7 @@ class OrderService {
       },
       select: {
         id: true,
+        status: true,
         shopifyOrderId: true,
         shopifyOrderName: true,
         shopifyOrderNumber: true,
@@ -459,6 +460,93 @@ class OrderService {
 
       reconciledCount++;
     }
+
+    // Also reconcile against Velocity Shipping Aggregator
+    if (config.velocity.apiToken) {
+      try {
+        const velRes = await velocityService.getShipmentsList({ page: 1, per_page: 50 });
+        const items = velRes.data || [];
+        for (const item of items) {
+          const attr = item?.attributes || {};
+          const awb = attr.tracking_number;
+          if (!awb) continue;
+
+          const dId = (attr.order?.display_id || attr.order?.external_id || '').trim();
+          if (!dId) continue;
+
+          const order = ordersPendingAwb.find((o) => {
+            const nameClean = o.shopifyOrderName.replace('#', '').trim().toLowerCase();
+            const rawName = o.shopifyOrderName.trim().toLowerCase();
+            const orderId = (o.shopifyOrderId || '').trim().toLowerCase();
+            const orderNum = String(o.shopifyOrderNumber || '').trim().toLowerCase();
+            const target = dId.replace('#', '').trim().toLowerCase();
+            return (
+              target === nameClean ||
+              target === rawName ||
+              target === orderId ||
+              target === orderNum
+            );
+          });
+          if (!order) continue;
+
+          const carrierName = attr.carrier?.name ? `Velocity (${attr.carrier.name})` : 'Velocity';
+          const mapped = velocityService.mapTrackingToShipmentStatus(attr.status || 'ready_for_pickup');
+
+          await prisma.shipment.upsert({
+            where: { orderId: order.id },
+            create: {
+              orderId: order.id,
+              waybillNumber: String(awb).trim(),
+              courier: carrierName,
+              paymentMode: order.paymentMethod === 'COD' ? 'COD' : 'Pre-paid',
+              codAmount: order.paymentMethod === 'COD' ? order.totalAmount : 0,
+              declaredValue: order.totalAmount,
+              status: mapped.shipmentStatus,
+              trackingStatus: mapped.description,
+              labelUrl: attr.label_url || undefined,
+              trackingUpdatedAt: new Date(),
+            },
+            update: {
+              waybillNumber: String(awb).trim(),
+              courier: carrierName,
+              status: mapped.shipmentStatus,
+              trackingStatus: mapped.description,
+              labelUrl: attr.label_url || undefined,
+              trackingUpdatedAt: new Date(),
+            },
+          });
+
+          await prisma.order.update({
+            where: { id: order.id },
+            data: {
+              status: (mapped.orderStatus === 'CANCELLED' ? order.status : mapped.orderStatus) as any,
+              dispatchedAt: order.dispatchedAt || new Date(),
+            },
+          });
+
+          if (!order.fulfillmentStatus || order.fulfillmentStatus !== 'fulfilled') {
+            try {
+              await shopifyService.fulfillOrderOnShopify(
+                order.shopifyOrderId,
+                String(awb).trim(),
+                attr.carrier?.name || 'Velocity',
+                `https://www.velocityshipping.in/track/${encodeURIComponent(String(awb).trim())}`
+              );
+            } catch (shopErr: any) {
+              logger.debug('Shopify fulfillment sync skipped during Velocity reconciliation', {
+                orderId: order.id,
+                error: shopErr.message,
+              });
+            }
+          }
+
+          reconciledCount++;
+        }
+      } catch (velErr: any) {
+        logger.warn('Velocity shipment reconciliation encountered error', { error: velErr.message });
+      }
+    }
+
     return reconciledCount;
   }
 
@@ -650,6 +738,99 @@ class OrderService {
         orderId,
         error: err.message,
       });
+    }
+
+    // Step 2.5: Check Velocity Shipping Aggregator
+    if (config.velocity.apiToken && (!order.shipment || !order.shipment.waybillNumber)) {
+      try {
+        const velRes = await velocityService.getShipmentsList({ search: order.shopifyOrderName });
+        const items = velRes.data || [];
+        const matching = items.find((item: any) => {
+          const attr = item?.attributes || {};
+          const dId = (attr.order?.display_id || attr.order?.external_id || '').trim().toLowerCase();
+          const target = order.shopifyOrderName.trim().toLowerCase();
+          return (
+            attr.tracking_number &&
+            (dId === target ||
+              dId === '#' + target.replace('#', '') ||
+              dId.replace('#', '') === target.replace('#', ''))
+          );
+        });
+
+        if (matching) {
+          const attr = matching.attributes;
+          const awb = String(attr.tracking_number).trim();
+          const carrierName = attr.carrier?.name ? `Velocity (${attr.carrier.name})` : 'Velocity';
+          const mapped = velocityService.mapTrackingToShipmentStatus(attr.status || 'ready_for_pickup');
+
+          const dbShipment = await prisma.shipment.upsert({
+            where: { orderId: order.id },
+            update: {
+              waybillNumber: awb,
+              courier: carrierName,
+              status: mapped.shipmentStatus,
+              trackingStatus: mapped.description,
+              labelUrl: attr.label_url || undefined,
+              trackingUpdatedAt: new Date(),
+            },
+            create: {
+              orderId: order.id,
+              waybillNumber: awb,
+              courier: carrierName,
+              paymentMode: order.paymentMethod === 'COD' ? 'COD' : 'Pre-paid',
+              codAmount: order.paymentMethod === 'COD' ? order.totalAmount || 0 : 0,
+              status: mapped.shipmentStatus,
+              trackingStatus: mapped.description,
+              labelUrl: attr.label_url || undefined,
+              trackingUpdatedAt: new Date(),
+            },
+          });
+
+          await prisma.order.update({
+            where: { id: order.id },
+            data: {
+              status: (mapped.orderStatus === 'CANCELLED' ? order.status : mapped.orderStatus) as any,
+              dispatchedAt: order.dispatchedAt || new Date(),
+            },
+          });
+
+          if (!order.fulfillmentStatus || order.fulfillmentStatus !== 'fulfilled') {
+            try {
+              await shopifyService.fulfillOrderOnShopify(
+                order.shopifyOrderId,
+                awb,
+                attr.carrier?.name || 'Velocity',
+                `https://www.velocityshipping.in/track/${encodeURIComponent(awb)}`
+              );
+            } catch (shopErr: any) {
+              logger.debug('Shopify fulfillment sync skipped during Velocity reconciliation', {
+                orderId: order.id,
+                error: shopErr.message,
+              });
+            }
+          }
+
+          const updated = await prisma.order.findUnique({
+            where: { id: order.id },
+            include: { shipment: true },
+          });
+
+          return {
+            found: true,
+            source: 'velocity' as any,
+            waybillNumber: awb,
+            courier: carrierName,
+            order: updated,
+            shipment: dbShipment,
+            message: `Fulfillment details retrieved from Velocity (${carrierName}: ${awb})`,
+          };
+        }
+      } catch (err: any) {
+        logger.warn('Failed to check Velocity in fetchAndReconcileOrderFulfillment', {
+          orderId,
+          error: err.message,
+        });
+      }
     }
 
     // Step 3: If already has waybill in DB
@@ -849,15 +1030,24 @@ class OrderService {
     // would stay on the yellow badge forever even though Delhivery has the
     // shipment. Pre-PR #10 round-2 finding (round-2 audit G3 was about EPOD
     // webhook gaps; this is the same class of bug for the dispatch flow).
+    const shipmentData = {
+      status: 'CREATED' as const,
+      trackingStatus: 'Label generated',
+      courier: courierToSave,
+      waybillNumber,
+      paymentMode: verifiedOrder.paymentMethod === 'COD' ? 'COD' : 'Pre-paid',
+      codAmount: verifiedOrder.paymentMethod === 'COD' ? verifiedOrder.totalAmount || 0 : 0,
+      declaredValue: verifiedOrder.totalAmount || undefined,
+      ...(labelUrl ? { labelUrl } : {}),
+    };
+
     const [, promoted] = await prisma.$transaction([
-      prisma.shipment.update({
+      prisma.shipment.upsert({
         where: { orderId: order.id },
-        data: {
-          status: 'CREATED',
-          trackingStatus: 'Label generated',
-          courier: courierToSave,
-          waybillNumber,
-          ...(labelUrl ? { labelUrl } : {}),
+        update: shipmentData,
+        create: {
+          orderId: order.id,
+          ...shipmentData,
         },
       }),
       // Conditional: a Shopify cancel that landed during the manifest call

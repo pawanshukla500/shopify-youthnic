@@ -21,6 +21,7 @@ const { prismaStub, velocityServiceStub, reconStub } = vi.hoisted(() => ({
     reconciliationImport: {
       create: vi.fn(),
       findFirst: vi.fn(),
+      update: vi.fn(),
     },
     accountTrailEvent: {
       create: vi.fn(),
@@ -197,6 +198,35 @@ describe('VelocityFinancialSyncService', () => {
           }),
         })
       );
+    });
+
+    it('updates existing daily ReconciliationImport record instead of creating duplicates', async () => {
+      prismaStub.reconciliationImport.findFirst.mockResolvedValueOnce({
+        id: 79,
+        fileName: `Velocity-Auto-Sync-${new Date().toISOString().slice(0, 10)}`,
+      });
+      prismaStub.reconciliationImport.update.mockResolvedValueOnce({ id: 79 });
+      velocityServiceStub.getCodRemittance.mockResolvedValueOnce([
+        {
+          trackingNumber: 'VEL123',
+          error: null,
+        },
+      ]);
+      velocityServiceStub.getShippingCharges.mockResolvedValueOnce([]);
+      velocityServiceStub.getSummaryReport.mockResolvedValueOnce({ summary: {} });
+
+      const result = await service.syncVelocityFinancials({ awbs: ['VEL123'] });
+
+      expect(result.success).toBe(true);
+      expect(prismaStub.reconciliationImport.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 79 },
+          data: expect.objectContaining({
+            uploadedBy: 'Velocity Financial Auto-Sync',
+          }),
+        })
+      );
+      expect(prismaStub.reconciliationImport.create).not.toHaveBeenCalled();
     });
 
     it('gracefully handles non-existent AWBs returned with error from Velocity API', async () => {

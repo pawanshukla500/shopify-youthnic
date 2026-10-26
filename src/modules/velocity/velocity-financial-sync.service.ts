@@ -438,7 +438,7 @@ export class VelocityFinancialSyncService {
       });
     }
 
-    // ── 5. Record ReconciliationImport Entry ──────────────────
+    // ── 5. Record ReconciliationImport Entry (Upsert per day) ─
     const matchedOrders = Array.from(matchedMap.values());
     const fileName = `Velocity-Auto-Sync-${new Date().toISOString().slice(0, 10)}`;
     const defaultRef = `VEL-BATCH-${Date.now()}`;
@@ -446,31 +446,51 @@ export class VelocityFinancialSyncService {
 
     let importId: number | undefined;
     try {
-      const imp = await prisma.reconciliationImport.create({
-        data: {
-          kind: 'VELOCITY_REMITTANCE',
-          fileName,
-          rowCount: candidateAwbs.length,
-          matchedCount: matchedOrders.length,
-          unmatched: unmatchedAwbs.slice(0, 500),
-          summary: {
-            remittanceNumber: defaultRef,
-            remittanceDate: new Date().toISOString().slice(0, 10),
-            bankTransactionId: defaultUtr,
-            state: 'Completed',
-            totalRemittance: Math.round(totalRemittanceAmount * 100) / 100,
-            totalBilledCharges: Math.round(totalBilledCharges * 100) / 100,
-            remittancesMatched,
-            chargesAudited,
-            matchedOrders: matchedOrders.slice(0, 500),
-            summaryReport: forwardSummary?.summary || null,
-            syncedAt: new Date().toISOString(),
-            notes,
-          } as any,
-          uploadedBy: options.actor?.name || 'Velocity Financial Auto-Sync',
-        },
+      const existing = await prisma.reconciliationImport.findFirst({
+        where: { kind: 'VELOCITY_REMITTANCE', fileName },
+        orderBy: { id: 'desc' },
       });
-      importId = imp.id;
+
+      const importData = {
+        rowCount: candidateAwbs.length,
+        matchedCount: matchedOrders.length,
+        unmatched: unmatchedAwbs.slice(0, 500),
+        summary: {
+          remittanceNumber: defaultRef,
+          remittanceDate: new Date().toISOString().slice(0, 10),
+          bankTransactionId: defaultUtr,
+          state: 'Completed',
+          totalRemittance: Math.round(totalRemittanceAmount * 100) / 100,
+          totalBilledCharges: Math.round(totalBilledCharges * 100) / 100,
+          remittancesMatched,
+          chargesAudited,
+          matchedOrders: matchedOrders.slice(0, 500),
+          summaryReport: forwardSummary?.summary || null,
+          syncedAt: new Date().toISOString(),
+          notes,
+        } as any,
+        uploadedBy: options.actor?.name || 'Velocity Financial Auto-Sync',
+      };
+
+      if (existing) {
+        const imp = await prisma.reconciliationImport.update({
+          where: { id: existing.id },
+          data: {
+            ...importData,
+            createdAt: new Date(),
+          },
+        });
+        importId = imp.id;
+      } else {
+        const imp = await prisma.reconciliationImport.create({
+          data: {
+            kind: 'VELOCITY_REMITTANCE',
+            fileName,
+            ...importData,
+          },
+        });
+        importId = imp.id;
+      }
     } catch (saveErr: any) {
       logger.warn('Could not persist Velocity reconciliation import record', {
         error: saveErr.message,

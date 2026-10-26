@@ -62,6 +62,9 @@ export interface ImportResult {
   /** Which header was used for each field, so a wrong guess is visible. */
   columns: Record<string, string | undefined>;
   notes: string[];
+  extractedFiles?: Array<{ fileName: string; sheetName: string; rowCount: number }>;
+  storageMode?: string;
+  zipStoredOnDisk?: boolean;
 }
 
 export interface RemittanceDefaults {
@@ -124,9 +127,20 @@ export async function findOrderByReference(reference: string) {
   return matches[0] || null;
 }
 
+function getExtractedFiles(sheets: ParsedSheet[]): Array<{ fileName: string; sheetName: string; rowCount: number }> {
+  return sheets
+    .filter((s) => s.isZipExtracted && s.sourceFile)
+    .map((s) => ({
+      fileName: s.sourceFile!,
+      sheetName: s.name,
+      rowCount: s.rows.length,
+    }));
+}
+
 async function saveImport(result: ImportResult, uploadedBy?: string): Promise<ImportResult> {
   const evidence = result.kind === 'DELHIVERY_CHARGES' ? {} : settlementEvidence(result.matchedOrders || []);
   result = { ...result, ...evidence };
+  const isZip = result.fileName.toLowerCase().endsWith('.zip') || Boolean(result.extractedFiles?.length);
   try {
     const row = await prisma.reconciliationImport.create({
       data: {
@@ -138,6 +152,10 @@ async function saveImport(result: ImportResult, uploadedBy?: string): Promise<Im
         summary: {
           columns: result.columns,
           notes: result.notes,
+          storageMode: result.storageMode || 'POSTGRESQL_RELATIONAL_DATA',
+          zipStoredOnDisk: false,
+          extractedFromZip: isZip,
+          extractedFiles: result.extractedFiles || null,
           skippedDuplicates: (result.skippedDuplicates || []).slice(0, 500),
           alreadyRemittedCount: result.skippedDuplicates?.length || 0,
           remittanceNumber: result.remittanceNumber || null,
@@ -224,6 +242,7 @@ export async function importDelhiveryRemittance(
   uploadedBy?: string,
   actor?: AccountTrailActor
 ): Promise<ImportResult> {
+  const extractedFiles = getExtractedFiles(sheets);
   const headers = sheets.flatMap((s) => s.headers);
   const columns = {
     awb: pickColumn(headers, AWB_COLUMN),
@@ -259,6 +278,9 @@ export async function importDelhiveryRemittance(
         skippedDuplicates: [],
         columns,
         notes: [`No Waybill / AWB or Order Number column found. Columns in the file: ${headers.join(', ')}`],
+        extractedFiles: getExtractedFiles(sheets),
+        storageMode: 'POSTGRESQL_RELATIONAL_DATA',
+        zipStoredOnDisk: false,
       },
       uploadedBy
     );
@@ -431,6 +453,7 @@ export async function importDelhiveryRemittance(
       matchedOrders,
       columns,
       notes,
+      extractedFiles,
     },
     uploadedBy
   );
@@ -510,6 +533,9 @@ export async function importDelhiveryCharges(
         unmatched: [],
         columns,
         notes: [`Need an AWB and an amount column. Columns in the file: ${headers.join(', ')}`],
+        extractedFiles: getExtractedFiles(sheets),
+        storageMode: 'POSTGRESQL_RELATIONAL_DATA',
+        zipStoredOnDisk: false,
       },
       uploadedBy
     );
@@ -818,6 +844,9 @@ export async function importDelhiveryCharges(
       remittanceNumber: cleanFileName,
       remittanceDate: new Date().toISOString(),
       matchedOrders,
+      extractedFiles: getExtractedFiles(sheets),
+      storageMode: 'POSTGRESQL_RELATIONAL_DATA',
+      zipStoredOnDisk: false,
     },
     uploadedBy
   );
@@ -876,6 +905,9 @@ export async function importGatewaySettlement(
         unmatched: [],
         columns,
         notes: [`No order or transaction id column found. Columns in the file: ${headers.join(', ')}`],
+        extractedFiles: getExtractedFiles(sheets),
+        storageMode: 'POSTGRESQL_RELATIONAL_DATA',
+        zipStoredOnDisk: false,
       },
       uploadedBy
     );
@@ -1016,6 +1048,9 @@ export async function importGatewaySettlement(
       bankTransactionId: primaryUtr,
       state: primaryUtr ? 'Completed' : 'Pending',
       matchedOrders,
+      extractedFiles: getExtractedFiles(sheets),
+      storageMode: 'POSTGRESQL_RELATIONAL_DATA',
+      zipStoredOnDisk: false,
     },
     uploadedBy
   );
@@ -1066,6 +1101,9 @@ export async function importCarrierRemittance(
         skippedDuplicates: [],
         columns,
         notes: [`No Waybill / AWB or Order Number column found. Columns in the file: ${headers.join(', ')}`],
+        extractedFiles: getExtractedFiles(sheets),
+        storageMode: 'POSTGRESQL_RELATIONAL_DATA',
+        zipStoredOnDisk: false,
       },
       uploadedBy
     );
@@ -1189,6 +1227,9 @@ export async function importCarrierRemittance(
       matchedOrders,
       columns,
       notes,
+      extractedFiles: getExtractedFiles(sheets),
+      storageMode: 'POSTGRESQL_RELATIONAL_DATA',
+      zipStoredOnDisk: false,
     },
     uploadedBy
   );

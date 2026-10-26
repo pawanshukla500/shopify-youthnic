@@ -41,3 +41,9 @@
 .remittance-workspace .button-secondary { background:var(--panel); color:var(--ink); border-color:var(--line); }
 @media(max-width:900px) { .remittance-header { flex-direction:column; } .remittance-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); } .remittance-metrics>div { border-bottom:1px solid var(--line); } }
 @media(max-width:560px) { .remittance-form-grid { grid-template-columns:minmax(0,1fr); } .remittance-metrics strong { font-size:20px; } .remittance-workspace .panel { padding:16px; } .remittance-header h1 { font-size:23px; } }
+
+.remittance-storage-badge { display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:4px; background:#eff6ff; color:#1d4ed8; font-size:11px; font-weight:550; margin-top:4px; border:1px solid #bfdbfe; }
+[data-theme="dark"] .remittance-storage-badge { background:#1e293b; color:#93c5fd; border-color:#334155; }
+.remittance-extraction-meta { margin-bottom:14px; padding:12px 14px; background:var(--panel); border:1px solid var(--line); border-radius:8px; font-size:12px; }
+.remittance-extraction-meta ul { margin:6px 0 6px 16px; padding:0; }
+.remittance-extraction-meta li { margin-bottom:3px; }

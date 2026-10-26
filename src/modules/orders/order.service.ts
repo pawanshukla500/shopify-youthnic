@@ -1058,14 +1058,23 @@ class OrderService {
       ...(labelUrl ? { labelUrl } : {}),
     };
 
+    // Fetch fresh state to prevent overwriting updates from concurrent webhooks
+    const currentOrder = await prisma.order.findUnique({
+      where: { id: order.id },
+      include: { shipment: true },
+    });
+
+    const isAdvancedShipment = ['IN_TRANSIT', 'OUT_FOR_DELIVERY', 'DELIVERED'].includes(currentOrder?.shipment?.status || '');
+    const isAdvancedOrder = ['IN_TRANSIT', 'OUT_FOR_DELIVERY', 'DELIVERED'].includes(currentOrder?.status || '');
+
     const [, promoted] = await prisma.$transaction([
       prisma.shipment.upsert({
         where: { orderId: order.id },
         update: {
           ...shipmentData,
-          status: ['IN_TRANSIT', 'OUT_FOR_DELIVERY', 'DELIVERED'].includes(verifiedOrder.shipment?.status || '')
-            ? (verifiedOrder.shipment!.status as any)
-            : 'CREATED',
+          ...(isAdvancedShipment
+            ? { status: currentOrder!.shipment!.status, trackingStatus: currentOrder!.shipment!.trackingStatus }
+            : {}),
         },
         create: {
           orderId: order.id,
@@ -1073,10 +1082,14 @@ class OrderService {
         },
       }),
       // Conditional: a Shopify cancel that landed during the manifest call
-      // must not be overwritten back to DISPATCHED.
+      // must not be overwritten back to DISPATCHED. Concurrently advanced states
+      // (IN_TRANSIT, OUT_FOR_DELIVERY, DELIVERED) are preserved.
       prisma.order.updateMany({
         where: { id: order.id, status: { in: ['NEW', 'DISPATCH_PENDING', 'DISPATCHED', 'IN_TRANSIT', 'OUT_FOR_DELIVERY', 'DELIVERED'] } },
-        data: { status: 'DISPATCHED', dispatchedAt: new Date() },
+        data: {
+          status: isAdvancedOrder ? currentOrder!.status : 'DISPATCHED',
+          dispatchedAt: currentOrder?.dispatchedAt || new Date(),
+        },
       }),
     ]);
 

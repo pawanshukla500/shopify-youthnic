@@ -130,7 +130,20 @@ export async function handleVelocityWebhook(req: Request, res: Response): Promis
             });
             return;
           }
-          shipment = { ...order.shipment, order } as any;
+          // If the existing shipment record has no waybill assigned, bind the incoming tracking number
+          if (!order.shipment.waybillNumber) {
+            const updatedShipment = await prisma.shipment.update({
+              where: { id: order.shipment.id },
+              data: {
+                waybillNumber: trackingNumber,
+                courier: data.carrier_name ? `Velocity (${data.carrier_name})` : (order.shipment.courier || 'Velocity'),
+                labelUrl: data.label_url || order.shipment.labelUrl || undefined,
+              },
+            });
+            shipment = { ...updatedShipment, order } as any;
+          } else {
+            shipment = { ...order.shipment, order } as any;
+          }
         } else {
           // Guard: if the order is already CANCELLED or REFUNDED, do not reopen it to DISPATCHED
           const isTerminated = ['CANCELLED', 'REFUNDED'].includes(order.status);

@@ -46,7 +46,7 @@ const { prismaStub, reconStub } = vi.hoisted(() => ({
 
 vi.mock('../src/database/prisma', () => ({ default: { ...prismaStub, $transaction: vi.fn(async (cb: any) => cb(prismaStub)) } }));
 
-describe('ZIP Excel In-Memory Extraction & PostgreSQL Storage', () => {
+describe('ZIP Excel In-Memory Extraction & Prisma Storage Pipeline', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     prismaStub.order.findUnique.mockImplementation(async ({ where }: any) => ({
@@ -323,6 +323,10 @@ describe('ZIP Excel In-Memory Extraction & PostgreSQL Storage', () => {
               dir: false,
               name: 'report.xlsx',
               _data: { uncompressedSize: 5000 },
+              nodeStream: vi.fn(() => {
+                const { Readable } = require('stream');
+                return Readable.from([Buffer.from('PK...mock')]);
+              }),
               async: vi.fn().mockResolvedValue(Buffer.from('PK...mock')),
             } as any,
           },

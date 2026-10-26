@@ -215,18 +215,12 @@ const MAX_XLSX_ENTRY_BYTES = 25 * 1024 * 1024; // 25 MB max per embedded XLSX
 
 function streamZipEntry(file: JSZip.JSZipObject, maxRemainingBytes: number): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    let entryTotal = 0;
     const stream = (file as any).nodeStream ? (file as any).nodeStream('nodebuffer') : null;
     if (!stream) {
-      return file.async('nodebuffer').then((buf) => {
-        if (buf.length > maxRemainingBytes) {
-          reject(new Error('Zip archive uncompressed content exceeds the maximum allowed limit (50 MB).'));
-        } else {
-          resolve(buf);
-        }
-      }, reject);
+      return reject(new Error('Zip decompression stream unavailable; operation aborted for security.'));
     }
+    const chunks: Buffer[] = [];
+    let entryTotal = 0;
     let done = false;
 
     stream.on('data', (chunk: Buffer) => {

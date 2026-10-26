@@ -46,16 +46,23 @@ export function extractVelocityErrorMessage(data: any, fallbackMessage?: string)
     }
   }
 
-  // 1. Direct message/detail fields
-  const message =
-    data.meta?.message ||
-    data.meta?.details ||
-    data.message ||
-    data.error ||
-    data.detail ||
-    data.payload?.message ||
-    data.payload?.error ||
-    data.result?.message;
+  // 1. Direct message/detail fields - combine meta.message and meta.details if distinct so details are not lost
+  const metaMsg = typeof data.meta?.message === 'string' ? data.meta.message.trim() : undefined;
+  const metaDetails = typeof data.meta?.details === 'string' ? data.meta.details.trim() : undefined;
+  let message: string | undefined;
+  if (metaMsg && metaDetails && metaMsg !== metaDetails) {
+    message = metaMsg + ' (' + metaDetails + ')';
+  } else {
+    message =
+      metaDetails ||
+      metaMsg ||
+      data.message ||
+      data.error ||
+      data.detail ||
+      data.payload?.message ||
+      data.payload?.error ||
+      data.result?.message;
+  }
 
   // 2. Errors field (could be array or dictionary of field -> errors[] or field -> string)
   const rawErrors = data.meta?.errors || data.errors;

@@ -246,12 +246,12 @@ export function Orders() {
     setDispatchingIds((prev) => new Set(prev).add(orderId))
     try {
       const res = await api.post(`/api/orders/${orderId}/dispatch`, { courier })
-      const courierName = res.data.courier || courier || 'Shipping'
+      const courierName = res.data.courier || (courier && courier !== 'auto' ? courier : 'Delhivery')
       const waybillNumber = res.data.waybillNumber || 'Assigned'
       toast.toast('success', `Order dispatched · ${courierName} AWB: ${waybillNumber}`)
       // Real-time optimistic update: order immediately moves from Dispatch to Ready to Ship
       queryClient.setQueriesData<Order[]>({ queryKey: ['orders'] }, (old) => {
-        if (!old) return old
+        if (!Array.isArray(old)) return old
         return old.map((item) =>
           item.id === orderId
             ? {
@@ -808,7 +808,7 @@ export function Orders() {
           else codDispatched++
 
           const waybillNumber = res.data.waybillNumber || 'Assigned'
-          const courierName = res.data.courier || courierChoice || 'Shipping'
+          const courierName = res.data.courier || (courierChoice && courierChoice !== 'auto' ? courierChoice : 'Delhivery')
 
           // Immediately remove the successfully dispatched order from selected IDs
           setSelectedOrderIds((prev) => {
@@ -820,7 +820,7 @@ export function Orders() {
           // Real-time optimistic update of React Query order cache so the order
           // immediately leaves Dispatch and appears in Ready to Ship!
           queryClient.setQueriesData<Order[]>({ queryKey: ['orders'] }, (old) => {
-            if (!old) return old
+            if (!Array.isArray(old)) return old
             return old.map((item) =>
               item.id === order.id
                 ? {

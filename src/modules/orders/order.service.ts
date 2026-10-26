@@ -973,7 +973,7 @@ class OrderService {
         eventType: 'SHIPMENT_FAILED',
         actorType: actor ? 'USER' : 'SYSTEM',
         actor,
-        source: preferredCourier === 'Velocity' ? 'VELOCITY_DISPATCH' : 'OMS_DISPATCH',
+        source: (preferredCourier === 'Velocity' || Boolean(options?.velocityCarrierId) || /velocity/i.test(dispatchErr.message)) ? 'VELOCITY_DISPATCH' : 'OMS_DISPATCH',
         status: 'FAILED',
         note: `Dispatch failed: ${dispatchErr.message}`,
       }).catch(() => {});
@@ -1078,6 +1078,7 @@ class OrderService {
 
     const isAdvancedShipment = ['IN_TRANSIT', 'OUT_FOR_DELIVERY', 'DELIVERED'].includes(currentOrder?.shipment?.status || '');
     const isAdvancedOrder = ['IN_TRANSIT', 'OUT_FOR_DELIVERY', 'DELIVERED'].includes(currentOrder?.status || '');
+    const isManifestReview = currentOrder?.supportFlag === 'MANIFEST_REVIEW';
 
     const [, promoted] = await prisma.$transaction([
       prisma.shipment.upsert({
@@ -1101,8 +1102,7 @@ class OrderService {
         data: {
           status: isAdvancedOrder ? currentOrder!.status : 'DISPATCHED',
           dispatchedAt: currentOrder?.dispatchedAt || new Date(),
-          supportFlag: null,
-          hasUrgentSupport: false,
+          ...(isManifestReview ? { supportFlag: null, hasUrgentSupport: false } : {}),
         },
       }),
     ]);

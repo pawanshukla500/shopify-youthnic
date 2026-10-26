@@ -129,6 +129,7 @@ describe('agency-api-tester: Velocity Error Extraction & Real-Time Dispatch Engi
       };
       const extracted = extractVelocityErrorMessage(errorPayload);
       expect(extracted).toContain('Insufficient wallet balance');
+      expect(extracted).toContain('Wallet balance INR 15.00 is below required INR 85.00');
     });
 
     it('extracts structured field validation errors (422 payload with field dictionary)', () => {

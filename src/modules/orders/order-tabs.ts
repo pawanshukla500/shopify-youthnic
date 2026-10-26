@@ -413,6 +413,10 @@ export function orderStatusFromLiveTracking(shipment?: OrderTabShipment | null):
  */
 export function isManifestRejected(order: OrderTabSnapshot): boolean {
   const shipStatus = (order.shipment?.status || '').toUpperCase();
+  // Successfully manifested parcels with an active AWB are never rejected
+  if (shipStatus === 'CREATED' && Boolean(order.shipment?.waybillNumber)) {
+    return false;
+  }
   const err = (order.shipment?.errorMessage || '').toLowerCase();
   const rejected =
     shipStatus === 'ERROR' ||

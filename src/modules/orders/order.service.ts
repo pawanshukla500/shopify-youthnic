@@ -967,6 +967,17 @@ class OrderService {
 
     try {
       return await this.dispatchClaimedOrder(order, actor, preferredCourier, options);
+    } catch (dispatchErr: any) {
+      await recordAccountTrailEvent({
+        orderId: order.id,
+        eventType: 'SHIPMENT_FAILED',
+        actorType: actor ? 'USER' : 'SYSTEM',
+        actor,
+        source: (preferredCourier === 'Velocity' || Boolean(options?.velocityCarrierId) || /velocity/i.test(dispatchErr.message)) ? 'VELOCITY_DISPATCH' : 'OMS_DISPATCH',
+        status: 'FAILED',
+        note: `Dispatch failed: ${dispatchErr.message}`,
+      }).catch(() => {});
+      throw dispatchErr;
     } finally {
       await prisma.order
         .updateMany({ where: { id: order.id, dispatchLockedAt: claimedAt }, data: { dispatchLockedAt: null } })
@@ -1055,6 +1066,7 @@ class OrderService {
       paymentMode: verifiedOrder.paymentMethod === 'COD' ? 'COD' : 'Pre-paid',
       codAmount: verifiedOrder.paymentMethod === 'COD' ? verifiedOrder.totalAmount || 0 : 0,
       declaredValue: verifiedOrder.totalAmount || undefined,
+      errorMessage: null, // Clear any prior manifest rejection error
       ...(labelUrl ? { labelUrl } : {}),
     };
 
@@ -1066,6 +1078,7 @@ class OrderService {
 
     const isAdvancedShipment = ['IN_TRANSIT', 'OUT_FOR_DELIVERY', 'DELIVERED'].includes(currentOrder?.shipment?.status || '');
     const isAdvancedOrder = ['IN_TRANSIT', 'OUT_FOR_DELIVERY', 'DELIVERED'].includes(currentOrder?.status || '');
+    const isManifestReview = currentOrder?.supportFlag === 'MANIFEST_REVIEW';
 
     const [, promoted] = await prisma.$transaction([
       prisma.shipment.upsert({
@@ -1089,6 +1102,7 @@ class OrderService {
         data: {
           status: isAdvancedOrder ? currentOrder!.status : 'DISPATCHED',
           dispatchedAt: currentOrder?.dispatchedAt || new Date(),
+          ...(isManifestReview ? { supportFlag: null, hasUrgentSupport: false } : {}),
         },
       }),
     ]);

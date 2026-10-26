@@ -184,6 +184,13 @@ export function Orders() {
   // Multi-select row checkboxes
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<number>>(new Set())
   const [isBulkDispatching, setIsBulkDispatching] = useState(false)
+  const [bulkDispatchProgress, setBulkDispatchProgress] = useState<{
+    current: number
+    total: number
+    orderName: string
+    completed: number
+    failed: number
+  } | null>(null)
   const [isBulkVerifying, setIsBulkVerifying] = useState(false)
   const [isBulkConfirmingCod, setIsBulkConfirmingCod] = useState(false)
   const [isBulkGeneratingLabels, setIsBulkGeneratingLabels] = useState(false)
@@ -239,8 +246,32 @@ export function Orders() {
     setDispatchingIds((prev) => new Set(prev).add(orderId))
     try {
       const res = await api.post(`/api/orders/${orderId}/dispatch`, { courier })
-      const courierName = res.data.courier || 'Shipping'
-      toast.toast('success', `Order dispatched · ${courierName} AWB: ${res.data.waybillNumber || 'Assigned'}`)
+      const courierName = res.data.courier || (courier && courier !== 'auto' ? courier : 'Delhivery')
+      const waybillNumber = res.data.waybillNumber || 'Assigned'
+      toast.toast('success', `Order dispatched · ${courierName} AWB: ${waybillNumber}`)
+      // Real-time optimistic update: order immediately moves from Dispatch to Ready to Ship
+      queryClient.setQueriesData<Order[]>({ queryKey: ['orders'] }, (old) => {
+        if (!Array.isArray(old)) return old
+        return old.map((item) =>
+          item.id === orderId
+            ? {
+                ...item,
+                status: 'DISPATCHED',
+                dispatchedAt: new Date().toISOString(),
+                shipment: {
+                  ...(item.shipment || {}),
+                  id: item.shipment?.id || 0,
+                  orderId: item.id,
+                  status: 'CREATED',
+                  waybillNumber,
+                  courier: courierName,
+                  trackingStatus: 'Label generated',
+                  errorMessage: null,
+                },
+              }
+            : item
+        ) as Order[]
+      })
       await queryClient.invalidateQueries({ queryKey: ['orders'] })
     } catch (err: any) {
       toast.toast('error', apiError(err))
@@ -729,11 +760,11 @@ export function Orders() {
     toast.toast('success', `Exported ${ordersToExport.length} orders report to CSV.`)
   }
 
-  // Bulk Dispatch action
+  // Bulk Dispatch action: Processes orders sequentially one-by-one in real-time,
+  // moving each successfully manifested order into Ready to Ship immediately,
+  // while surfacing individual carrier/Velocity error responses without blocking.
   const handleBulkDispatch = async (courierChoice?: 'Delhivery' | 'Velocity' | 'auto') => {
     const selected = filtered.filter((o) => selectedOrderIds.has(o.id))
-    // Same rule the server enforces: prepaid or confirmed COD, not yet
-    // manifested. Unconfirmed COD in New is never shipped from a bulk select.
     const hasLiveAwb = (o: Order) =>
       Boolean(o.shipment?.waybillNumber) && !['ERROR', 'CANCELLED'].includes(o.shipment?.status || '')
     const candidateOrders = selected.filter(
@@ -749,33 +780,100 @@ export function Orders() {
     }
 
     setIsBulkDispatching(true)
-    try {
-      // Prioritize: Prepaid orders ALWAYS dispatched first (FIFO), then COD (FIFO)
-      const prioritizedCandidates = prioritizeOrdersForDispatch(candidateOrders)
-      const candidateIds = prioritizedCandidates.map((o) => o.id)
-      const res: any = await api.post('/api/orders/bulk-dispatch', { orderIds: candidateIds, courier: courierChoice })
-      const results: Array<{ orderId: number; success: boolean; courier?: string; error?: string; paymentMode?: string }> = res.data?.results ?? []
-      const dispatched = res.data?.dispatched ?? results.filter((r) => r.success).length
-      const prepaidDispatched = res.data?.prepaidDispatched ?? results.filter((r) => r.success && (r.paymentMode === 'Prepaid' || prepaidOrder(candidateOrders.find((o) => o.id === r.orderId) || {} as any))).length
-      const codDispatched = res.data?.codDispatched ?? (dispatched - prepaidDispatched)
-      const failures = results.filter((r) => !r.success)
-      const nameOf = (id: number) => candidateOrders.find((o) => o.id === id)?.shopifyOrderName || `#${id}`
+    // Prioritize: Prepaid orders ALWAYS dispatched first (FIFO), then COD (FIFO)
+    const prioritizedCandidates = prioritizeOrdersForDispatch(candidateOrders)
+    let completedCount = 0
+    let failedCount = 0
+    let prepaidDispatched = 0
+    let codDispatched = 0
+    const failures: Array<{ orderId: number; orderName: string; error: string }> = []
 
-      const prioritySummary = dispatched > 0 ? ` (${prepaidDispatched} Prepaid prioritized, ${codDispatched} COD on FIFO)` : ''
-      const parts = [`Dispatched ${dispatched} order${dispatched === 1 ? '' : 's'}${prioritySummary}.`]
+    try {
+      for (let i = 0; i < prioritizedCandidates.length; i++) {
+        const order = prioritizedCandidates[i]
+        setBulkDispatchProgress({
+          current: i + 1,
+          total: prioritizedCandidates.length,
+          orderName: order.shopifyOrderName,
+          completed: completedCount,
+          failed: failedCount,
+        })
+        setDispatchingIds((prev) => new Set(prev).add(order.id))
+
+        try {
+          const res = await api.post(`/api/orders/${order.id}/dispatch`, { courier: courierChoice })
+          completedCount++
+          const isPrepaid = prepaidOrder(order)
+          if (isPrepaid) prepaidDispatched++
+          else codDispatched++
+
+          const waybillNumber = res.data.waybillNumber || 'Assigned'
+          const courierName = res.data.courier || (courierChoice && courierChoice !== 'auto' ? courierChoice : 'Delhivery')
+
+          // Immediately remove the successfully dispatched order from selected IDs
+          setSelectedOrderIds((prev) => {
+            const next = new Set(prev)
+            next.delete(order.id)
+            return next
+          })
+
+          // Real-time optimistic update of React Query order cache so the order
+          // immediately leaves Dispatch and appears in Ready to Ship!
+          queryClient.setQueriesData<Order[]>({ queryKey: ['orders'] }, (old) => {
+            if (!Array.isArray(old)) return old
+            return old.map((item) =>
+              item.id === order.id
+                ? {
+                    ...item,
+                    status: 'DISPATCHED',
+                    dispatchedAt: new Date().toISOString(),
+                    shipment: {
+                      ...(item.shipment || {}),
+                      id: item.shipment?.id || 0,
+                      orderId: item.id,
+                      status: 'CREATED',
+                      waybillNumber,
+                      courier: courierName,
+                      trackingStatus: 'Label generated',
+                      errorMessage: null,
+                    },
+                  }
+                : item
+            ) as Order[]
+          })
+        } catch (err: any) {
+          failedCount++
+          const errorMsg = apiError(err)
+          failures.push({ orderId: order.id, orderName: order.shopifyOrderName, error: errorMsg })
+          // Surface individual Velocity / carrier error response immediately so user sees what failed in real time
+          toast.toast('error', `${order.shopifyOrderName}: ${errorMsg}`)
+        } finally {
+          setDispatchingIds((prev) => {
+            const next = new Set(prev)
+            next.delete(order.id)
+            return next
+          })
+        }
+      }
+
+      // Re-sync with server state after the full queue has completed
+      await queryClient.invalidateQueries({ queryKey: ['orders'] })
+
+      const prioritySummary = completedCount > 0 ? ` (${prepaidDispatched} Prepaid prioritized, ${codDispatched} COD on FIFO)` : ''
+      const parts = [`Dispatched ${completedCount} order${completedCount === 1 ? '' : 's'}${prioritySummary} to Ready to Ship.`]
       if (notEligible > 0) parts.push(`${notEligible} not eligible (unconfirmed COD or already manifested) were skipped.`)
       if (failures.length > 0) {
-        const shown = failures.slice(0, 3).map((f) => `${nameOf(f.orderId)}: ${f.error || 'failed'}`)
+        const shown = failures.slice(0, 3).map((f) => `${f.orderName}: ${f.error}`)
         parts.push(`${failures.length} failed: ${shown.join(' | ')}${failures.length > 3 ? ' …' : ''}`)
       }
       toast.toast(failures.length > 0 ? 'error' : 'success', parts.join(' '))
 
-      // Keep the failed orders selected so they can be fixed and retried.
+      // Keep only failed orders selected so they can be fixed and retried
       setSelectedOrderIds(new Set(failures.map((f) => f.orderId)))
-      await queryClient.invalidateQueries({ queryKey: ['orders'] })
     } catch (err: any) {
       toast.toast('error', apiError(err))
     } finally {
+      setBulkDispatchProgress(null)
       setIsBulkDispatching(false)
     }
   }
@@ -1632,6 +1730,55 @@ export function Orders() {
         {selectedOrderIds.size > 0 && <div className="bulk-spacer" />}
       </Panel>
 
+      {/* Real-time Bulk Dispatch Floating Progress Banner */}
+      {bulkDispatchProgress && (
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            position: 'fixed',
+            bottom: '84px',
+            right: '24px',
+            zIndex: 9999,
+            background: 'rgba(15, 23, 42, 0.96)',
+            border: '1px solid rgba(139, 92, 246, 0.5)',
+            borderRadius: '10px',
+            padding: '12px 18px',
+            boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 0 15px rgba(139, 92, 246, 0.3)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '8px',
+            minWidth: '320px',
+            backdropFilter: 'blur(8px)',
+            color: '#f8fafc',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+            <span style={{ fontSize: '13px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span className="kpi-dot is-amber" style={{ width: 8, height: 8 }} />
+              Dispatching: {bulkDispatchProgress.orderName}
+            </span>
+            <span style={{ fontSize: '12px', color: '#a78bfa', fontWeight: 600 }}>
+              {bulkDispatchProgress.current} / {bulkDispatchProgress.total}
+            </span>
+          </div>
+          <div style={{ width: '100%', height: '6px', background: 'rgba(255, 255, 255, 0.1)', borderRadius: '3px', overflow: 'hidden' }}>
+            <div
+              style={{
+                width: `${Math.round((bulkDispatchProgress.current / bulkDispatchProgress.total) * 100)}%`,
+                height: '100%',
+                background: 'linear-gradient(90deg, #8b5cf6 0%, #ec4899 100%)',
+                transition: 'width 0.3s ease',
+              }}
+            />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#94a3b8' }}>
+            <span>Processing real-time &rarr; Ready to Ship</span>
+            <span>{bulkDispatchProgress.completed} ready{bulkDispatchProgress.failed > 0 ? ` · ${bulkDispatchProgress.failed} failed` : ''}</span>
+          </div>
+        </div>
+      )}
+
       {/* Floating Bulk Action Toolbar */}
       {selectedOrderIds.size > 0 && (
         <div className="bulk-action-bar" role="toolbar" aria-label="Bulk actions">
@@ -1647,10 +1794,16 @@ export function Orders() {
             className="bulk-btn bulk-btn-primary"
             onClick={() => handleBulkDispatch()}
             disabled={isBulkDispatching}
-            title="Dispatch selected orders using configured carrier priority & automatic routing"
+            title="Dispatch selected orders sequentially in real time using carrier priority and automatic routing"
           >
             <Icon name="package" size={15} />
-            <span className="bulk-btn-label">{isBulkDispatching ? 'Dispatching…' : 'Dispatch'}</span>
+            <span className="bulk-btn-label">
+              {bulkDispatchProgress
+                ? `Dispatching ${bulkDispatchProgress.current}/${bulkDispatchProgress.total}…`
+                : isBulkDispatching
+                ? 'Dispatching…'
+                : 'Dispatch'}
+            </span>
           </button>
 
           {/* Direct File Download Labels (No new tab) */}

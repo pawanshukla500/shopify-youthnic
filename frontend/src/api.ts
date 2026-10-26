@@ -70,8 +70,20 @@ api.interceptors.response.use(
 
 export function apiError(error: unknown): string {
   if (axios.isAxiosError(error)) {
-    const message = error.response?.data?.error
-    if (typeof message === 'string') return message
+    const d = error.response?.data
+    if (typeof d?.error === 'string') return d.error
+    if (typeof d?.message === 'string') return d.message
+    if (typeof d?.detail === 'string') return d.detail
+    if (d?.errors) {
+      if (Array.isArray(d.errors)) return d.errors.join(', ')
+      if (typeof d.errors === 'object') {
+        const parts = Object.entries(d.errors).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`)
+        if (parts.length > 0) return parts.join('; ')
+      }
+    }
+    if (typeof d?.error === 'object' && d?.error !== null) {
+      return JSON.stringify(d.error)
+    }
     if (error.message) return error.message
   }
   return error instanceof Error ? error.message : 'Something went wrong. Please try again.'

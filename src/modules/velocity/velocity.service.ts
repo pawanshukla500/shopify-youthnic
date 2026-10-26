@@ -29,6 +29,66 @@ export const VELOCITY_PRIORITY_CARRIERS = [
   { id: 'CAR7RFCSBPAV7', name: 'Shadowfax Standard', code: 'shadowfax' },
 ];
 
+/**
+ * Safely extracts human-readable carrier error details from Velocity responses,
+ * preserving specific fields (e.g. unserviceable pincode, wallet balance, validation maps).
+ */
+export function extractVelocityErrorMessage(data: any, fallbackMessage?: string): string {
+  if (!data) return fallbackMessage || "Unknown Velocity error";
+  if (typeof data === "string") {
+    try {
+      const parsed = JSON.parse(data);
+      if (parsed && typeof parsed === "object") {
+        return extractVelocityErrorMessage(parsed, fallbackMessage);
+      }
+    } catch {
+      return data;
+    }
+  }
+
+  // 1. Direct message/detail fields
+  const message =
+    data.meta?.message ||
+    data.meta?.details ||
+    data.message ||
+    data.error ||
+    data.detail ||
+    data.payload?.message ||
+    data.payload?.error ||
+    data.result?.message;
+
+  // 2. Errors field (could be array or dictionary of field -> errors[] or field -> string)
+  const rawErrors = data.meta?.errors || data.errors;
+  let errorsFormatted: string | undefined;
+
+  if (Array.isArray(rawErrors) && rawErrors.length > 0) {
+    errorsFormatted = rawErrors
+      .map((e: any) => (typeof e === "object" && e !== null ? extractVelocityErrorMessage(e) : String(e)))
+      .join("; ");
+  } else if (rawErrors && typeof rawErrors === "object") {
+    const errorEntries = Object.entries(rawErrors).map(([field, errVal]) => {
+      if (Array.isArray(errVal)) return field + ": " + errVal.join(", ");
+      if (typeof errVal === "object" && errVal !== null) return field + ": " + JSON.stringify(errVal);
+      return field + ": " + String(errVal);
+    });
+    if (errorEntries.length > 0) {
+      errorsFormatted = errorEntries.join("; ");
+    }
+  }
+
+  if (message && errorsFormatted && message !== errorsFormatted) {
+    return message + " (" + errorsFormatted + ")";
+  }
+  if (errorsFormatted) return errorsFormatted;
+  if (message) return typeof message === "object" ? JSON.stringify(message) : String(message);
+
+  if (data.status_code || data.error_code) {
+    return "Error code " + (data.status_code || data.error_code) + ": " + (data.status_message || fallbackMessage || "Operation failed");
+  }
+
+  return fallbackMessage || JSON.stringify(data);
+}
+
 export interface VelocityServiceabilityParams {
   fromPincode: string;
   toPincode: string;
@@ -513,12 +573,7 @@ export class VelocityService {
             };
           }
 
-          const errMsg =
-            data?.meta?.message ||
-            data?.meta?.details ||
-            data?.message ||
-            data?.error ||
-            JSON.stringify(data);
+          const errMsg = extractVelocityErrorMessage(data, 'Velocity shipment creation failed');
           throw new Error(`Velocity shipment creation failed: ${errMsg}`);
         } catch (err: any) {
           lastError = err;
@@ -545,22 +600,22 @@ export class VelocityService {
 
       throw lastError || new Error('All Velocity candidate couriers failed');
     } catch (error: any) {
+      if (typeof error.message === 'string' && error.message.startsWith('Velocity error')) {
+        throw error;
+      }
       const respData = error.response?.data;
-      const msg =
-        respData?.meta?.message ||
-        respData?.meta?.details ||
-        respData?.message ||
-        respData?.error ||
-        respData?.detail ||
-        (Array.isArray(respData?.errors) ? respData.errors.join(', ') : undefined) ||
-        error.message;
+      const status = error.response?.status;
+      const extractedMsg = extractVelocityErrorMessage(respData, error.message);
       logger.error('Velocity forward shipment creation error', {
         orderId: order.id,
-        status: error.response?.status,
+        status,
         data: respData,
-        error: msg,
+        error: extractedMsg,
       });
-      throw new Error(`Velocity error (${error.response?.status || 500}): ${typeof msg === 'object' ? JSON.stringify(msg) : msg}`);
+      const finalMsg = status
+        ? `Velocity error (${status}): ${extractedMsg}`
+        : (extractedMsg.startsWith('Velocity') ? extractedMsg : `Velocity error: ${extractedMsg}`);
+      throw new Error(finalMsg);
     }
   }
 

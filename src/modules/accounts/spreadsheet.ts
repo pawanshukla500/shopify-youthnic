@@ -263,7 +263,7 @@ async function readZipArchive(content: Buffer): Promise<ParsedSheet[]> {
       }
       const parsed = gridToSheet(baseName, parseDelimited(text));
       if (parsed.headers.length > 0) {
-        parsed.sourceFile = baseName;
+        parsed.sourceFile = entryPath;
         parsed.isZipExtracted = true;
         sheets.push(parsed);
       }
@@ -304,7 +304,7 @@ async function readZipArchive(content: Buffer): Promise<ParsedSheet[]> {
         });
         const parsed = gridToSheet(worksheet.name, grid);
         if (parsed.headers.length > 0) {
-          parsed.sourceFile = baseName;
+          parsed.sourceFile = entryPath;
           parsed.isZipExtracted = true;
           sheets.push(parsed);
         }

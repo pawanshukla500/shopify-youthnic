@@ -14,6 +14,8 @@ export interface ParsedSheet {
   name: string;
   headers: string[];
   rows: Array<Record<string, string>>;
+  sourceFile?: string;
+  isZipExtracted?: boolean;
 }
 
 /** Lower-case, punctuation collapsed to single spaces: "Bank_Txn-ID " → "bank txn id". */
@@ -207,24 +209,50 @@ function cellText(value: ExcelJS.CellValue): string {
   return String(value);
 }
 
+const MAX_ZIP_ENTRIES = 50;
+const MAX_UNCOMPRESSED_BYTES = 50 * 1024 * 1024; // 50 MB safety limit
+
 async function readZipArchive(content: Buffer): Promise<ParsedSheet[]> {
   const zip = await JSZip.loadAsync(content);
   const sheets: ParsedSheet[] = [];
+  let totalExtractedBytes = 0;
+  let entryCount = 0;
 
   for (const [entryPath, file] of Object.entries(zip.files)) {
     if (file.dir || entryPath.startsWith('__MACOSX/') || /(^|\/)\.[^/]+/.test(entryPath)) {
       continue;
     }
+    entryCount++;
+    if (entryCount > MAX_ZIP_ENTRIES) {
+      throw new Error(`Zip archive contains too many files (exceeds limit of ${MAX_ZIP_ENTRIES} entries).`);
+    }
+
+    // Zip Slip / Directory traversal prevention
+    if (entryPath.includes('..') || entryPath.startsWith('/') || entryPath.startsWith('\\')) {
+      continue;
+    }
+
     const lower = entryPath.toLowerCase();
+    const baseName = entryPath.split('/').pop() || entryPath;
+
     if (lower.endsWith('.csv') || lower.endsWith('.tsv') || lower.endsWith('.txt')) {
       const text = await file.async('text');
-      const baseName = entryPath.split('/').pop() || entryPath;
+      totalExtractedBytes += Buffer.byteLength(text, 'utf8');
+      if (totalExtractedBytes > MAX_UNCOMPRESSED_BYTES) {
+        throw new Error('Zip archive uncompressed content exceeds the maximum allowed limit (50 MB).');
+      }
       const parsed = gridToSheet(baseName, parseDelimited(text));
       if (parsed.headers.length > 0) {
+        parsed.sourceFile = baseName;
+        parsed.isZipExtracted = true;
         sheets.push(parsed);
       }
     } else if (lower.endsWith('.xlsx')) {
       const buf = await file.async('nodebuffer');
+      totalExtractedBytes += buf.length;
+      if (totalExtractedBytes > MAX_UNCOMPRESSED_BYTES) {
+        throw new Error('Zip archive uncompressed content exceeds the maximum allowed limit (50 MB).');
+      }
       const workbook = new ExcelJS.Workbook();
       await workbook.xlsx.load(buf as any);
       workbook.eachSheet((worksheet) => {
@@ -241,6 +269,8 @@ async function readZipArchive(content: Buffer): Promise<ParsedSheet[]> {
         });
         const parsed = gridToSheet(worksheet.name, grid);
         if (parsed.headers.length > 0) {
+          parsed.sourceFile = baseName;
+          parsed.isZipExtracted = true;
           sheets.push(parsed);
         }
       });

@@ -2,8 +2,8 @@
  * Comprehensive test suite for ZIP archive processing and PostgreSQL persistence.
  * Validates:
  * 1. ZIP archives are decoded strictly in-memory (RAM buffer); NEVER written to disk.
- * 2. Excel spreadsheets (.xlsx) inside ZIP archives are extracted, parsed, and persisted
- *    directly into PostgreSQL relational tables (Order, Shipment, AccountTrailEvent, ReconciliationImport).
+ * 2. Excel spreadsheets (.xlsx) inside ZIP archives are extracted, parsed, and verified
+ *    against Prisma ORM model operations (Order, Shipment, AccountTrailEvent, ReconciliationImport).
  * 3. AppSec boundaries: Zip Slip path traversal resistance, Zip Bomb decompression limits,
  *    executable filtering, and entry count thresholds.
  */

@@ -115,21 +115,59 @@ export async function handleVelocityWebhook(req: Request, res: Response): Promis
         include: { shipment: true, items: true },
       });
 
-      if (order?.shipment) {
-        if (order.shipment.waybillNumber && order.shipment.waybillNumber !== trackingNumber) {
-          logger.warn('Velocity webhook ignored: matches superseded waybill on order with active shipment', {
-            trackingNumber,
-            activeWaybill: order.shipment.waybillNumber,
-            orderName: order.shopifyOrderName,
-            status: rawStatus,
+      if (order) {
+        if (order.shipment) {
+          if (order.shipment.waybillNumber && order.shipment.waybillNumber !== trackingNumber) {
+            logger.warn('Velocity webhook ignored: matches superseded waybill on order with active shipment', {
+              trackingNumber,
+              activeWaybill: order.shipment.waybillNumber,
+              orderName: order.shopifyOrderName,
+              status: rawStatus,
+            });
+            res.status(200).json({
+              success: true,
+              message: 'Webhook received for superseded waybill, ignored to protect active shipment',
+            });
+            return;
+          }
+          // If the existing shipment record has no waybill assigned, bind the incoming tracking number
+          if (!order.shipment.waybillNumber) {
+            const updatedShipment = await prisma.shipment.update({
+              where: { id: order.shipment.id },
+              data: {
+                waybillNumber: trackingNumber,
+                courier: data.carrier_name ? `Velocity (${data.carrier_name})` : (order.shipment.courier || 'Velocity'),
+                labelUrl: data.label_url || order.shipment.labelUrl || undefined,
+              },
+            });
+            shipment = { ...updatedShipment, order } as any;
+          } else {
+            shipment = { ...order.shipment, order } as any;
+          }
+        } else {
+          // Guard: if the order is already CANCELLED or REFUNDED, do not reopen it to DISPATCHED
+          const isTerminated = ['CANCELLED', 'REFUNDED'].includes(order.status);
+
+          const createdShipment = await prisma.shipment.create({
+            data: {
+              orderId: order.id,
+              waybillNumber: trackingNumber,
+              courier: data.carrier_name ? `Velocity (${data.carrier_name})` : 'Velocity',
+              paymentMode: order.paymentMethod === 'COD' ? 'COD' : 'Pre-paid',
+              codAmount: order.paymentMethod === 'COD' ? order.totalAmount || 0 : 0,
+              status: isTerminated ? 'CANCELLED' : 'CREATED',
+              trackingStatus: 'Label generated',
+              labelUrl: data.label_url || undefined,
+            },
           });
-          res.status(200).json({
-            success: true,
-            message: 'Webhook received for superseded waybill, ignored to protect active shipment',
-          });
-          return;
+          if (!isTerminated) {
+            await prisma.order.update({
+              where: { id: order.id },
+              data: { status: 'DISPATCHED', dispatchedAt: order.dispatchedAt || new Date() },
+            });
+          }
+          shipment = { ...createdShipment, order } as any;
         }
-        shipment = { ...order.shipment, order } as any;
       }
     }
 

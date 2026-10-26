@@ -24,6 +24,7 @@ const { prismaStub } = vi.hoisted(() => ({
     },
     shipment: {
       findFirst: vi.fn(),
+      create: vi.fn(),
       update: vi.fn(),
     },
     order: {
@@ -696,6 +697,76 @@ describe('Velocity Shipping Integration', () => {
       // Must NOT update shipment or trigger handleStatusChange for superseded waybill!
       expect(prismaStub.shipment.update).not.toHaveBeenCalled();
       expect(trackingServiceStub.handleStatusChange).not.toHaveBeenCalled();
+    });
+
+    it('creates shipment and promotes order to DISPATCHED when webhook arrives for order without existing shipment', async () => {
+      prismaStub.shipment.findFirst.mockResolvedValueOnce(null);
+      prismaStub.order.findFirst.mockResolvedValueOnce({
+        id: 1989,
+        shopifyOrderId: '18965496594631',
+        shopifyOrderName: '#26YOU6167',
+        paymentMethod: 'COD',
+        totalAmount: 699,
+        shipment: null,
+      });
+      prismaStub.shipment.create.mockResolvedValueOnce({
+        id: 1499,
+        orderId: 1989,
+        waybillNumber: '374797832251',
+        courier: 'Velocity (Amazon Transportation)',
+        paymentMode: 'COD',
+        codAmount: 699,
+        status: 'CREATED',
+        trackingStatus: 'Label generated',
+      });
+
+      const req: any = {
+        body: {
+          event: 'status_change',
+          event_id: 'evt-new-shipment',
+          data: {
+            tracking_number: '374797832251',
+            order_display_id: '#26YOU6167',
+            status: 'in_transit',
+            carrier_name: 'Amazon Transportation',
+          },
+        },
+        headers: {},
+      };
+      const res: any = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn(),
+      };
+
+      await handleVelocityWebhook(req, res);
+      expect(prismaStub.shipment.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            orderId: 1989,
+            waybillNumber: '374797832251',
+            courier: 'Velocity (Amazon Transportation)',
+          }),
+        })
+      );
+      expect(prismaStub.order.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 1989 },
+          data: expect.objectContaining({
+            status: 'DISPATCHED',
+          }),
+        })
+      );
+      expect(trackingServiceStub.handleStatusChange).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 1499,
+          orderId: 1989,
+        }),
+        'CREATED',
+        'IN_TRANSIT',
+        'In Transit',
+        'Amazon Transportation'
+      );
+      expect(res.status).toHaveBeenCalledWith(200);
     });
   });
 

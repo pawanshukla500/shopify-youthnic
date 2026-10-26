@@ -227,7 +227,13 @@ class TrackingService {
             waybillNumber: { not: null },
             OR: [
               { courier: { contains: 'velocity', mode: 'insensitive' } },
+              { courier: { contains: 'amazon', mode: 'insensitive' } },
+              { courier: { contains: 'ats', mode: 'insensitive' } },
+              { courier: { contains: 'ekart', mode: 'insensitive' } },
+              { courier: { contains: 'bluedart', mode: 'insensitive' } },
+              { courier: { contains: 'shadowfax', mode: 'insensitive' } },
               { labelUrl: { contains: 'velocity', mode: 'insensitive' } },
+              { labelUrl: { contains: 'amazon', mode: 'insensitive' } },
             ],
             status: { notIn: ['DELIVERED', 'CANCELLED', 'RTO_DELIVERED'] },
             ...(force

@@ -144,11 +144,16 @@ describe('dispatchOrder status transitions', () => {
     const txArgs = prismaStub.$transaction.mock.calls[0][0];
     expect(txArgs).toHaveLength(2);
 
-    // shipment update -> CREATED + trackingStatus = 'Label generated'
-    expect(prismaStub.shipment.update).toHaveBeenCalledWith(
+    // shipment upsert -> CREATED + trackingStatus = 'Label generated'
+    expect(prismaStub.shipment.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { orderId: 1 },
-        data: expect.objectContaining({
+        update: expect.objectContaining({
+          status: 'CREATED',
+          trackingStatus: 'Label generated',
+        }),
+        create: expect.objectContaining({
+          orderId: 1,
           status: 'CREATED',
           trackingStatus: 'Label generated',
         }),
@@ -159,7 +164,7 @@ describe('dispatchOrder status transitions', () => {
     // order not having been cancelled during the manifest call
     expect(prismaStub.order.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 1, status: { in: ['NEW', 'DISPATCH_PENDING', 'DISPATCHED'] } },
+        where: { id: 1, status: { in: ['NEW', 'DISPATCH_PENDING', 'DISPATCHED', 'IN_TRANSIT', 'OUT_FOR_DELIVERY', 'DELIVERED'] } },
         data: expect.objectContaining({
           status: 'DISPATCHED',
           dispatchedAt: expect.any(Date),

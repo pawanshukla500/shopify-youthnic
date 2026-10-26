@@ -95,7 +95,7 @@ router.get('/overview', async (req: AuthenticatedRequest, res: Response): Promis
     const [recipients, sentAt, imports] = await Promise.all([
       getReportRecipients(),
       reportSentAt(month),
-      prisma.reconciliationImport.findMany({ orderBy: { createdAt: 'desc' }, take: 25 }),
+      prisma.reconciliationImport.findMany({ orderBy: { createdAt: 'desc' }, take: 250 }),
     ]);
     res.json({
       month,
@@ -344,7 +344,7 @@ router.post('/import', async (req: AuthenticatedRequest, res: Response): Promise
 });
 
 router.get('/imports', async (_req: AuthenticatedRequest, res: Response): Promise<void> => {
-  const imports = await prisma.reconciliationImport.findMany({ orderBy: { createdAt: 'desc' }, take: 50 });
+  const imports = await prisma.reconciliationImport.findMany({ orderBy: { createdAt: 'desc' }, take: 250 });
   res.json(imports);
 });
 

@@ -211,6 +211,7 @@ function cellText(value: ExcelJS.CellValue): string {
 
 const MAX_ZIP_ENTRIES = 50;
 const MAX_UNCOMPRESSED_BYTES = 50 * 1024 * 1024; // 50 MB safety limit
+const MAX_XLSX_ENTRY_BYTES = 25 * 1024 * 1024; // 25 MB max per embedded XLSX
 
 async function readZipArchive(content: Buffer): Promise<ParsedSheet[]> {
   const zip = await JSZip.loadAsync(content);
@@ -227,13 +228,27 @@ async function readZipArchive(content: Buffer): Promise<ParsedSheet[]> {
       throw new Error(`Zip archive contains too many files (exceeds limit of ${MAX_ZIP_ENTRIES} entries).`);
     }
 
-    // Zip Slip / Directory traversal prevention
-    if (entryPath.includes('..') || entryPath.startsWith('/') || entryPath.startsWith('\\')) {
+    // Zip Slip / Directory traversal prevention (check both normalized path and raw unsafeOriginalName)
+    const rawName = (file as any).unsafeOriginalName || entryPath;
+    if (
+      entryPath.includes('..') ||
+      rawName.includes('..') ||
+      entryPath.startsWith('/') ||
+      entryPath.startsWith('\\') ||
+      rawName.startsWith('/') ||
+      rawName.startsWith('\\')
+    ) {
       continue;
     }
 
     const lower = entryPath.toLowerCase();
     const baseName = entryPath.split('/').pop() || entryPath;
+
+    // Pre-decompression Zip Bomb protection: inspect header uncompressedSize before decompressing
+    const declaredSize = typeof (file as any)._data?.uncompressedSize === 'number' ? (file as any)._data.uncompressedSize : 0;
+    if (declaredSize > MAX_UNCOMPRESSED_BYTES || (totalExtractedBytes + declaredSize) > MAX_UNCOMPRESSED_BYTES) {
+      throw new Error('Zip archive uncompressed content exceeds the maximum allowed limit (50 MB).');
+    }
 
     if (lower.endsWith('.csv') || lower.endsWith('.tsv') || lower.endsWith('.txt')) {
       const text = await file.async('text');
@@ -248,6 +263,9 @@ async function readZipArchive(content: Buffer): Promise<ParsedSheet[]> {
         sheets.push(parsed);
       }
     } else if (lower.endsWith('.xlsx')) {
+      if (declaredSize > MAX_XLSX_ENTRY_BYTES) {
+        throw new Error('Embedded XLSX file exceeds safe size limit of 25 MB.');
+      }
       const buf = await file.async('nodebuffer');
       totalExtractedBytes += buf.length;
       if (totalExtractedBytes > MAX_UNCOMPRESSED_BYTES) {

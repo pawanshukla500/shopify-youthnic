@@ -251,6 +251,41 @@ describe('ZIP Excel In-Memory Extraction & PostgreSQL Storage', () => {
       );
     });
 
+    it('rejects zip files when uncompressed size exceeds limit before decompression (Zip Bomb protection)', async () => {
+      const zip = new JSZip();
+      zip.file('bomb.csv', 'A,B\n1,2\n');
+      const buffer = await zip.generateAsync({ type: 'nodebuffer' });
+
+      const loadSpy = vi.spyOn(JSZip, 'loadAsync').mockResolvedValueOnce({
+        files: {
+          'bomb.csv': {
+            dir: false,
+            name: 'bomb.csv',
+            _data: { uncompressedSize: 60 * 1024 * 1024 },
+            async: vi.fn(),
+          } as any,
+        },
+      } as any);
+
+      await expect(readSpreadsheet('bomb.zip', buffer)).rejects.toThrow(
+        /Zip archive uncompressed content exceeds the maximum allowed limit/
+      );
+      loadSpy.mockRestore();
+    });
+
+    it('skips or ignores zip entries attempting directory traversal (Zip Slip ../ or root slashes)', async () => {
+      const zip = new JSZip();
+      zip.file('../../../etc/passwd', 'root:x:0:0');
+      zip.file('/var/log/secret.csv', 'Waybill Number\n3010081002\n');
+      zip.file('safe.csv', 'Waybill Number,Amount Payable,Order Number\n3010081002,600,26YOU100\n');
+      const buffer = await zip.generateAsync({ type: 'nodebuffer' });
+
+      const sheets = await readSpreadsheet('traversal.zip', buffer);
+      expect(sheets).toHaveLength(1);
+      expect(sheets[0].sourceFile).toBe('safe.csv');
+      expect(sheets[0].rows[0]['Order Number']).toBe('26YOU100');
+    });
+
     it('throws when zip archive has no spreadsheets or is empty', async () => {
       const zip = new JSZip();
       zip.file('readme.txt', 'This archive contains no spreadsheets');

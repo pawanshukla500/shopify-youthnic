@@ -220,6 +220,7 @@ async function readZipArchive(content: Buffer): Promise<ParsedSheet[]> {
   }
   const sheets: ParsedSheet[] = [];
   let totalExtractedBytes = 0;
+  let totalXmlExpandedBytes = 0;
   let entryCount = 0;
 
   for (const [entryPath, file] of Object.entries(zip.files)) {
@@ -277,14 +278,13 @@ async function readZipArchive(content: Buffer): Promise<ParsedSheet[]> {
         throw new Error('Zip archive uncompressed content exceeds the maximum allowed limit (50 MB).');
       }
 
-      // Check inner XLSX package uncompressed XML size to prevent nested zip bomb expansion in ExcelJS
+      // Check inner XLSX package uncompressed XML size across the entire archive to prevent nested zip bomb expansion in ExcelJS
       const innerZip = await JSZip.loadAsync(buf);
-      let innerUncompressedTotal = 0;
       for (const innerFile of Object.values(innerZip.files)) {
         const innerSize = typeof (innerFile as any)._data?.uncompressedSize === 'number' ? (innerFile as any)._data.uncompressedSize : 0;
-        innerUncompressedTotal += innerSize;
-        if (innerUncompressedTotal > MAX_UNCOMPRESSED_BYTES) {
-          throw new Error('Embedded XLSX expanded XML content exceeds the maximum allowed limit (50 MB).');
+        totalXmlExpandedBytes += innerSize;
+        if (totalXmlExpandedBytes > MAX_UNCOMPRESSED_BYTES) {
+          throw new Error('Embedded XLSX expanded XML content exceeds archive-wide maximum allowed limit (50 MB).');
         }
       }
 

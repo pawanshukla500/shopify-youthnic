@@ -339,7 +339,7 @@ describe('ZIP Excel In-Memory Extraction & PostgreSQL Storage', () => {
         } as any);
 
       await expect(readSpreadsheet('nested_bomb.zip', buffer)).rejects.toThrow(
-        /Embedded XLSX expanded XML content exceeds the maximum allowed limit/
+        /Embedded XLSX expanded XML content exceeds.*50 MB/
       );
       loadSpy2.mockRestore();
     });

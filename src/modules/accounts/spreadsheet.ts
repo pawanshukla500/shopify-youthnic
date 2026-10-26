@@ -215,6 +215,9 @@ const MAX_XLSX_ENTRY_BYTES = 25 * 1024 * 1024; // 25 MB max per embedded XLSX
 
 async function readZipArchive(content: Buffer): Promise<ParsedSheet[]> {
   const zip = await JSZip.loadAsync(content);
+  if (Object.keys(zip.files).length > MAX_ZIP_ENTRIES) {
+    throw new Error(`Zip archive contains too many files (exceeds limit of ${MAX_ZIP_ENTRIES} entries).`);
+  }
   const sheets: ParsedSheet[] = [];
   let totalExtractedBytes = 0;
   let entryCount = 0;

@@ -92,8 +92,8 @@ export function Remittances() {
   })
   const records = useMemo(() => (query.data?.imports || []).filter((r) => {
     const source = r.kind.startsWith('DELHIVERY') ? 'Delhivery' : r.kind === 'VELOCITY_REMITTANCE' ? 'Velocity' : r.kind === 'GOKWIK_SETTLEMENT' ? 'GoKwik' : r.kind === 'PHONEPE_SETTLEMENT' ? 'PhonePe' : 'Other providers'
-    const { summary, rows, state } = evidence(r)
-    const text = [r.fileName, r.uploadedBy, summary.remittanceNumber, ...rows.flatMap((row) => [row.shopifyOrderName, row.waybillNumber, row.utr])].join(' ').toLowerCase()
+    const { summary, rows, state, extractedFiles } = evidence(r)
+    const text = [r.fileName, r.uploadedBy, summary.remittanceNumber, ...extractedFiles.flatMap((f) => [f.fileName, f.sheetName]), ...rows.flatMap((row) => [row.shopifyOrderName, row.waybillNumber, row.utr])].join(' ').toLowerCase()
     return (provider === 'All history' || provider === source) && (!search || text.includes(search.toLowerCase())) && (filter === 'All statuses' || filter === state)
   }), [query.data, provider, search, filter])
   const metric = (name: string) => query.data?.summary?.find((r) => r.label === name)?.value ?? '—'

@@ -228,11 +228,13 @@ async function readZipArchive(content: Buffer): Promise<ParsedSheet[]> {
       throw new Error(`Zip archive contains too many files (exceeds limit of ${MAX_ZIP_ENTRIES} entries).`);
     }
 
-    // Zip Slip / Directory traversal prevention (check both normalized path and raw unsafeOriginalName)
+    // Zip Slip / Directory traversal prevention: inspect path segments so valid filenames with dots (e.g. report..csv) are preserved
     const rawName = (file as any).unsafeOriginalName || entryPath;
+    const segments = entryPath.split(/[\/\\]/);
+    const rawSegments = rawName.split(/[\/\\]/);
     if (
-      entryPath.includes('..') ||
-      rawName.includes('..') ||
+      segments.includes('..') ||
+      rawSegments.includes('..') ||
       entryPath.startsWith('/') ||
       entryPath.startsWith('\\') ||
       rawName.startsWith('/') ||
@@ -271,6 +273,18 @@ async function readZipArchive(content: Buffer): Promise<ParsedSheet[]> {
       if (totalExtractedBytes > MAX_UNCOMPRESSED_BYTES) {
         throw new Error('Zip archive uncompressed content exceeds the maximum allowed limit (50 MB).');
       }
+
+      // Check inner XLSX package uncompressed XML size to prevent nested zip bomb expansion in ExcelJS
+      const innerZip = await JSZip.loadAsync(buf);
+      let innerUncompressedTotal = 0;
+      for (const innerFile of Object.values(innerZip.files)) {
+        const innerSize = typeof (innerFile as any)._data?.uncompressedSize === 'number' ? (innerFile as any)._data.uncompressedSize : 0;
+        innerUncompressedTotal += innerSize;
+        if (innerUncompressedTotal > MAX_UNCOMPRESSED_BYTES) {
+          throw new Error('Embedded XLSX expanded XML content exceeds the maximum allowed limit (50 MB).');
+        }
+      }
+
       const workbook = new ExcelJS.Workbook();
       await workbook.xlsx.load(buf as any);
       workbook.eachSheet((worksheet) => {

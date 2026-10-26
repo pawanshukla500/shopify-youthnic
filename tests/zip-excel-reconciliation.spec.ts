@@ -273,17 +273,75 @@ describe('ZIP Excel In-Memory Extraction & PostgreSQL Storage', () => {
       loadSpy.mockRestore();
     });
 
-    it('skips or ignores zip entries attempting directory traversal (Zip Slip ../ or root slashes)', async () => {
+    it('skips directory traversal paths (Zip Slip ../) while preserving valid double-dot filenames', async () => {
       const zip = new JSZip();
       zip.file('../../../etc/passwd', 'root:x:0:0');
       zip.file('/var/log/secret.csv', 'Waybill Number\n3010081002\n');
-      zip.file('safe.csv', 'Waybill Number,Amount Payable,Order Number\n3010081002,600,26YOU100\n');
+      zip.file('remittance..final.csv', 'Waybill Number,Amount Payable,Order Number\n3010081002,600,26YOU100\n');
       const buffer = await zip.generateAsync({ type: 'nodebuffer' });
 
       const sheets = await readSpreadsheet('traversal.zip', buffer);
       expect(sheets).toHaveLength(1);
-      expect(sheets[0].sourceFile).toBe('safe.csv');
+      expect(sheets[0].sourceFile).toBe('remittance..final.csv');
       expect(sheets[0].rows[0]['Order Number']).toBe('26YOU100');
+    });
+
+    it('rejects embedded XLSX when internal XML uncompressed size exceeds limit (nested Zip Bomb)', async () => {
+      const zip = new JSZip();
+      const xlsxZip = new JSZip();
+      xlsxZip.file('[Content_Types].xml', '<Types></Types>');
+      const xlsxBuf = await xlsxZip.generateAsync({ type: 'nodebuffer' });
+      zip.file('bomb.xlsx', xlsxBuf);
+      const buffer = await zip.generateAsync({ type: 'nodebuffer' });
+
+      const loadSpy = vi.spyOn(JSZip, 'loadAsync');
+      // Let the first call load the outer zip, and mock the inner xlsx zip check
+      loadSpy.mockImplementation(async (data: any) => {
+        const actual = await (JSZip.loadAsync as any).getMockImplementation()?.(data);
+        if (Buffer.isBuffer(data) && data.length === xlsxBuf.length) {
+          return {
+            files: {
+              'xl/worksheets/sheet1.xml': {
+                dir: false,
+                name: 'xl/worksheets/sheet1.xml',
+                _data: { uncompressedSize: 60 * 1024 * 1024 },
+                async: vi.fn(),
+              } as any,
+            },
+          } as any;
+        }
+        return actual || loadSpy.getMockImplementation()?.(data);
+      });
+
+      // Simple direct test by mocking innerZip loadAsync to return oversized XML
+      loadSpy.mockRestore();
+
+      const loadSpy2 = vi.spyOn(JSZip, 'loadAsync')
+        .mockResolvedValueOnce({
+          files: {
+            'report.xlsx': {
+              dir: false,
+              name: 'report.xlsx',
+              _data: { uncompressedSize: 5000 },
+              async: vi.fn().mockResolvedValue(Buffer.from('PK...mock')),
+            } as any,
+          },
+        } as any)
+        .mockResolvedValueOnce({
+          files: {
+            'xl/worksheets/sheet1.xml': {
+              dir: false,
+              name: 'xl/worksheets/sheet1.xml',
+              _data: { uncompressedSize: 60 * 1024 * 1024 },
+              async: vi.fn(),
+            } as any,
+          },
+        } as any);
+
+      await expect(readSpreadsheet('nested_bomb.zip', buffer)).rejects.toThrow(
+        /Embedded XLSX expanded XML content exceeds the maximum allowed limit/
+      );
+      loadSpy2.mockRestore();
     });
 
     it('throws when zip archive has no spreadsheets or is empty', async () => {

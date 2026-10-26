@@ -164,7 +164,7 @@ describe('dispatchOrder status transitions', () => {
     // order not having been cancelled during the manifest call
     expect(prismaStub.order.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 1, status: { in: ['NEW', 'DISPATCH_PENDING', 'DISPATCHED'] } },
+        where: { id: 1, status: { in: ['NEW', 'DISPATCH_PENDING', 'DISPATCHED', 'IN_TRANSIT', 'OUT_FOR_DELIVERY', 'DELIVERED'] } },
         data: expect.objectContaining({
           status: 'DISPATCHED',
           dispatchedAt: expect.any(Date),

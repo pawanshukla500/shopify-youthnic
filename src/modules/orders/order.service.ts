@@ -461,12 +461,20 @@ class OrderService {
       reconciledCount++;
     }
 
-    // Also reconcile against Velocity Shipping Aggregator
+    // Also reconcile against Velocity Shipping Aggregator (paginating up to 5 pages)
     if (config.velocity.apiToken) {
       try {
-        const velRes = await velocityService.getShipmentsList({ page: 1, per_page: 50 });
-        const items = velRes.data || [];
-        for (const item of items) {
+        const matchedOrderIds = new Set<number>();
+        let page = 1;
+        let hasMore = true;
+        const maxPages = 5;
+
+        while (hasMore && page <= maxPages && ordersPendingAwb.some((o) => !matchedOrderIds.has(o.id))) {
+          const velRes = await velocityService.getShipmentsList({ page, per_page: 50 });
+          const items = velRes.data || [];
+          if (!items.length) break;
+
+          for (const item of items) {
           const attr = item?.attributes || {};
           const awb = attr.tracking_number;
           if (!awb) continue;
@@ -540,12 +548,21 @@ class OrderService {
             }
           }
 
+          matchedOrderIds.add(order.id);
           reconciledCount++;
         }
-      } catch (velErr: any) {
-        logger.warn('Velocity shipment reconciliation encountered error', { error: velErr.message });
+
+        const totalPages = (velRes as any).meta?.pagination?.total_pages || 1;
+        if (page >= totalPages || items.length < 50) {
+          hasMore = false;
+        } else {
+          page++;
+        }
       }
+    } catch (velErr: any) {
+      logger.warn('Velocity shipment reconciliation encountered error', { error: velErr.message });
     }
+  }
 
     return reconciledCount;
   }
@@ -1044,7 +1061,12 @@ class OrderService {
     const [, promoted] = await prisma.$transaction([
       prisma.shipment.upsert({
         where: { orderId: order.id },
-        update: shipmentData,
+        update: {
+          ...shipmentData,
+          status: ['IN_TRANSIT', 'OUT_FOR_DELIVERY', 'DELIVERED'].includes(verifiedOrder.shipment?.status || '')
+            ? (verifiedOrder.shipment!.status as any)
+            : 'CREATED',
+        },
         create: {
           orderId: order.id,
           ...shipmentData,
@@ -1053,7 +1075,7 @@ class OrderService {
       // Conditional: a Shopify cancel that landed during the manifest call
       // must not be overwritten back to DISPATCHED.
       prisma.order.updateMany({
-        where: { id: order.id, status: { in: ['NEW', 'DISPATCH_PENDING', 'DISPATCHED'] } },
+        where: { id: order.id, status: { in: ['NEW', 'DISPATCH_PENDING', 'DISPATCHED', 'IN_TRANSIT', 'OUT_FOR_DELIVERY', 'DELIVERED'] } },
         data: { status: 'DISPATCHED', dispatchedAt: new Date() },
       }),
     ]);

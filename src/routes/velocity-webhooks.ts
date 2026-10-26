@@ -132,6 +132,9 @@ export async function handleVelocityWebhook(req: Request, res: Response): Promis
           }
           shipment = { ...order.shipment, order } as any;
         } else {
+          // Guard: if the order is already CANCELLED or REFUNDED, do not reopen it to DISPATCHED
+          const isTerminated = ['CANCELLED', 'REFUNDED'].includes(order.status);
+
           const createdShipment = await prisma.shipment.create({
             data: {
               orderId: order.id,
@@ -139,15 +142,17 @@ export async function handleVelocityWebhook(req: Request, res: Response): Promis
               courier: data.carrier_name ? `Velocity (${data.carrier_name})` : 'Velocity',
               paymentMode: order.paymentMethod === 'COD' ? 'COD' : 'Pre-paid',
               codAmount: order.paymentMethod === 'COD' ? order.totalAmount || 0 : 0,
-              status: 'CREATED',
+              status: isTerminated ? 'CANCELLED' : 'CREATED',
               trackingStatus: 'Label generated',
               labelUrl: data.label_url || undefined,
             },
           });
-          await prisma.order.update({
-            where: { id: order.id },
-            data: { status: 'DISPATCHED', dispatchedAt: order.dispatchedAt || new Date() },
-          });
+          if (!isTerminated) {
+            await prisma.order.update({
+              where: { id: order.id },
+              data: { status: 'DISPATCHED', dispatchedAt: order.dispatchedAt || new Date() },
+            });
+          }
           shipment = { ...createdShipment, order } as any;
         }
       }

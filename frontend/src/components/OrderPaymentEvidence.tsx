@@ -68,10 +68,13 @@ export function OrderPaymentEvidence({ order }: { order: Order }) {
                       : (order.shipment?.courier
                           ? (/delhivery/i.test(order.shipment.courier) ? 'Delhivery COD' : `${order.shipment.courier} COD`)
                           : 'COD'))
-                  : ((order.paymentProvider || order.paymentGateway || '').toLowerCase().includes('phonepe')
+                  : (`${order.paymentProvider || ''} ${order.paymentGateway || ''} ${order.paymentAggregator || ''}`.toLowerCase().includes('phonepe') ||
+                     `${order.paymentProvider || ''} ${order.paymentGateway || ''} ${order.paymentAggregator || ''}`.toLowerCase().includes('phone_pe') ||
+                     (order.tags || '').toLowerCase().includes('phonepe')
                       ? 'PhonePe'
-                      : ((order.paymentProvider || order.paymentGateway || '').toLowerCase().includes('gokwik') ||
-                         (order.paymentProvider || order.paymentGateway || '').toLowerCase().includes('easebuzz')
+                      : (`${order.paymentProvider || ''} ${order.paymentGateway || ''} ${order.paymentAggregator || ''}`.toLowerCase().includes('gokwik') ||
+                         `${order.paymentProvider || ''} ${order.paymentGateway || ''} ${order.paymentAggregator || ''}`.toLowerCase().includes('easebuzz') ||
+                         (order.tags || '').toLowerCase().includes('gokwik')
                           ? 'GoKwik (Easebuzz)'
                           : (order.paymentProvider || order.paymentGateway || 'Prepaid')))}
               </dd>

@@ -1039,6 +1039,9 @@ class OrderService {
           verifiedOrder.shopifyOrderName
         );
       } catch (err: any) {
+        if (err.message && err.message.includes('temporarily unavailable')) {
+          throw err;
+        }
         logger.warn('Non-fatal pre-dispatch Velocity search check failed', {
           orderId: verifiedOrder.id,
           error: err.message,

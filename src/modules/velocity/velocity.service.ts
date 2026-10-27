@@ -458,6 +458,10 @@ export class VelocityService {
         };
       }
     } catch (err: any) {
+      const status = err.response?.status;
+      if (status && status >= 500) {
+        throw new Error(`Velocity search temporarily unavailable (${status}): ${err.message}`);
+      }
       logger.warn('Velocity findExistingShipment search non-fatal failure', {
         search: cleanName,
         error: err.message,

@@ -57,7 +57,10 @@ const money = (value?: number | null): number | null =>
 
 const SOURCE_LABELS: Record<string, string> = {
   DELHIVERY_REMITTANCE: 'Delhivery COD remittance',
+  VELOCITY_REMITTANCE: 'Velocity COD remittance',
   PG_SETTLEMENT_REPORT: 'Gateway settlement report',
+  GOKWIK_SETTLEMENT: 'GoKwik (Easebuzz) settlement',
+  PHONEPE_SETTLEMENT: 'PhonePe settlement',
   PHONEPE_SETTLEMENT_API: 'PhonePe settlement API',
   EASEBUZZ_PAYOUT_API: 'Easebuzz payout API',
   MANUAL: 'Entered manually',

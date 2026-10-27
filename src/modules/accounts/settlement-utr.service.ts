@@ -25,7 +25,7 @@ export async function correctImportUtr(importId: number, utr: string, actor: Acc
       const snapshot = snapshots.find((row) => row.orderId === order.id);
       const expectedRef = snapshot?.remittanceRef || summary.remittanceNumber;
       const expectedSource = record.kind === 'PG_SETTLEMENT' ? 'PG_SETTLEMENT_REPORT'
-        : ['DELHIVERY_REMITTANCE', 'GOKWIK_SETTLEMENT', 'PHONEPE_SETTLEMENT'].includes(record.kind) ? record.kind : `${record.kind}_REMITTANCE`;
+        : ['DELHIVERY_REMITTANCE', 'VELOCITY_REMITTANCE', 'GOKWIK_SETTLEMENT', 'PHONEPE_SETTLEMENT'].includes(record.kind) ? record.kind : `${record.kind}_REMITTANCE`;
       if (!order.paymentReceivedAt || !order.paymentReceivedRef || order.paymentReceivedSource !== expectedSource
         || (expectedRef && order.paymentReceivedRef !== expectedRef)
         || (!expectedRef && snapshot?.utr !== order.paymentReceivedUtr)) {

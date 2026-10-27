@@ -153,7 +153,7 @@ export function isVelocityCourier(courier?: string | null, waybill?: string | nu
     c.includes('shazam') ||
     c.includes('amazon') ||
     c.includes('ats') ||
-    c.includes('ekart') ||
+    (c.includes('ekart') && (c.includes('velocity') || c.includes('shipfastt'))) ||
     /^(pd|vehr|vel)/i.test(w)
   )
 }

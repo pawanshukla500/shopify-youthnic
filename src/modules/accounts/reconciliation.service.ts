@@ -1181,7 +1181,7 @@ export async function importCarrierRemittance(
         amount,
         utr,
         ref,
-        source: `${carrierKind}_REMITTANCE`,
+        source: carrierKind.endsWith('_REMITTANCE') ? carrierKind : `${carrierKind}_REMITTANCE`,
         actor: actor || (uploadedBy ? { email: uploadedBy } : undefined),
         deliveredAt: shipment.order.deliveredAt || remittedAt,
       });

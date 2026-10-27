@@ -147,6 +147,8 @@ export function OrderDetail() {
   useEffect(() => {
     if (order?.shipment && isVelocityCourier(order.shipment.courier, order.shipment.waybillNumber)) {
       setCarrier('Velocity')
+    } else {
+      setCarrier('Delhivery')
     }
   }, [order?.shipment?.courier, order?.shipment?.waybillNumber])
   const refreshShopify = useMutation({

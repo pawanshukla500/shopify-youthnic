@@ -423,7 +423,7 @@ export class VelocityService {
           };
         }
       } catch (err: any) {
-        const status = err.response?.status;
+        const status = err.response?.status || err.status || err.statusCode;
         if (status && status >= 500) {
           throw new Error(`Velocity order details lookup temporarily unavailable (${status}): ${err.message}`);
         }
@@ -461,7 +461,7 @@ export class VelocityService {
         };
       }
     } catch (err: any) {
-      const status = err.response?.status;
+      const status = err.response?.status || err.status || err.statusCode;
       if (status && status >= 500) {
         throw new Error(`Velocity search temporarily unavailable (${status}): ${err.message}`);
       }
@@ -1186,7 +1186,10 @@ export class VelocityService {
       });
       return response?.data?.payload || response?.data?.data || response?.data;
     } catch (error: any) {
-      throw new Error(`Failed to fetch forward order details: ${error.response?.data?.message || error.message}`);
+      const wrapped: any = new Error(`Failed to fetch forward order details: ${error.response?.data?.message || error.message}`);
+      wrapped.response = error.response;
+      wrapped.status = error.response?.status || error.status;
+      throw wrapped;
     }
   }
 
@@ -1377,7 +1380,10 @@ export class VelocityService {
         raw: response.data,
       };
     } catch (error: any) {
-      throw new Error(`Failed to fetch Velocity shipments list: ${error.response?.data?.message || error.message}`);
+      const wrapped: any = new Error(`Failed to fetch Velocity shipments list: ${error.response?.data?.message || error.message}`);
+      wrapped.response = error.response;
+      wrapped.status = error.response?.status || error.status;
+      throw wrapped;
     }
   }
 

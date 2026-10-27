@@ -407,7 +407,7 @@ export class VelocityService {
         const p = details?.payload || details?.data || details?.result || details;
         const awb = p?.awb_code || p?.awb || p?.tracking_number;
         const orderStatus = String(p?.status || p?.shipment_status || p?.order_status || '').toUpperCase();
-        const isTerminal = ['CANCELLED', 'CANCELED', 'DELIVERED', 'RTO_DELIVERED', 'RETURNED', 'LOST', 'FAILED'].includes(orderStatus);
+        const isTerminal = ['CANCELLED', 'CANCELED', 'DELIVERED', 'RTO_DELIVERED', 'RTO', 'RETURNED', 'LOST', 'FAILED'].includes(orderStatus) || orderStatus.startsWith('RTO');
         if (awb && !isTerminal) {
           logger.info('Found existing Velocity order via order-details under youthnic2024', {
             orderId: id,
@@ -444,7 +444,7 @@ export class VelocityService {
         const target = cleanName.toLowerCase();
         const hasAwb = Boolean(attr.tracking_number || attr.awb_code || attr.awb);
         const itemStatus = String(attr.status || attr.shipment_status || item.status || '').toUpperCase();
-        const isTerminal = ['CANCELLED', 'CANCELED', 'DELIVERED', 'RTO_DELIVERED', 'RETURNED', 'LOST', 'FAILED'].includes(itemStatus);
+        const isTerminal = ['CANCELLED', 'CANCELED', 'DELIVERED', 'RTO_DELIVERED', 'RTO', 'RETURNED', 'LOST', 'FAILED'].includes(itemStatus) || itemStatus.startsWith('RTO');
         return hasAwb && !isTerminal && (dId === target || dId === '#' + target || dId.replace(/^#/, '') === target);
       });
 

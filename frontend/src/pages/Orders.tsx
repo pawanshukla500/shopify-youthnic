@@ -649,6 +649,9 @@ export function Orders() {
       if (isCod) {
         codCount++
         codAmt += o.totalAmount || 0
+      } else if (gw.includes('phonepe') || gw.includes('phone_pe') || tags.includes('phonepe') || agg.includes('phonepe') || prov.includes('phonepe')) {
+        phonepeCount++
+        phonepeAmt += o.totalAmount || 0
       } else if (
         gw.includes('gokwik') ||
         gw.includes('kwik') ||
@@ -661,9 +664,6 @@ export function Orders() {
       ) {
         gokwikCount++
         gokwikAmt += o.totalAmount || 0
-      } else if (gw.includes('phonepe') || gw.includes('phone_pe') || tags.includes('phonepe') || agg.includes('phonepe') || prov.includes('phonepe')) {
-        phonepeCount++
-        phonepeAmt += o.totalAmount || 0
       }
     }
 
@@ -1161,6 +1161,20 @@ export function Orders() {
       )
     }
 
+    if (gw.includes('phonepe') || gw.includes('phone_pe') || agg.includes('phonepe') || provider.toLowerCase().includes('phonepe') || (order.tags || '').toLowerCase().includes('phonepe')) {
+      return (
+        <div className="pay-cell">
+          <span className="pay-pill is-phonepe" title="PhonePe payment gateway">
+            <span className="pay-dot" />
+            PhonePe PG
+          </span>
+          <span className={`pay-sub ${order.paymentVerified ? 'is-ok' : 'is-warn'}`}>
+            {order.paymentVerified ? 'Captured & verified' : 'Verification pending'}
+          </span>
+        </div>
+      )
+    }
+
     if (agg.includes('gokwik') || gw.includes('gokwik') || gw.includes('kwik') || sc.includes('gokwik') || (order.tags || '').toLowerCase().includes('gokwik') || provider.toLowerCase().includes('gokwik') || provider.toLowerCase().includes('easebuzz') || gw.toLowerCase().includes('easebuzz')) {
       return (
         <div className="pay-cell">
@@ -1179,20 +1193,6 @@ export function Orders() {
                   : order.paymentProviderPaymentId}
               </span>
             )}
-          </span>
-        </div>
-      )
-    }
-
-    if (gw.includes('phonepe') || gw.includes('phone_pe') || agg.includes('phonepe') || provider.toLowerCase().includes('phonepe') || (order.tags || '').toLowerCase().includes('phonepe')) {
-      return (
-        <div className="pay-cell">
-          <span className="pay-pill is-phonepe" title="PhonePe payment gateway">
-            <span className="pay-dot" />
-            PhonePe PG
-          </span>
-          <span className={`pay-sub ${order.paymentVerified ? 'is-ok' : 'is-warn'}`}>
-            {order.paymentVerified ? 'Captured & verified' : 'Verification pending'}
           </span>
         </div>
       )

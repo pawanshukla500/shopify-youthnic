@@ -80,6 +80,15 @@ describe('Velocity Aggregator Branding, Returns & Store Linkup', () => {
         )
       ).toBe('Delhivery Surface');
     });
+
+    it('frontend isVelocityCourier excludes Delhivery shipments even if waybill has VEL/PD prefix', async () => {
+      const { isVelocityCourier: frontendIsVel } = await import('../frontend/src/lib');
+      expect(frontendIsVel('Delhivery', 'VEL999')).toBe(false);
+      expect(frontendIsVel('Delhivery Surface', 'PD12345')).toBe(false);
+      expect(frontendIsVel('Delhivery', 'https://delhivery.com/label.pdf', 'VEL999')).toBe(false);
+      expect(frontendIsVel(null, 'VEL999')).toBe(true);
+      expect(frontendIsVel('Velocity', 'VEL999')).toBe(true);
+    });
   });
 
   describe('2. Velocity Store Search & Pre-Dispatch Linkup (youthnic2024)', () => {

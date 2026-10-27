@@ -153,6 +153,11 @@ export function isVelocityCourier(courier?: string | null, labelUrlOrWaybill?: s
   const l = isUrl ? second.toLowerCase() : ''
   const w = isUrl ? third : second || third
 
+  // Explicit Delhivery courier or Delhivery label URL is never Velocity
+  if (c.includes('delhivery') || l.includes('delhivery')) {
+    return false
+  }
+
   return (
     c.includes('velocity') ||
     c.includes('shipfastt') ||

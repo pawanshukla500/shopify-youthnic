@@ -426,9 +426,9 @@ export class VelocityService {
         }
       } catch (err: any) {
         const status = err.response?.status || err.status || err.statusCode;
-        const isOutage = (status && (status >= 500 || status === 429)) || (!status && /timeout|network|econn|enotfound|rate limit/i.test(err.message));
-        if (isOutage) {
-          throw new Error(`Velocity order details lookup temporarily unavailable (${status}): ${err.message}`);
+        const isAuthOrOutage = (status && (status === 401 || status === 403 || status === 429 || status >= 500)) || (!status && /timeout|network|econn|enotfound|rate limit/i.test(err.message));
+        if (isAuthOrOutage) {
+          throw new Error(`Velocity order details lookup temporarily unavailable (${status || 'network'}): ${err.message}`);
         }
       }
     }
@@ -467,9 +467,9 @@ export class VelocityService {
       }
     } catch (err: any) {
       const status = err.response?.status || err.status || err.statusCode;
-      const isOutage = (status && (status >= 500 || status === 429)) || (!status && /timeout|network|econn|enotfound|rate limit/i.test(err.message));
-      if (isOutage) {
-        throw new Error(`Velocity search temporarily unavailable (${status}): ${err.message}`);
+      const isAuthOrOutage = (status && (status === 401 || status === 403 || status === 429 || status >= 500)) || (!status && /timeout|network|econn|enotfound|rate limit/i.test(err.message));
+      if (isAuthOrOutage) {
+        throw new Error(`Velocity search temporarily unavailable (${status || 'network'}): ${err.message}`);
       }
       logger.warn('Velocity findExistingShipment search non-fatal failure', {
         search: cleanName,

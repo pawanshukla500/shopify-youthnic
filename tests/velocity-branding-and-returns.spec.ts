@@ -149,6 +149,27 @@ describe('Velocity Aggregator Branding, Returns & Store Linkup', () => {
       const found = await velocityService.findExistingShipment('#26YOU9999', '26YOU9999');
       expect(found).toBeNull();
     });
+
+    it('throws if order details returns 401 Unauthorized or 403 Forbidden', async () => {
+      const err: any = new Error('Unauthorized');
+      err.response = { status: 401 };
+      mockAxios.get.mockRejectedValueOnce(err);
+
+      await expect(velocityService.findExistingShipment('#26YOU6156', '26YOU6156')).rejects.toThrow(
+        /temporarily unavailable/i
+      );
+    });
+
+    it('throws if shipments list search returns 401 Unauthorized or 403 Forbidden', async () => {
+      mockAxios.get.mockRejectedValueOnce(new Error('Order not found'));
+      const err: any = new Error('Forbidden');
+      err.response = { status: 403 };
+      mockAxios.post.mockRejectedValueOnce(err);
+
+      await expect(velocityService.findExistingShipment('#26YOU6156', '26YOU6156')).rejects.toThrow(
+        /temporarily unavailable/i
+      );
+    });
   });
 
   describe('3. Velocity Return Creation Against Delivered Forward Orders', () => {
@@ -283,6 +304,45 @@ describe('Velocity Aggregator Branding, Returns & Store Linkup', () => {
             carrier: 'Velocity',
             returnWaybillNumber: 'REV-VEL-777',
             pickupAutomatic: true,
+          }),
+        })
+      );
+    });
+
+    it('identifies Velocity Reverse in return notifications for Velocity carrier', async () => {
+      const { default: notificationEngine } = await import('../src/modules/notifications/notification.service');
+      const { default: kwikengageService } = await import('../src/modules/whatsapp/kwikengage.service');
+      const { default: resendService } = await import('../src/modules/email/resend.service');
+
+      const spyKwik = vi.spyOn(kwikengageService, 'sendCriticalTrigger').mockResolvedValueOnce({} as any);
+      const spyResend = vi.spyOn(resendService, 'sendEmail').mockResolvedValueOnce({} as any);
+
+      const fakeOrder: any = {
+        id: 1,
+        shopifyOrderName: '#26YOU6156',
+        customerName: 'Customer',
+        customerEmail: 'cust@example.com',
+      };
+      const fakeReturn: any = {
+        returnWaybillNumber: 'REV-VEL-777',
+        returnReason: 'Wrong size',
+        carrier: 'Velocity',
+      };
+
+      await notificationEngine.notifyReturnInitiated(fakeOrder, fakeReturn);
+
+      expect(spyKwik).toHaveBeenCalledWith(
+        'RETURN_INITIATED',
+        fakeOrder,
+        expect.objectContaining({
+          courierName: 'Velocity Reverse',
+          waybillNumber: 'REV-VEL-777',
+        })
+      );
+      expect(spyResend).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            courier: 'Velocity Reverse',
           }),
         })
       );

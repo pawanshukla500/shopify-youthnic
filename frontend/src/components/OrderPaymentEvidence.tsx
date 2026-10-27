@@ -63,7 +63,11 @@ export function OrderPaymentEvidence({ order }: { order: Order }) {
               <dt>Provider / Gateway</dt>
               <dd>
                 {isCod
-                  ? (isVelocityShipment ? 'Velocity COD' : (order.shipment?.courier && !/delhivery/i.test(order.shipment.courier) ? `${order.shipment.courier} COD` : 'Delhivery COD'))
+                  ? (isVelocityShipment
+                      ? 'Velocity COD'
+                      : (order.shipment?.courier
+                          ? (/delhivery/i.test(order.shipment.courier) ? 'Delhivery COD' : `${order.shipment.courier} COD`)
+                          : 'COD'))
                   : ((order.paymentProvider || order.paymentGateway || '').toLowerCase().includes('phonepe')
                       ? 'PhonePe'
                       : ((order.paymentProvider || order.paymentGateway || '').toLowerCase().includes('gokwik') ||

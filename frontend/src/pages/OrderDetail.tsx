@@ -2820,11 +2820,19 @@ function ReturnForm({
             />
           </FormField>
 
-          <ol className="reverse-steps">
-            <li>{carrier === 'Velocity' ? 'Velocity' : 'Delhivery'} manifests a reverse AWB against {forwardAwb || 'this order'}.</li>
-            <li>The customer pickup is scheduled by {carrier === 'Velocity' ? 'Velocity' : 'Delhivery'}. A warehouse pickup request is not used for returns.</li>
-            <li>Scans move the return the same way a forward shipment moves. Refund still waits for warehouse QC.</li>
-          </ol>
+          {linkExisting ? (
+            <ol className="reverse-steps">
+              <li>Links the manually provided reverse AWB to this order.</li>
+              <li>Tracking updates will sync scans from the carrier.</li>
+              <li>Refund still waits for warehouse QC upon delivery.</li>
+            </ol>
+          ) : (
+            <ol className="reverse-steps">
+              <li>{carrier === 'Velocity' ? 'Velocity' : 'Delhivery'} manifests a reverse AWB against {forwardAwb || 'this order'}.</li>
+              <li>The customer pickup is scheduled by {carrier === 'Velocity' ? 'Velocity' : 'Delhivery'}. A warehouse pickup request is not used for returns.</li>
+              <li>Scans move the return the same way a forward shipment moves. Refund still waits for warehouse QC.</li>
+            </ol>
+          )}
 
           <button type="button" className="reverse-link-toggle" onClick={() => {
             setLinkExisting((value) => !value)

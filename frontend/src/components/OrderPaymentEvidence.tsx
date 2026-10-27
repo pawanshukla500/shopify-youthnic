@@ -69,7 +69,7 @@ export function OrderPaymentEvidence({ order }: { order: Order }) {
                       : ((order.paymentProvider || order.paymentGateway || '').toLowerCase().includes('gokwik') ||
                          (order.paymentProvider || order.paymentGateway || '').toLowerCase().includes('easebuzz')
                           ? 'GoKwik (Easebuzz)'
-                          : (order.paymentProvider || order.paymentGateway || 'GoKwik (Easebuzz)')))}
+                          : (order.paymentProvider || order.paymentGateway || 'Prepaid')))}
               </dd>
             </div>
             <div>

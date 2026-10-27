@@ -2821,21 +2821,21 @@ function ReturnForm({
           </FormField>
 
           <ol className="reverse-steps">
-            <li>Delhivery manifests a reverse AWB against {forwardAwb || 'this order'}.</li>
-            <li>The customer pickup is scheduled by Delhivery. A warehouse pickup request is not used for returns.</li>
+            <li>{carrier === 'Velocity' ? 'Velocity' : 'Delhivery'} manifests a reverse AWB against {forwardAwb || 'this order'}.</li>
+            <li>The customer pickup is scheduled by {carrier === 'Velocity' ? 'Velocity' : 'Delhivery'}. A warehouse pickup request is not used for returns.</li>
             <li>Scans move the return the same way a forward shipment moves. Refund still waits for warehouse QC.</li>
           </ol>
 
           <button type="button" className="reverse-link-toggle" onClick={() => {
             setLinkExisting((value) => !value)
             if (linkExisting) {
-              setCarrier('Delhivery')
+              setCarrier(order.shipment && isVelocityCourier(order.shipment.courier, order.shipment.waybillNumber) ? 'Velocity' : 'Delhivery')
               setReturnTracking('')
             } else {
               setCarrier('Other')
             }
           }}>
-            {linkExisting ? 'Use automatic Delhivery pickup' : 'Link an AWB that already exists'}
+            {linkExisting ? `Use automatic ${carrier === 'Velocity' || (order.shipment && isVelocityCourier(order.shipment.courier, order.shipment.waybillNumber)) ? 'Velocity' : 'Delhivery'} pickup` : 'Link an AWB that already exists'}
           </button>
 
           {linkExisting ? (

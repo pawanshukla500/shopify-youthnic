@@ -178,6 +178,11 @@ class ReturnService {
       });
       const rawName = (order.customerName || 'Customer').trim();
       const parts = rawName.split(/\s+/);
+      if (!forwardWaybill) {
+        throw new Error(
+          `Cannot create Velocity reverse pickup for ${order.shopifyOrderName}: forward AWB is required to link the return to the delivered shipment.`
+        );
+      }
       const velReturn = await velocityService.createReverseShipment({
         orderId: order.shopifyOrderName,
         forwardAwb: forwardWaybill || undefined,

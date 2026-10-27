@@ -197,6 +197,7 @@ export function carrierTrackingUrl(courier: string | null | undefined, waybill: 
   if (
     name.includes('velocity') ||
     name.includes('shipfastt') ||
+    name.includes('shazam') ||
     name.includes('amazon') ||
     name.includes('ats') ||
     (name.includes('ekart') && (name.includes('velocity') || name.includes('shipfastt'))) ||

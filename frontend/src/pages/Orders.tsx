@@ -1157,7 +1157,7 @@ export function Orders() {
       )
     }
 
-    if (agg.includes('gokwik') || gw.includes('gokwik') || gw.includes('kwik') || sc.includes('gokwik') || (order.tags || '').toLowerCase().includes('gokwik') || provider.toLowerCase().includes('easebuzz') || gw.toLowerCase().includes('easebuzz')) {
+    if (agg.includes('gokwik') || gw.includes('gokwik') || gw.includes('kwik') || sc.includes('gokwik') || (order.tags || '').toLowerCase().includes('gokwik') || provider.toLowerCase().includes('gokwik') || provider.toLowerCase().includes('easebuzz') || gw.toLowerCase().includes('easebuzz')) {
       return (
         <div className="pay-cell">
           <span className="pay-pill is-gokwik" title="GoKwik 1-click checkout via Easebuzz">

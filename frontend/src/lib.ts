@@ -147,7 +147,15 @@ export function formatMoney(amount: number | null | undefined, currency = 'INR')
 export function isVelocityCourier(courier?: string | null, waybill?: string | null): boolean {
   const c = (courier || '').toLowerCase()
   const w = (waybill || '').trim()
-  return c.includes('velocity') || c.includes('shipfastt') || /^(pd|vehr|vel)/i.test(w)
+  return (
+    c.includes('velocity') ||
+    c.includes('shipfastt') ||
+    c.includes('shazam') ||
+    c.includes('amazon') ||
+    c.includes('ats') ||
+    c.includes('ekart') ||
+    /^(pd|vehr|vel)/i.test(w)
+  )
 }
 
 /** Official brand logo URL for couriers and logistics partners (Brandfetch) */
@@ -191,11 +199,11 @@ export function carrierTrackingUrl(courier: string | null | undefined, waybill: 
     name.includes('shipfastt') ||
     name.includes('amazon') ||
     name.includes('ats') ||
+    name.includes('ekart') ||
     /^(pd|vehr|vel)/i.test(wb)
   ) {
     return `https://www.velocityshipping.in/track/${encodeURIComponent(wb)}`
   }
-  if (name.includes('ekart') || name.includes('proship')) return `https://t.proship.in/${encodeURIComponent(wb)}`
   if (name.includes('bluedart')) return `https://www.bluedart.com/tracking?trackNumber=${encodeURIComponent(wb)}`
   if (name.includes('dtdc')) return `https://www.dtdc.in/tracking/shipment-tracking.asp?trackingNo=${encodeURIComponent(wb)}`
   return `https://www.delhivery.com/track/package/${encodeURIComponent(wb)}`

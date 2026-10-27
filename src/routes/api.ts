@@ -668,11 +668,13 @@ router.get('/reports/analytics', async (_req: Request, res: Response): Promise<v
     }> = {};
 
     for (const order of allOrders) {
-      let courierName = order.shipment?.courier?.trim() || 'Delhivery';
-      if (courierName.toLowerCase().includes('delhivery')) courierName = 'Delhivery';
-      else if (courierName.toLowerCase().includes('ekart')) courierName = 'Ekart Logistics';
-      else if (courierName.toLowerCase().includes('ecom')) courierName = 'Ecom Express';
-      else if (courierName.toLowerCase().includes('ats') || courierName.toLowerCase().includes('amazon')) courierName = 'Amazon ATS';
+      const isVel = isVelocityCourier(order.shipment?.courier, order.shipment?.labelUrl, order.shipment?.waybillNumber);
+      let courierName = isVel ? 'Velocity' : (order.shipment?.courier?.trim() || 'Delhivery');
+      if (!isVel) {
+        if (courierName.toLowerCase().includes('delhivery')) courierName = 'Delhivery';
+        else if (courierName.toLowerCase().includes('ekart')) courierName = 'Ekart Logistics';
+        else if (courierName.toLowerCase().includes('ecom')) courierName = 'Ecom Express';
+      }
 
       if (!courierMap[courierName]) {
         courierMap[courierName] = {

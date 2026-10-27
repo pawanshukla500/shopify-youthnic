@@ -120,8 +120,10 @@ class ReturnService {
       }
     }
 
-    const carrierName = (options?.carrier || 'Delhivery').trim() || 'Delhivery';
-    const isDelhivery = /delhivery/i.test(carrierName);
+    const defaultCarrier = (order.shipment && isVelocityCourier(order.shipment.courier, order.shipment.labelUrl, order.shipment.waybillNumber))
+      ? 'Velocity'
+      : 'Delhivery';
+    const carrierName = (options?.carrier || defaultCarrier).trim() || defaultCarrier;
     const typedWaybill = (options?.returnWaybillNumber || '').trim();
     if (/^REV-DEL-/i.test(typedWaybill)) {
       throw new Error('Placeholder return codes are not accepted. Leave the AWB blank so Delhivery can assign a real reverse waybill.');
@@ -138,7 +140,8 @@ class ReturnService {
     let pickupAutomatic = false;
     let labelUrl: string | null = null;
 
-    const isVel = isVelocityCourier(carrierName, null, typedWaybill);
+    const isVel = isVelocityCourier(carrierName, null, typedWaybill) || /velocity/i.test(carrierName);
+    const isDelhivery = /delhivery/i.test(carrierName) && !isVel;
 
     if (isDelhivery && !finalReturnWaybill) {
       if (!forwardDelivered) {
@@ -159,6 +162,11 @@ class ReturnService {
       finalReturnWaybill = created.waybillNumber;
       pickupAutomatic = true;
     } else if (isVel && !finalReturnWaybill) {
+      if (!forwardDelivered) {
+        throw new Error(
+          `Reverse pickup is created after the forward shipment is delivered. ${order.shopifyOrderName} is still ${order.status}.`
+        );
+      }
       const selectedLines = items.map((item) => {
         const line = order.items.find((row) => row.id === item.orderItemId)!;
         return {
@@ -172,6 +180,9 @@ class ReturnService {
       const parts = rawName.split(/\s+/);
       const velReturn = await velocityService.createReverseShipment({
         orderId: order.shopifyOrderName,
+        forwardAwb: forwardWaybill || undefined,
+        returnReason,
+        storeName: 'youthnic2024',
         pickupCustomerName: parts[0] || 'Customer',
         pickupLastName: parts.slice(1).join(' ') || '.',
         pickupAddress: (order.customerAddress || 'Address').substring(0, 200),
@@ -209,7 +220,7 @@ class ReturnService {
         returnWaybillNumber: finalReturnWaybill,
         returnShipmentStatus: pickupAutomatic ? 'Pickup scheduled' : 'Linked',
         forwardWaybill,
-        carrier: carrierName,
+        carrier: isVel ? 'Velocity' : carrierName,
         pickupAutomatic,
         trackingStatus: pickupAutomatic ? 'Pickup scheduled' : 'Linked AWB',
         labelUrl,

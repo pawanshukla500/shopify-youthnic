@@ -38,8 +38,15 @@ const UPLOADS: Array<{
   {
     kind: 'DELHIVERY_REMITTANCE',
     title: 'Delhivery COD remittance',
-    what: 'Marks COD orders as paid into the bank, with the UTR.',
+    what: 'Marks Delhivery COD orders as paid into the bank, with the UTR.',
     where: 'Delhivery One → Finances → Remittance → open a remittance → download the AWB list (.xlsx or .csv).',
+    withRemittanceFields: true,
+  },
+  {
+    kind: 'VELOCITY_REMITTANCE',
+    title: 'Velocity COD remittance',
+    what: 'Marks Velocity COD orders as paid into the bank with UTR.',
+    where: 'Velocity Shipping Dashboard → Remittances → download remittance details.',
     withRemittanceFields: true,
   },
   {
@@ -50,7 +57,7 @@ const UPLOADS: Array<{
   },
   {
     kind: 'PG_SETTLEMENT',
-    title: 'Prepaid settlement (PhonePe / Easebuzz / GoKwik)',
+    title: 'Prepaid settlement (GoKwik / Easebuzz / PhonePe)',
     what: 'Marks prepaid orders as paid into the bank, with the settlement UTR and gateway fees.',
     where: 'PhonePe Business / Easebuzz / GoKwik dashboard → Settlements → download the transaction-wise settlement report.',
   },

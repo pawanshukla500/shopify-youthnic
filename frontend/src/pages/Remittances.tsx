@@ -11,11 +11,11 @@ const options: Array<{ kind: AccountsImportKind; label: string; template: Parame
   { kind: 'DELHIVERY_REMITTANCE', label: 'Delhivery COD remittance', template: 'delhivery-remittance' },
   { kind: 'VELOCITY_REMITTANCE', label: 'Velocity COD remittance', template: 'carrier-remittance' },
   { kind: 'DELHIVERY_CHARGES', label: 'Delhivery freight ledger', template: 'delhivery-charges' },
-  { kind: 'GOKWIK_SETTLEMENT', label: 'GoKwik settlement', template: 'gokwik-settlement' },
+  { kind: 'GOKWIK_SETTLEMENT', label: 'GoKwik (Easebuzz) settlement', template: 'gokwik-settlement' },
   { kind: 'PHONEPE_SETTLEMENT', label: 'PhonePe settlement', template: 'phonepe-settlement' },
   { kind: 'PG_SETTLEMENT', label: 'Other gateway settlement', template: 'gokwik-settlement' },
-  { kind: 'AMAZON_SHIPPING', label: 'Amazon Shipping remittance', template: 'carrier-remittance' },
-  { kind: 'EKART_SHIPPING', label: 'Ekart remittance', template: 'carrier-remittance' },
+  { kind: 'AMAZON_SHIPPING', label: 'Velocity - Amazon Shipping partner remittance', template: 'carrier-remittance' },
+  { kind: 'EKART_SHIPPING', label: 'Velocity - Ekart partner remittance', template: 'carrier-remittance' },
   { kind: 'GENERIC_CARRIER', label: 'Other carrier remittance', template: 'carrier-remittance' },
 ]
 const istToday = () => new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10)

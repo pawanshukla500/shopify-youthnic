@@ -23,7 +23,7 @@ import {
   downloadBulkInvoicesDirectFile,
   syncBulkExternalFulfillments,
 } from '../api'
-import { ORDER_TABS, carrierTrackingUrl, tabForStatus, formatDate, formatMoney, labelize, type OrderTabKey } from '../lib'
+import { ORDER_TABS, carrierTrackingUrl, tabForStatus, formatDate, formatMoney, labelize, isVelocityCourier, type OrderTabKey } from '../lib'
 import { classifyOrderTab, isApprovedForDispatch, isCodConfirmed as codConfirmedTag, isManifestRejected, isPrepaidOrder as prepaidOrder, prioritizeOrdersForDispatch } from '../../../src/modules/orders/order-tabs'
 import { getOrderTabCounts } from '../api'
 import { Button, EmptyState, ErrorBox, FormField, Icon, LoadingState, PageIntro, Panel, StatusBadge, useDocumentTitle, useToast } from '../components/UI'
@@ -1117,15 +1117,17 @@ export function Orders() {
     if (isCod) {
       const isRemitted = order.shipment?.codRemitted
       const isCollected = order.shipment?.codCollected
-      const courier = order.shipment?.courier || 'Cash'
-      const courierLower = courier.toLowerCase()
-      const courierLabel = courierLower.includes('cod') ? courier : `${courier} COD`
+      const isVel = isVelocityCourier(order.shipment?.courier, order.shipment?.waybillNumber)
+      const courier = isVel ? 'Velocity' : (order.shipment?.courier || 'Delhivery')
+      const courierLabel = `${courier} COD`
 
       return (
         <div className="pay-cell">
           <span className="pay-pill is-cod" title="Cash on Delivery order">
-            {courierLower === 'delhivery' ? (
+            {courier.toLowerCase() === 'delhivery' ? (
               <img src="/logos/delhivery.png" alt="Delhivery" />
+            ) : isVel ? (
+              <img src="/logos/velocity.svg" alt="Velocity" />
             ) : (
               <span className="pay-dot" />
             )}
@@ -1144,19 +1146,14 @@ export function Orders() {
       )
     }
 
-    if (agg.includes('gokwik') || gw.includes('gokwik') || gw.includes('kwik') || sc.includes('gokwik')) {
-      const isEasebuzz = (provider || '').toLowerCase().includes('easebuzz')
+    if (agg.includes('gokwik') || gw.includes('gokwik') || gw.includes('kwik') || sc.includes('gokwik') || (order.tags || '').toLowerCase().includes('gokwik')) {
       return (
         <div className="pay-cell">
-          <span className="pay-pill is-gokwik" title={`GoKwik 1-click checkout${provider ? ` · ${provider}` : ''}`}>
+          <span className="pay-pill is-gokwik" title="GoKwik 1-click checkout via Easebuzz">
             <img src="/logos/gokwik.png" alt="GoKwik" />
-            {isEasebuzz ? (
-              <span className="pay-pill-via">
-                via <img src="/logos/easebuzz.png" alt="Easebuzz" />
-              </span>
-            ) : (
-              provider && <span className="pay-pill-via">({provider})</span>
-            )}
+            <span className="pay-pill-via">
+              (Easebuzz)
+            </span>
           </span>
           <span className={`pay-sub ${order.paymentVerified ? 'is-ok' : 'is-warn'}`}>
             {order.paymentVerified ? 'Captured & verified' : 'Verification pending'}

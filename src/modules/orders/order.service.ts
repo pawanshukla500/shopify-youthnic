@@ -497,7 +497,7 @@ class OrderService {
           });
           if (!order) continue;
 
-          const carrierName = attr.carrier?.name ? `Velocity (${attr.carrier.name})` : 'Velocity';
+          const carrierName = 'Velocity';
           const mapped = velocityService.mapTrackingToShipmentStatus(attr.status || 'ready_for_pickup');
 
           await prisma.shipment.upsert({
@@ -1031,17 +1031,38 @@ class OrderService {
     let courierToSave = chosenCourier as string;
 
     if (chosenCourier === 'Velocity') {
-      const result = await velocityService.createForwardShipment(verifiedOrder, {
-        carrierId: options?.velocityCarrierId,
-      });
-      waybillNumber = result.awbCode;
-      labelUrl = result.labelUrl || null;
-      courierNameForShopify = result.courierName || 'Velocity';
-      courierToSave = result.courierName
-        ? (result.courierName.toLowerCase().includes('velocity')
-            ? result.courierName
-            : `Velocity (${result.courierName})`)
-        : 'Velocity';
+      // Search Velocity first to link pre-synced order under youthnic2024 if already manifested with an AWB
+      let existingShipmentResult: any = null;
+      try {
+        existingShipmentResult = await velocityService.findExistingShipment(
+          verifiedOrder.shopifyOrderName,
+          verifiedOrder.shopifyOrderName
+        );
+      } catch (err: any) {
+        logger.warn('Non-fatal pre-dispatch Velocity search check failed', {
+          orderId: verifiedOrder.id,
+          error: err.message,
+        });
+      }
+
+      if (existingShipmentResult && existingShipmentResult.awbCode) {
+        waybillNumber = existingShipmentResult.awbCode;
+        labelUrl = existingShipmentResult.labelUrl || null;
+        courierNameForShopify = 'Velocity';
+        courierToSave = 'Velocity';
+        logger.info('Linked pre-existing manifested Velocity shipment under youthnic2024 before dispatch', {
+          orderId: verifiedOrder.id,
+          waybillNumber,
+        });
+      } else {
+        const result = await velocityService.createForwardShipment(verifiedOrder, {
+          carrierId: options?.velocityCarrierId,
+        });
+        waybillNumber = result.awbCode;
+        labelUrl = result.labelUrl || null;
+        courierNameForShopify = 'Velocity';
+        courierToSave = 'Velocity';
+      }
     } else {
       // Create shipment on Delhivery
       const result = await delhiveryService.createShipment(verifiedOrder, {

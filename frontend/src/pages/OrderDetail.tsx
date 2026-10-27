@@ -49,7 +49,7 @@ export function OrderDetail() {
   const [selected, setSelected] = useState<Record<number, number>>({})
   const [reason, setReason] = useState('')
   const [returnTracking, setReturnTracking] = useState('')
-  const [carrier, setCarrier] = useState('Delhivery')
+  const [carrier, setCarrier] = useState(() => (order && isVelocityCourier(order.shipment?.courier, order.shipment?.waybillNumber) ? 'Velocity' : 'Delhivery'))
   const [section, setSection] = useState<OrderSection>(() => window.location.hash === '#return-panel' ? 'returns' : 'overview')
   useEffect(() => {
     if (orderQuery.dataUpdatedAt) queryClient.invalidateQueries({ queryKey: ['order-activity', id] })
@@ -2835,6 +2835,7 @@ function ReturnForm({
               <FormField label="Carrier">
                 <select value={carrier} onChange={(event) => setCarrier(event.target.value)}>
                   <option value="Delhivery">Delhivery</option>
+                  <option value="Velocity">Velocity</option>
                   <option value="Other">Other carrier</option>
                 </select>
               </FormField>

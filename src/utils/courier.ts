@@ -121,10 +121,6 @@ export function normalizeCourierName(
   }
 
   if (isVelocityCourier(courier, trackingUrl, waybillNumber)) {
-    if (courier && /amazon|ats/i.test(courier)) return 'Amazon Transportation';
-    if (courier && /bluedart|blue dart/i.test(courier)) return 'Blue Dart';
-    if (courier && /ekart/i.test(courier)) return 'Ekart';
-    if (trackingUrl && /labels\/amazon/i.test(trackingUrl)) return 'Amazon Transportation';
     return 'Velocity';
   }
 

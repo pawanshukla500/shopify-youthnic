@@ -182,6 +182,9 @@ export interface VelocityReverseShipmentParams {
   orderId: string;
   orderDate?: string;
   carrierId?: string;
+  forwardAwb?: string;
+  storeName?: string;
+  returnReason?: string;
   pickupCustomerName: string;
   pickupLastName?: string;
   pickupAddress: string;
@@ -385,6 +388,85 @@ export class VelocityService {
    * Create and manifest forward shipment using single-step orchestration
    * POST /custom/api/v1/forward-order-orchestration
    */
+  /**
+   * Search Velocity for an existing order/shipment under connected store (youthnic2024).
+   * Used before forward orchestration to avoid duplicate manifestations and link
+   * pre-synced shipments directly.
+   */
+  async findExistingShipment(
+    baseOrderId: string,
+    shopifyOrderName: string
+  ): Promise<VelocityForwardShipmentResult | null> {
+    const cleanName = shopifyOrderName.replace(/^#/, '');
+    const idsToSearch = Array.from(new Set([baseOrderId, shopifyOrderName, cleanName]));
+
+    for (const id of idsToSearch) {
+      try {
+        const details = await this.getForwardOrderDetails({ orderId: id });
+        const p = details?.payload || details?.data || details?.result || details;
+        const awb = p?.awb_code || p?.awb || p?.tracking_number;
+        if (awb) {
+          logger.info('Found existing Velocity order via order-details under youthnic2024', {
+            orderId: id,
+            awb,
+          });
+          return {
+            orderId: p.order_id || id,
+            shipmentId: String(p.shipment_id || p.order_id || p.id || ''),
+            awbCode: String(awb).trim(),
+            courierName: 'Velocity',
+            courierCompanyId: p.courier_company_id || p.carrier_id,
+            labelUrl: p.label_url || '',
+            assignedDateTime: p.assigned_date_time?.date || p.assigned_date_time,
+            charges: p.charges,
+            raw: details,
+          };
+        }
+      } catch {
+        // Continue search
+      }
+    }
+
+    try {
+      const listRes = await this.getShipmentsList({ search: cleanName });
+      const items = listRes.data || [];
+      const match = items.find((item: any) => {
+        const attr = item?.attributes || item || {};
+        const dId = String(attr.order?.display_id || attr.order?.external_id || attr.order_id || '').trim().toLowerCase();
+        const target = cleanName.toLowerCase();
+        const hasAwb = Boolean(attr.tracking_number || attr.awb_code || attr.awb);
+        return hasAwb && (dId === target || dId === '#' + target || dId.replace(/^#/, '') === target);
+      });
+
+      if (match) {
+        const attr = match.attributes || match;
+        const awb = String(attr.tracking_number || attr.awb_code || attr.awb).trim();
+        logger.info('Found existing Velocity order via shipments list search under youthnic2024', {
+          search: cleanName,
+          awb,
+        });
+        return {
+          orderId: baseOrderId,
+          shipmentId: String(attr.shipment_id || attr.id || ''),
+          awbCode: awb,
+          courierName: 'Velocity',
+          courierCompanyId: attr.carrier?.id || attr.carrier_id,
+          labelUrl: attr.label_url || '',
+          assignedDateTime: attr.assigned_date_time || attr.created_at,
+          charges: attr.charges,
+          raw: match,
+        };
+      }
+    } catch (err: any) {
+      logger.warn('Velocity findExistingShipment search non-fatal failure', {
+        search: cleanName,
+        error: err.message,
+      });
+    }
+
+    return null;
+  }
+
   async createForwardShipment(
     order: Order & { items: OrderItem[] },
     options?: VelocityForwardOrderOptions
@@ -749,15 +831,16 @@ export class VelocityService {
    * POST /custom/api/v1/reverse-order-orchestration
    */
   async createReverseShipment(params: VelocityReverseShipmentParams): Promise<any> {
-    const warehouseId = params.warehouseId || config.velocity.warehouseId;
-    if (!warehouseId) {
-      throw new Error('VELOCITY_WAREHOUSE_ID is required for reverse pickup creation');
-    }
+    const warehouseId = params.warehouseId || config.velocity.warehouseId || 'WHGSYR';
+    const storeName = params.storeName || config.shopify.shopDomain?.replace('.myshopify.com', '') || 'youthnic2024';
 
-    const payload = {
+    const payload: any = {
       order_id: params.orderId,
       order_date: params.orderDate || new Date().toISOString().slice(0, 10),
+      store_name: storeName,
       carrier_id: params.carrierId || '',
+      ...(params.forwardAwb ? { forward_awb: params.forwardAwb, tracking_number: params.forwardAwb } : {}),
+      ...(params.returnReason ? { return_reason: params.returnReason, remarks: params.returnReason } : {}),
       pickup_customer_name: params.pickupCustomerName,
       pickup_last_name: params.pickupLastName || '.',
       pickup_address: params.pickupAddress,
@@ -796,7 +879,7 @@ export class VelocityService {
       return {
         awbCode: awbCode ? String(awbCode).trim() : '',
         shipmentId: String(p?.shipment_id || p?.order_id || ''),
-        courierName: p?.courier_name || p?.carrier_name || 'Velocity Reverse',
+        courierName: 'Velocity',
         labelUrl: p?.label_url || '',
         raw: data,
       };
@@ -1094,7 +1177,7 @@ export class VelocityService {
           awb: identifier.awb,
         },
       });
-      return response.data?.payload || response.data?.data || response.data;
+      return response?.data?.payload || response?.data?.data || response?.data;
     } catch (error: any) {
       throw new Error(`Failed to fetch forward order details: ${error.response?.data?.message || error.message}`);
     }

@@ -63,8 +63,10 @@ export function OrderPaymentEvidence({ order }: { order: Order }) {
               <dt>Provider / Gateway</dt>
               <dd>
                 {isCod
-                  ? 'Cash on Delivery'
-                  : order.paymentProvider || order.paymentGateway || 'GoKwik / PhonePe'}
+                  ? (isVelocityShipment ? 'Velocity COD' : 'Delhivery COD')
+                  : ((order.paymentProvider || order.paymentGateway || '').toLowerCase().includes('phonepe')
+                      ? 'PhonePe'
+                      : 'GoKwik (Easebuzz)')}
               </dd>
             </div>
             <div>

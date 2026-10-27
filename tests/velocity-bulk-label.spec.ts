@@ -91,9 +91,9 @@ describe('Velocity & Amazon Shipping Bulk Label Verification', () => {
       expect(isDelhiveryCourier('Amazon Shipping')).toBe(false);
     });
 
-    it('normalizes courier name to Amazon Transportation for Amazon variants', () => {
-      expect(normalizeCourierName('Amazon Transportation')).toBe('Amazon Transportation');
-      expect(normalizeCourierName('Amazon Shipping')).toBe('Amazon Transportation');
+    it('normalizes courier name to Velocity for Amazon / Velocity variants', () => {
+      expect(normalizeCourierName('Amazon Transportation')).toBe('Velocity');
+      expect(normalizeCourierName('Amazon Shipping')).toBe('Velocity');
     });
 
     it('correctly keeps Delhivery as Delhivery even with AWS S3 amazonaws.com URL', () => {

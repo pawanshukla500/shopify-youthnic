@@ -276,11 +276,13 @@ class NotificationEngine {
    * Dispatches WhatsApp return notice + Email return notice.
    */
   async notifyReturnInitiated(order: Order, returnRecord: Return): Promise<void> {
+    const isVel = isVelocityCourier(returnRecord.carrier, returnRecord.returnWaybillNumber);
+    const courierLabel = isVel ? 'Velocity Reverse' : (returnRecord.carrier || 'Delhivery Surface Reverse');
     try {
       await kwikengageService.sendCriticalTrigger('RETURN_INITIATED', order, {
         waybillNumber: returnRecord.returnWaybillNumber || undefined,
         ndrReason: returnRecord.returnReason,
-        courierName: 'Delhivery Surface Reverse',
+        courierName: courierLabel,
       });
     } catch (err) {
       logger.warn('KwikEngage send failed for RETURN_INITIATED', { err });
@@ -288,7 +290,7 @@ class NotificationEngine {
     await this.sendLifecycleEmail(order, 'RETURN_INITIATED', {
       waybillNumber: returnRecord.returnWaybillNumber || undefined,
       returnReason: returnRecord.returnReason,
-      courier: 'Delhivery Surface Reverse',
+      courier: courierLabel,
     });
   }
 

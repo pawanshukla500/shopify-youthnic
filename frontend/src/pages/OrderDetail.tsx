@@ -143,6 +143,14 @@ export function OrderDetail() {
   })
 
   const order = orderQuery.data
+
+  useEffect(() => {
+    if (order?.shipment && isVelocityCourier(order.shipment.courier, order.shipment.waybillNumber)) {
+      setCarrier('Velocity')
+    } else {
+      setCarrier('Delhivery')
+    }
+  }, [order?.shipment?.courier, order?.shipment?.waybillNumber])
   const refreshShopify = useMutation({
     mutationFn: () => api.post(`/api/orders/${id}/refresh-shopify`),
     onSuccess: async () => {
@@ -224,7 +232,7 @@ export function OrderDetail() {
         data.shopifyReturnId
           ? `Reverse AWB ${data.returnWaybill} is live and Shopify return ${data.shopifyReturnId.split('/').pop()} is open.`
           : data.pickupAutomatic
-          ? `Reverse AWB ${data.returnWaybill} is live. Delhivery will pick up from the customer — status updates from carrier scans.`
+          ? `Reverse AWB ${data.returnWaybill} is live. ${carrier === 'Velocity' ? 'Velocity' : 'Delhivery'} will pick up from the customer — status updates from carrier scans.`
           : `Return linked with waybill ${data.returnWaybill}${data.shopifyTriggered ? ' · Synced to Shopify' : ''}.`
       )
       setSelected({})
@@ -1153,7 +1161,7 @@ export function OrderDetail() {
               isVelocityCourier(order.shipment?.courier, order.shipment?.waybillNumber) ? (
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
                   <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '22px', height: '22px', borderRadius: '5px', background: '#7c3aed', color: '#fff', fontSize: '12px', fontWeight: 900 }}>⚡</span>
-                  <span style={{ fontWeight: 700 }}>{order.shipment?.courier || 'Velocity'} Aggregator Logistics</span>
+                  <span style={{ fontWeight: 700 }}>Velocity Aggregator Logistics</span>
                 </span>
               ) : order.shipment?.courier?.toLowerCase() === 'delhivery' ? (
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
@@ -1304,14 +1312,14 @@ export function OrderDetail() {
                 <div style={{ background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: '8px', padding: '12px 16px', marginTop: '14px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', fontSize: '12px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <img
-                      src={getCourierLogoUrl(order.shipment.courier)}
+                      src="/logos/velocity.svg"
                       alt=""
                       style={{ height: '24px', maxWidth: '80px', objectFit: 'contain' }}
                       onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none' }}
                     />
                     <div>
-                      <div style={{ color: '#6d28d9', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>⚡ Aggregator Partner</div>
-                      <div style={{ fontWeight: 800, fontSize: '14px', color: '#1e1b4b', marginTop: '2px' }}>{order.shipment.courier || 'Velocity'}</div>
+                      <div style={{ color: '#6d28d9', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>⚡ Shipping Aggregator</div>
+                      <div style={{ fontWeight: 800, fontSize: '14px', color: '#1e1b4b', marginTop: '2px' }}>Velocity ({order.shipment.courier || 'Aggregator'})</div>
                       <div style={{ color: '#6b7280', fontSize: '11px' }}>AWB: <span style={{ fontFamily: 'monospace' }}>{order.shipment.waybillNumber}</span></div>
                     </div>
                   </div>
@@ -2812,22 +2820,30 @@ function ReturnForm({
             />
           </FormField>
 
-          <ol className="reverse-steps">
-            <li>Delhivery manifests a reverse AWB against {forwardAwb || 'this order'}.</li>
-            <li>The customer pickup is scheduled by Delhivery. A warehouse pickup request is not used for returns.</li>
-            <li>Scans move the return the same way a forward shipment moves. Refund still waits for warehouse QC.</li>
-          </ol>
+          {linkExisting ? (
+            <ol className="reverse-steps">
+              <li>Links the manually provided reverse AWB to this order.</li>
+              <li>Tracking updates will sync scans from the carrier.</li>
+              <li>Refund still waits for warehouse QC upon delivery.</li>
+            </ol>
+          ) : (
+            <ol className="reverse-steps">
+              <li>{carrier === 'Velocity' ? 'Velocity' : 'Delhivery'} manifests a reverse AWB against {forwardAwb || 'this order'}.</li>
+              <li>The customer pickup is scheduled by {carrier === 'Velocity' ? 'Velocity' : 'Delhivery'}. A warehouse pickup request is not used for returns.</li>
+              <li>Scans move the return the same way a forward shipment moves. Refund still waits for warehouse QC.</li>
+            </ol>
+          )}
 
           <button type="button" className="reverse-link-toggle" onClick={() => {
             setLinkExisting((value) => !value)
             if (linkExisting) {
-              setCarrier('Delhivery')
+              setCarrier(order.shipment && isVelocityCourier(order.shipment.courier, order.shipment.waybillNumber) ? 'Velocity' : 'Delhivery')
               setReturnTracking('')
             } else {
               setCarrier('Other')
             }
           }}>
-            {linkExisting ? 'Use automatic Delhivery pickup' : 'Link an AWB that already exists'}
+            {linkExisting ? `Use automatic ${carrier === 'Velocity' || (order.shipment && isVelocityCourier(order.shipment.courier, order.shipment.waybillNumber)) ? 'Velocity' : 'Delhivery'} pickup` : 'Link an AWB that already exists'}
           </button>
 
           {linkExisting ? (
@@ -2835,6 +2851,7 @@ function ReturnForm({
               <FormField label="Carrier">
                 <select value={carrier} onChange={(event) => setCarrier(event.target.value)}>
                   <option value="Delhivery">Delhivery</option>
+                  <option value="Velocity">Velocity</option>
                   <option value="Other">Other carrier</option>
                 </select>
               </FormField>
@@ -2892,7 +2909,7 @@ function ActiveReturnCard({ record }: { record: ReturnRecord }) {
         <strong className="mono">{record.returnWaybillNumber || 'Waybill pending'}</strong>
         <p>
           {record.pickupAutomatic
-            ? 'Customer pickup was scheduled by Delhivery. Status follows carrier scans.'
+            ? `Customer pickup was scheduled by ${record.carrier || 'the carrier'}. Status follows carrier scans.`
             : 'This return is linked to an existing waybill.'}
           {record.forwardWaybill ? ` Forward AWB ${record.forwardWaybill}.` : ''}
           {record.shopifyReturnId ? ` Shopify return ${record.shopifyReturnId.split('/').pop()}.` : ''}

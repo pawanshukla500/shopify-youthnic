@@ -13,9 +13,12 @@ export function OrderPaymentEvidence({ order }: { order: Order }) {
     /cod|cash/i.test(order.shipment?.paymentMode || '')
 
   const isVelocityShipment = Boolean(
-    isVelocityCourier(order.shipment?.courier, order.shipment?.waybillNumber) ||
+    isVelocityCourier(order.shipment?.courier, order.shipment?.labelUrl, order.shipment?.waybillNumber) ||
     order.shipment?.labelUrl?.includes('velocity') ||
-    order.paymentReceivedSource === 'Velocity'
+    order.paymentReceivedSource === 'Velocity' ||
+    order.paymentReceivedSource === 'VELOCITY_REMITTANCE' ||
+    order.paymentReceivedSource === 'VELOCITY_API' ||
+    (order.paymentReceivedSource || '').toLowerCase().includes('velocity')
   )
 
   const paymentLogo = getPaymentLogoUrl(order.paymentProvider, order.paymentGateway, order.paymentMethod)
@@ -63,8 +66,22 @@ export function OrderPaymentEvidence({ order }: { order: Order }) {
               <dt>Provider / Gateway</dt>
               <dd>
                 {isCod
-                  ? 'Cash on Delivery'
-                  : order.paymentProvider || order.paymentGateway || 'GoKwik / PhonePe'}
+                  ? (isVelocityShipment
+                      ? 'Velocity COD'
+                      : (order.shipment?.courier
+                          ? (/delhivery/i.test(order.shipment.courier) ? 'Delhivery COD' : `${order.shipment.courier} COD`)
+                          : order.paymentReceivedSource && (order.paymentReceivedSource === 'DELHIVERY_REMITTANCE' || /delhivery/i.test(order.paymentReceivedSource))
+                            ? 'Delhivery COD'
+                            : 'COD'))
+                  : (`${order.paymentProvider || ''} ${order.paymentGateway || ''} ${order.paymentAggregator || ''}`.toLowerCase().includes('phonepe') ||
+                     `${order.paymentProvider || ''} ${order.paymentGateway || ''} ${order.paymentAggregator || ''}`.toLowerCase().includes('phone_pe') ||
+                     (order.tags || '').toLowerCase().includes('phonepe')
+                      ? 'PhonePe'
+                      : (`${order.paymentProvider || ''} ${order.paymentGateway || ''} ${order.paymentAggregator || ''}`.toLowerCase().includes('gokwik') ||
+                         `${order.paymentProvider || ''} ${order.paymentGateway || ''} ${order.paymentAggregator || ''}`.toLowerCase().includes('easebuzz') ||
+                         (order.tags || '').toLowerCase().includes('gokwik')
+                          ? 'GoKwik (Easebuzz)'
+                          : (order.paymentProvider || order.paymentGateway || 'Prepaid')))}
               </dd>
             </div>
             <div>

@@ -254,11 +254,7 @@ export class ShippingLabelService {
    */
   public generatePrintableLabelPage(order: OrderWithDetails, waybillNumber: string): string {
     const isVelocity = isVelocityCourier(order.shipment?.courier, order.shipment?.labelUrl, waybillNumber);
-    const courierLabel = isVelocity
-      ? /amazon|ats/i.test(order.shipment?.courier || '')
-        ? 'Amazon Transportation'
-        : 'Velocity'
-      : 'Delhivery';
+    const courierLabel = isVelocity ? 'Velocity' : 'Delhivery';
     const labelHtml = this.generateSingleLabelHtml(order, waybillNumber);
 
     return `<!DOCTYPE html>
@@ -402,11 +398,7 @@ export class ShippingLabelService {
    */
   public generateLabelAndInvoiceHtml(order: OrderWithDetails, waybillNumber: string, pdfBuffer?: Buffer | null): string {
     const isVelocity = isVelocityCourier(order.shipment?.courier, order.shipment?.labelUrl, waybillNumber);
-    const courierLabel = isVelocity
-      ? /amazon|ats/i.test(order.shipment?.courier || '')
-        ? 'Amazon Transportation'
-        : 'Velocity'
-      : 'Delhivery';
+    const courierLabel = isVelocity ? 'Velocity' : 'Delhivery';
     const invoiceHtml = invoiceService.generateInvoiceHtml(order);
     const pdfBase64 = isVelocity && pdfBuffer && pdfBuffer.length > 20 ? pdfBuffer.toString('base64') : '';
 

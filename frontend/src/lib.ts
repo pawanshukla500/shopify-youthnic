@@ -144,10 +144,42 @@ export function formatMoney(amount: number | null | undefined, currency = 'INR')
   }
 }
 
-export function isVelocityCourier(courier?: string | null, waybill?: string | null): boolean {
+export function isVelocityCourier(courier?: string | null, labelUrlOrWaybill?: string | null, waybill?: string | null): boolean {
   const c = (courier || '').toLowerCase()
-  const w = (waybill || '').trim()
-  return c.includes('velocity') || c.includes('shipfastt') || /^(pd|vehr|vel)/i.test(w)
+  const second = (labelUrlOrWaybill || '').trim()
+  const third = (waybill || '').trim()
+
+  const isUrl = second.startsWith('http://') || second.startsWith('https://') || second.includes('/')
+  const l = isUrl ? second.toLowerCase() : ''
+  const w = isUrl ? third : second || third
+
+  // If the label URL is from Velocity's domain, it is always a Velocity-aggregated shipment
+  if (l.includes('velocity') || l.includes('velocity-shazam') || l.includes('shipfastt')) {
+    return true
+  }
+
+  // If courier name explicitly includes Velocity or Shipfastt, it is Velocity (even if partner courier mentions Delhivery)
+  if (c.includes('velocity') || c.includes('shipfastt') || c.includes('shazam')) {
+    return true
+  }
+
+  // Explicit Delhivery courier or Delhivery label URL is never Velocity
+  if (c.includes('delhivery') || l.includes('delhivery')) {
+    return false
+  }
+
+  return (
+    c.includes('velocity') ||
+    c.includes('shipfastt') ||
+    c.includes('shazam') ||
+    c.includes('amazon') ||
+    c.includes('ats') ||
+    c.includes('ekart') ||
+    l.includes('velocity') ||
+    l.includes('velocity-shazam') ||
+    l.includes('shipfastt') ||
+    (Boolean(w) && /^(pd|vehr|vel)[0-9a-z]+$/i.test(w))
+  )
 }
 
 /** Official brand logo URL for couriers and logistics partners (Brandfetch) */
@@ -189,8 +221,10 @@ export function carrierTrackingUrl(courier: string | null | undefined, waybill: 
   if (
     name.includes('velocity') ||
     name.includes('shipfastt') ||
+    name.includes('shazam') ||
     name.includes('amazon') ||
     name.includes('ats') ||
+    (name.includes('ekart') && (name.includes('velocity') || name.includes('shipfastt'))) ||
     /^(pd|vehr|vel)/i.test(wb)
   ) {
     return `https://www.velocityshipping.in/track/${encodeURIComponent(wb)}`

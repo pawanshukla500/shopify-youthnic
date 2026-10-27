@@ -23,7 +23,7 @@ import {
   downloadBulkInvoicesDirectFile,
   syncBulkExternalFulfillments,
 } from '../api'
-import { ORDER_TABS, carrierTrackingUrl, tabForStatus, formatDate, formatMoney, labelize, type OrderTabKey } from '../lib'
+import { ORDER_TABS, tabForStatus, formatDate, formatMoney, labelize, isVelocityCourier, type OrderTabKey } from '../lib'
 import { classifyOrderTab, isApprovedForDispatch, isCodConfirmed as codConfirmedTag, isManifestRejected, isPrepaidOrder as prepaidOrder, prioritizeOrdersForDispatch } from '../../../src/modules/orders/order-tabs'
 import { getOrderTabCounts } from '../api'
 import { Button, EmptyState, ErrorBox, FormField, Icon, LoadingState, PageIntro, Panel, StatusBadge, useDocumentTitle, useToast } from '../components/UI'
@@ -508,7 +508,7 @@ export function Orders() {
         (o) =>
           o.hasNdrException ||
           ['FAILED_DELIVERY', 'RTO_INITIATED'].includes(o.status) ||
-          (o.shipment?.trackingStatus && /fail|attempt|undeliver/i.test(o.shipment.trackingStatus))
+          (o.shipment?.trackingStatus && /fail|attempt|undeliver|ndr/i.test(o.shipment.trackingStatus))
       )
     } else if (channelFilter === 'COD') {
       list = list.filter((o) => o.paymentMethod === 'COD' || o.shipment?.paymentMode === 'COD')
@@ -517,13 +517,17 @@ export function Orders() {
         const gw = (o.paymentGateway || '').toLowerCase()
         const sc = (o.salesChannel || '').toLowerCase()
         const tags = (o.tags || '').toLowerCase()
-        return (gw.includes('gokwik') || gw.includes('kwik') || sc.includes('gokwik') || tags.includes('gokwik')) && o.paymentMethod !== 'COD'
+        const prov = (o.paymentProvider || '').toLowerCase()
+        const agg = (o.paymentAggregator || '').toLowerCase()
+        return (gw.includes('gokwik') || gw.includes('kwik') || gw.includes('easebuzz') || sc.includes('gokwik') || tags.includes('gokwik') || prov.includes('gokwik') || prov.includes('easebuzz') || agg.includes('gokwik')) && o.paymentMethod !== 'COD' && o.shipment?.paymentMode !== 'COD'
       })
     } else if (channelFilter === 'PHONEPE') {
       list = list.filter((o) => {
         const gw = (o.paymentGateway || '').toLowerCase()
         const tags = (o.tags || '').toLowerCase()
-        return (gw.includes('phonepe') || gw.includes('phone_pe') || tags.includes('phonepe')) && o.paymentMethod !== 'COD'
+        const agg = (o.paymentAggregator || '').toLowerCase()
+        const prov = (o.paymentProvider || '').toLowerCase()
+        return (gw.includes('phonepe') || gw.includes('phone_pe') || tags.includes('phonepe') || agg.includes('phonepe') || prov.includes('phonepe')) && o.paymentMethod !== 'COD' && o.shipment?.paymentMode !== 'COD'
       })
     }
 
@@ -639,16 +643,27 @@ export function Orders() {
       const gw = (o.paymentGateway || '').toLowerCase()
       const sc = (o.salesChannel || '').toLowerCase()
       const tags = (o.tags || '').toLowerCase()
+      const agg = (o.paymentAggregator || '').toLowerCase()
+      const prov = (o.paymentProvider || '').toLowerCase()
 
       if (isCod) {
         codCount++
         codAmt += o.totalAmount || 0
-      } else if (gw.includes('gokwik') || gw.includes('kwik') || sc.includes('gokwik') || tags.includes('gokwik')) {
-        gokwikCount++
-        gokwikAmt += o.totalAmount || 0
-      } else if (gw.includes('phonepe') || gw.includes('phone_pe') || tags.includes('phonepe')) {
+      } else if (gw.includes('phonepe') || gw.includes('phone_pe') || tags.includes('phonepe') || agg.includes('phonepe') || prov.includes('phonepe')) {
         phonepeCount++
         phonepeAmt += o.totalAmount || 0
+      } else if (
+        gw.includes('gokwik') ||
+        gw.includes('kwik') ||
+        gw.includes('easebuzz') ||
+        sc.includes('gokwik') ||
+        tags.includes('gokwik') ||
+        (o.paymentProvider || '').toLowerCase().includes('gokwik') ||
+        (o.paymentProvider || '').toLowerCase().includes('easebuzz') ||
+        (o.paymentAggregator || '').toLowerCase().includes('gokwik')
+      ) {
+        gokwikCount++
+        gokwikAmt += o.totalAmount || 0
       }
     }
 
@@ -1117,15 +1132,17 @@ export function Orders() {
     if (isCod) {
       const isRemitted = order.shipment?.codRemitted
       const isCollected = order.shipment?.codCollected
-      const courier = order.shipment?.courier || 'Cash'
-      const courierLower = courier.toLowerCase()
-      const courierLabel = courierLower.includes('cod') ? courier : `${courier} COD`
+      const isVel = isVelocityCourier(order.shipment?.courier, order.shipment?.labelUrl, order.shipment?.waybillNumber)
+      const courier = isVel ? 'Velocity' : ((order.shipment?.courier || '').toLowerCase().includes('delhivery') ? 'Delhivery' : (order.shipment?.courier || 'Delhivery'))
+      const courierLabel = `${courier} COD`
 
       return (
         <div className="pay-cell">
           <span className="pay-pill is-cod" title="Cash on Delivery order">
-            {courierLower === 'delhivery' ? (
+            {courier.toLowerCase() === 'delhivery' ? (
               <img src="/logos/delhivery.png" alt="Delhivery" />
+            ) : isVel ? (
+              <img src="/logos/velocity.svg" alt="Velocity" />
             ) : (
               <span className="pay-dot" />
             )}
@@ -1144,19 +1161,28 @@ export function Orders() {
       )
     }
 
-    if (agg.includes('gokwik') || gw.includes('gokwik') || gw.includes('kwik') || sc.includes('gokwik')) {
-      const isEasebuzz = (provider || '').toLowerCase().includes('easebuzz')
+    if (gw.includes('phonepe') || gw.includes('phone_pe') || agg.includes('phonepe') || provider.toLowerCase().includes('phonepe') || (order.tags || '').toLowerCase().includes('phonepe')) {
       return (
         <div className="pay-cell">
-          <span className="pay-pill is-gokwik" title={`GoKwik 1-click checkout${provider ? ` · ${provider}` : ''}`}>
+          <span className="pay-pill is-phonepe" title="PhonePe payment gateway">
+            <span className="pay-dot" />
+            PhonePe PG
+          </span>
+          <span className={`pay-sub ${order.paymentVerified ? 'is-ok' : 'is-warn'}`}>
+            {order.paymentVerified ? 'Captured & verified' : 'Verification pending'}
+          </span>
+        </div>
+      )
+    }
+
+    if (agg.includes('gokwik') || gw.includes('gokwik') || gw.includes('kwik') || sc.includes('gokwik') || (order.tags || '').toLowerCase().includes('gokwik') || provider.toLowerCase().includes('gokwik') || provider.toLowerCase().includes('easebuzz') || gw.toLowerCase().includes('easebuzz')) {
+      return (
+        <div className="pay-cell">
+          <span className="pay-pill is-gokwik" title="GoKwik 1-click checkout via Easebuzz">
             <img src="/logos/gokwik.png" alt="GoKwik" />
-            {isEasebuzz ? (
-              <span className="pay-pill-via">
-                via <img src="/logos/easebuzz.png" alt="Easebuzz" />
-              </span>
-            ) : (
-              provider && <span className="pay-pill-via">({provider})</span>
-            )}
+            <span className="pay-pill-via">
+              (Easebuzz)
+            </span>
           </span>
           <span className={`pay-sub ${order.paymentVerified ? 'is-ok' : 'is-warn'}`}>
             {order.paymentVerified ? 'Captured & verified' : 'Verification pending'}
@@ -1167,20 +1193,6 @@ export function Orders() {
                   : order.paymentProviderPaymentId}
               </span>
             )}
-          </span>
-        </div>
-      )
-    }
-
-    if (gw.includes('phonepe') || gw.includes('phone_pe')) {
-      return (
-        <div className="pay-cell">
-          <span className="pay-pill is-phonepe" title="PhonePe payment gateway">
-            <span className="pay-dot" />
-            PhonePe PG
-          </span>
-          <span className={`pay-sub ${order.paymentVerified ? 'is-ok' : 'is-warn'}`}>
-            {order.paymentVerified ? 'Captured & verified' : 'Verification pending'}
           </span>
         </div>
       )

@@ -26,6 +26,19 @@ export function isVelocityCourier(
   const url = (trackingUrl || '').trim();
   const wb = (waybillNumber || '').trim();
 
+  // If courier name explicitly includes Velocity or Shipfastt, or tracking URL is on Velocity domain, it is Velocity
+  if (/velocity|shipfastt|shazam/i.test(c)) {
+    return true;
+  }
+  if (
+    url &&
+    /velocityshipping\.in|shipfastt\.in|shazam\.velocity\.in|velocity-shazam|\/labels\/velocity\//i.test(
+      url
+    )
+  ) {
+    return true;
+  }
+
   // If explicitly identified as Delhivery by courier name or URL, it is NEVER direct Velocity
   if (DELHIVERY_COURIER_PATTERN.test(c) || (url && /delhivery/i.test(url))) {
     return false;
@@ -66,15 +79,16 @@ export function isDelhiveryCourier(
   const url = (trackingUrl || '').trim();
   const wb = (waybillNumber || '').trim();
 
+  // If explicitly identified as Velocity, it is not direct Delhivery
+  if (isVelocityCourier(courier, trackingUrl, waybillNumber)) {
+    return false;
+  }
+
   // If courier explicitly contains delhivery or url contains delhivery
   if (DELHIVERY_COURIER_PATTERN.test(c) || (url && /delhivery/i.test(url))) {
     return true;
   }
 
-  // If explicitly identified as Velocity, it is not direct Delhivery
-  if (isVelocityCourier(courier, trackingUrl, waybillNumber)) {
-    return false;
-  }
 
   // Guard against known third-party couriers
   if (
@@ -111,6 +125,10 @@ export function normalizeCourierName(
   trackingUrl?: string | null,
   waybillNumber?: string | null
 ): string {
+  if (isVelocityCourier(courier, trackingUrl, waybillNumber)) {
+    return 'Velocity';
+  }
+
   if (isDelhiveryCourier(courier, trackingUrl, waybillNumber)) {
     if (courier && /delhivery\s+(surface|express|b2c)/i.test(courier.trim())) {
       const match = courier.trim().match(/delhivery\s+(surface|express|b2c)/i);
@@ -118,14 +136,6 @@ export function normalizeCourierName(
       return variant ? `Delhivery ${variant}` : 'Delhivery';
     }
     return 'Delhivery';
-  }
-
-  if (isVelocityCourier(courier, trackingUrl, waybillNumber)) {
-    if (courier && /amazon|ats/i.test(courier)) return 'Amazon Transportation';
-    if (courier && /bluedart|blue dart/i.test(courier)) return 'Blue Dart';
-    if (courier && /ekart/i.test(courier)) return 'Ekart';
-    if (trackingUrl && /labels\/amazon/i.test(trackingUrl)) return 'Amazon Transportation';
-    return 'Velocity';
   }
 
   const c = (courier || '').trim();

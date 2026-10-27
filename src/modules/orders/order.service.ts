@@ -497,7 +497,7 @@ class OrderService {
           });
           if (!order) continue;
 
-          const carrierName = attr.carrier?.name ? `Velocity (${attr.carrier.name})` : 'Velocity';
+          const carrierName = 'Velocity';
           const mapped = velocityService.mapTrackingToShipmentStatus(attr.status || 'ready_for_pickup');
 
           await prisma.shipment.upsert({
@@ -1029,19 +1029,66 @@ class OrderService {
     let labelUrl: string | null = null;
     let courierNameForShopify = chosenCourier as string;
     let courierToSave = chosenCourier as string;
+    let existingShipmentResult: any = null;
 
     if (chosenCourier === 'Velocity') {
-      const result = await velocityService.createForwardShipment(verifiedOrder, {
-        carrierId: options?.velocityCarrierId,
-      });
-      waybillNumber = result.awbCode;
-      labelUrl = result.labelUrl || null;
-      courierNameForShopify = result.courierName || 'Velocity';
-      courierToSave = result.courierName
-        ? (result.courierName.toLowerCase().includes('velocity')
-            ? result.courierName
-            : `Velocity (${result.courierName})`)
-        : 'Velocity';
+      // Search Velocity first to link pre-synced order under youthnic2024 if already manifested with an AWB
+      try {
+        existingShipmentResult = await velocityService.findExistingShipment(
+          verifiedOrder.shopifyOrderId,
+          verifiedOrder.shopifyOrderName
+        );
+      } catch (err: any) {
+        if (err.message && err.message.includes('temporarily unavailable')) {
+          throw err;
+        }
+        logger.warn('Non-fatal pre-dispatch Velocity search check failed', {
+          orderId: verifiedOrder.id,
+          error: err.message,
+        });
+      }
+
+      if (existingShipmentResult && existingShipmentResult.awbCode) {
+        waybillNumber = existingShipmentResult.awbCode;
+        labelUrl = existingShipmentResult.labelUrl || null;
+        courierNameForShopify = 'Velocity';
+        courierToSave = 'Velocity';
+        logger.info('Linked pre-existing manifested Velocity shipment under youthnic2024 before dispatch', {
+          orderId: verifiedOrder.id,
+          waybillNumber,
+        });
+      } else {
+        let result: any;
+        try {
+          result = await velocityService.createForwardShipment(verifiedOrder, {
+            carrierId: options?.velocityCarrierId,
+          });
+        } catch (err: any) {
+          const errStr = String(err.message || '');
+          if (/already exists|already taken|duplicate|external_id/i.test(errStr)) {
+            const fallback = await velocityService.findExistingShipment(
+              verifiedOrder.shopifyOrderId,
+              verifiedOrder.shopifyOrderName
+            );
+            if (fallback && fallback.awbCode) {
+              logger.info('Recovered Velocity shipment manifested concurrently', {
+                orderId: verifiedOrder.id,
+                awb: fallback.awbCode,
+              });
+              result = fallback;
+              existingShipmentResult = fallback;
+            } else {
+              throw err;
+            }
+          } else {
+            throw err;
+          }
+        }
+        waybillNumber = result.awbCode;
+        labelUrl = result.labelUrl || null;
+        courierNameForShopify = 'Velocity';
+        courierToSave = 'Velocity';
+      }
     } else {
       // Create shipment on Delhivery
       const result = await delhiveryService.createShipment(verifiedOrder, {
@@ -1058,9 +1105,37 @@ class OrderService {
     // would stay on the yellow badge forever even though Delhivery has the
     // shipment. Pre-PR #10 round-2 finding (round-2 audit G3 was about EPOD
     // webhook gaps; this is the same class of bug for the dispatch flow).
+    let initialShipmentStatus: 'CREATED' | 'IN_TRANSIT' | 'OUT_FOR_DELIVERY' | 'DELIVERED' = 'CREATED';
+    let initialTrackingStatus = 'Label generated';
+    if (existingShipmentResult?.status) {
+      const s = String(existingShipmentResult.status).toUpperCase();
+      if (s === 'DELIVERED') {
+        initialShipmentStatus = 'DELIVERED';
+        initialTrackingStatus = 'Delivered';
+      } else if (s === 'OUT_FOR_DELIVERY' || s.includes('OUT FOR DELIVERY') || s.includes('OUT_FOR_DELIVERY')) {
+        initialShipmentStatus = 'OUT_FOR_DELIVERY';
+        initialTrackingStatus = 'Out for delivery';
+      } else if (
+        s.includes('TRANSIT') ||
+        s.includes('SHIPPED') ||
+        s.includes('PICKED') ||
+        s.includes('NDR') ||
+        s.includes('UNDELIVERED') ||
+        s.includes('EXCEPTION')
+      ) {
+        if (s.includes('NDR') || s.includes('UNDELIVERED') || s.includes('EXCEPTION')) {
+          initialShipmentStatus = 'IN_TRANSIT';
+          initialTrackingStatus = 'Undelivered (NDR)';
+        } else {
+          initialShipmentStatus = 'IN_TRANSIT';
+          initialTrackingStatus = 'In transit';
+        }
+      }
+    }
+
     const shipmentData = {
-      status: 'CREATED' as const,
-      trackingStatus: 'Label generated',
+      status: initialShipmentStatus,
+      trackingStatus: initialTrackingStatus,
       courier: courierToSave,
       waybillNumber,
       paymentMode: verifiedOrder.paymentMethod === 'COD' ? 'COD' : 'Pre-paid',
@@ -1100,7 +1175,7 @@ class OrderService {
       prisma.order.updateMany({
         where: { id: order.id, status: { in: ['NEW', 'DISPATCH_PENDING', 'DISPATCHED', 'IN_TRANSIT', 'OUT_FOR_DELIVERY', 'DELIVERED'] } },
         data: {
-          status: isAdvancedOrder ? currentOrder!.status : 'DISPATCHED',
+          status: isAdvancedOrder ? currentOrder!.status : (initialShipmentStatus !== 'CREATED' ? initialShipmentStatus : 'DISPATCHED'),
           dispatchedAt: currentOrder?.dispatchedAt || new Date(),
           ...(isManifestReview ? { supportFlag: null, hasUrgentSupport: false } : {}),
         },

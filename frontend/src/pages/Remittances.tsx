@@ -11,11 +11,11 @@ const options: Array<{ kind: AccountsImportKind; label: string; template: Parame
   { kind: 'DELHIVERY_REMITTANCE', label: 'Delhivery COD remittance', template: 'delhivery-remittance' },
   { kind: 'VELOCITY_REMITTANCE', label: 'Velocity COD remittance', template: 'carrier-remittance' },
   { kind: 'DELHIVERY_CHARGES', label: 'Delhivery freight ledger', template: 'delhivery-charges' },
-  { kind: 'GOKWIK_SETTLEMENT', label: 'GoKwik settlement', template: 'gokwik-settlement' },
+  { kind: 'GOKWIK_SETTLEMENT', label: 'GoKwik (Easebuzz) settlement', template: 'gokwik-settlement' },
   { kind: 'PHONEPE_SETTLEMENT', label: 'PhonePe settlement', template: 'phonepe-settlement' },
   { kind: 'PG_SETTLEMENT', label: 'Other gateway settlement', template: 'gokwik-settlement' },
-  { kind: 'AMAZON_SHIPPING', label: 'Amazon Shipping remittance', template: 'carrier-remittance' },
-  { kind: 'EKART_SHIPPING', label: 'Ekart remittance', template: 'carrier-remittance' },
+  { kind: 'AMAZON_SHIPPING', label: 'Velocity - Amazon Shipping partner remittance', template: 'carrier-remittance' },
+  { kind: 'EKART_SHIPPING', label: 'Velocity - Ekart partner remittance', template: 'carrier-remittance' },
   { kind: 'GENERIC_CARRIER', label: 'Other carrier remittance', template: 'carrier-remittance' },
 ]
 const istToday = () => new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10)
@@ -91,7 +91,7 @@ export function Remittances() {
     onError: (e) => toast.toast('error', apiError(e)),
   })
   const records = useMemo(() => (query.data?.imports || []).filter((r) => {
-    const source = r.kind.startsWith('DELHIVERY') ? 'Delhivery' : r.kind === 'VELOCITY_REMITTANCE' ? 'Velocity' : r.kind === 'GOKWIK_SETTLEMENT' ? 'GoKwik' : r.kind === 'PHONEPE_SETTLEMENT' ? 'PhonePe' : 'Other providers'
+    const source = r.kind.startsWith('DELHIVERY') ? 'Delhivery' : (r.kind === 'VELOCITY_REMITTANCE' || r.kind === 'AMAZON_SHIPPING' || r.kind === 'EKART_SHIPPING') ? 'Velocity' : r.kind === 'GOKWIK_SETTLEMENT' ? 'GoKwik' : r.kind === 'PHONEPE_SETTLEMENT' ? 'PhonePe' : 'Other providers'
     const { summary, rows, state, extractedFiles } = evidence(r)
     const text = [r.fileName, r.uploadedBy, summary.remittanceNumber, ...extractedFiles.flatMap((f) => [f.fileName, f.sheetName]), ...rows.flatMap((row) => [row.shopifyOrderName, row.waybillNumber, row.utr])].join(' ').toLowerCase()
     return (provider === 'All history' || provider === source) && (!search || text.includes(search.toLowerCase())) && (filter === 'All statuses' || filter === state)

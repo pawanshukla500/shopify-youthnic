@@ -175,6 +175,33 @@ describe('buildReportData', () => {
     expect(value('Received in bank (₹)')).toBe(740.6);
     expect(value('Refunds (₹)')).toBe(754.52);
   });
+
+  it('correctly attributes PhonePe and GoKwik even when paymentProvider is generic or missing', () => {
+    const phonepeOrder = order({
+      paymentProvider: 'Shopify Payments',
+      paymentAggregator: 'PhonePe',
+      paymentGateway: 'custom',
+    });
+    const gokwikOrder = order({
+      paymentProvider: 'Manual',
+      paymentAggregator: 'GoKwik',
+      paymentGateway: 'easebuzz',
+    });
+    const data = buildReportData('2026-10', [phonepeOrder, gokwikOrder], now);
+    expect(data.orders[0].gateway).toBe('PhonePe');
+    expect(data.orders[1].gateway).toBe('GoKwik (Easebuzz)');
+  });
+
+  it('recognizes tag-only PhonePe orders in monthly accounts report', () => {
+    const tagPhonePe = order({
+      paymentProvider: 'Manual',
+      paymentAggregator: null,
+      paymentGateway: null,
+      tags: 'prepaid, phonepe, rush',
+    });
+    const data = buildReportData('2026-10', [tagPhonePe], now);
+    expect(data.orders[0].gateway).toBe('PhonePe');
+  });
 });
 
 describe('renderWorkbook', () => {

@@ -18,6 +18,7 @@ import logger from '../../utils/logger';
 import resendService from '../email/resend.service';
 import { accountsStatus } from '../orders/order-tabs';
 import { istDateRange } from './settlement-summary';
+import { isDelhiveryCourier, isVelocityCourier, normalizeCourierName } from '../../utils/courier';
 
 const IST_OFFSET_MS = 5.5 * 3600 * 1000;
 
@@ -56,7 +57,12 @@ const money = (value?: number | null): number | null =>
 
 const SOURCE_LABELS: Record<string, string> = {
   DELHIVERY_REMITTANCE: 'Delhivery COD remittance',
+  VELOCITY_REMITTANCE: 'Velocity COD remittance',
+  AMAZON_SHIPPING_REMITTANCE: 'Velocity (Amazon) remittance',
+  EKART_SHIPPING_REMITTANCE: 'Velocity (Ekart) remittance',
   PG_SETTLEMENT_REPORT: 'Gateway settlement report',
+  GOKWIK_SETTLEMENT: 'GoKwik (Easebuzz) settlement',
+  PHONEPE_SETTLEMENT: 'PhonePe settlement',
   PHONEPE_SETTLEMENT_API: 'PhonePe settlement API',
   EASEBUZZ_PAYOUT_API: 'Easebuzz payout API',
   MANUAL: 'Entered manually',
@@ -191,7 +197,17 @@ export function buildReportData(monthOrLabel: string, orders: any[], now: Date =
       state: order.customerState,
       pincode: order.customerPincode,
       paymentMode: isCod ? 'COD' : 'Prepaid',
-      gateway: isCod ? 'Delhivery COD' : order.paymentProvider || order.paymentAggregator || order.paymentGateway || '',
+      gateway: isCod
+        ? (isVelocityCourier(shipment?.courier, shipment?.labelUrl, shipment?.waybillNumber) ? 'Velocity COD' : (shipment?.courier && !isDelhiveryCourier(shipment?.courier, shipment?.labelUrl, shipment?.waybillNumber) ? `${normalizeCourierName(shipment.courier, shipment.labelUrl, shipment.waybillNumber)} COD` : 'Delhivery COD'))
+        : (`${order.paymentProvider || ''} ${order.paymentAggregator || ''} ${order.paymentGateway || ''}`.toLowerCase().includes('phonepe') ||
+           `${order.paymentProvider || ''} ${order.paymentAggregator || ''} ${order.paymentGateway || ''}`.toLowerCase().includes('phone_pe') ||
+           (order.tags || '').toLowerCase().includes('phonepe')
+            ? 'PhonePe'
+            : (`${order.paymentProvider || ''} ${order.paymentAggregator || ''} ${order.paymentGateway || ''}`.toLowerCase().includes('gokwik') ||
+               `${order.paymentProvider || ''} ${order.paymentAggregator || ''} ${order.paymentGateway || ''}`.toLowerCase().includes('easebuzz') ||
+               (order.tags || '').toLowerCase().includes('gokwik'))
+              ? 'GoKwik (Easebuzz)'
+              : (order.paymentGateway || order.paymentProvider || 'Prepaid')),
       orderValue: money(order.totalAmount) || 0,
       orderStatus: STATUS_LABELS[order.status] || order.status,
       deliveredOn: istDay(order.deliveredAt),
@@ -295,7 +311,7 @@ export function buildReportData(monthOrLabel: string, orders: any[], now: Date =
     { label: 'Order value, sales (₹)', value: sum(sales.map((r) => r.orderValue)) },
     { label: '   …prepaid (₹)', value: sum(sales.filter((r) => r.paymentMode === 'Prepaid').map((r) => r.orderValue)) },
     { label: '   …COD (₹)', value: sum(sales.filter((r) => r.paymentMode === 'COD').map((r) => r.orderValue)) },
-    { label: 'Received in bank (₹)', value: sum(rows.map((r) => r.receivedAmount)), note: 'Prepaid settlements net of gateway fees + Delhivery COD remittances' },
+    { label: 'Received in bank (₹)', value: sum(rows.map((r) => r.receivedAmount)), note: 'Prepaid settlements net of gateway fees + Velocity & Delhivery COD remittances' },
     { label: '   …prepaid settlements (₹)', value: sum(rows.filter((r) => r.paymentMode === 'Prepaid').map((r) => r.receivedAmount)) },
     { label: '   …COD remittances (₹)', value: sum(rows.filter((r) => r.paymentMode === 'COD').map((r) => r.receivedAmount)) },
     { label: 'Gateway fees (₹)', value: sum(rows.map((r) => r.gatewayFee)) },

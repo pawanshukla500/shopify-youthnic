@@ -1123,8 +1123,13 @@ class OrderService {
         s.includes('UNDELIVERED') ||
         s.includes('EXCEPTION')
       ) {
-        initialShipmentStatus = 'IN_TRANSIT';
-        initialTrackingStatus = s.includes('NDR') || s.includes('UNDELIVERED') ? 'NDR' : 'In transit';
+        if (s.includes('NDR') || s.includes('UNDELIVERED') || s.includes('EXCEPTION')) {
+          initialShipmentStatus = 'IN_TRANSIT';
+          initialTrackingStatus = 'Undelivered (NDR)';
+        } else {
+          initialShipmentStatus = 'IN_TRANSIT';
+          initialTrackingStatus = 'In transit';
+        }
       }
     }
 

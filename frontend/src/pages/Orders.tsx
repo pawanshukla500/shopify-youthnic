@@ -508,7 +508,7 @@ export function Orders() {
         (o) =>
           o.hasNdrException ||
           ['FAILED_DELIVERY', 'RTO_INITIATED'].includes(o.status) ||
-          (o.shipment?.trackingStatus && /fail|attempt|undeliver/i.test(o.shipment.trackingStatus))
+          (o.shipment?.trackingStatus && /fail|attempt|undeliver|ndr/i.test(o.shipment.trackingStatus))
       )
     } else if (channelFilter === 'COD') {
       list = list.filter((o) => o.paymentMethod === 'COD' || o.shipment?.paymentMode === 'COD')

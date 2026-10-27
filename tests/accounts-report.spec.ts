@@ -191,6 +191,17 @@ describe('buildReportData', () => {
     expect(data.orders[0].gateway).toBe('PhonePe');
     expect(data.orders[1].gateway).toBe('GoKwik (Easebuzz)');
   });
+
+  it('recognizes tag-only PhonePe orders in monthly accounts report', () => {
+    const tagPhonePe = order({
+      paymentProvider: 'Manual',
+      paymentAggregator: null,
+      paymentGateway: null,
+      tags: 'prepaid, phonepe, rush',
+    });
+    const data = buildReportData('2026-10', [tagPhonePe], now);
+    expect(data.orders[0].gateway).toBe('PhonePe');
+  });
 });
 
 describe('renderWorkbook', () => {

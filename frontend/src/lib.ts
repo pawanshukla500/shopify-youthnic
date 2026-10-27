@@ -153,6 +153,11 @@ export function isVelocityCourier(courier?: string | null, labelUrlOrWaybill?: s
   const l = isUrl ? second.toLowerCase() : ''
   const w = isUrl ? third : second || third
 
+  // If the label URL is from Velocity's domain, it is always a Velocity-aggregated shipment
+  if (l.includes('velocity') || l.includes('velocity-shazam') || l.includes('shipfastt')) {
+    return true
+  }
+
   // Explicit Delhivery courier or Delhivery label URL is never Velocity
   if (c.includes('delhivery') || l.includes('delhivery')) {
     return false

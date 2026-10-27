@@ -159,7 +159,7 @@ router.get('/dashboard/stats', async (_req: Request, res: Response): Promise<voi
     const delayedDispatchCount = delayedDispatchOrders.length;
     const ndrExceptions = allOrders.filter((o) =>
       ['FAILED_DELIVERY', 'RTO_INITIATED'].includes(o.status) ||
-      Boolean(o.shipment?.trackingStatus && /fail|attempt|undeliver/i.test(o.shipment.trackingStatus))
+      Boolean(o.shipment?.trackingStatus && /fail|attempt|undeliver|ndr/i.test(o.shipment.trackingStatus))
     ).length;
     const totalReturnsCount = returns.length;
     const returnRate = totalOrders > 0 ? (totalReturnsCount / totalOrders) * 100 : 0;

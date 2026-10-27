@@ -150,6 +150,34 @@ describe('Velocity Aggregator Branding, Returns & Store Linkup', () => {
       expect(found).toBeNull();
     });
 
+    it('ignores terminal shipments (e.g. DELIVERED, CANCELLED, RTO) so dispatch can book an active forward shipment', async () => {
+      mockAxios.get.mockResolvedValueOnce({
+        data: {
+          payload: {
+            order_id: '#26YOU6156',
+            awb_code: 'OLD-DELIVERED-AWB',
+            status: 'DELIVERED',
+          },
+        },
+      });
+      mockAxios.post.mockResolvedValueOnce({
+        data: {
+          data: [
+            {
+              attributes: {
+                order: { display_id: '#26YOU6156' },
+                tracking_number: 'OLD-RTO-AWB',
+                status: 'RTO_DELIVERED',
+              },
+            },
+          ],
+        },
+      });
+
+      const found = await velocityService.findExistingShipment('#26YOU6156', '26YOU6156');
+      expect(found).toBeNull();
+    });
+
     it('throws if order details returns 401 Unauthorized or 403 Forbidden', async () => {
       const err: any = new Error('Unauthorized');
       err.response = { status: 401 };

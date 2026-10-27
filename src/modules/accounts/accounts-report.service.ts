@@ -18,7 +18,7 @@ import logger from '../../utils/logger';
 import resendService from '../email/resend.service';
 import { accountsStatus } from '../orders/order-tabs';
 import { istDateRange } from './settlement-summary';
-import { isVelocityCourier } from '../../utils/courier';
+import { isDelhiveryCourier, isVelocityCourier, normalizeCourierName } from '../../utils/courier';
 
 const IST_OFFSET_MS = 5.5 * 3600 * 1000;
 
@@ -196,7 +196,7 @@ export function buildReportData(monthOrLabel: string, orders: any[], now: Date =
       pincode: order.customerPincode,
       paymentMode: isCod ? 'COD' : 'Prepaid',
       gateway: isCod
-        ? (isVelocityCourier(shipment?.courier, shipment?.labelUrl, shipment?.waybillNumber) ? 'Velocity COD' : 'Delhivery COD')
+        ? (isVelocityCourier(shipment?.courier, shipment?.labelUrl, shipment?.waybillNumber) ? 'Velocity COD' : (shipment?.courier && !isDelhiveryCourier(shipment?.courier, shipment?.labelUrl, shipment?.waybillNumber) ? `${normalizeCourierName(shipment.courier, shipment.labelUrl, shipment.waybillNumber)} COD` : 'Delhivery COD'))
         : ((order.paymentProvider || order.paymentAggregator || order.paymentGateway || '').toLowerCase().includes('phonepe')
             ? 'PhonePe'
             : ((order.paymentProvider || order.paymentAggregator || order.paymentGateway || '').toLowerCase().includes('gokwik') ||

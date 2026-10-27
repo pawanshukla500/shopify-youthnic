@@ -23,7 +23,7 @@ import {
   downloadBulkInvoicesDirectFile,
   syncBulkExternalFulfillments,
 } from '../api'
-import { ORDER_TABS, carrierTrackingUrl, tabForStatus, formatDate, formatMoney, labelize, isVelocityCourier, type OrderTabKey } from '../lib'
+import { ORDER_TABS, tabForStatus, formatDate, formatMoney, labelize, isVelocityCourier, type OrderTabKey } from '../lib'
 import { classifyOrderTab, isApprovedForDispatch, isCodConfirmed as codConfirmedTag, isManifestRejected, isPrepaidOrder as prepaidOrder, prioritizeOrdersForDispatch } from '../../../src/modules/orders/order-tabs'
 import { getOrderTabCounts } from '../api'
 import { Button, EmptyState, ErrorBox, FormField, Icon, LoadingState, PageIntro, Panel, StatusBadge, useDocumentTitle, useToast } from '../components/UI'

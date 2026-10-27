@@ -426,7 +426,7 @@ export class VelocityService {
         }
       } catch (err: any) {
         const status = err.response?.status || err.status || err.statusCode;
-        const isOutage = (status && status >= 500) || (!status && /timeout|network|econn|enotfound/i.test(err.message));
+        const isOutage = (status && (status >= 500 || status === 429)) || (!status && /timeout|network|econn|enotfound|rate limit/i.test(err.message));
         if (isOutage) {
           throw new Error(`Velocity order details lookup temporarily unavailable (${status}): ${err.message}`);
         }
@@ -467,7 +467,7 @@ export class VelocityService {
       }
     } catch (err: any) {
       const status = err.response?.status || err.status || err.statusCode;
-      const isOutage = (status && status >= 500) || (!status && /timeout|network|econn|enotfound/i.test(err.message));
+      const isOutage = (status && (status >= 500 || status === 429)) || (!status && /timeout|network|econn|enotfound|rate limit/i.test(err.message));
       if (isOutage) {
         throw new Error(`Velocity search temporarily unavailable (${status}): ${err.message}`);
       }

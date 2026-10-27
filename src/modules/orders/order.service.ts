@@ -1076,6 +1076,7 @@ class OrderService {
                 awb: fallback.awbCode,
               });
               result = fallback;
+              existingShipmentResult = fallback;
             } else {
               throw err;
             }
@@ -1162,7 +1163,7 @@ class OrderService {
       prisma.order.updateMany({
         where: { id: order.id, status: { in: ['NEW', 'DISPATCH_PENDING', 'DISPATCHED', 'IN_TRANSIT', 'OUT_FOR_DELIVERY', 'DELIVERED'] } },
         data: {
-          status: isAdvancedOrder ? currentOrder!.status : 'DISPATCHED',
+          status: isAdvancedOrder ? currentOrder!.status : (initialShipmentStatus !== 'CREATED' ? initialShipmentStatus : 'DISPATCHED'),
           dispatchedAt: currentOrder?.dispatchedAt || new Date(),
           ...(isManifestReview ? { supportFlag: null, hasUrgentSupport: false } : {}),
         },

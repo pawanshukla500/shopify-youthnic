@@ -144,9 +144,15 @@ export function formatMoney(amount: number | null | undefined, currency = 'INR')
   }
 }
 
-export function isVelocityCourier(courier?: string | null, waybill?: string | null): boolean {
+export function isVelocityCourier(courier?: string | null, labelUrlOrWaybill?: string | null, waybill?: string | null): boolean {
   const c = (courier || '').toLowerCase()
-  const w = (waybill || '').trim()
+  const second = (labelUrlOrWaybill || '').trim()
+  const third = (waybill || '').trim()
+
+  const isUrl = second.startsWith('http://') || second.startsWith('https://') || second.includes('/')
+  const l = isUrl ? second.toLowerCase() : ''
+  const w = isUrl ? third : second || third
+
   return (
     c.includes('velocity') ||
     c.includes('shipfastt') ||
@@ -154,6 +160,9 @@ export function isVelocityCourier(courier?: string | null, waybill?: string | nu
     c.includes('amazon') ||
     c.includes('ats') ||
     (c.includes('ekart') && (c.includes('velocity') || c.includes('shipfastt'))) ||
+    l.includes('velocity') ||
+    l.includes('velocity-shazam') ||
+    l.includes('shipfastt') ||
     /^(pd|vehr|vel)/i.test(w)
   )
 }

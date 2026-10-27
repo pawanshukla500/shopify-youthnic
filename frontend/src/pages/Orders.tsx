@@ -525,7 +525,9 @@ export function Orders() {
       list = list.filter((o) => {
         const gw = (o.paymentGateway || '').toLowerCase()
         const tags = (o.tags || '').toLowerCase()
-        return (gw.includes('phonepe') || gw.includes('phone_pe') || tags.includes('phonepe')) && o.paymentMethod !== 'COD'
+        const agg = (o.paymentAggregator || '').toLowerCase()
+        const prov = (o.paymentProvider || '').toLowerCase()
+        return (gw.includes('phonepe') || gw.includes('phone_pe') || tags.includes('phonepe') || agg.includes('phonepe') || prov.includes('phonepe')) && o.paymentMethod !== 'COD' && o.shipment?.paymentMode !== 'COD'
       })
     }
 
@@ -641,6 +643,8 @@ export function Orders() {
       const gw = (o.paymentGateway || '').toLowerCase()
       const sc = (o.salesChannel || '').toLowerCase()
       const tags = (o.tags || '').toLowerCase()
+      const agg = (o.paymentAggregator || '').toLowerCase()
+      const prov = (o.paymentProvider || '').toLowerCase()
 
       if (isCod) {
         codCount++
@@ -657,7 +661,7 @@ export function Orders() {
       ) {
         gokwikCount++
         gokwikAmt += o.totalAmount || 0
-      } else if (gw.includes('phonepe') || gw.includes('phone_pe') || tags.includes('phonepe')) {
+      } else if (gw.includes('phonepe') || gw.includes('phone_pe') || tags.includes('phonepe') || agg.includes('phonepe') || prov.includes('phonepe')) {
         phonepeCount++
         phonepeAmt += o.totalAmount || 0
       }
@@ -1128,7 +1132,7 @@ export function Orders() {
     if (isCod) {
       const isRemitted = order.shipment?.codRemitted
       const isCollected = order.shipment?.codCollected
-      const isVel = isVelocityCourier(order.shipment?.courier, order.shipment?.waybillNumber)
+      const isVel = isVelocityCourier(order.shipment?.courier, order.shipment?.labelUrl, order.shipment?.waybillNumber)
       const courier = isVel ? 'Velocity' : ((order.shipment?.courier || '').toLowerCase().includes('delhivery') ? 'Delhivery' : (order.shipment?.courier || 'Delhivery'))
       const courierLabel = `${courier} COD`
 

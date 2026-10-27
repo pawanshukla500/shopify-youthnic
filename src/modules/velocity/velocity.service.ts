@@ -142,6 +142,7 @@ export interface VelocityForwardShipmentResult {
   assignedDateTime?: string;
   charges?: any;
   raw?: any;
+  status?: string;
 }
 
 export interface VelocityTrackingActivity {
@@ -422,6 +423,7 @@ export class VelocityService {
             assignedDateTime: p.assigned_date_time?.date || p.assigned_date_time,
             charges: p.charges,
             raw: details,
+            status: orderStatus,
           };
         }
       } catch (err: any) {
@@ -449,6 +451,7 @@ export class VelocityService {
       if (match) {
         const attr = match.attributes || match;
         const awb = String(attr.tracking_number || attr.awb_code || attr.awb).trim();
+        const itemStatus = String(attr.status || attr.shipment_status || match.status || '').toUpperCase();
         logger.info('Found existing Velocity order via shipments list search under youthnic2024', {
           search: cleanName,
           awb,
@@ -463,6 +466,7 @@ export class VelocityService {
           assignedDateTime: attr.assigned_date_time || attr.created_at,
           charges: attr.charges,
           raw: match,
+          status: itemStatus,
         };
       }
     } catch (err: any) {

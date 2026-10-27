@@ -232,7 +232,7 @@ export function OrderDetail() {
         data.shopifyReturnId
           ? `Reverse AWB ${data.returnWaybill} is live and Shopify return ${data.shopifyReturnId.split('/').pop()} is open.`
           : data.pickupAutomatic
-          ? `Reverse AWB ${data.returnWaybill} is live. Delhivery will pick up from the customer — status updates from carrier scans.`
+          ? `Reverse AWB ${data.returnWaybill} is live. ${carrier === 'Velocity' ? 'Velocity' : 'Delhivery'} will pick up from the customer — status updates from carrier scans.`
           : `Return linked with waybill ${data.returnWaybill}${data.shopifyTriggered ? ' · Synced to Shopify' : ''}.`
       )
       setSelected({})
@@ -2909,7 +2909,7 @@ function ActiveReturnCard({ record }: { record: ReturnRecord }) {
         <strong className="mono">{record.returnWaybillNumber || 'Waybill pending'}</strong>
         <p>
           {record.pickupAutomatic
-            ? 'Customer pickup was scheduled by Delhivery. Status follows carrier scans.'
+            ? `Customer pickup was scheduled by ${record.carrier || 'the carrier'}. Status follows carrier scans.`
             : 'This return is linked to an existing waybill.'}
           {record.forwardWaybill ? ` Forward AWB ${record.forwardWaybill}.` : ''}
           {record.shopifyReturnId ? ` Shopify return ${record.shopifyReturnId.split('/').pop()}.` : ''}

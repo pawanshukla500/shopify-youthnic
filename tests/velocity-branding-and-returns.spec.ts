@@ -117,7 +117,7 @@ describe('Velocity Aggregator Branding, Returns & Store Linkup', () => {
     });
 
     it('finds existing shipment under youthnic2024 via shipments list search when details 404', async () => {
-      mockAxios.get.mockRejectedValueOnce(new Error('Order not found'));
+      mockAxios.get.mockRejectedValue(new Error('Order not found'));
       mockAxios.post.mockResolvedValueOnce({
         data: {
           data: [
@@ -143,7 +143,7 @@ describe('Velocity Aggregator Branding, Returns & Store Linkup', () => {
     });
 
     it('returns null gracefully if order is not yet manifested on Velocity', async () => {
-      mockAxios.get.mockRejectedValueOnce(new Error('Order not found'));
+      mockAxios.get.mockRejectedValue(new Error('Order not found'));
       mockAxios.post.mockResolvedValueOnce({ data: { data: [] } });
 
       const found = await velocityService.findExistingShipment('#26YOU9999', '26YOU9999');

@@ -1029,13 +1029,13 @@ class OrderService {
     let labelUrl: string | null = null;
     let courierNameForShopify = chosenCourier as string;
     let courierToSave = chosenCourier as string;
+    let existingShipmentResult: any = null;
 
     if (chosenCourier === 'Velocity') {
       // Search Velocity first to link pre-synced order under youthnic2024 if already manifested with an AWB
-      let existingShipmentResult: any = null;
       try {
         existingShipmentResult = await velocityService.findExistingShipment(
-          verifiedOrder.shopifyOrderName,
+          verifiedOrder.shopifyOrderId,
           verifiedOrder.shopifyOrderName
         );
       } catch (err: any) {
@@ -1067,7 +1067,7 @@ class OrderService {
           const errStr = String(err.message || '');
           if (/already exists|already taken|duplicate|external_id/i.test(errStr)) {
             const fallback = await velocityService.findExistingShipment(
-              verifiedOrder.shopifyOrderName,
+              verifiedOrder.shopifyOrderId,
               verifiedOrder.shopifyOrderName
             );
             if (fallback && fallback.awbCode) {
@@ -1104,9 +1104,25 @@ class OrderService {
     // would stay on the yellow badge forever even though Delhivery has the
     // shipment. Pre-PR #10 round-2 finding (round-2 audit G3 was about EPOD
     // webhook gaps; this is the same class of bug for the dispatch flow).
+    let initialShipmentStatus: 'CREATED' | 'IN_TRANSIT' | 'OUT_FOR_DELIVERY' | 'DELIVERED' = 'CREATED';
+    let initialTrackingStatus = 'Label generated';
+    if (existingShipmentResult?.status) {
+      const s = String(existingShipmentResult.status).toUpperCase();
+      if (s === 'DELIVERED') {
+        initialShipmentStatus = 'DELIVERED';
+        initialTrackingStatus = 'Delivered';
+      } else if (s === 'OUT_FOR_DELIVERY') {
+        initialShipmentStatus = 'OUT_FOR_DELIVERY';
+        initialTrackingStatus = 'Out for delivery';
+      } else if (s.includes('TRANSIT') || s.includes('SHIPPED') || s.includes('PICKED')) {
+        initialShipmentStatus = 'IN_TRANSIT';
+        initialTrackingStatus = 'In transit';
+      }
+    }
+
     const shipmentData = {
-      status: 'CREATED' as const,
-      trackingStatus: 'Label generated',
+      status: initialShipmentStatus,
+      trackingStatus: initialTrackingStatus,
       courier: courierToSave,
       waybillNumber,
       paymentMode: verifiedOrder.paymentMethod === 'COD' ? 'COD' : 'Pre-paid',

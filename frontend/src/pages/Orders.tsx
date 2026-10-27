@@ -517,7 +517,9 @@ export function Orders() {
         const gw = (o.paymentGateway || '').toLowerCase()
         const sc = (o.salesChannel || '').toLowerCase()
         const tags = (o.tags || '').toLowerCase()
-        return (gw.includes('gokwik') || gw.includes('kwik') || sc.includes('gokwik') || tags.includes('gokwik')) && o.paymentMethod !== 'COD'
+        const prov = (o.paymentProvider || '').toLowerCase()
+        const agg = (o.paymentAggregator || '').toLowerCase()
+        return (gw.includes('gokwik') || gw.includes('kwik') || gw.includes('easebuzz') || sc.includes('gokwik') || tags.includes('gokwik') || prov.includes('gokwik') || prov.includes('easebuzz') || agg.includes('gokwik')) && o.paymentMethod !== 'COD' && o.shipment?.paymentMode !== 'COD'
       })
     } else if (channelFilter === 'PHONEPE') {
       list = list.filter((o) => {
@@ -643,7 +645,16 @@ export function Orders() {
       if (isCod) {
         codCount++
         codAmt += o.totalAmount || 0
-      } else if (gw.includes('gokwik') || gw.includes('kwik') || sc.includes('gokwik') || tags.includes('gokwik')) {
+      } else if (
+        gw.includes('gokwik') ||
+        gw.includes('kwik') ||
+        gw.includes('easebuzz') ||
+        sc.includes('gokwik') ||
+        tags.includes('gokwik') ||
+        (o.paymentProvider || '').toLowerCase().includes('gokwik') ||
+        (o.paymentProvider || '').toLowerCase().includes('easebuzz') ||
+        (o.paymentAggregator || '').toLowerCase().includes('gokwik')
+      ) {
         gokwikCount++
         gokwikAmt += o.totalAmount || 0
       } else if (gw.includes('phonepe') || gw.includes('phone_pe') || tags.includes('phonepe')) {

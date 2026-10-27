@@ -204,7 +204,7 @@ export function buildReportData(monthOrLabel: string, orders: any[], now: Date =
                (order.tags || '').toLowerCase().includes('gokwik') ||
                (order.paymentAggregator || '').toLowerCase().includes('gokwik'))
               ? 'GoKwik (Easebuzz)'
-              : (order.paymentProvider || order.paymentGateway || 'GoKwik (Easebuzz)')),
+              : (order.paymentProvider || order.paymentGateway || 'Prepaid')),
       orderValue: money(order.totalAmount) || 0,
       orderStatus: STATUS_LABELS[order.status] || order.status,
       deliveredOn: istDay(order.deliveredAt),

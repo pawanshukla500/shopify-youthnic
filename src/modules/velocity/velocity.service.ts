@@ -422,8 +422,11 @@ export class VelocityService {
             raw: details,
           };
         }
-      } catch {
-        // Continue search
+      } catch (err: any) {
+        const status = err.response?.status;
+        if (status && status >= 500) {
+          throw new Error(`Velocity order details lookup temporarily unavailable (${status}): ${err.message}`);
+        }
       }
     }
 

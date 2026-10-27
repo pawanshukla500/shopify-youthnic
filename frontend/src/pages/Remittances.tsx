@@ -91,7 +91,7 @@ export function Remittances() {
     onError: (e) => toast.toast('error', apiError(e)),
   })
   const records = useMemo(() => (query.data?.imports || []).filter((r) => {
-    const source = r.kind.startsWith('DELHIVERY') ? 'Delhivery' : r.kind === 'VELOCITY_REMITTANCE' ? 'Velocity' : r.kind === 'GOKWIK_SETTLEMENT' ? 'GoKwik' : r.kind === 'PHONEPE_SETTLEMENT' ? 'PhonePe' : 'Other providers'
+    const source = r.kind.startsWith('DELHIVERY') ? 'Delhivery' : (r.kind === 'VELOCITY_REMITTANCE' || r.kind === 'AMAZON_SHIPPING' || r.kind === 'EKART_SHIPPING') ? 'Velocity' : r.kind === 'GOKWIK_SETTLEMENT' ? 'GoKwik' : r.kind === 'PHONEPE_SETTLEMENT' ? 'PhonePe' : 'Other providers'
     const { summary, rows, state, extractedFiles } = evidence(r)
     const text = [r.fileName, r.uploadedBy, summary.remittanceNumber, ...extractedFiles.flatMap((f) => [f.fileName, f.sheetName]), ...rows.flatMap((row) => [row.shopifyOrderName, row.waybillNumber, row.utr])].join(' ').toLowerCase()
     return (provider === 'All history' || provider === source) && (!search || text.includes(search.toLowerCase())) && (filter === 'All statuses' || filter === state)

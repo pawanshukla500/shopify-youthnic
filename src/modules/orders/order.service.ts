@@ -1058,9 +1058,31 @@ class OrderService {
           waybillNumber,
         });
       } else {
-        const result = await velocityService.createForwardShipment(verifiedOrder, {
-          carrierId: options?.velocityCarrierId,
-        });
+        let result: any;
+        try {
+          result = await velocityService.createForwardShipment(verifiedOrder, {
+            carrierId: options?.velocityCarrierId,
+          });
+        } catch (err: any) {
+          const errStr = String(err.message || '');
+          if (/already exists|already taken|duplicate|external_id/i.test(errStr)) {
+            const fallback = await velocityService.findExistingShipment(
+              verifiedOrder.shopifyOrderName,
+              verifiedOrder.shopifyOrderName
+            );
+            if (fallback && fallback.awbCode) {
+              logger.info('Recovered Velocity shipment manifested concurrently', {
+                orderId: verifiedOrder.id,
+                awb: fallback.awbCode,
+              });
+              result = fallback;
+            } else {
+              throw err;
+            }
+          } else {
+            throw err;
+          }
+        }
         waybillNumber = result.awbCode;
         labelUrl = result.labelUrl || null;
         courierNameForShopify = 'Velocity';

@@ -1118,7 +1118,7 @@ export function Orders() {
       const isRemitted = order.shipment?.codRemitted
       const isCollected = order.shipment?.codCollected
       const isVel = isVelocityCourier(order.shipment?.courier, order.shipment?.waybillNumber)
-      const courier = isVel ? 'Velocity' : (order.shipment?.courier || 'Delhivery')
+      const courier = isVel ? 'Velocity' : ((order.shipment?.courier || '').toLowerCase().includes('delhivery') ? 'Delhivery' : (order.shipment?.courier || 'Delhivery'))
       const courierLabel = `${courier} COD`
 
       return (
@@ -1146,7 +1146,7 @@ export function Orders() {
       )
     }
 
-    if (agg.includes('gokwik') || gw.includes('gokwik') || gw.includes('kwik') || sc.includes('gokwik') || (order.tags || '').toLowerCase().includes('gokwik')) {
+    if (agg.includes('gokwik') || gw.includes('gokwik') || gw.includes('kwik') || sc.includes('gokwik') || (order.tags || '').toLowerCase().includes('gokwik') || provider.toLowerCase().includes('easebuzz') || gw.toLowerCase().includes('easebuzz')) {
       return (
         <div className="pay-cell">
           <span className="pay-pill is-gokwik" title="GoKwik 1-click checkout via Easebuzz">

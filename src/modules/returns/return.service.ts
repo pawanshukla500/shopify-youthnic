@@ -247,7 +247,7 @@ class ReturnService {
       const shopifyRes = await shopifyService.registerReturnOnShopify(order.shopifyOrderId, {
         returnReason,
         returnTrackingNumber: finalReturnWaybill,
-        carrier: options?.carrier || 'Delhivery',
+        carrier: isVel ? 'Velocity' : (options?.carrier || 'Delhivery'),
         items: items.map((item) => {
           const line = order.items.find((row) => row.id === item.orderItemId);
           return { sku: line?.sku, title: line?.title, quantity: item.quantity };
@@ -273,7 +273,7 @@ class ReturnService {
         syncType: 'RETURN_CREATE',
         status: 'SUCCESS',
         message: pickupAutomatic
-          ? `Reverse AWB ${finalReturnWaybill} manifested against forward ${forwardWaybill || 'order'}. Delhivery schedules the customer pickup automatically.`
+          ? `Reverse AWB ${finalReturnWaybill} manifested against forward ${forwardWaybill || 'order'}. ${isVel ? 'Velocity' : 'Delhivery'} schedules the customer pickup automatically.`
           : `Return linked with waybill ${finalReturnWaybill}${shopifyTriggered ? ' · Synced to Shopify' : ''}`,
       },
     });

@@ -58,6 +58,8 @@ const money = (value?: number | null): number | null =>
 const SOURCE_LABELS: Record<string, string> = {
   DELHIVERY_REMITTANCE: 'Delhivery COD remittance',
   VELOCITY_REMITTANCE: 'Velocity COD remittance',
+  AMAZON_SHIPPING_REMITTANCE: 'Velocity (Amazon) remittance',
+  EKART_SHIPPING_REMITTANCE: 'Velocity (Ekart) remittance',
   PG_SETTLEMENT_REPORT: 'Gateway settlement report',
   GOKWIK_SETTLEMENT: 'GoKwik (Easebuzz) settlement',
   PHONEPE_SETTLEMENT: 'PhonePe settlement',
@@ -204,7 +206,7 @@ export function buildReportData(monthOrLabel: string, orders: any[], now: Date =
                (order.tags || '').toLowerCase().includes('gokwik') ||
                (order.paymentAggregator || '').toLowerCase().includes('gokwik'))
               ? 'GoKwik (Easebuzz)'
-              : (order.paymentProvider || order.paymentGateway || 'Prepaid')),
+              : (order.paymentGateway || order.paymentProvider || 'Prepaid')),
       orderValue: money(order.totalAmount) || 0,
       orderStatus: STATUS_LABELS[order.status] || order.status,
       deliveredOn: istDay(order.deliveredAt),

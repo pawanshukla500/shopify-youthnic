@@ -1180,7 +1180,7 @@ export function Orders() {
       )
     }
 
-    if (gw.includes('phonepe') || gw.includes('phone_pe')) {
+    if (gw.includes('phonepe') || gw.includes('phone_pe') || agg.includes('phonepe') || provider.toLowerCase().includes('phonepe')) {
       return (
         <div className="pay-cell">
           <span className="pay-pill is-phonepe" title="PhonePe payment gateway">

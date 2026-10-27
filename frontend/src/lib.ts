@@ -158,6 +158,11 @@ export function isVelocityCourier(courier?: string | null, labelUrlOrWaybill?: s
     return true
   }
 
+  // If courier name explicitly includes Velocity or Shipfastt, it is Velocity (even if partner courier mentions Delhivery)
+  if (c.includes('velocity') || c.includes('shipfastt') || c.includes('shazam')) {
+    return true
+  }
+
   // Explicit Delhivery courier or Delhivery label URL is never Velocity
   if (c.includes('delhivery') || l.includes('delhivery')) {
     return false
@@ -169,7 +174,7 @@ export function isVelocityCourier(courier?: string | null, labelUrlOrWaybill?: s
     c.includes('shazam') ||
     c.includes('amazon') ||
     c.includes('ats') ||
-    (c.includes('ekart') && (c.includes('velocity') || c.includes('shipfastt'))) ||
+    c.includes('ekart') ||
     l.includes('velocity') ||
     l.includes('velocity-shazam') ||
     l.includes('shipfastt') ||

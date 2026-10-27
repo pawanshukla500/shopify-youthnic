@@ -53,6 +53,7 @@ describe('Velocity Aggregator Branding, Returns & Store Linkup', () => {
       expect(normalizeCourierName('Amazon ATS')).toBe('Velocity');
       expect(normalizeCourierName('Velocity (Amazon Shipping)')).toBe('Velocity');
       expect(normalizeCourierName('Velocity (Ekart)')).toBe('Velocity');
+      expect(normalizeCourierName('Velocity (Delhivery Standard)')).toBe('Velocity');
 
       // Amazon label URL via Velocity S3
       expect(
@@ -86,6 +87,8 @@ describe('Velocity Aggregator Branding, Returns & Store Linkup', () => {
       expect(frontendIsVel('Delhivery', 'VEL999')).toBe(false);
       expect(frontendIsVel('Delhivery Surface', 'PD12345')).toBe(false);
       expect(frontendIsVel('Delhivery', 'https://delhivery.com/label.pdf', 'VEL999')).toBe(false);
+      expect(frontendIsVel('Velocity (Delhivery Standard)')).toBe(true);
+      expect(frontendIsVel('Delhivery Standard', 'https://velocity-shazam-prod.s3.ap-south-1.amazonaws.com/labels/delhivery/123.pdf')).toBe(true);
       expect(frontendIsVel(null, 'VEL999')).toBe(true);
       expect(frontendIsVel('Velocity', 'VEL999')).toBe(true);
     });

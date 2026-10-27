@@ -49,7 +49,7 @@ export function OrderDetail() {
   const [selected, setSelected] = useState<Record<number, number>>({})
   const [reason, setReason] = useState('')
   const [returnTracking, setReturnTracking] = useState('')
-  const [carrier, setCarrier] = useState(() => (order && isVelocityCourier(order.shipment?.courier, order.shipment?.waybillNumber) ? 'Velocity' : 'Delhivery'))
+  const [carrier, setCarrier] = useState('Delhivery')
   const [section, setSection] = useState<OrderSection>(() => window.location.hash === '#return-panel' ? 'returns' : 'overview')
   useEffect(() => {
     if (orderQuery.dataUpdatedAt) queryClient.invalidateQueries({ queryKey: ['order-activity', id] })
@@ -143,6 +143,12 @@ export function OrderDetail() {
   })
 
   const order = orderQuery.data
+
+  useEffect(() => {
+    if (order?.shipment && isVelocityCourier(order.shipment.courier, order.shipment.waybillNumber)) {
+      setCarrier('Velocity')
+    }
+  }, [order?.shipment?.courier, order?.shipment?.waybillNumber])
   const refreshShopify = useMutation({
     mutationFn: () => api.post(`/api/orders/${id}/refresh-shopify`),
     onSuccess: async () => {

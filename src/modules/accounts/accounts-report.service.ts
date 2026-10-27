@@ -199,12 +199,11 @@ export function buildReportData(monthOrLabel: string, orders: any[], now: Date =
       paymentMode: isCod ? 'COD' : 'Prepaid',
       gateway: isCod
         ? (isVelocityCourier(shipment?.courier, shipment?.labelUrl, shipment?.waybillNumber) ? 'Velocity COD' : (shipment?.courier && !isDelhiveryCourier(shipment?.courier, shipment?.labelUrl, shipment?.waybillNumber) ? `${normalizeCourierName(shipment.courier, shipment.labelUrl, shipment.waybillNumber)} COD` : 'Delhivery COD'))
-        : ((order.paymentProvider || order.paymentAggregator || order.paymentGateway || '').toLowerCase().includes('phonepe')
+        : (`${order.paymentProvider || ''} ${order.paymentAggregator || ''} ${order.paymentGateway || ''}`.toLowerCase().includes('phonepe') || `${order.paymentProvider || ''} ${order.paymentAggregator || ''} ${order.paymentGateway || ''}`.toLowerCase().includes('phone_pe')
             ? 'PhonePe'
-            : ((order.paymentProvider || order.paymentAggregator || order.paymentGateway || '').toLowerCase().includes('gokwik') ||
-               (order.paymentProvider || order.paymentAggregator || order.paymentGateway || '').toLowerCase().includes('easebuzz') ||
-               (order.tags || '').toLowerCase().includes('gokwik') ||
-               (order.paymentAggregator || '').toLowerCase().includes('gokwik'))
+            : (`${order.paymentProvider || ''} ${order.paymentAggregator || ''} ${order.paymentGateway || ''}`.toLowerCase().includes('gokwik') ||
+               `${order.paymentProvider || ''} ${order.paymentAggregator || ''} ${order.paymentGateway || ''}`.toLowerCase().includes('easebuzz') ||
+               (order.tags || '').toLowerCase().includes('gokwik'))
               ? 'GoKwik (Easebuzz)'
               : (order.paymentGateway || order.paymentProvider || 'Prepaid')),
       orderValue: money(order.totalAmount) || 0,

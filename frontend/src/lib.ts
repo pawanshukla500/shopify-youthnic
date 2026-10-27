@@ -168,7 +168,7 @@ export function isVelocityCourier(courier?: string | null, labelUrlOrWaybill?: s
     l.includes('velocity') ||
     l.includes('velocity-shazam') ||
     l.includes('shipfastt') ||
-    /^(pd|vehr|vel)/i.test(w)
+    (Boolean(w) && /^(pd|vehr|vel)[0-9a-z]+$/i.test(w))
   )
 }
 

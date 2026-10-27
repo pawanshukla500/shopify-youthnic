@@ -1112,12 +1112,19 @@ class OrderService {
       if (s === 'DELIVERED') {
         initialShipmentStatus = 'DELIVERED';
         initialTrackingStatus = 'Delivered';
-      } else if (s === 'OUT_FOR_DELIVERY') {
+      } else if (s === 'OUT_FOR_DELIVERY' || s.includes('OUT FOR DELIVERY') || s.includes('OUT_FOR_DELIVERY')) {
         initialShipmentStatus = 'OUT_FOR_DELIVERY';
         initialTrackingStatus = 'Out for delivery';
-      } else if (s.includes('TRANSIT') || s.includes('SHIPPED') || s.includes('PICKED')) {
+      } else if (
+        s.includes('TRANSIT') ||
+        s.includes('SHIPPED') ||
+        s.includes('PICKED') ||
+        s.includes('NDR') ||
+        s.includes('UNDELIVERED') ||
+        s.includes('EXCEPTION')
+      ) {
         initialShipmentStatus = 'IN_TRANSIT';
-        initialTrackingStatus = 'In transit';
+        initialTrackingStatus = s.includes('NDR') || s.includes('UNDELIVERED') ? 'NDR' : 'In transit';
       }
     }
 

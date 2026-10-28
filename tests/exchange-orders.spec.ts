@@ -381,6 +381,126 @@ describe('Exchange Orders API & Workflow (/agency-api-tester)', () => {
         'VEL-FWD-AUTO-99',
         'Velocity'
       );
+      expect(prismaStub.return.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 602 },
+          data: expect.objectContaining({
+            returnStatus: 'IN_TRANSIT',
+            order: { update: { status: 'RETURN_DISPATCHED' } },
+          }),
+        })
+      );
+    });
+
+    it('advances parent order to RETURN_RECEIVED when reverse package arrives at warehouse', async () => {
+      const mockReturnRecord = {
+        id: 603,
+        orderId: 99101,
+        isExchange: false,
+        returnStatus: 'IN_TRANSIT',
+        returnWaybillNumber: 'REV-DELIVERY-1',
+        order: { ...mockOrder, status: 'RETURN_DISPATCHED' },
+      };
+
+      prismaStub.shipment.findFirst.mockResolvedValueOnce(null);
+      prismaStub.return.findFirst.mockResolvedValueOnce(mockReturnRecord);
+      prismaStub.return.update.mockResolvedValue({});
+
+      vi.spyOn(velocityService, 'mapTrackingToShipmentStatus').mockReturnValueOnce({
+        shipmentStatus: 'DELIVERED',
+        description: 'Delivered to warehouse',
+      });
+
+      const req: any = {
+        body: {
+          event: 'shipment_status_changed',
+          data: {
+            tracking_number: 'REV-DELIVERY-1',
+            status: 'delivered',
+            location: 'Warehouse Hub',
+          },
+        },
+        headers: {},
+      };
+
+      let jsonRes: any = null;
+      let statusCode = 0;
+      const res: any = {
+        status: (code: number) => {
+          statusCode = code;
+          return {
+            json: (data: any) => { jsonRes = data; },
+          };
+        },
+      };
+
+      await handleVelocityWebhook(req, res);
+
+      expect(statusCode).toBe(200);
+      expect(jsonRes.success).toBe(true);
+      expect(prismaStub.return.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 603 },
+          data: expect.objectContaining({
+            returnStatus: 'RECEIVED',
+            order: { update: { status: 'RETURN_RECEIVED' } },
+          }),
+        })
+      );
+    });
+
+    it('rolls back parent order to DELIVERED when reverse pickup is cancelled without replacement', async () => {
+      const mockReturnRecord = {
+        id: 604,
+        orderId: 99101,
+        isExchange: false,
+        returnStatus: 'PICKUP_SCHEDULED',
+        returnWaybillNumber: 'REV-CANCEL-1',
+        order: { ...mockOrder, status: 'RETURN_REQUESTED' },
+      };
+
+      prismaStub.shipment.findFirst.mockResolvedValueOnce(null);
+      prismaStub.return.findFirst.mockResolvedValueOnce(mockReturnRecord);
+      prismaStub.return.update.mockResolvedValue({});
+
+      vi.spyOn(velocityService, 'mapTrackingToShipmentStatus').mockReturnValueOnce({
+        shipmentStatus: 'CANCELLED',
+        description: 'Pickup cancelled by customer',
+      });
+
+      const req: any = {
+        body: {
+          event: 'shipment_status_changed',
+          data: {
+            tracking_number: 'REV-CANCEL-1',
+            status: 'cancelled',
+          },
+        },
+        headers: {},
+      };
+
+      let statusCode = 0;
+      const res: any = {
+        status: (code: number) => {
+          statusCode = code;
+          return {
+            json: (_data: any) => {},
+          };
+        },
+      };
+
+      await handleVelocityWebhook(req, res);
+
+      expect(statusCode).toBe(200);
+      expect(prismaStub.return.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 604 },
+          data: expect.objectContaining({
+            returnStatus: 'CANCELLED',
+            order: { update: { status: 'DELIVERED' } },
+          }),
+        })
+      );
     });
   });
 });

@@ -99,6 +99,11 @@ async function loadFreshLabelPdf(
   return null;
 }
 
+function parsePositiveInt(val: any): number | null {
+  const n = parseInt(val, 10);
+  return Number.isSafeInteger(n) && n > 0 ? n : null;
+}
+
 // ─── Health ──────────────────────────────────────────────
 router.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
@@ -849,7 +854,11 @@ router.get('/orders', async (req: Request, res: Response): Promise<void> => {
 // Get a single order
 router.get('/orders/:id', async (req: Request, res: Response): Promise<void> => {
   try {
-    const orderId = parseInt(req.params.id, 10);
+    const orderId = parsePositiveInt(req.params.id);
+    if (!orderId) {
+      res.status(400).json({ error: 'Valid positive integer order ID is required' });
+      return;
+    }
     const order = await orderService.getOrder(orderId);
     if (!order) {
       res.status(404).json({ error: 'Order not found' });
@@ -1071,7 +1080,11 @@ router.post('/orders/:id/update-courier', async (req: Request, res: Response): P
 // Manually dispatch an order
 router.post('/orders/:id/dispatch', async (req: Request, res: Response): Promise<void> => {
   try {
-    const orderId = parseInt(req.params.id, 10);
+    const orderId = parsePositiveInt(req.params.id);
+    if (!orderId) {
+      res.status(400).json({ error: 'Valid positive integer order ID is required' });
+      return;
+    }
     const courierChoice = (req.body?.courier || req.query?.courier) as CourierChoice | 'auto' | undefined;
     const velocityCarrierId = req.body?.velocityCarrierId || req.body?.carrierId;
     const result = await orderService.dispatchOrder(
@@ -1093,6 +1106,10 @@ router.post('/orders/bulk-dispatch', async (req: Request, res: Response): Promis
     const selectedCarrierId = velocityCarrierId || carrierId;
     if (!Array.isArray(orderIds) || !orderIds.length) {
       res.status(400).json({ error: 'orderIds array is required' });
+      return;
+    }
+    if (orderIds.length > 50) {
+      res.status(400).json({ error: 'Batch dispatch limit is 50 orders per request' });
       return;
     }
 
@@ -1535,7 +1552,11 @@ router.post('/orders/bulk-labels/download', async (req: Request, res: Response):
 // Single Shipping Label + GST Tax Invoice (Label then Invoice sequence)
 router.get('/orders/:id/label-and-invoice', async (req: Request, res: Response): Promise<void> => {
   try {
-    const orderId = parseInt(req.params.id, 10);
+    const orderId = parsePositiveInt(req.params.id);
+    if (!orderId) {
+      res.status(400).send('<h1>Valid positive integer order ID is required</h1>');
+      return;
+    }
     const order = await prisma.order.findUnique({
       where: { id: orderId },
       include: { items: true, shipment: true },
@@ -1546,8 +1567,7 @@ router.get('/orders/:id/label-and-invoice', async (req: Request, res: Response):
     }
     const waybill = order.shipment?.waybillNumber || `PENDING-${order.shopifyOrderName.replace('#', '')}`;
     let pdfBuffer: Buffer | null = null;
-    const isVel = isVelocityCourier(order.shipment?.courier, order.shipment?.labelUrl, waybill);
-    if (isVel && order.shipment?.waybillNumber) {
+    if (order.shipment?.waybillNumber) {
       try {
         pdfBuffer = await loadFreshLabelPdf(
           waybill,
@@ -1556,7 +1576,7 @@ router.get('/orders/:id/label-and-invoice', async (req: Request, res: Response):
           order.shipment?.courier
         );
       } catch (err: any) {
-        logger.warn('Could not load Velocity label PDF for single label+invoice', { waybill, error: err.message });
+        logger.warn('Could not load shipping label PDF for single label+invoice', { waybill, error: err.message });
       }
     }
     const html = shippingLabelService.generateLabelAndInvoiceHtml(order as any, waybill, pdfBuffer);
@@ -1570,7 +1590,11 @@ router.get('/orders/:id/label-and-invoice', async (req: Request, res: Response):
 // Download Single Shipping Label + GST Tax Invoice (Direct attachment download)
 router.get('/orders/:id/label-and-invoice/download', async (req: Request, res: Response): Promise<void> => {
   try {
-    const orderId = parseInt(req.params.id, 10);
+    const orderId = parsePositiveInt(req.params.id);
+    if (!orderId) {
+      res.status(400).json({ error: 'Valid positive integer order ID is required' });
+      return;
+    }
     const order = await prisma.order.findUnique({
       where: { id: orderId },
       include: { items: true, shipment: true },
@@ -1581,8 +1605,7 @@ router.get('/orders/:id/label-and-invoice/download', async (req: Request, res: R
     }
     const waybill = order.shipment?.waybillNumber || `PENDING-${order.shopifyOrderName.replace('#', '')}`;
     let pdfBuffer: Buffer | null = null;
-    const isVel = isVelocityCourier(order.shipment?.courier, order.shipment?.labelUrl, waybill);
-    if (isVel && order.shipment?.waybillNumber) {
+    if (order.shipment?.waybillNumber) {
       try {
         pdfBuffer = await loadFreshLabelPdf(
           waybill,
@@ -1591,7 +1614,7 @@ router.get('/orders/:id/label-and-invoice/download', async (req: Request, res: R
           order.shipment?.courier
         );
       } catch (err: any) {
-        logger.warn('Could not load Velocity label PDF for single label+invoice download', { waybill, error: err.message });
+        logger.warn('Could not load shipping label PDF for single label+invoice download', { waybill, error: err.message });
       }
     }
     const html = shippingLabelService.generateLabelAndInvoiceHtml(order as any, waybill, pdfBuffer);
@@ -2271,9 +2294,9 @@ router.get('/returns', async (req: Request, res: Response): Promise<void> => {
 // Get product variants / exchange size options for an order
 router.get('/orders/:id/exchange-options', async (req: Request, res: Response): Promise<void> => {
   try {
-    const orderId = parseInt(req.params.id, 10);
-    if (!Number.isFinite(orderId)) {
-      res.status(400).json({ error: 'Valid order ID is required' });
+    const orderId = parsePositiveInt(req.params.id);
+    if (!orderId) {
+      res.status(400).json({ error: 'Valid positive integer order ID is required' });
       return;
     }
     const items = await shopifyService.getExchangeOptionsForOrder(orderId);
@@ -2287,7 +2310,11 @@ router.get('/orders/:id/exchange-options', async (req: Request, res: Response): 
 // Create an exchange request for an order
 router.post('/orders/:id/exchange', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const orderId = parseInt(req.params.id, 10);
+    const orderId = parsePositiveInt(req.params.id);
+    if (!orderId) {
+      res.status(400).json({ error: 'Valid positive integer order ID is required' });
+      return;
+    }
     const {
       returnOrderItemId,
       returnQuantity,
@@ -2352,7 +2379,11 @@ router.post('/orders/:id/exchange', async (req: AuthenticatedRequest, res: Respo
 // ONLY sends return email to user if return is created from our side
 router.post('/orders/:id/returns', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const orderId = parseInt(req.params.id, 10);
+    const orderId = parsePositiveInt(req.params.id);
+    if (!orderId) {
+      res.status(400).json({ error: 'Valid positive integer order ID is required' });
+      return;
+    }
     const { returnReason, items, returnWaybillNumber, carrierName, triggerShopify } = req.body;
 
     if (!returnReason || !items || !Array.isArray(items)) {
@@ -2423,7 +2454,11 @@ router.post('/orders/:id/returns', async (req: AuthenticatedRequest, res: Respon
 // Update the return reason before the reverse parcel is picked up.
 router.patch('/returns/:id/reason', async (req: Request, res: Response): Promise<void> => {
   try {
-    const returnId = parseInt(req.params.id, 10);
+    const returnId = parsePositiveInt(req.params.id);
+    if (!returnId) {
+      res.status(400).json({ error: 'Valid positive integer return ID is required' });
+      return;
+    }
     const { returnReason } = req.body || {};
     const result = await returnService.updateReturnReason(returnId, String(returnReason || ''));
     res.json({ success: true, ...result });
@@ -2435,7 +2470,11 @@ router.patch('/returns/:id/reason', async (req: Request, res: Response): Promise
 // Process direct refund for an order via Shopify
 router.post('/orders/:id/refund', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const orderId = parseInt(req.params.id, 10);
+    const orderId = parsePositiveInt(req.params.id);
+    if (!orderId) {
+      res.status(400).json({ error: 'Valid positive integer order ID is required' });
+      return;
+    }
     const { amount, reason } = req.body;
     const result = await returnService.refundOrder(orderId, amount ? parseFloat(amount) : undefined, reason, req.user);
 

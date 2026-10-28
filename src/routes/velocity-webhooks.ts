@@ -6,6 +6,7 @@ import velocityService from '../modules/velocity/velocity.service';
 import trackingService from '../modules/tracking/tracking.service';
 import logger from '../utils/logger';
 import { recordAccountTrailEvent } from '../modules/accounts/account-trail.service';
+import { orderStatusForReturn, CarrierReturnStatus } from '../modules/returns/return-tracking';
 
 const router = Router();
 
@@ -198,11 +199,24 @@ export async function handleVelocityWebhook(req: Request, res: Response): Promis
         } else {
           // Reverse shipment status update
           let newReturnStatus = returnRecord.returnStatus;
-          if (mapped.shipmentStatus === 'PICKED_UP' || mapped.shipmentStatus === 'IN_TRANSIT') {
+          let carrierStatusForOrder: CarrierReturnStatus | null = null;
+          if (mapped.shipmentStatus === 'CANCELLED') {
+            newReturnStatus = 'CANCELLED';
+            carrierStatusForOrder = 'CANCELLED';
+          } else if (mapped.shipmentStatus === 'PICKED_UP' || mapped.shipmentStatus === 'IN_TRANSIT') {
             newReturnStatus = 'IN_TRANSIT';
+            carrierStatusForOrder = 'IN_TRANSIT';
           } else if (mapped.shipmentStatus === 'DELIVERED') {
             newReturnStatus = 'RECEIVED';
+            carrierStatusForOrder = 'QC_PENDING';
           }
+
+          const hasActiveReplacement = Boolean(
+            returnRecord.isExchange && (returnRecord.exchangeForwardAwb || returnRecord.exchangeForwardShipmentId)
+          );
+          const nextOrderStatus = carrierStatusForOrder
+            ? orderStatusForReturn(carrierStatusForOrder, returnRecord.order.status, hasActiveReplacement)
+            : null;
 
           await prisma.return.update({
             where: { id: returnRecord.id },
@@ -213,6 +227,7 @@ export async function handleVelocityWebhook(req: Request, res: Response): Promis
               trackingUpdatedAt: new Date(),
               pickedUpAt: (mapped.shipmentStatus === 'PICKED_UP' || mapped.shipmentStatus === 'IN_TRANSIT') && !returnRecord.pickedUpAt ? new Date() : undefined,
               receivedAt: mapped.shipmentStatus === 'DELIVERED' && !returnRecord.receivedAt ? new Date() : undefined,
+              ...(nextOrderStatus ? { order: { update: { status: nextOrderStatus as any } } } : {}),
             },
           });
 

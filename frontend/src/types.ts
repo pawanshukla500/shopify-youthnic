@@ -10,6 +10,7 @@ export type OrderStatus =
   | 'RTO_INITIATED'
   | 'RTO_DELIVERED'
   | 'RETURN_REQUESTED'
+  | 'EXCHANGE_REQUESTED'
   | 'RETURN_DISPATCHED'
   | 'RETURN_RECEIVED'
   | 'REFUNDED'
@@ -269,6 +270,17 @@ export interface ReturnRecord {
   /** Reverse-pickup shipping cost incl. GST. */
   shippingCharge?: number | null
   shippingCostSource?: 'ESTIMATE' | 'ACTUAL' | null
+  // Exchange fields
+  isExchange?: boolean
+  exchangeVariantId?: string | null
+  exchangeSku?: string | null
+  exchangeTitle?: string | null
+  exchangeForwardAwb?: string | null
+  exchangeForwardShipmentId?: string | null
+  exchangeForwardStatus?: string | null
+  exchangeDispatchMode?: 'IMMEDIATE' | 'ON_PICKUP' | 'ON_RECEIVED' | null
+  exchangeLabelUrl?: string | null
+
   errorMessage: string | null
   createdAt: string
   updatedAt: string

@@ -908,6 +908,101 @@ export class VelocityService {
     }
   }
 
+  /**
+   * Manifest a forward replacement shipment for an exchange order via Velocity
+   * POST /custom/api/v1/forward-order-orchestration
+   */
+  async createExchangeForwardShipment(params: {
+    order: any;
+    exchangeItem: {
+      name: string;
+      sku: string;
+      units: number;
+      selling_price: number;
+    };
+    customOrderId?: string;
+    carrierId?: string;
+  }): Promise<VelocityForwardShipmentResult> {
+    const warehouseId = config.velocity.warehouseId || 'WHGSYR';
+    const storeName = config.shopify.shopDomain?.replace('.myshopify.com', '') || 'youthnic2024';
+
+    const rawName = (params.order.customerName || 'Customer').trim();
+    const nameParts = rawName.split(/\s+/);
+    const firstName = nameParts[0] || 'Customer';
+    const lastName = nameParts.slice(1).join(' ') || '.';
+
+    let phone = (params.order.customerPhone || '').replace(/\D/g, '');
+    if (phone.length === 12 && phone.startsWith('91')) phone = phone.substring(2);
+    if (phone.length > 10) phone = phone.slice(-10);
+    if (phone.length < 10) phone = '9999999999';
+
+    const orderId = params.customOrderId || `${params.order.shopifyOrderName.replace('#', '')}-EX-FWD`;
+
+    const payload: any = {
+      order_id: orderId,
+      warehouse_id: warehouseId,
+      store_name: storeName,
+      billing_customer_name: firstName,
+      billing_last_name: lastName,
+      billing_address: (params.order.customerAddress || 'Address').substring(0, 200),
+      billing_city: params.order.customerCity || 'City',
+      billing_state: params.order.customerState || 'State',
+      billing_pincode: params.order.customerPincode?.trim() || '000000',
+      billing_phone: phone,
+      shipping_is_billing: true,
+      shipping_customer_name: firstName,
+      shipping_last_name: lastName,
+      shipping_address: (params.order.customerAddress || 'Address').substring(0, 200),
+      shipping_city: params.order.customerCity || 'City',
+      shipping_state: params.order.customerState || 'State',
+      shipping_pincode: params.order.customerPincode?.trim() || '000000',
+      shipping_phone: phone,
+      order_items: [
+        {
+          name: params.exchangeItem.name.substring(0, 100),
+          sku: params.exchangeItem.sku,
+          units: Math.max(1, params.exchangeItem.units || 1),
+          selling_price: Math.max(1, Math.round(params.exchangeItem.selling_price || 0)),
+          discount: 0,
+        },
+      ],
+      payment_method: 'PREPAID',
+      sub_total: Math.max(1, Math.round(params.exchangeItem.selling_price * params.exchangeItem.units)),
+      cod_collectible: 0,
+      length: config.delhivery.singleItemLengthCm || 22,
+      breadth: config.delhivery.singleItemBreadthCm || 20,
+      height: config.delhivery.singleItemHeightCm || 3,
+      weight: 0.35,
+      print_label: true,
+    };
+
+    if (params.carrierId) {
+      payload.carrier_id = params.carrierId;
+    }
+
+    try {
+      const response = await this.client.post('/custom/api/v1/forward-order-orchestration', payload);
+      const data = response.data;
+      const p = data?.payload || data?.data || data?.result || data;
+      const awbCode = p?.awb_code || p?.awb || p?.tracking_number;
+      return {
+        orderId: String(p?.order_id || orderId),
+        shipmentId: String(p?.shipment_id || ''),
+        awbCode: awbCode ? String(awbCode).trim() : '',
+        courierName: 'Velocity',
+        courierCompanyId: p?.courier_company_id ? String(p.courier_company_id) : undefined,
+        labelUrl: p?.label_url || '',
+        charges: p?.charges,
+        raw: data,
+        status: p?.status,
+      };
+    } catch (error: any) {
+      const msg = extractVelocityErrorMessage(error.response?.data, error.message);
+      logger.error('Velocity exchange forward shipment failed', { error: msg, orderId });
+      throw new Error(`Velocity exchange forward shipment error: ${msg}`);
+    }
+  }
+
   // ═══════════════════════════════════════════════════════════
   // 6. RATES & PRICING
   // ═══════════════════════════════════════════════════════════

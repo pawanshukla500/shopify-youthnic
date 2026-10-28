@@ -356,6 +356,17 @@ model Return {
   // WhatsApp notification for return
   customerNotified Boolean @default(false)
 
+  // Exchange Orders Support
+  isExchange                 Boolean   @default(false)
+  exchangeVariantId          String?   // Shopify Variant ID / GID of replacement item
+  exchangeSku                String?   // SKU of replacement item
+  exchangeTitle              String?   // Title / Size of replacement item (e.g. "Size L")
+  exchangeForwardAwb         String?   // Forward replacement shipment AWB
+  exchangeForwardShipmentId  String?   // Velocity / downstream shipment ID for forward leg
+  exchangeForwardStatus      String?   // PENDING | DISPATCHED | IN_TRANSIT | DELIVERED
+  exchangeDispatchMode       String?   @default("IMMEDIATE") // IMMEDIATE | ON_PICKUP | ON_RECEIVED
+  exchangeLabelUrl           String?   // Shipping label URL for replacement forward parcel
+
   errorMessage String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -650,6 +661,7 @@ enum OrderStatus {
   RTO_INITIATED // Return to origin initiated
   RTO_DELIVERED // Returned back to seller
   RETURN_REQUESTED // Customer requested return
+  EXCHANGE_REQUESTED // Customer requested size exchange
   RETURN_DISPATCHED // Return shipment dispatched
   RETURN_RECEIVED // Return received at warehouse (scanned)
   REFUNDED // Refund processed

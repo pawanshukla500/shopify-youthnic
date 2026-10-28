@@ -117,6 +117,7 @@ export function OrderDetail() {
 
   // Switch courier partner state
   const [showSwitchCourierModal, setShowSwitchCourierModal] = useState(false)
+  const [showExchangeModal, setShowExchangeModal] = useState(false)
   const [switchCourierName, setSwitchCourierName] = useState('Velocity')
   const [switchWaybill, setSwitchWaybill] = useState('')
 
@@ -1389,6 +1390,18 @@ export function OrderDetail() {
                   </a>
                 )}
 
+                {hasCustomerDelivery(order) && !(order.returns || []).some((r) => !['REFUNDED', 'CANCELLED'].includes(r.returnStatus)) && (
+                  <Button
+                    className="button-secondary"
+                    style={{ borderColor: '#c4b5fd', color: '#6d28d9', background: '#f5f3ff', fontWeight: 600 }}
+                    onClick={() => setShowExchangeModal(true)}
+                    title="Create size exchange request for this delivered order"
+                  >
+                    <Icon name="refresh" size={15} />
+                    <span>Exchange Size</span>
+                  </Button>
+                )}
+
                 <Button
                   className="button-secondary"
                   onClick={() => {
@@ -1541,6 +1554,7 @@ export function OrderDetail() {
         <ReturnForm
           order={order}
           items={(order.items ?? []).filter((item) => item.returnable)}
+          onOpenExchange={() => setShowExchangeModal(true)}
           selected={selected}
           setSelected={setSelected}
           reason={reason}
@@ -2319,6 +2333,19 @@ export function OrderDetail() {
       </div>
     )}
 
+    {/* ─── Size Exchange Modal ─── */}
+    {showExchangeModal && order && (
+      <ExchangeModal
+        order={order}
+        isOpen={showExchangeModal}
+        onClose={() => setShowExchangeModal(false)}
+        onSuccess={async () => {
+          await queryClient.invalidateQueries({ queryKey: ['order', id] })
+          await queryClient.invalidateQueries({ queryKey: ['orders'] })
+        }}
+      />
+    )}
+
     {/* ─── Switch Courier Partner Modal ─── */}
     {showSwitchCourierModal && order && (
       <div className="modal-backdrop" onClick={() => !updateCourierMutation.isPending && setShowSwitchCourierModal(false)}>
@@ -2696,7 +2723,9 @@ function ReturnForm({
   setCarrier,
   loading,
   onSubmit,
+  onOpenExchange,
 }: {
+  onOpenExchange?: () => void
   order: Order
   items: OrderItem[]
   selected: Record<number, number>
@@ -2729,12 +2758,32 @@ function ReturnForm({
     <Panel className="return-form-panel" id="return-panel">
       <PanelHeading eyebrow="Reverse logistics" title="Create reverse pickup" />
       {active ? (
-        <ActiveReturnCard record={active} />
+        active.isExchange ? (
+          <ActiveExchangeCard record={active} />
+        ) : (
+          <ActiveReturnCard record={active} />
+        )
       ) : (
         <>
           <p className="panel-description">
             This opens a Shopify return on the order and books the reverse pickup the way Delhivery ONE “Initiate Return” does: same sale order id, the delivered forward AWB as the reference, and the return location set to the Surat warehouse. Delhivery assigns the reverse waybill. Pickup and transit update from carrier scans.
           </p>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', padding: '12px 14px', background: '#f5f3ff', borderRadius: '8px', border: '1px solid #ddd6fe' }}>
+            <div>
+              <strong style={{ color: '#5b21b6', fontSize: '13px' }}>Customer wants to change size?</strong>
+              <p style={{ margin: 0, fontSize: '12px', color: '#6d28d9' }}>Schedule reverse pickup of old size & dispatch replacement size via Velocity.</p>
+            </div>
+            <button
+              type="button"
+              className="button button-primary"
+              style={{ background: '#7c3aed', borderColor: '#6d28d9', fontSize: '12px', padding: '6px 14px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+              onClick={() => onOpenExchange?.()}
+            >
+              <Icon name="refresh" size={14} />
+              <span>Exchange Size</span>
+            </button>
+          </div>
 
           {forwardAwb ? (
             <div className="reverse-forward-link">
@@ -2922,6 +2971,316 @@ function ActiveReturnCard({ record }: { record: ReturnRecord }) {
       </div>
       <StatusBadge status={record.returnStatus} />
       {record.trackingStatus ? <span className="cell-muted">{record.trackingStatus}{record.trackingLocation ? ` · ${record.trackingLocation}` : ''}</span> : null}
+    </div>
+  )
+}
+
+
+function ExchangeModal({
+  order,
+  isOpen,
+  onClose,
+  onSuccess,
+}: {
+  order: Order
+  isOpen: boolean
+  onClose: () => void
+  onSuccess: () => void
+}) {
+  const toast = useToast()
+  const [selectedItemId, setSelectedItemId] = useState<number>(order.items?.[0]?.id || 0)
+  const [selectedVariantId, setSelectedVariantId] = useState<string>('')
+  const [reason, setReason] = useState<string>('Size mismatch')
+  const [carrier, setCarrier] = useState<string>('Velocity')
+  const [dispatchMode, setDispatchMode] = useState<'IMMEDIATE' | 'ON_PICKUP'>('IMMEDIATE')
+  const [loadingOptions, setLoadingOptions] = useState(false)
+  const [exchangeOptions, setExchangeOptions] = useState<any[]>([])
+  const [submitting, setSubmitting] = useState(false)
+
+  useEffect(() => {
+    if (!isOpen) return
+    let cancelled = false
+    setLoadingOptions(true)
+    api.get(`/api/orders/${order.id}/exchange-options`)
+      .then((res) => {
+        if (!cancelled && res.data?.items) {
+          setExchangeOptions(res.data.items)
+          const firstItem = res.data.items[0]
+          if (firstItem) {
+            setSelectedItemId(firstItem.orderItemId)
+            const firstAvailable = firstItem.availableVariants?.[0]
+            if (firstAvailable) setSelectedVariantId(firstAvailable.id)
+          }
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) toast.toast('error', apiError(err))
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingOptions(false)
+      })
+    return () => { cancelled = true }
+  }, [isOpen, order.id])
+
+  if (!isOpen) return null
+
+  const currentItemOptions = exchangeOptions.find((o) => o.orderItemId === selectedItemId) || exchangeOptions[0]
+  const currentItem = order.items?.find((i) => i.id === selectedItemId) || order.items?.[0]
+  const selectedVariant = currentItemOptions?.availableVariants?.find((v: any) => v.id === selectedVariantId)
+
+  const handleSubmit = async () => {
+    if (!selectedItemId || !selectedVariantId) {
+      toast.toast('error', 'Please select the item and the replacement size.')
+      return
+    }
+    setSubmitting(true)
+    try {
+      const payload = {
+        returnOrderItemId: selectedItemId,
+        returnQuantity: 1,
+        returnReason: reason,
+        exchangeVariantId: selectedVariantId,
+        exchangeSku: selectedVariant?.sku || currentItem?.sku,
+        exchangeTitle: selectedVariant?.title || 'Replacement Size',
+        dispatchMode,
+        carrierName: carrier,
+      }
+      const res = await api.post(`/api/orders/${order.id}/exchange`, payload)
+      toast.toast('success', `Exchange created! Reverse AWB: ${res.data.returnWaybill}${res.data.exchangeForwardAwb ? ` · Forward AWB: ${res.data.exchangeForwardAwb}` : ''}`)
+      onSuccess()
+      onClose()
+    } catch (err) {
+      toast.toast('error', apiError(err))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={() => !submitting && onClose()}>
+      <div className="modal-card" role="dialog" aria-modal="true" aria-label="Create Size Exchange" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '560px' }}>
+        <div className="modal-header">
+          <div className="modal-header-left">
+            <div className="modal-icon-badge" style={{ background: '#ede9fe', color: '#7c3aed' }}>
+              <Icon name="refresh" size={20} />
+            </div>
+            <div>
+              <h3 className="modal-title">Create Size Exchange</h3>
+              <p className="modal-desc">Schedule reverse pickup & dispatch replacement size for {order.shopifyOrderName}.</p>
+            </div>
+          </div>
+          <button type="button" className="modal-close-btn" disabled={submitting} onClick={onClose}>
+            <Icon name="close" size={16} />
+          </button>
+        </div>
+
+        <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <FormField label="Item to Return (Old Size)">
+            <select
+              className="input-select"
+              value={selectedItemId}
+              onChange={(e) => {
+                const id = Number(e.target.value)
+                setSelectedItemId(id)
+                const opt = exchangeOptions.find((o) => o.orderItemId === id)
+                if (opt?.availableVariants?.[0]) setSelectedVariantId(opt.availableVariants[0].id)
+              }}
+              disabled={submitting || (order.items?.length || 0) <= 1}
+              style={{ width: '100%' }}
+            >
+              {(order.items || []).map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.title} {item.variantTitle ? `(${item.variantTitle})` : ''} — SKU: {item.sku || 'N/A'} (₹{item.price})
+                </option>
+              ))}
+            </select>
+          </FormField>
+
+          <FormField label="Replacement Size to Dispatch (New)">
+            {loadingOptions ? (
+              <p className="cell-muted" style={{ padding: '8px 0' }}>Loading available sizes from Shopify...</p>
+            ) : (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '4px' }}>
+                {(currentItemOptions?.availableVariants || []).map((v: any) => {
+                  const isSelected = v.id === selectedVariantId
+                  const isCurrent = currentItem?.variantTitle && (v.title.toLowerCase() === currentItem.variantTitle.toLowerCase() || v.sku === currentItem.sku)
+                  return (
+                    <button
+                      type="button"
+                      key={v.id}
+                      onClick={() => setSelectedVariantId(v.id)}
+                      className={`button ${isSelected ? 'button-primary' : 'button-secondary'}`}
+                      style={{
+                        padding: '6px 14px',
+                        fontSize: '13px',
+                        fontWeight: 600,
+                        ...(isSelected ? { background: '#7c3aed', borderColor: '#7c3aed' } : {}),
+                        ...(isCurrent ? { opacity: 0.6 } : {})
+                      }}
+                      title={isCurrent ? 'Current size on order' : `Switch to size ${v.title}`}
+                    >
+                      {v.title} {isCurrent ? '(Current)' : ''}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </FormField>
+
+          <FormField label="Exchange Reason">
+            <select
+              className="input-select"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              disabled={submitting}
+              style={{ width: '100%' }}
+            >
+              <option value="Size mismatch">Size mismatch / Wrong size</option>
+              <option value="Size too small">Size too small</option>
+              <option value="Size too large">Size too large</option>
+              <option value="Fit unsatisfactory">Fit unsatisfactory</option>
+              <option value="Defective piece">Defective piece (Exchange)</option>
+              <option value="Others">Other</option>
+            </select>
+          </FormField>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+            <FormField label="Logistics Carrier">
+              <select
+                className="input-select"
+                value={carrier}
+                onChange={(e) => setCarrier(e.target.value)}
+                disabled={submitting}
+                style={{ width: '100%' }}
+              >
+                <option value="Velocity">Velocity (Recommended)</option>
+                <option value="Delhivery">Delhivery</option>
+              </select>
+            </FormField>
+
+            <FormField label="Dispatch Strategy">
+              <select
+                className="input-select"
+                value={dispatchMode}
+                onChange={(e) => setDispatchMode(e.target.value as any)}
+                disabled={submitting}
+                style={{ width: '100%' }}
+              >
+                <option value="IMMEDIATE">Immediate Dispatch</option>
+                <option value="ON_PICKUP">Dispatch on Pickup</option>
+              </select>
+            </FormField>
+          </div>
+
+          <div style={{ padding: '10px 14px', borderRadius: '8px', background: '#f8fafc', border: '1px solid #e2e8f0', fontSize: '12px', color: '#475569', lineHeight: 1.5 }}>
+            <strong style={{ color: '#1e293b', display: 'block', marginBottom: '2px' }}>How this exchange works:</strong>
+            1. <strong>Reverse Leg:</strong> {carrier} books a doorstep pickup from the customer to Surat Warehouse.<br />
+            2. <strong>Forward Leg:</strong> {dispatchMode === 'IMMEDIATE' ? 'Replacement size will be manifested immediately with a fresh shipping label.' : 'Replacement will be dispatched once courier scans the return parcel.'}<br />
+            3. <strong>Shopify:</strong> A Return with replacement exchange item is registered, linking both journeys without refunding.
+          </div>
+        </div>
+
+        <div className="modal-footer" style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '16px' }}>
+          <button type="button" className="button button-secondary" disabled={submitting} onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="button button-primary"
+            disabled={submitting || !selectedVariantId || loadingOptions}
+            onClick={handleSubmit}
+            style={{ background: '#7c3aed', borderColor: '#6d28d9' }}
+          >
+            {submitting ? 'Creating Exchange…' : 'Confirm Size Exchange'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ActiveExchangeCard({ record }: { record: ReturnRecord }) {
+  const forwardDelivered = record.exchangeForwardStatus === 'DELIVERED'
+  const reverseDelivered = record.returnStatus === 'RECEIVED' || record.returnStatus === 'QC_APPROVED'
+  return (
+    <div className="active-return-card" style={{ borderLeft: '4px solid #7c3aed' }}>
+      <div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+          <span className="eyebrow" style={{ color: '#7c3aed', background: '#ede9fe', padding: '2px 8px', borderRadius: '4px' }}>
+            Size Exchange in Progress
+          </span>
+          {record.exchangeTitle && (
+            <span style={{ fontSize: '12px', fontWeight: 600, color: '#475569' }}>
+              Replacement: <strong>{record.exchangeTitle}</strong> {record.exchangeSku ? `(${record.exchangeSku})` : ''}
+            </span>
+          )}
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginTop: '10px', padding: '10px 14px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+          <div>
+            <div style={{ fontSize: '11px', textTransform: 'uppercase', color: '#64748b', fontWeight: 600 }}>1. Reverse Pickup (Old Item)</div>
+            <div style={{ marginTop: '4px' }}>
+              <strong className="mono" style={{ fontSize: '13px' }}>{record.returnWaybillNumber || 'Pending AWB'}</strong>
+              <div style={{ fontSize: '12px', color: '#475569', marginTop: '2px' }}>
+                Status: <span style={{ fontWeight: 600, color: reverseDelivered ? '#059669' : '#d97706' }}>{record.trackingStatus || record.returnShipmentStatus || record.returnStatus}</span>
+              </div>
+            </div>
+            {record.returnWaybillNumber && (
+              <a
+                href={carrierTrackingUrl(record.carrier || 'Velocity', record.returnWaybillNumber)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="button button-secondary"
+                style={{ marginTop: '8px', fontSize: '11px', padding: '3px 8px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+              >
+                <Icon name="route" size={13} />
+                <span>Track Reverse</span>
+              </a>
+            )}
+          </div>
+
+          <div>
+            <div style={{ fontSize: '11px', textTransform: 'uppercase', color: '#64748b', fontWeight: 600 }}>2. Forward Dispatch (Replacement)</div>
+            <div style={{ marginTop: '4px' }}>
+              <strong className="mono" style={{ fontSize: '13px' }}>{record.exchangeForwardAwb || (record.exchangeDispatchMode === 'ON_PICKUP' ? 'Dispatches on Pickup' : 'Pending')}</strong>
+              <div style={{ fontSize: '12px', color: '#475569', marginTop: '2px' }}>
+                Status: <span style={{ fontWeight: 600, color: forwardDelivered ? '#059669' : '#2563eb' }}>{record.exchangeForwardStatus || 'PENDING'}</span>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '6px', marginTop: '8px', flexWrap: 'wrap' }}>
+              {record.exchangeForwardAwb && (
+                <a
+                  href={carrierTrackingUrl(record.carrier || 'Velocity', record.exchangeForwardAwb)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="button button-secondary"
+                  style={{ fontSize: '11px', padding: '3px 8px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                >
+                  <Icon name="route" size={13} />
+                  <span>Track Forward</span>
+                </a>
+              )}
+              {record.exchangeLabelUrl && (
+                <a
+                  href={record.exchangeLabelUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="button button-primary"
+                  style={{ fontSize: '11px', padding: '3px 8px', background: '#7c3aed', borderColor: '#7c3aed', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                >
+                  <Icon name="download" size={13} />
+                  <span>Print Label</span>
+                </a>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <p className="cell-muted" style={{ marginTop: '8px' }}>
+          Carrier: <strong>{record.carrier || 'Velocity'}</strong> · Reason: {record.returnReason}
+          {record.shopifyReturnId ? ` · Shopify Return: ${record.shopifyReturnId.split('/').pop()}` : ''}
+        </p>
+      </div>
     </div>
   )
 }

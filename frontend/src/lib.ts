@@ -278,7 +278,7 @@ export function statusTone(status: string | null | undefined): string {
   if (['FAILED', 'FAILED_DELIVERY', 'CANCELLED', 'QC_REJECTED', 'REJECTED', 'ERROR'].includes(normalized)) {
     return 'status-danger'
   }
-  if (['RETURN_REQUESTED', 'RETURN_DISPATCHED', 'RETURN_RECEIVED', 'QC_PENDING', 'REFUND_PENDING', 'PARTIAL'].includes(normalized)) {
+  if (['RETURN_REQUESTED', 'EXCHANGE_REQUESTED', 'RETURN_DISPATCHED', 'RETURN_RECEIVED', 'QC_PENDING', 'REFUND_PENDING', 'PARTIAL'].includes(normalized)) {
     return 'status-purple'
   }
   return 'status-warning'

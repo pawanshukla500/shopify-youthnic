@@ -91,26 +91,32 @@ export function shouldAdvanceReturnStatus(current: string, next: CarrierReturnSt
  * Move the parent order only forward along the return lane, and only once
  * the forward shipment is already delivered (or the return lane has started).
  */
-export function orderStatusForReturn(returnStatus: CarrierReturnStatus, currentOrderStatus: string): string | null {
+export function orderStatusForReturn(
+  returnStatus: CarrierReturnStatus,
+  currentOrderStatus: string,
+  hasActiveReplacement = false
+): string | null {
   if (currentOrderStatus === 'REFUNDED' || currentOrderStatus === 'CANCELLED') return null;
 
   if (returnStatus === 'CANCELLED') {
-    return currentOrderStatus === 'RETURN_REQUESTED' ? 'DELIVERED' : null;
+    if (currentOrderStatus === 'EXCHANGE_REQUESTED' && hasActiveReplacement) return null;
+    return (currentOrderStatus === 'RETURN_REQUESTED' || currentOrderStatus === 'EXCHANGE_REQUESTED') ? 'DELIVERED' : null;
   }
 
   const target =
     returnStatus === 'PICKUP_SCHEDULED'
-      ? 'RETURN_REQUESTED'
+      ? (currentOrderStatus === 'EXCHANGE_REQUESTED' ? 'EXCHANGE_REQUESTED' : 'RETURN_REQUESTED')
       : returnStatus === 'QC_PENDING'
         ? 'RETURN_RECEIVED'
         : 'RETURN_DISPATCHED';
 
-  const allowedFrom = new Set(['DELIVERED', 'RETURN_REQUESTED', 'RETURN_DISPATCHED', 'RETURN_RECEIVED']);
+  const allowedFrom = new Set(['DELIVERED', 'RETURN_REQUESTED', 'EXCHANGE_REQUESTED', 'RETURN_DISPATCHED', 'RETURN_RECEIVED']);
   if (!allowedFrom.has(currentOrderStatus)) return null;
 
   const orderRank: Record<string, number> = {
     DELIVERED: 0,
     RETURN_REQUESTED: 1,
+    EXCHANGE_REQUESTED: 1,
     RETURN_DISPATCHED: 2,
     RETURN_RECEIVED: 3,
     REFUNDED: 9,
@@ -141,7 +147,8 @@ export async function applyReturnCarrierScan(waybill: string, scan: ReturnCarrie
 
   const next = mapCarrierScanToReturnStatus(scan.statusType || '', scan.status, scan.remarks);
   const advance = next ? shouldAdvanceReturnStatus(record.returnStatus, next) : false;
-  const orderStatus = advance && next ? orderStatusForReturn(next, record.order.status) : null;
+  const hasActiveReplacement = Boolean(record.isExchange && (record.exchangeForwardAwb || record.exchangeForwardShipmentId));
+  const orderStatus = advance && next ? orderStatusForReturn(next, record.order.status, hasActiveReplacement) : null;
 
   const previous = Array.isArray(record.trackingHistory) ? (record.trackingHistory as any[]) : [];
   const incoming = (scan.history && scan.history.length ? scan.history : [

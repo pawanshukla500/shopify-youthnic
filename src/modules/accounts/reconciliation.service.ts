@@ -65,6 +65,15 @@ export interface ImportResult {
   extractedFiles?: Array<{ fileName: string; sheetName: string; rowCount: number }>;
   storageMode?: string;
   zipStoredOnDisk?: boolean;
+  dataQuality?: {
+    scorePercentage: number;
+    totalRows: number;
+    matchedRows: number;
+    unmatchedRows: number;
+    skippedDuplicates: number;
+    hasAnomalies: boolean;
+    status: 'HEALTHY' | 'WARNING' | 'CRITICAL';
+  };
 }
 
 export interface RemittanceDefaults {
@@ -141,6 +150,23 @@ async function saveImport(result: ImportResult, uploadedBy?: string): Promise<Im
   const evidence = result.kind === 'DELHIVERY_CHARGES' ? {} : settlementEvidence(result.matchedOrders || []);
   result = { ...result, ...evidence };
   const isZip = result.fileName.toLowerCase().endsWith('.zip') || Boolean(result.extractedFiles?.length);
+
+  const totalRows = result.rowCount || 0;
+  const matchedRows = result.matchedCount || 0;
+  const unmatchedRows = (result.unmatched || []).length;
+  const skippedRows = (result.skippedDuplicates || []).length;
+  const dataQualityScore = totalRows > 0 ? Math.round((matchedRows / totalRows) * 10000) / 100 : 100;
+  const dataQuality = {
+    scorePercentage: dataQualityScore,
+    totalRows,
+    matchedRows,
+    unmatchedRows,
+    skippedDuplicates: skippedRows,
+    hasAnomalies: unmatchedRows > 0,
+    status: (dataQualityScore >= 95 ? 'HEALTHY' : dataQualityScore >= 80 ? 'WARNING' : 'CRITICAL') as 'HEALTHY' | 'WARNING' | 'CRITICAL',
+  };
+  result = { ...result, dataQuality };
+
   try {
     const row = await prisma.reconciliationImport.create({
       data: {
@@ -152,6 +178,7 @@ async function saveImport(result: ImportResult, uploadedBy?: string): Promise<Im
         summary: {
           columns: result.columns,
           notes: result.notes,
+          dataQuality,
           storageMode: result.storageMode || 'POSTGRESQL_RELATIONAL_DATA',
           zipStoredOnDisk: false,
           extractedFromZip: isZip,

@@ -2268,6 +2268,86 @@ router.get('/returns', async (req: Request, res: Response): Promise<void> => {
   }
 });
 
+// Get product variants / exchange size options for an order
+router.get('/orders/:id/exchange-options', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const orderId = parseInt(req.params.id, 10);
+    if (!Number.isFinite(orderId)) {
+      res.status(400).json({ error: 'Valid order ID is required' });
+      return;
+    }
+    const items = await shopifyService.getExchangeOptionsForOrder(orderId);
+    res.json({ success: true, items });
+  } catch (error: any) {
+    logger.error('Failed to get exchange options for order', { orderId: req.params.id, error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Create an exchange request for an order
+router.post('/orders/:id/exchange', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const orderId = parseInt(req.params.id, 10);
+    const {
+      returnOrderItemId,
+      returnQuantity,
+      returnReason,
+      exchangeVariantId,
+      exchangeSku,
+      exchangeTitle,
+      dispatchMode,
+      carrierName,
+    } = req.body;
+
+    if (!returnOrderItemId || !returnReason || !exchangeVariantId) {
+      res.status(400).json({ error: 'returnOrderItemId, returnReason, and exchangeVariantId are required' });
+      return;
+    }
+
+    const result = await returnService.createExchange(orderId, {
+      returnOrderItemId: Number(returnOrderItemId),
+      returnQuantity: Number(returnQuantity) || 1,
+      returnReason: String(returnReason).trim(),
+      exchangeVariantId: String(exchangeVariantId).trim(),
+      exchangeSku: exchangeSku ? String(exchangeSku).trim() : undefined,
+      exchangeTitle: exchangeTitle ? String(exchangeTitle).trim() : undefined,
+      dispatchMode: dispatchMode === 'ON_PICKUP' ? 'ON_PICKUP' : 'IMMEDIATE',
+      carrier: carrierName,
+    });
+
+    await recordAccountTrailEvent({
+      orderId,
+      returnId: result.returnId,
+      eventType: 'EXCHANGE_CREATED',
+      actorType: 'USER',
+      actor: req.user,
+      source: 'OMS_UI',
+      status: 'COMPLETED',
+      note: `Size exchange created by ${req.user?.email || req.user?.name || 'authenticated user'}. Replacement: ${exchangeTitle || exchangeSku || 'New Size'}.`,
+      metadata: {
+        returnReason,
+        returnWaybill: result.returnWaybill,
+        exchangeForwardAwb: result.exchangeForwardAwb,
+        returnOrderItemId,
+        returnQuantity,
+        exchangeVariantId,
+        dispatchMode: result.dispatchMode,
+      },
+    }).catch((auditError: any) => {
+      logger.error('Exchange was created but account-trail event could not be written', {
+        orderId,
+        returnId: result.returnId,
+        error: auditError.message,
+      });
+    });
+
+    res.json({ success: true, ...result });
+  } catch (error: any) {
+    logger.error('Failed to create exchange for order', { orderId: req.params.id, error: error.message });
+    res.status(400).json({ error: error.message });
+  }
+});
+
 // Create a return for an order (with reverse tracking and Shopify trigger)
 // ONLY sends return email to user if return is created from our side
 router.post('/orders/:id/returns', async (req: AuthenticatedRequest, res: Response): Promise<void> => {

@@ -1,3 +1,4 @@
+import shopifyService from '../modules/shopify/shopify.service';
 import { Router, Request, Response } from 'express';
 import prisma from '../database/prisma';
 import config from '../config';
@@ -172,6 +173,107 @@ export async function handleVelocityWebhook(req: Request, res: Response): Promis
     }
 
     if (!shipment) {
+      // Check if trackingNumber is a Return / Reverse AWB or Exchange Replacement AWB
+      const returnRecord = await prisma.return.findFirst({
+        where: {
+          OR: [
+            { returnWaybillNumber: trackingNumber },
+            { exchangeForwardAwb: trackingNumber },
+          ],
+        },
+        include: { order: { include: { items: true } } },
+      });
+
+      if (returnRecord) {
+        const isForwardAwb = returnRecord.exchangeForwardAwb === trackingNumber;
+        const mapped = velocityService.mapTrackingToShipmentStatus(rawStatus);
+
+        if (isForwardAwb) {
+          await prisma.return.update({
+            where: { id: returnRecord.id },
+            data: {
+              exchangeForwardStatus: mapped.shipmentStatus === 'DELIVERED' ? 'DELIVERED' : 'IN_TRANSIT',
+            },
+          });
+        } else {
+          // Reverse shipment status update
+          let newReturnStatus = returnRecord.returnStatus;
+          if (mapped.shipmentStatus === 'PICKED_UP' || mapped.shipmentStatus === 'IN_TRANSIT') {
+            newReturnStatus = 'IN_TRANSIT';
+          } else if (mapped.shipmentStatus === 'DELIVERED') {
+            newReturnStatus = 'RECEIVED';
+          }
+
+          await prisma.return.update({
+            where: { id: returnRecord.id },
+            data: {
+              returnStatus: newReturnStatus,
+              trackingStatus: mapped.description,
+              trackingLocation: data.location || data.city || 'Velocity Hub',
+              trackingUpdatedAt: new Date(),
+              pickedUpAt: (mapped.shipmentStatus === 'PICKED_UP' || mapped.shipmentStatus === 'IN_TRANSIT') && !returnRecord.pickedUpAt ? new Date() : undefined,
+              receivedAt: mapped.shipmentStatus === 'DELIVERED' && !returnRecord.receivedAt ? new Date() : undefined,
+            },
+          });
+
+          // If ON_PICKUP exchange dispatch is pending, trigger forward replacement!
+          if (
+            returnRecord.isExchange &&
+            returnRecord.exchangeDispatchMode === 'ON_PICKUP' &&
+            returnRecord.exchangeForwardStatus === 'PENDING' &&
+            (mapped.shipmentStatus === 'PICKED_UP' || mapped.shipmentStatus === 'IN_TRANSIT')
+          ) {
+            try {
+              const order = returnRecord.order;
+              const fwdRes = await velocityService.createExchangeForwardShipment({
+                order,
+                exchangeItem: {
+                  name: returnRecord.exchangeTitle || 'Replacement Size',
+                  sku: returnRecord.exchangeSku || 'EXCH-SKU',
+                  units: 1,
+                  selling_price: Math.max(1, Math.round(order.totalAmount || 0)),
+                },
+                customOrderId: `${order.shopifyOrderName.replace('#', '')}-EX-FWD`,
+              });
+
+              await prisma.return.update({
+                where: { id: returnRecord.id },
+                data: {
+                  exchangeForwardAwb: fwdRes.awbCode,
+                  exchangeForwardShipmentId: fwdRes.shipmentId,
+                  exchangeForwardStatus: 'DISPATCHED',
+                  exchangeLabelUrl: fwdRes.labelUrl,
+                },
+              });
+
+              await shopifyService.fulfillOrderOnShopify(
+                order.shopifyOrderId,
+                fwdRes.awbCode,
+                'Velocity'
+              );
+
+              logger.info('Auto-dispatched exchange forward replacement on reverse pickup', {
+                orderId: order.id,
+                returnId: returnRecord.id,
+                forwardAwb: fwdRes.awbCode,
+              });
+            } catch (autoErr: any) {
+              logger.error('Failed to auto-dispatch forward exchange on reverse pickup', {
+                returnId: returnRecord.id,
+                error: autoErr.message,
+              });
+            }
+          }
+        }
+
+        res.status(200).json({
+          success: true,
+          message: 'Velocity return/exchange tracking updated',
+          returnId: returnRecord.id,
+        });
+        return;
+      }
+
       logger.info('Velocity webhook: Shipment not found for tracking number', { trackingNumber });
       res.status(200).json({ success: true, message: 'Shipment not found in OMS, recorded' });
       return;

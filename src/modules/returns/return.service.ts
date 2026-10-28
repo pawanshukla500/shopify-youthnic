@@ -43,6 +43,285 @@ class ReturnService {
    * This creates the return in our DB and initiates a reverse pickup with Delhivery,
    * while also triggering reverse tracking and notes on Shopify.
    */
+  /**
+   * Create an exchange request for an order:
+   * 1. Validates order delivery & line items
+   * 2. Schedules reverse pickup for the returned item via Velocity or Delhivery
+   * 3. Manifests forward replacement shipment for the new size via Velocity (if immediate dispatch)
+   * 4. Registers return + exchangeLineItems on Shopify via GraphQL
+   * 5. Saves Return record with isExchange: true, reverse AWB & forward replacement AWB
+   * 6. Fulfills exchange fulfillment order on Shopify with forward AWB
+   */
+  async createExchange(
+    orderId: number,
+    params: {
+      returnOrderItemId: number;
+      returnQuantity: number;
+      returnReason: string;
+      exchangeVariantId: string;
+      exchangeSku?: string;
+      exchangeTitle?: string;
+      dispatchMode?: 'IMMEDIATE' | 'ON_PICKUP' | 'ON_RECEIVED';
+      carrier?: string;
+    }
+  ): Promise<{
+    returnId: number;
+    returnWaybill: string;
+    exchangeForwardAwb?: string;
+    exchangeLabelUrl?: string;
+    shopifyReturnId?: string | null;
+    shopifyTriggered: boolean;
+    carrier: string;
+    dispatchMode: string;
+  }> {
+    if (returnBookingsInFlight.has(orderId)) {
+      throw new Error('An exchange or return for this order is already being booked. Wait for it to finish.');
+    }
+    returnBookingsInFlight.add(orderId);
+    try {
+      return await this.bookExchange(orderId, params);
+    } finally {
+      returnBookingsInFlight.delete(orderId);
+    }
+  }
+
+  private async bookExchange(
+    orderId: number,
+    params: {
+      returnOrderItemId: number;
+      returnQuantity: number;
+      returnReason: string;
+      exchangeVariantId: string;
+      exchangeSku?: string;
+      exchangeTitle?: string;
+      dispatchMode?: 'IMMEDIATE' | 'ON_PICKUP' | 'ON_RECEIVED';
+      carrier?: string;
+    }
+  ): Promise<{
+    returnId: number;
+    returnWaybill: string;
+    exchangeForwardAwb?: string;
+    exchangeLabelUrl?: string;
+    shopifyReturnId?: string | null;
+    shopifyTriggered: boolean;
+    carrier: string;
+    dispatchMode: string;
+  }> {
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: { items: true, returns: true, shipment: true },
+    });
+
+    if (!order) {
+      throw new Error(`Order not found: ${orderId}`);
+    }
+
+    const activeReturn = order.returns.find(
+      (r) => !['REFUNDED', 'CANCELLED'].includes(r.returnStatus)
+    );
+    if (activeReturn) {
+      throw new Error(`Order ${order.shopifyOrderName} already has an active return or exchange (${activeReturn.returnWaybillNumber || activeReturn.returnStatus}).`);
+    }
+
+    const forwardDelivered =
+      order.status === 'DELIVERED' ||
+      Boolean(order.deliveredAt) ||
+      order.shipment?.status === 'DELIVERED' ||
+      (/delivered/i.test(order.shipment?.trackingStatus || '') && !/undeliver/i.test(order.shipment?.trackingStatus || ''));
+
+    if (!forwardDelivered) {
+      throw new Error(`Exchange request becomes available after the forward shipment is delivered to the customer. ${order.shopifyOrderName} is currently ${order.status}.`);
+    }
+
+    const returnItem = order.items.find((i) => i.id === params.returnOrderItemId);
+    if (!returnItem) {
+      throw new Error('The selected item to return was not found in this order.');
+    }
+
+    const returnQty = Math.max(1, Math.min(returnItem.quantity, params.returnQuantity || 1));
+    const carrierName = (params.carrier || (order.shipment && isVelocityCourier(order.shipment.courier, order.shipment.labelUrl, order.shipment.waybillNumber)) ? 'Velocity' : 'Delhivery').trim();
+    const isVel = isVelocityCourier(carrierName, null, undefined) || /velocity/i.test(carrierName);
+    const forwardWaybill = order.shipment?.waybillNumber || null;
+    const dispatchMode = params.dispatchMode || 'IMMEDIATE';
+
+    // 1. Manifest Reverse Pickup (Leg 1)
+    let finalReturnWaybill: string = '';
+    let reverseLabelUrl: string | null = null;
+
+    if (isVel) {
+      const rawName = (order.customerName || 'Customer').trim();
+      const parts = rawName.split(/\s+/);
+      const velReturn = await velocityService.createReverseShipment({
+        orderId: `${order.shopifyOrderName.replace('#', '')}-EX-RET`,
+        forwardAwb: forwardWaybill || undefined,
+        returnReason: params.returnReason,
+        storeName: 'youthnic2024',
+        pickupCustomerName: parts[0] || 'Customer',
+        pickupLastName: parts.slice(1).join(' ') || '.',
+        pickupAddress: (order.customerAddress || 'Address').substring(0, 200),
+        pickupCity: order.customerCity || 'City',
+        pickupState: order.customerState || 'State',
+        pickupPincode: order.customerPincode?.trim() || '000000',
+        pickupPhone: order.customerPhone || '9999999999',
+        pickupEmail: order.customerEmail || undefined,
+        items: [
+          {
+            name: returnItem.title,
+            sku: returnItem.sku || `SKU-${returnItem.id}`,
+            units: returnQty,
+            selling_price: Math.max(1, Math.round(returnItem.price || 0)),
+          },
+        ],
+        totalAmount: Math.max(1, Math.round((returnItem.price || 0) * returnQty)),
+      });
+      finalReturnWaybill = velReturn.awbCode;
+      reverseLabelUrl = velReturn.labelUrl || null;
+    } else {
+      const created = await delhiveryService.createReturnShipment(
+        order,
+        params.returnReason,
+        forwardWaybill || undefined,
+        [{ title: returnItem.title, sku: returnItem.sku, quantity: returnQty }]
+      );
+      finalReturnWaybill = created.waybillNumber;
+      try {
+        reverseLabelUrl = await delhiveryService.generateLabel(finalReturnWaybill);
+      } catch {
+        reverseLabelUrl = null;
+      }
+    }
+
+    if (!finalReturnWaybill) {
+      throw new Error(`Failed to generate reverse waybill with ${isVel ? 'Velocity' : 'Delhivery'}.`);
+    }
+
+    // 2. Manifest Forward Replacement (Leg 2) if IMMEDIATE dispatch
+    let exchangeForwardAwb: string | undefined;
+    let exchangeForwardShipmentId: string | undefined;
+    let exchangeLabelUrl: string | undefined;
+
+    if (dispatchMode === 'IMMEDIATE') {
+      try {
+        if (isVel) {
+          const velFwd = await velocityService.createExchangeForwardShipment({
+            order,
+            exchangeItem: {
+              name: params.exchangeTitle ? `${returnItem.title} (${params.exchangeTitle})` : returnItem.title,
+              sku: params.exchangeSku || returnItem.sku || `SKU-${returnItem.id}`,
+              units: returnQty,
+              selling_price: Math.max(1, Math.round(returnItem.price || 0)),
+            },
+            customOrderId: `${order.shopifyOrderName.replace('#', '')}-EX-FWD`,
+          });
+          exchangeForwardAwb = velFwd.awbCode;
+          exchangeForwardShipmentId = velFwd.shipmentId;
+          exchangeLabelUrl = velFwd.labelUrl;
+        }
+      } catch (fwdErr: any) {
+        logger.warn('Forward replacement shipment creation deferred or failed; reverse pickup remains valid', {
+          orderId: order.id,
+          error: fwdErr.message,
+        });
+      }
+    }
+
+    // 3. Register Return & Exchange on Shopify
+    let shopifyTriggered = false;
+    let shopifyReturnId: string | null = null;
+    try {
+      const shopifyRes = await shopifyService.registerExchangeOnShopify(order.shopifyOrderId, {
+        returnReason: params.returnReason,
+        returnTrackingNumber: finalReturnWaybill,
+        carrier: isVel ? 'Velocity' : carrierName,
+        items: [{ sku: returnItem.sku, title: returnItem.title, quantity: returnQty }],
+        exchangeItems: [{ variantId: params.exchangeVariantId, quantity: returnQty }],
+        exchangeTitle: params.exchangeTitle,
+        forwardTrackingNumber: exchangeForwardAwb,
+      });
+      shopifyTriggered = shopifyRes.success;
+      shopifyReturnId = shopifyRes.shopifyReturnId || null;
+    } catch (shopErr: any) {
+      logger.warn('Shopify exchange registration encountered warning', {
+        orderId: order.id,
+        error: shopErr.message,
+      });
+    }
+
+    // 4. Save to Database
+    const returnRecord = await prisma.return.create({
+      data: {
+        orderId: order.id,
+        returnReason: params.returnReason,
+        returnStatus: 'PICKUP_SCHEDULED',
+        returnWaybillNumber: finalReturnWaybill,
+        returnShipmentStatus: 'Pickup scheduled',
+        forwardWaybill,
+        carrier: isVel ? 'Velocity' : carrierName,
+        pickupAutomatic: true,
+        trackingStatus: 'Pickup scheduled',
+        labelUrl: reverseLabelUrl,
+        refundStatus: 'NONE',
+        shopifyReturnId,
+        // Exchange properties
+        isExchange: true,
+        exchangeVariantId: params.exchangeVariantId,
+        exchangeSku: params.exchangeSku || returnItem.sku,
+        exchangeTitle: params.exchangeTitle || 'Replacement Size',
+        exchangeForwardAwb: exchangeForwardAwb || null,
+        exchangeForwardShipmentId: exchangeForwardShipmentId || null,
+        exchangeForwardStatus: exchangeForwardAwb ? 'DISPATCHED' : 'PENDING',
+        exchangeDispatchMode: dispatchMode,
+        exchangeLabelUrl: exchangeLabelUrl || null,
+        items: {
+          create: [
+            {
+              orderItemId: returnItem.id,
+              quantity: returnQty,
+            },
+          ],
+        },
+      },
+    });
+
+    // Update order status to EXCHANGE_REQUESTED
+    await prisma.order.update({
+      where: { id: order.id },
+      data: { status: 'EXCHANGE_REQUESTED' },
+    });
+
+    // Notify customer
+    await notificationEngine.notifyReturnInitiated(order, returnRecord);
+
+    // Record Sync Log
+    await prisma.syncLog.create({
+      data: {
+        orderId: order.id,
+        syncType: 'RETURN_CREATE',
+        status: 'SUCCESS',
+        message: `Exchange created. Reverse AWB: ${finalReturnWaybill}${exchangeForwardAwb ? ` · Forward Replacement AWB: ${exchangeForwardAwb}` : ''} via ${isVel ? 'Velocity' : 'Delhivery'}.`,
+      },
+    });
+
+    logger.info('Exchange created successfully', {
+      orderId: order.id,
+      returnId: returnRecord.id,
+      returnWaybill: finalReturnWaybill,
+      exchangeForwardAwb,
+      dispatchMode,
+    });
+
+    return {
+      returnId: returnRecord.id,
+      returnWaybill: finalReturnWaybill,
+      exchangeForwardAwb,
+      exchangeLabelUrl,
+      shopifyReturnId,
+      shopifyTriggered,
+      carrier: returnRecord.carrier || 'Velocity',
+      dispatchMode,
+    };
+  }
+
   async createReturn(
     orderId: number,
     returnReason: string,

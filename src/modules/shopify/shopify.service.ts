@@ -548,6 +548,236 @@ class ShopifyService {
    * Requires the app token to include write_returns. A missing scope still
    * writes the note so the reverse pickup is not lost.
    */
+/**
+   * Register an exchange on Shopify (calls returnCreate with exchangeLineItems,
+   * adds exchange tags, appends timeline note, and optionally fulfills the newly spawned
+   * fulfillment order if replacement forward AWB is already manifested).
+   */
+  async registerExchangeOnShopify(
+    shopifyOrderId: string,
+    exchangeData: {
+      returnReason: string;
+      returnTrackingNumber?: string;
+      carrier?: string;
+      items: Array<{ sku?: string | null; title?: string | null; quantity: number }>;
+      exchangeItems: Array<{ variantId: string; quantity: number }>;
+      exchangeTitle?: string;
+      forwardTrackingNumber?: string;
+    }
+  ): Promise<{
+    success: boolean;
+    tagsAdded?: string[];
+    note?: string;
+    shopifyReturnId?: string | null;
+    returnError?: string;
+    fulfillmentId?: string;
+  }> {
+    const mapped = mapReturnReason(exchangeData.returnReason);
+    let shopifyReturnId: string | null = null;
+    let returnError: string | undefined;
+
+    try {
+      shopifyReturnId = await this.createShopifyReturn(shopifyOrderId, {
+        reason: mapped.shopifyReason,
+        reasonNote: mapped.note,
+        items: exchangeData.items || [],
+        trackingNumber: exchangeData.returnTrackingNumber,
+        carrier: exchangeData.carrier || 'Velocity',
+        exchangeItems: exchangeData.exchangeItems,
+      });
+    } catch (error: any) {
+      returnError = error.message || 'Shopify returnCreate with exchange failed';
+      logger.error('Shopify returnCreate with exchange failed; timeline note will still be updated', {
+        shopifyOrderId,
+        error: returnError,
+      });
+    }
+
+    let fulfillmentId: string | undefined;
+    if (exchangeData.forwardTrackingNumber) {
+      try {
+        const fulfillRes = await this.fulfillOrderOnShopify(
+          shopifyOrderId,
+          exchangeData.forwardTrackingNumber,
+          exchangeData.carrier || 'Velocity'
+        );
+        fulfillmentId = fulfillRes.fulfillmentId;
+      } catch (fErr: any) {
+        logger.warn('Fulfillment of exchange item on Shopify failed', {
+          shopifyOrderId,
+          forwardAwb: exchangeData.forwardTrackingNumber,
+          error: fErr.message,
+        });
+      }
+    }
+
+    try {
+      const order = await this.fetchOrder(shopifyOrderId);
+      const existingTags = order.tags ? order.tags.split(',').map((t: string) => t.trim()).filter(Boolean) : [];
+      const newTags = Array.from(
+        new Set([
+          ...existingTags,
+          'Exchange-Initiated',
+          ...(exchangeData.exchangeTitle ? [`Exchange-Size:${exchangeData.exchangeTitle}`] : []),
+          ...(exchangeData.returnTrackingNumber ? [`Exchange-Reverse-AWB:${exchangeData.returnTrackingNumber}`] : []),
+          ...(exchangeData.forwardTrackingNumber ? [`Exchange-Forward-AWB:${exchangeData.forwardTrackingNumber}`] : []),
+          `Exchange-Courier:${exchangeData.carrier || 'Velocity'}`,
+        ])
+      );
+
+      const existingNote = (order as any).note || '';
+      const exchangeTimestamp = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+      const exchangeLogEntry = `[Exchange Initiated - ${exchangeTimestamp}] Courier: ${exchangeData.carrier || 'Velocity'}${
+        exchangeData.returnTrackingNumber ? ` | Reverse AWB: ${exchangeData.returnTrackingNumber}` : ''
+      }${
+        exchangeData.forwardTrackingNumber ? ` | Replacement AWB: ${exchangeData.forwardTrackingNumber}` : ''
+      }${
+        exchangeData.exchangeTitle ? ` | Size: ${exchangeData.exchangeTitle}` : ''
+      } | Reason: ${mapped.delhiveryReason}${
+        shopifyReturnId ? ` | Shopify return: ${shopifyReturnId}` : ''
+      }`;
+      const updatedNote = existingNote ? `${existingNote}\n${exchangeLogEntry}` : exchangeLogEntry;
+
+      await this.client.put(`/orders/${shopifyOrderId}.json`, {
+        order: {
+          id: shopifyOrderId,
+          tags: newTags.join(', '),
+          note: updatedNote,
+        },
+      });
+
+      logger.info('Exchange registered on Shopify order', {
+        shopifyOrderId,
+        reverseWaybill: exchangeData.returnTrackingNumber,
+        forwardWaybill: exchangeData.forwardTrackingNumber,
+        shopifyReturnId,
+      });
+
+      return {
+        success: true,
+        tagsAdded: newTags,
+        note: updatedNote,
+        shopifyReturnId,
+        returnError,
+        fulfillmentId,
+      };
+    } catch (error: any) {
+      logger.error('Failed to register exchange tags/note on Shopify order', {
+        shopifyOrderId,
+        error: error.response?.data || error.message,
+      });
+      return {
+        success: Boolean(shopifyReturnId),
+        shopifyReturnId,
+        returnError: returnError || error.message,
+        fulfillmentId,
+      };
+    }
+  }
+
+  /**
+   * Get available variants and sizes for an order's items so the operator can pick
+   * the replacement size during exchange initiation.
+   */
+  async getExchangeOptionsForOrder(orderId: number): Promise<Array<{
+    orderItemId: number;
+    title: string;
+    sku: string | null;
+    currentVariantId: string | null;
+    currentVariantTitle: string | null;
+    price: number;
+    availableVariants: Array<{
+      id: string;
+      gid: string;
+      title: string;
+      sku: string | null;
+      price: number;
+      availableForSale: boolean;
+    }>;
+  }>> {
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: { items: true },
+    });
+    if (!order) throw new Error(`Order not found: ${orderId}`);
+
+    const results: Array<any> = [];
+
+    for (const item of order.items) {
+      let variantsList: Array<any> = [];
+      const varId = item.shopifyVariantId;
+
+      if (varId) {
+        try {
+          const varGid = varId.startsWith('gid://') ? varId : `gid://shopify/ProductVariant/${varId}`;
+          const q = `query VariantSiblings($id: ID!) {
+            productVariant(id: $id) {
+              id
+              title
+              sku
+              product {
+                id
+                title
+                variants(first: 30) {
+                  nodes {
+                    id
+                    title
+                    sku
+                    price
+                    availableForSale
+                  }
+                }
+              }
+            }
+          }`;
+          const resp = await this.graphql<any>(q, { id: varGid });
+          const rawVariants = resp.productVariant?.product?.variants?.nodes || [];
+          variantsList = rawVariants.map((v: any) => ({
+            id: v.id.replace('gid://shopify/ProductVariant/', ''),
+            gid: v.id,
+            title: v.title,
+            sku: v.sku,
+            price: parseFloat(v.price) || item.price,
+            availableForSale: v.availableForSale !== false,
+          }));
+        } catch (err: any) {
+          logger.warn('Failed to query variant siblings from Shopify GraphQL', {
+            orderItemId: item.id,
+            variantId: varId,
+            error: err.message,
+          });
+        }
+      }
+
+      // If Shopify GraphQL did not return sibling variants (e.g. offline or custom SKU),
+      // generate standard apparel sizes as graceful fallback so UI is never blocked
+      if (!variantsList.length) {
+        const standardSizes = ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL'];
+        const baseSku = item.sku ? item.sku.replace(/[-_][A-Z0-9]+$/i, '') : 'SKU';
+        variantsList = standardSizes.map((size) => ({
+          id: `${varId || item.id}-${size}`,
+          gid: `gid://shopify/ProductVariant/${varId || item.id}`,
+          title: size,
+          sku: `${baseSku}_${size}`,
+          price: item.price,
+          availableForSale: true,
+        }));
+      }
+
+      results.push({
+        orderItemId: item.id,
+        title: item.title,
+        sku: item.sku,
+        currentVariantId: item.shopifyVariantId,
+        currentVariantTitle: item.variantTitle,
+        price: item.price,
+        availableVariants: variantsList,
+      });
+    }
+
+    return results;
+  }
+
   async registerReturnOnShopify(
     shopifyOrderId: string,
     returnData: {
@@ -822,6 +1052,7 @@ class ShopifyService {
       items: Array<{ sku?: string | null; title?: string | null; quantity: number }>;
       trackingNumber?: string;
       carrier: string;
+      exchangeItems?: Array<{ variantId: string; quantity?: number }>;
     }
   ): Promise<string> {
     const orderGid = shopifyOrderId.startsWith('gid://')
@@ -866,15 +1097,35 @@ class ShopifyService {
       throw new Error('Shopify has no fulfilled line items to open a return against.');
     }
 
+    const exchangeLineItems = (input.exchangeItems || []).map((ex) => ({
+      variantId: ex.variantId.startsWith('gid://') ? ex.variantId : `gid://shopify/ProductVariant/${ex.variantId}`,
+      quantity: ex.quantity || 1,
+    }));
+
     const createMutation = `mutation ReturnCreate($returnInput: ReturnInput!) {
       returnCreate(returnInput: $returnInput) {
         userErrors { field message }
-        return { id status }
+        return {
+          id
+          status
+          exchangeLineItems(first: 10) {
+            nodes {
+              id
+              quantity
+              variant { id title sku }
+            }
+          }
+        }
       }
     }`;
+    const returnInputPayload: any = { orderId: orderGid, returnLineItems };
+    if (exchangeLineItems.length > 0) {
+      returnInputPayload.exchangeLineItems = exchangeLineItems;
+    }
+
     const created = await this.graphql<{
       returnCreate: { userErrors: Array<{ message: string }>; return: { id: string; status: string } | null };
-    }>(createMutation, { returnInput: { orderId: orderGid, returnLineItems } });
+    }>(createMutation, { returnInput: returnInputPayload });
     const createErrors = created.returnCreate?.userErrors || [];
     if (createErrors.length || !created.returnCreate?.return?.id) {
       throw new Error(createErrors.map((err) => err.message).join('; ') || 'Shopify did not create the return.');

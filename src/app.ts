@@ -10,6 +10,8 @@ import webhookRoutes from './routes/webhooks';
 import delhiveryWebhookRoutes from './routes/delhivery-webhooks';
 import velocityWebhookRoutes from './routes/velocity-webhooks';
 import scheduler from './jobs/scheduler';
+import prisma from './database/prisma';
+import { normalizeLegacyShipmentCouriers } from './utils/courier';
 import { requireAuth } from './middleware/auth.middleware';
 
 import path from 'path';
@@ -172,6 +174,8 @@ const server = app.listen(config.port, () => {
     nodeEnv: config.nodeEnv,
     appBaseUrl: config.appBaseUrl,
   });
+
+  normalizeLegacyShipmentCouriers(prisma).catch(() => undefined);
 
   const unconfigured: string[] = [];
   if (!config.shopify.accessToken && !(config.shopify.clientId && config.shopify.clientSecret)) {

@@ -24,7 +24,7 @@ import {
   syncExternalOrderFulfillment,
   getOrderShippingOptions,
 } from '../api'
-import { ORDER_TABS, carrierTrackingUrl, formatDate, formatMoney, labelize, isVelocityCourier, getCourierLogoUrl } from '../lib'
+import { ORDER_TABS, carrierTrackingUrl, formatDate, formatMoney, labelize, isVelocityCourier, normalizeCourierName, getCourierLogoUrl } from '../lib'
 import { classifyOrderTab, isCodConfirmed, isPrepaidOrder } from '../../../src/modules/orders/order-tabs'
 import { Button, ButtonGroup, CopyableBadge, EmptyState, ErrorBox, FormField, Icon, InfoCard, LoadingState, PageIntro, Panel, PanelHeading, StatCard, StatusBadge, useDocumentTitle, useToast } from '../components/UI'
 import { OrderNextStep } from '../components/OrderNextStep'
@@ -1319,7 +1319,7 @@ export function OrderDetail() {
                     />
                     <div>
                       <div style={{ color: '#6d28d9', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>⚡ Shipping Aggregator</div>
-                      <div style={{ fontWeight: 800, fontSize: '14px', color: '#1e1b4b', marginTop: '2px' }}>Velocity ({order.shipment.courier || 'Aggregator'})</div>
+                      <div style={{ fontWeight: 800, fontSize: '14px', color: '#1e1b4b', marginTop: '2px' }}>Velocity</div>
                       <div style={{ color: '#6b7280', fontSize: '11px' }}>AWB: <span style={{ fontFamily: 'monospace' }}>{order.shipment.waybillNumber}</span></div>
                     </div>
                   </div>
@@ -2352,16 +2352,8 @@ export function OrderDetail() {
                 disabled={updateCourierMutation.isPending}
                 style={{ width: '100%' }}
               >
-                <option value="Velocity">Velocity (Aggregator)</option>
-                <option value="Delhivery">Delhivery Express</option>
-                <option value="Amazon Transportation">Amazon ATS</option>
-                <option value="Ekart">Ekart Logistics</option>
-                <option value="Blue Dart">Blue Dart</option>
-                <option value="Shadowfax">Shadowfax</option>
-                <option value="DTDC">DTDC</option>
-                <option value="Smartr">Smartr Logistics</option>
-                <option value="Ecom Express">Ecom Express</option>
-                <option value="India Post">India Post</option>
+                <option value="Velocity">Velocity</option>
+                <option value="Delhivery">Delhivery</option>
               </select>
             </FormField>
 

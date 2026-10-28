@@ -4,7 +4,7 @@ import shopifyService from '../shopify/shopify.service';
 import delhiveryService from '../delhivery/delhivery.service';
 import velocityService from '../velocity/velocity.service';
 import shippingRouterService, { CourierChoice } from '../shipping/shipping-router.service';
-import { isVelocityCourier, isDelhiveryCourier, getTrackingUrl } from '../../utils/courier';
+import { isVelocityCourier, isDelhiveryCourier, getTrackingUrl, normalizeCourierName } from '../../utils/courier';
 import notificationEngine from '../notifications/notification.service';
 import paymentService from '../payments/payment.service';
 import { recordAccountTrailEvent, type AccountTrailActor } from '../accounts/account-trail.service';
@@ -537,7 +537,7 @@ class OrderService {
               await shopifyService.fulfillOrderOnShopify(
                 order.shopifyOrderId,
                 String(awb).trim(),
-                attr.carrier?.name || 'Velocity',
+                'Velocity',
                 `https://www.velocityshipping.in/track/${encodeURIComponent(String(awb).trim())}`
               );
             } catch (shopErr: any) {
@@ -777,7 +777,7 @@ class OrderService {
         if (matching) {
           const attr = matching.attributes;
           const awb = String(attr.tracking_number).trim();
-          const carrierName = attr.carrier?.name ? `Velocity (${attr.carrier.name})` : 'Velocity';
+          const carrierName = 'Velocity';
           const mapped = velocityService.mapTrackingToShipmentStatus(attr.status || 'ready_for_pickup');
 
           const dbShipment = await prisma.shipment.upsert({
@@ -816,7 +816,7 @@ class OrderService {
               await shopifyService.fulfillOrderOnShopify(
                 order.shopifyOrderId,
                 awb,
-                attr.carrier?.name || 'Velocity',
+                'Velocity',
                 `https://www.velocityshipping.in/track/${encodeURIComponent(awb)}`
               );
             } catch (shopErr: any) {
@@ -2143,8 +2143,8 @@ class OrderService {
     if (!order) throw new Error(`Order #${orderId} not found`);
 
     const finalAwb = waybillNumber?.trim() || order.shipment?.waybillNumber || null;
-    const normCourier = courierName.trim();
-    const isVel = isVelocityCourier(normCourier, undefined, finalAwb);
+    const isVel = isVelocityCourier(courierName, undefined, finalAwb);
+    const normCourier = isVel ? 'Velocity' : normalizeCourierName(courierName, undefined, finalAwb);
     const trackingUrl = isVel
       ? (finalAwb ? `https://www.velocityshipping.in/track/${encodeURIComponent(finalAwb)}` : null)
       : (finalAwb ? `https://www.delhivery.com/track/package/${encodeURIComponent(finalAwb)}` : null);

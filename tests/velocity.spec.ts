@@ -752,7 +752,7 @@ describe('Velocity Shipping Integration', () => {
         id: 1499,
         orderId: 1989,
         waybillNumber: '374797832251',
-        courier: 'Velocity (Amazon Transportation)',
+        courier: 'Velocity',
         paymentMode: 'COD',
         codAmount: 699,
         status: 'CREATED',
@@ -783,7 +783,7 @@ describe('Velocity Shipping Integration', () => {
           data: expect.objectContaining({
             orderId: 1989,
             waybillNumber: '374797832251',
-            courier: 'Velocity (Amazon Transportation)',
+            courier: 'Velocity',
           }),
         })
       );

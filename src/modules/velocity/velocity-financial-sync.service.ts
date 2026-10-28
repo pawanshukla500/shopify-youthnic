@@ -640,10 +640,7 @@ export class VelocityFinancialSyncService {
       deliveredDate = vTracking.deliveredDate || null;
       pickupDate = vTracking.pickupDate || null;
 
-      const subCourier = vTracking.raw?.courier_name || vTracking.raw?.carrier_name;
-      if (subCourier && typeof subCourier === 'string') {
-        courierToSave = subCourier.toLowerCase().includes('velocity') ? subCourier : `Velocity (${subCourier})`;
-      }
+      courierToSave = 'Velocity';
 
       // Appending new tracking logs
       if (vTracking.activities && vTracking.activities.length > 0) {

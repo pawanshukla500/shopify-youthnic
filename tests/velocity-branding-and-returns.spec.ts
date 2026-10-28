@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { isVelocityCourier, normalizeCourierName } from '../src/utils/courier';
+import { isVelocityCourier, normalizeCourierName, normalizeLegacyShipmentCouriers } from '../src/utils/courier';
 import { VelocityService } from '../src/modules/velocity/velocity.service';
 import returnService from '../src/modules/returns/return.service';
 
@@ -82,6 +82,24 @@ describe('Velocity Aggregator Branding, Returns & Store Linkup', () => {
           '30100810013731'
         )
       ).toBe('Delhivery Surface');
+    });
+
+    it('normalizes legacy database records via normalizeLegacyShipmentCouriers', async () => {
+      const mockPrisma: any = {
+        shipment: { updateMany: vi.fn().mockResolvedValue({ count: 41 }) },
+        trackingLog: { updateMany: vi.fn().mockResolvedValue({ count: 431 }) },
+      };
+      await normalizeLegacyShipmentCouriers(mockPrisma);
+      expect(mockPrisma.shipment.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { courier: 'Velocity' },
+        })
+      );
+      expect(mockPrisma.trackingLog.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { location: 'Velocity Hub' },
+        })
+      );
     });
 
     it('frontend isVelocityCourier excludes Delhivery shipments even if waybill has VEL/PD prefix', async () => {

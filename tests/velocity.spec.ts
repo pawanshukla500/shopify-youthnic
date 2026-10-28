@@ -651,7 +651,46 @@ describe('Velocity Shipping Integration', () => {
         'IN_TRANSIT',
         'DELIVERED',
         expect.any(String),
-        'Velocity'
+        undefined
+      );
+    });
+
+    it('passes scanLocation (location or city) to handleStatusChange instead of carrier_name', async () => {
+      prismaStub.shipment.findFirst.mockResolvedValueOnce({
+        id: 88,
+        status: 'IN_TRANSIT',
+        orderId: 102,
+        order: { id: 102, status: 'IN_TRANSIT', items: [] },
+      });
+      prismaStub.shipment.update.mockResolvedValueOnce({ id: 88 });
+      prismaStub.trackingLog.create.mockResolvedValueOnce({ id: 2 });
+
+      const req: any = {
+        body: {
+          event: 'status_change',
+          event_id: 'evt-loc-1',
+          data: {
+            tracking_number: 'VEL999888777IN',
+            status: 'out_for_delivery',
+            location: 'Bengaluru Hub',
+            carrier_name: 'Velocity',
+          },
+        },
+        headers: {},
+      };
+      const res: any = {
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn(),
+      };
+
+      await handleVelocityWebhook(req, res);
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(trackingServiceStub.handleStatusChange).toHaveBeenCalledWith(
+        expect.anything(),
+        'IN_TRANSIT',
+        'OUT_FOR_DELIVERY',
+        expect.any(String),
+        'Bengaluru Hub'
       );
     });
 
@@ -764,7 +803,7 @@ describe('Velocity Shipping Integration', () => {
         'CREATED',
         'IN_TRANSIT',
         'In Transit',
-        'Amazon Transportation'
+        undefined
       );
       expect(res.status).toHaveBeenCalledWith(200);
     });

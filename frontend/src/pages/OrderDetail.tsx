@@ -762,7 +762,9 @@ export function OrderDetail() {
                 <a role="menuitem" href={carrierTrackingUrl(order.shipment?.courier, order.shipment!.waybillNumber!)} target="_blank" rel="noreferrer" onClick={closeMore}>Track shipment</a>
               )}
               <div className="shopify-more-label">Order</div>
-              <button type="button" role="menuitem" onClick={() => { closeMore(); setShowExchangeModal(true) }}>Exchange order</button>
+              {hasCustomerDelivery(order) && !(order.returns || []).some((r) => !['REFUNDED', 'CANCELLED'].includes(r.returnStatus)) && (
+                <button type="button" role="menuitem" onClick={() => { closeMore(); setShowExchangeModal(true) }}>Exchange order</button>
+              )}
               <button type="button" role="menuitem" onClick={() => { closeMore(); setSwitchCourierName(order.shipment?.courier || 'Velocity'); setSwitchWaybill(order.shipment?.waybillNumber || ''); setShowSwitchCourierModal(true) }}>Switch courier partner</button>
               {order.supportFlag === 'MANIFEST_REVIEW' && (
                 <button type="button" role="menuitem" disabled={clearManifestReview.isPending} onClick={() => { closeMore(); clearManifestReview.mutate() }}>Clear manifest review</button>

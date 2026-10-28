@@ -6,6 +6,7 @@ import velocityService from '../modules/velocity/velocity.service';
 import trackingService from '../modules/tracking/tracking.service';
 import logger from '../utils/logger';
 import { recordAccountTrailEvent } from '../modules/accounts/account-trail.service';
+import { orderStatusForReturn, shouldAdvanceReturnStatus, CarrierReturnStatus } from '../modules/returns/return-tracking';
 
 const router = Router();
 
@@ -197,22 +198,39 @@ export async function handleVelocityWebhook(req: Request, res: Response): Promis
           });
         } else {
           // Reverse shipment status update
-          let newReturnStatus = returnRecord.returnStatus;
-          if (mapped.shipmentStatus === 'PICKED_UP' || mapped.shipmentStatus === 'IN_TRANSIT') {
-            newReturnStatus = 'IN_TRANSIT';
+          let carrierStatusForOrder: CarrierReturnStatus | null = null;
+          if (mapped.shipmentStatus === 'CANCELLED') {
+            carrierStatusForOrder = 'CANCELLED';
+          } else if (mapped.shipmentStatus === 'PICKED_UP' || mapped.shipmentStatus === 'IN_TRANSIT') {
+            carrierStatusForOrder = 'IN_TRANSIT';
           } else if (mapped.shipmentStatus === 'DELIVERED') {
-            newReturnStatus = 'RECEIVED';
+            carrierStatusForOrder = 'QC_PENDING';
           }
+
+          const canAdvance = carrierStatusForOrder
+            ? shouldAdvanceReturnStatus(returnRecord.returnStatus, carrierStatusForOrder)
+            : false;
+          const newReturnStatus = canAdvance
+            ? (carrierStatusForOrder === 'QC_PENDING' ? 'RECEIVED' : carrierStatusForOrder)
+            : returnRecord.returnStatus;
+
+          const hasActiveReplacement = Boolean(
+            returnRecord.isExchange && (returnRecord.exchangeForwardAwb || returnRecord.exchangeForwardShipmentId)
+          );
+          const nextOrderStatus = canAdvance && carrierStatusForOrder
+            ? orderStatusForReturn(carrierStatusForOrder, returnRecord.order.status, hasActiveReplacement)
+            : null;
 
           await prisma.return.update({
             where: { id: returnRecord.id },
             data: {
-              returnStatus: newReturnStatus,
+              returnStatus: newReturnStatus as any,
               trackingStatus: mapped.description,
               trackingLocation: data.location || data.city || 'Velocity Hub',
               trackingUpdatedAt: new Date(),
               pickedUpAt: (mapped.shipmentStatus === 'PICKED_UP' || mapped.shipmentStatus === 'IN_TRANSIT') && !returnRecord.pickedUpAt ? new Date() : undefined,
               receivedAt: mapped.shipmentStatus === 'DELIVERED' && !returnRecord.receivedAt ? new Date() : undefined,
+              ...(nextOrderStatus ? { order: { update: { status: nextOrderStatus as any } } } : {}),
             },
           });
 

@@ -449,6 +449,56 @@ describe('Exchange Orders API & Workflow (/agency-api-tester)', () => {
       );
     });
 
+    it('ignores delayed IN_TRANSIT scan if return is already CANCELLED (CodeAnt regression check)', async () => {
+      const mockReturnRecord = {
+        id: 605,
+        orderId: 99101,
+        isExchange: false,
+        returnStatus: 'CANCELLED',
+        returnWaybillNumber: 'REV-LATE-1',
+        order: { ...mockOrder, status: 'DELIVERED' },
+      };
+
+      prismaStub.shipment.findFirst.mockResolvedValueOnce(null);
+      prismaStub.return.findFirst.mockResolvedValueOnce(mockReturnRecord);
+      prismaStub.return.update.mockResolvedValue({});
+
+      vi.spyOn(velocityService, 'mapTrackingToShipmentStatus').mockReturnValueOnce({
+        shipmentStatus: 'IN_TRANSIT',
+        description: 'Late In Transit scan',
+      });
+
+      const req: any = {
+        body: {
+          event: 'shipment_status_changed',
+          data: {
+            tracking_number: 'REV-LATE-1',
+            status: 'in_transit',
+          },
+        },
+        headers: {},
+      };
+
+      const res: any = {
+        status: (_code: number) => ({ json: (_d: any) => {} }),
+      };
+
+      await handleVelocityWebhook(req, res);
+
+      // Verify returnStatus remains CANCELLED and order status is NOT touched
+      expect(prismaStub.return.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 605 },
+          data: expect.objectContaining({
+            returnStatus: 'CANCELLED',
+          }),
+        })
+      );
+      const updateCalls = prismaStub.return.update.mock.calls;
+      const lastCall = updateCalls[updateCalls.length - 1][0];
+      expect(lastCall.data.order).toBeUndefined();
+    });
+
     it('rolls back parent order to DELIVERED when reverse pickup is cancelled without replacement', async () => {
       const mockReturnRecord = {
         id: 604,

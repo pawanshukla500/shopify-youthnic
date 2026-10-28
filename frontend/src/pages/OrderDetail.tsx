@@ -762,6 +762,7 @@ export function OrderDetail() {
                 <a role="menuitem" href={carrierTrackingUrl(order.shipment?.courier, order.shipment!.waybillNumber!)} target="_blank" rel="noreferrer" onClick={closeMore}>Track shipment</a>
               )}
               <div className="shopify-more-label">Order</div>
+              <button type="button" role="menuitem" onClick={() => { closeMore(); setShowExchangeModal(true) }}>Exchange order</button>
               <button type="button" role="menuitem" onClick={() => { closeMore(); setSwitchCourierName(order.shipment?.courier || 'Velocity'); setSwitchWaybill(order.shipment?.waybillNumber || ''); setShowSwitchCourierModal(true) }}>Switch courier partner</button>
               {order.supportFlag === 'MANIFEST_REVIEW' && (
                 <button type="button" role="menuitem" disabled={clearManifestReview.isPending} onClick={() => { closeMore(); clearManifestReview.mutate() }}>Clear manifest review</button>
@@ -3024,6 +3025,12 @@ function ExchangeModal({
 
   if (!isOpen) return null
 
+  const isDelivered =
+    order.status === 'DELIVERED' ||
+    Boolean(order.deliveredAt) ||
+    order.shipment?.status === 'DELIVERED' ||
+    (/delivered/i.test(order.shipment?.trackingStatus || '') && !/undeliver/i.test(order.shipment?.trackingStatus || ''))
+
   const currentItemOptions = exchangeOptions.find((o) => o.orderItemId === selectedItemId) || exchangeOptions[0]
   const currentItem = order.items?.find((i) => i.id === selectedItemId) || order.items?.[0]
   const selectedVariant = currentItemOptions?.availableVariants?.find((v: any) => v.id === selectedVariantId)
@@ -3075,6 +3082,11 @@ function ExchangeModal({
         </div>
 
         <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          {!isDelivered && (
+            <div style={{ padding: '10px 14px', borderRadius: '8px', background: '#fffbeb', border: '1px solid #fde68a', color: '#b45309', fontSize: '12.5px', lineHeight: 1.4 }}>
+              <strong>Notice:</strong> Order status is currently <strong>{order.status}</strong>. Logistics courier exchange requires the parcel to be delivered to the customer first.
+            </div>
+          )}
           <FormField label="Item to Return (Old Size)">
             <select
               className="input-select"
@@ -3187,7 +3199,7 @@ function ExchangeModal({
           <button
             type="button"
             className="button button-primary"
-            disabled={submitting || !selectedVariantId || loadingOptions}
+            disabled={submitting || !selectedVariantId || loadingOptions || !isDelivered}
             onClick={handleSubmit}
             style={{ background: '#7c3aed', borderColor: '#6d28d9' }}
           >

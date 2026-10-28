@@ -130,8 +130,25 @@ In `prisma/schema.prisma`:
 ---
 
 ## 6. Frontend UI
-1. **Shipment Actions Bar**: "Exchange Size" button appears on delivered orders.
+1. **Shipment Actions Bar & More Actions Menu**:
+   - "Exchange Size" button appears on delivered orders.
+   - "Exchange order" option added inside the **More actions** dropdown on Order Detail (/orders/:id), with status guard informing operators if the forward parcel is awaiting delivery.
 2. **ExchangeModal**: Interactive modal allowing selection of item, size selector chips, reason, carrier, and dispatch strategy.
 3. **ActiveExchangeCard**: Dedicated status card displaying dual tracking pills:
    - Reverse Pickup AWB (Track Reverse)
    - Replacement Forward AWB (Track Forward + Print Label)
+
+---
+
+## 7. Streamlined Bulk Action Toolbar (Orders List)
+
+The bulk action toolbar on `/orders` has been streamlined to prevent clutter, reduce redundant popups, and focus on essential high-volume warehouse operations:
+- **Dispatch**: Real-time sequential dispatch with carrier priority and automatic routing.
+- **DL Labels**: Consolidated 4R thermal shipping labels file download.
+- **DL Labels+ Invoice**: Alternating labels + GST invoices file download.
+- **DL Invoices**: Single consolidated GST invoice download (merged redundant individual invoice generator).
+- **Schedule Pickup**: Next-day warehouse forward pickup request with Delhivery.
+- **Confirm COD**: Bulk verification and confirmation for unconfirmed COD orders.
+- **Export**: Selected orders CSV export.
+- **Verify Payments**: Payment gateway verification for selected orders.
+- *Removed redundant actions*: `Print Labels 4R` (redundant preview), `Print Label+Inv SEQ` (redundant preview), `Invoices GST` (merged into `DL Invoices`), `Picklist SKUs`, `Pack (ZIP)`, and `Get AWBs` (retained in header).

@@ -162,8 +162,8 @@ async function saveImport(result: ImportResult, uploadedBy?: string): Promise<Im
     matchedRows,
     unmatchedRows,
     skippedDuplicates: skippedRows,
-    hasAnomalies: unmatchedRows > 0 || (result.notes || []).length > 0,
-    status: (dataQualityScore >= 90 ? 'HEALTHY' : dataQualityScore >= 50 ? 'WARNING' : 'CRITICAL') as 'HEALTHY' | 'WARNING' | 'CRITICAL',
+    hasAnomalies: unmatchedRows > 0,
+    status: (dataQualityScore >= 95 ? 'HEALTHY' : dataQualityScore >= 80 ? 'WARNING' : 'CRITICAL') as 'HEALTHY' | 'WARNING' | 'CRITICAL',
   };
   result = { ...result, dataQuality };
 

@@ -50,7 +50,7 @@ export interface OrderTabSnapshot {
   financialStatus?: string | null;
   tags?: string | null;
   shipment?: OrderTabShipment | null;
-  returns?: Array<{ status?: string | null; returnStatus?: string | null }> | null;
+  returns?: Array<{ status?: string | null; returnStatus?: string | null; isExchange?: boolean | null }> | null;
   // Accounts reconciliation (see accountsStatus)
   deliveredAt?: Date | string | null;
   paymentReceivedAt?: Date | string | null;
@@ -130,7 +130,10 @@ export function accountsStatus(order: OrderTabSnapshot, now: Date = new Date()):
   else if (!paymentReceived) pending.push('Payment recorded but the bank UTR is missing');
   const hasActiveExchange =
     order.status === 'EXCHANGE_REQUESTED' ||
-    (order.returns || []).some((r: any) => r.isExchange && !['RECEIVED', 'CANCELLED', 'REFUNDED'].includes(r.returnStatus || r.status));
+    (order.returns || []).some((r: any) => {
+      const status = r?.returnStatus || r?.status;
+      return r?.isExchange && Boolean(status) && status !== 'CANCELLED' && status !== 'REFUNDED';
+    });
   if (hasActiveExchange) {
     pending.push('Exchange in progress');
   } else if (openReturn) {
@@ -297,7 +300,7 @@ function hasWaybill(order: OrderTabSnapshot): boolean {
 function hasOpenReturn(order: OrderTabSnapshot): boolean {
   return (order.returns || []).some((entry) => {
     const status = entry?.returnStatus || entry?.status;
-    return Boolean(status) && status !== 'CANCELLED' && status !== 'REFUNDED';
+    return !entry?.isExchange && Boolean(status) && status !== 'CANCELLED' && status !== 'REFUNDED';
   });
 }
 

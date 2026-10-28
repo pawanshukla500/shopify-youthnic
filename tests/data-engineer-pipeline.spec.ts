@@ -2,11 +2,10 @@
  * Data Engineering Pipeline & Architecture Tests (/agency-data-engineer)
  *
  * Verifies:
- * 1. Bronze layer streaming ingest with zero disk persistence and data contract validation.
- * 2. Silver layer idempotency & deduplication (re-running files produces zero duplicate credits).
- * 3. Gold layer reporting contract (every OrderStatus mapped in STATUS_LABELS and accountsStatus).
- * 4. Data Quality metrics & SLA observability (scorePercentage, matchedRows, status).
- * 5. State machine transition safety for exchange parcels in return tracking.
+ * 1. Silver layer idempotency & in-batch deduplication (re-running files produces zero duplicate credits).
+ * 2. Data Quality metrics & SLA observability (scorePercentage, matchedRows, anomaly detection, status).
+ * 3. Gold layer financial accounts reporting contract for EXCHANGE_REQUESTED and active exchange tracking.
+ * 4. State machine transition safety and replacement protection for exchange parcels in return tracking.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
@@ -139,7 +138,7 @@ describe('Data Engineering Pipeline & Architecture Suite (/agency-data-engineer)
       expect(result.dataQuality?.unmatchedRows).toBe(1);
       expect(result.dataQuality?.scorePercentage).toBe(50);
       expect(result.dataQuality?.hasAnomalies).toBe(true);
-      expect(result.dataQuality?.status).toBe('WARNING');
+      expect(result.dataQuality?.status).toBe('CRITICAL');
 
       // Verify stored in PostgreSQL ReconciliationImport summary
       expect(prismaStub.reconciliationImport.create).toHaveBeenCalledWith(
@@ -148,7 +147,7 @@ describe('Data Engineering Pipeline & Architecture Suite (/agency-data-engineer)
             summary: expect.objectContaining({
               dataQuality: expect.objectContaining({
                 scorePercentage: 50,
-                status: 'WARNING',
+                status: 'CRITICAL',
               }),
               storageMode: 'POSTGRESQL_RELATIONAL_DATA',
               zipStoredOnDisk: false,

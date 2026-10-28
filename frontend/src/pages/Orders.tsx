@@ -12,14 +12,8 @@ import {
   syncOrders,
   syncChannelOrders,
   getDelhiveryChannelStatus,
-  downloadBulkLabels,
-  downloadBulkInvoices,
   downloadBulkLabelsDirectFile,
   downloadBulkLabelsAndInvoicesDirectFile,
-  openPrintableBulkLabelsAndInvoices,
-  downloadBulkPackZip,
-  downloadBulkPicklist,
-  openPrintableBulkPicklist,
   downloadBulkInvoicesDirectFile,
   syncBulkExternalFulfillments,
 } from '../api'
@@ -193,8 +187,7 @@ export function Orders() {
   } | null>(null)
   const [isBulkVerifying, setIsBulkVerifying] = useState(false)
   const [isBulkConfirmingCod, setIsBulkConfirmingCod] = useState(false)
-  const [isBulkGeneratingLabels, setIsBulkGeneratingLabels] = useState(false)
-  const [isBulkGeneratingInvoices, setIsBulkGeneratingInvoices] = useState(false)
+
   const [showPickupModal, setShowPickupModal] = useState(false)
   const [isSubmittingPickup, setIsSubmittingPickup] = useState(false)
 
@@ -947,21 +940,6 @@ export function Orders() {
     await queryClient.invalidateQueries({ queryKey: ['orders'] })
   }
 
-  // Bulk Download Shipping Labels
-  const handleBulkDownloadLabels = async () => {
-    const ids = Array.from(selectedOrderIds)
-    if (!ids.length) return
-    setIsBulkGeneratingLabels(true)
-    try {
-      await downloadBulkLabels(ids)
-      toast.toast('success', `Generated 4R shipping labels for ${ids.length} orders!`)
-    } catch (err: any) {
-      toast.toast('error', err.message || 'Failed to generate bulk shipping labels')
-    } finally {
-      setIsBulkGeneratingLabels(false)
-    }
-  }
-
   // Bulk Download Shipping Labels (Direct File Download - No new tab)
   const [isBulkDownloadingLabelsDirect, setIsBulkDownloadingLabelsDirect] = useState(false)
   const handleBulkDownloadLabelsDirect = async () => {
@@ -991,100 +969,6 @@ export function Orders() {
       toast.toast('error', err.message || 'Failed to download bulk labels and invoices')
     } finally {
       setIsBulkDownloadingLabelsAndInvoicesDirect(false)
-    }
-  }
-
-  // Bulk Print Labels + Invoices (Preview tab - Strictly alternating: Label then Invoice)
-  const [isBulkPrintingLabelsAndInvoices, setIsBulkPrintingLabelsAndInvoices] = useState(false)
-  const handleBulkPrintLabelsAndInvoices = async () => {
-    const ids = Array.from(selectedOrderIds)
-    if (!ids.length) return
-    setIsBulkPrintingLabelsAndInvoices(true)
-    try {
-      await openPrintableBulkLabelsAndInvoices(ids)
-      toast.toast('success', `Opened combined Labels + Invoices print preview for ${ids.length} orders!`)
-    } catch (err: any) {
-      toast.toast('error', err.message || 'Failed to open printable labels and invoices')
-    } finally {
-      setIsBulkPrintingLabelsAndInvoices(false)
-    }
-  }
-
-  // Bulk Download GST Invoices — one file per order, sequentially in download mode
-  const [invoiceProgress, setInvoiceProgress] = useState<{ done: number; total: number } | null>(null)
-  const handleBulkDownloadInvoices = async () => {
-    const ids = Array.from(selectedOrderIds)
-    if (!ids.length) return
-    setIsBulkGeneratingInvoices(true)
-    setInvoiceProgress({ done: 0, total: ids.length })
-    try {
-      const { downloaded, failed } = await downloadBulkInvoices(ids, (done, total) =>
-        setInvoiceProgress({ done, total })
-      )
-      if (failed.length === 0) {
-        toast.toast(
-          'success',
-          `Downloaded ${downloaded}/${ids.length} GST invoices — open each file and Print → Save as PDF.`
-        )
-      } else {
-        toast.toast(
-          'error',
-          `Downloaded ${downloaded}/${ids.length} invoices. ${failed.length} failed — retry them individually. If the browser blocked multiple downloads, click Allow in the address bar and retry.`
-        )
-      }
-    } catch (err: any) {
-      toast.toast('error', err.message || 'Failed to generate bulk invoices')
-    } finally {
-      setIsBulkGeneratingInvoices(false)
-      setInvoiceProgress(null)
-    }
-  }
-
-  // Bulk Download Complete Pack (ZIP: Picklist + Collated Labels & Invoices + Individual Docs + Manifest CSV)
-  const [isBulkDownloadingPackZip, setIsBulkDownloadingPackZip] = useState(false)
-  const handleBulkDownloadPackZip = async () => {
-    const ids = Array.from(selectedOrderIds)
-    if (!ids.length) return
-    setIsBulkDownloadingPackZip(true)
-    try {
-      await downloadBulkPackZip(ids)
-      toast.toast('success', `Downloaded complete bulk pack (ZIP) for ${ids.length} orders!`)
-    } catch (err: any) {
-      toast.toast('error', err.message || 'Failed to download bulk pack ZIP')
-    } finally {
-      setIsBulkDownloadingPackZip(false)
-    }
-  }
-
-  // Bulk Download Consolidated Picklist (Direct File Download)
-  const [isBulkDownloadingPicklist, setIsBulkDownloadingPicklist] = useState(false)
-  const handleBulkDownloadPicklist = async () => {
-    const ids = Array.from(selectedOrderIds)
-    if (!ids.length) return
-    setIsBulkDownloadingPicklist(true)
-    try {
-      await downloadBulkPicklist(ids)
-      toast.toast('success', `Downloaded consolidated SKU picklist for ${ids.length} orders!`)
-    } catch (err: any) {
-      toast.toast('error', err.message || 'Failed to download picklist')
-    } finally {
-      setIsBulkDownloadingPicklist(false)
-    }
-  }
-
-  // Bulk Print Picklist (Preview Tab)
-  const [isBulkPrintingPicklist, setIsBulkPrintingPicklist] = useState(false)
-  const handleBulkPrintPicklist = async () => {
-    const ids = Array.from(selectedOrderIds)
-    if (!ids.length) return
-    setIsBulkPrintingPicklist(true)
-    try {
-      await openPrintableBulkPicklist(ids)
-      toast.toast('success', `Opened consolidated SKU picklist print preview for ${ids.length} orders!`)
-    } catch (err: any) {
-      toast.toast('error', err.message || 'Failed to open picklist')
-    } finally {
-      setIsBulkPrintingPicklist(false)
     }
   }
 
@@ -1818,33 +1702,19 @@ export function Orders() {
             </span>
           </button>
 
-          {/* Direct File Download Labels (No new tab) */}
+          {/* Direct File Download Labels */}
           <button
             type="button"
             className="bulk-btn bulk-btn-secondary"
             onClick={handleBulkDownloadLabelsDirect}
             disabled={isBulkDownloadingLabelsDirect}
-            title="Directly download consolidated Delhivery 4R thermal shipping labels as a file without opening in a new tab"
+            title="Directly download consolidated shipping labels as a file"
           >
             <Icon name="download" size={15} />
             <span className="bulk-btn-label">{isBulkDownloadingLabelsDirect ? 'Downloading…' : 'DL Labels'}</span>
-            <span className="bulk-btn-meta">File</span>
           </button>
 
-          {/* Print Labels (New Tab) */}
-          <button
-            type="button"
-            className="bulk-btn bulk-btn-secondary"
-            onClick={handleBulkDownloadLabels}
-            disabled={isBulkGeneratingLabels}
-            title="Open printable preview tab of Delhivery 4R thermal shipping labels"
-          >
-            <Icon name="tag" size={15} />
-            <span className="bulk-btn-label">{isBulkGeneratingLabels ? 'Generating…' : 'Print Labels'}</span>
-            <span className="bulk-btn-meta">4R</span>
-          </button>
-
-          {/* Direct File Download Combined Labels + Invoices (Strictly alternating: Label then Invoice - No new tab) */}
+          {/* Direct File Download Combined Labels + Invoices */}
           <button
             type="button"
             className="bulk-btn bulk-btn-secondary"
@@ -1854,43 +1724,11 @@ export function Orders() {
             style={{ background: 'rgba(124, 58, 237, 0.28)', borderColor: 'rgba(196, 181, 253, 0.4)' }}
           >
             <Icon name="download" size={15} />
-            <span className="bulk-btn-label">{isBulkDownloadingLabelsAndInvoicesDirect ? 'Downloading…' : 'DL Label+Inv'}</span>
+            <span className="bulk-btn-label">{isBulkDownloadingLabelsAndInvoicesDirect ? 'Downloading…' : 'DL Labels+ Invoice'}</span>
             <span className="bulk-btn-meta">Seq</span>
           </button>
 
-          {/* Print Preview Combined Labels + Invoices (Strictly alternating: Label then Invoice) */}
-          <button
-            type="button"
-            className="bulk-btn bulk-btn-secondary"
-            onClick={handleBulkPrintLabelsAndInvoices}
-            disabled={isBulkPrintingLabelsAndInvoices}
-            title="Open printable tab of combined shipping labels and GST invoices (strictly sequenced: Order 1 Label -> Order 1 Invoice -> Order 2 Label -> Order 2 Invoice...)"
-            style={{ background: 'rgba(124, 58, 237, 0.28)', borderColor: 'rgba(196, 181, 253, 0.4)' }}
-          >
-            <Icon name="tag" size={15} />
-            <span className="bulk-btn-label">{isBulkPrintingLabelsAndInvoices ? 'Opening…' : 'Print Label+Inv'}</span>
-            <span className="bulk-btn-meta">Seq</span>
-          </button>
-
-          <button
-            type="button"
-            className="bulk-btn bulk-btn-secondary"
-            onClick={handleBulkDownloadInvoices}
-            disabled={isBulkGeneratingInvoices}
-            title="Download one GST invoice file per selected order, sequentially"
-          >
-            <Icon name="download" size={15} />
-            <span className="bulk-btn-label">
-              {isBulkGeneratingInvoices && invoiceProgress
-                ? `Invoice ${invoiceProgress.done}/${invoiceProgress.total}…`
-                : isBulkGeneratingInvoices
-                  ? 'Generating…'
-                  : 'Invoices'}
-            </span>
-            <span className="bulk-btn-meta">GST</span>
-          </button>
-
-          {/* Direct Bulk Invoices Download (Single combined file, no new tab) */}
+          {/* Direct Bulk Invoices Download (Single combined file) */}
           <button
             type="button"
             className="bulk-btn bulk-btn-secondary"
@@ -1900,49 +1738,7 @@ export function Orders() {
           >
             <Icon name="download" size={15} />
             <span className="bulk-btn-label">{isBulkDownloadingInvoicesDirect ? 'Downloading…' : 'DL Invoices'}</span>
-            <span className="bulk-btn-meta">File</span>
-          </button>
-
-          {/* Consolidated Picklist (Direct File Download) */}
-          <button
-            type="button"
-            className="bulk-btn bulk-btn-secondary"
-            onClick={handleBulkDownloadPicklist}
-            disabled={isBulkDownloadingPicklist}
-            title="Download consolidated SKU picklist for warehouse fulfillment (groups quantities e.g. SKU1=2, SKU2=3)"
-            style={{ background: 'rgba(59, 130, 246, 0.25)', borderColor: 'rgba(147, 197, 253, 0.5)' }}
-          >
-            <Icon name="box" size={15} />
-            <span className="bulk-btn-label">{isBulkDownloadingPicklist ? 'Generating…' : 'Picklist'}</span>
-            <span className="bulk-btn-meta">SKUs</span>
-          </button>
-
-          {/* Complete Bulk Pack (ZIP Archive: Picklist + Collated Labels & Invoices + Individual Docs + Manifest CSV) */}
-          <button
-            type="button"
-            className="bulk-btn bulk-btn-secondary"
-            onClick={handleBulkDownloadPackZip}
-            disabled={isBulkDownloadingPackZip}
-            title="Download complete fulfillment package ZIP (Picklist + Collated Labels & Invoices + Individual folders + Manifest CSV)"
-            style={{ background: 'rgba(16, 185, 129, 0.28)', borderColor: 'rgba(110, 231, 183, 0.5)', fontWeight: 700 }}
-          >
-            <Icon name="package" size={15} />
-            <span className="bulk-btn-label">{isBulkDownloadingPackZip ? 'Zipping…' : '📦 Pack (ZIP)'}</span>
-            <span className="bulk-btn-meta">All-in-1</span>
-          </button>
-
-          {/* Fetch External AWBs (Selected Orders) */}
-          <button
-            type="button"
-            className="bulk-btn bulk-btn-secondary"
-            onClick={handleSyncExternalFulfillments}
-            disabled={isSyncingExternal}
-            title="Automatically fetch tracking IDs & carrier names from OMS Guru / Shopify fulfillments or Delhivery ONE panel"
-            style={{ background: 'rgba(124, 58, 237, 0.25)', borderColor: 'rgba(196, 181, 253, 0.5)' }}
-          >
-            <Icon name="zap" size={15} />
-            <span className="bulk-btn-label">{isSyncingExternal ? 'Fetching…' : '⚡ Get AWBs'}</span>
-            <span className="bulk-btn-meta">Auto</span>
+            <span className="bulk-btn-meta">GST</span>
           </button>
 
           <button

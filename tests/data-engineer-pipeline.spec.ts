@@ -270,6 +270,9 @@ describe('Data Engineering Pipeline & Architecture Suite (/agency-data-engineer)
 
       // 4. Cancelled pickup reverts EXCHANGE_REQUESTED safely back to DELIVERED
       expect(orderStatusForReturn('CANCELLED', 'EXCHANGE_REQUESTED')).toBe('DELIVERED');
+
+      // 5. Cancelled pickup with active replacement does NOT revert to DELIVERED (prevents premature accounts closure)
+      expect(orderStatusForReturn('CANCELLED', 'EXCHANGE_REQUESTED', true)).toBe(null);
     });
 
     it('includes EXCHANGE_REQUESTED in accounts delivery backfill query candidate list', async () => {

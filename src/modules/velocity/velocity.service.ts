@@ -670,7 +670,7 @@ export class VelocityService {
               orderId: p.order_id || payload.order_id,
               shipmentId: String(p.shipment_id || p.order_id || ''),
               awbCode,
-              courierName: p.courier_name || p.carrier_name || 'Velocity Standard',
+              courierName: 'Velocity',
               courierCompanyId: p.courier_company_id || p.carrier_id,
               labelUrl: p.label_url || '',
               assignedDateTime: p.assigned_date_time?.date || p.assigned_date_time,

@@ -136,7 +136,7 @@ export async function handleVelocityWebhook(req: Request, res: Response): Promis
               where: { id: order.shipment.id },
               data: {
                 waybillNumber: trackingNumber,
-                courier: data.carrier_name ? `Velocity (${data.carrier_name})` : (order.shipment.courier || 'Velocity'),
+                courier: 'Velocity',
                 labelUrl: data.label_url || order.shipment.labelUrl || undefined,
               },
             });
@@ -152,7 +152,7 @@ export async function handleVelocityWebhook(req: Request, res: Response): Promis
             data: {
               orderId: order.id,
               waybillNumber: trackingNumber,
-              courier: data.carrier_name ? `Velocity (${data.carrier_name})` : 'Velocity',
+              courier: 'Velocity',
               paymentMode: order.paymentMethod === 'COD' ? 'COD' : 'Pre-paid',
               codAmount: order.paymentMethod === 'COD' ? order.totalAmount || 0 : 0,
               status: isTerminated ? 'CANCELLED' : 'CREATED',
@@ -199,7 +199,7 @@ export async function handleVelocityWebhook(req: Request, res: Response): Promis
     await prisma.shipment.update({
       where: { id: shipment.id },
       data: {
-        courier: shipment.courier || 'Velocity',
+        courier: 'Velocity',
         trackingStatus: mapped.description,
         trackingUpdatedAt: new Date(),
         expectedDeliveryDate: data.estimated_delivery_date
@@ -214,7 +214,7 @@ export async function handleVelocityWebhook(req: Request, res: Response): Promis
       data: {
         shipmentId: shipment.id,
         status: mapped.description,
-        location: data.carrier_name || 'Velocity Hub',
+        location: data.location || data.city || data.destination || data.origin || 'Velocity Hub',
         remark: data.sub_status || data.status,
         scannedAt: data.delivered_at
           ? new Date(data.delivered_at)

@@ -139,16 +139,15 @@ export function normalizeCourierName(
   }
 
   const c = (courier || '').trim();
-  if (/velocity/i.test(c)) return 'Velocity';
-  if (/bluedart|blue dart/i.test(c)) return 'Blue Dart';
+  if (/velocity|shipfastt|shazam|amazon|ats/i.test(c)) return 'Velocity';
   if (/ekart|e-kart/i.test(c)) return 'Ekart';
+  if (/bluedart|blue dart/i.test(c)) return 'Blue Dart';
   if (/dtdc/i.test(c)) return 'DTDC';
   if (/shadowfax/i.test(c)) return 'Shadowfax';
   if (/xpressbees|xpress bees/i.test(c)) return 'Xpressbees';
   if (/ecom express/i.test(c)) return 'Ecom Express';
   if (/india post|speed post/i.test(c)) return 'India Post';
   if (/smartr/i.test(c)) return 'Smartr';
-  if (/amazon/i.test(c)) return 'Amazon Shipping';
 
   if (!c || /^(other|oms\s*guru|omsguru|oms|custom|manual|api)$/i.test(c)) {
     return 'Other';
@@ -185,4 +184,38 @@ export function getTrackingUrl(
   if (c.includes('dtdc')) return `https://www.dtdc.in/tracking/shipment-tracking.asp?trackingNo=${encodeURIComponent(wb)}`;
 
   return undefined;
+}
+
+/**
+ * Normalizes legacy or sub-carrier shipment records to standard 'Velocity'
+ */
+export async function normalizeLegacyShipmentCouriers(prismaClient: any): Promise<void> {
+  try {
+    await prismaClient.shipment.updateMany({
+      where: {
+        courier: {
+          in: [
+            'Amazon Transportation',
+            'Amazon Shipping',
+            'Ekart',
+            'Amazon',
+            'ATS',
+            'Velocity (Amazon Transportation)',
+            'Velocity (Ekart)',
+            'Velocity (Amazon Shipping)',
+          ],
+        },
+      },
+      data: { courier: 'Velocity' },
+    });
+
+    await prismaClient.trackingLog.updateMany({
+      where: {
+        location: { in: ['Amazon Transportation', 'Amazon Shipping', 'Ekart', 'Amazon', 'ATS'] },
+      },
+      data: { location: 'Velocity Hub' },
+    });
+  } catch {
+    // Non-fatal background migration
+  }
 }

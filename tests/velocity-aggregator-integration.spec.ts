@@ -221,7 +221,7 @@ describe('Velocity Aggregator Integration & Business Rules', () => {
         })
       );
       expect(result.awbCode).toBe('VEL-ATS-999');
-      expect(result.courierName).toBe('Amazon Transportation');
+      expect(result.courierName).toBe('Velocity');
     });
 
     it('ranks courier rates strictly according to priority: Amazon -> Ekart -> Delhivery -> Shadowfax', async () => {
@@ -346,7 +346,7 @@ describe('Velocity Aggregator Integration & Business Rules', () => {
         expect.objectContaining({ carrier_id: 'CARR5H4WQY3PM' })
       );
       expect(result.awbCode).toBe('VELP1504737675');
-      expect(result.courierName).toBe('Ekart Standard');
+      expect(result.courierName).toBe('Velocity');
     });
 
     it('appends revision suffix to order_id when re-routing an order with a previously cancelled shipment', async () => {
@@ -442,7 +442,7 @@ describe('Velocity Aggregator Integration & Business Rules', () => {
         totalAmount: 1200,
         items: [{ id: 1, title: 'Top', quantity: 1, price: 1200, sku: 'TOP-1' }],
         shipment: {
-          courier: 'Velocity (Amazon Transportation)',
+          courier: 'Velocity',
           waybillNumber: 'VEL7001',
           labelUrl: 'https://shazam.velocity.in/labels/VEL7001.pdf',
         },
@@ -515,7 +515,7 @@ describe('Velocity Aggregator Integration & Business Rules', () => {
       const result = await financialSyncService.syncSingleOrderVelocityDetails(888);
 
       expect(result.success).toBe(true);
-      expect(result.courier).toBe('Velocity (Amazon Transportation)');
+      expect(result.courier).toBe('Velocity');
       expect(result.deliveredDate).toBe('2026-10-22T10:00:00Z');
       expect(result.shippingCharges?.netBilledCost).toBe(67.26);
       expect(result.codRemittance?.codRemitted).toBe(true);

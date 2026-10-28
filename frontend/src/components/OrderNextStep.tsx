@@ -1,5 +1,5 @@
 import { accountsStatus, classifyOrderTab } from '../../../src/modules/orders/order-tabs'
-import { formatMoney, shortDate } from '../lib'
+import { formatMoney, shortDate, isVelocityCourier } from '../lib'
 import type { Order } from '../types'
 import { Button, Icon, type IconName } from './UI'
 
@@ -91,7 +91,7 @@ function nextStep(p: OrderNextStepProps): Step {
       tone: order.isDispatchOverdue ? 'danger' : 'info',
       title: p.isPrepaid ? 'Paid: ready to dispatch' : 'COD confirmed: ready to dispatch',
       text: `${p.isPrepaid ? `Paid online${order.paymentProvider ? ` via ${order.paymentProvider}` : ''}.` : 'The customer confirmed the COD order.'} Book shipment with courier partner.${overdue}`,
-      action: { label: `Dispatch with ${order.shipment?.courier?.toLowerCase().includes('velocity') ? 'Velocity' : 'Delhivery'}`, icon: 'package', onClick: p.onDispatch, loading: p.dispatching, disabled: !p.canDispatch || p.dispatching },
+      action: { label: `Dispatch with ${isVelocityCourier(order.shipment?.courier, order.shipment?.labelUrl, order.shipment?.waybillNumber) ? 'Velocity' : 'Delhivery'}`, icon: 'package', onClick: p.onDispatch, loading: p.dispatching, disabled: !p.canDispatch || p.dispatching },
     }
   }
   if (tab === 'new' && order.paymentMethod === 'COD' && !p.isCodConfirmed) {
@@ -113,7 +113,7 @@ function nextStep(p: OrderNextStepProps): Step {
   if (tab === 'transit') {
     return {
       tone: 'info',
-      title: `On the way (${order.shipment?.courier || 'Courier'})`,
+      title: `On the way (${isVelocityCourier(order.shipment?.courier, order.shipment?.labelUrl, order.shipment?.waybillNumber) ? 'Velocity' : 'Delhivery'})`,
       text: [shipment?.trackingStatus, shipment?.trackingLocation].filter(Boolean).join(' · ') || 'In transit.',
     }
   }
@@ -133,7 +133,7 @@ function nextStep(p: OrderNextStepProps): Step {
         order.paymentReceivedAt
           ? 'the bank UTR of the payment is added'
           : order.paymentMethod === 'COD'
-            ? `the ${order.shipment?.courier || 'Courier'} COD remittance (with UTR) arrives`
+            ? `the ${isVelocityCourier(order.shipment?.courier, order.shipment?.labelUrl, order.shipment?.waybillNumber) ? 'Velocity' : 'Delhivery'} COD remittance (with UTR) arrives`
             : 'the gateway settlement (with UTR) arrives'
       )
     }

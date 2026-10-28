@@ -82,7 +82,7 @@ export function ShopifyTagList({ tags }: { tags?: string | null }) {
     // Filter out tags that duplicate badges already shown in column 1
     .filter((t) => {
       const lower = t.toLowerCase()
-      if (lower.startsWith('delhivery-awb')) return false
+      if (lower.includes('-awb:') || lower.includes('~awb:') || lower.startsWith('delhivery-awb') || lower.startsWith('velocity-awb')) return false
       if (lower === 'dispatched' || lower === 'shipped') return false
       if (lower === 'cod' || lower === 'prepaid' || lower === 'pre-paid') return false
       if (lower === 'cod_confirmed' || lower === 'cod confirmed' || lower === 'confirmed') return false

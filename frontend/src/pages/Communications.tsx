@@ -22,7 +22,7 @@ import {
   useToast,
 } from '../components/UI'
 import type { EmailLog, EmailTemplateType, DelayedInTransitShipment } from '../types'
-import { carrierTrackingUrl } from '../lib'
+import { carrierTrackingUrl, isVelocityCourier } from '../lib'
 
 const TEMPLATE_PREVIEWS: Record<
   EmailTemplateType,
@@ -620,7 +620,7 @@ export function Communications() {
                         <span style={{ color: '#94a3b8' }}>Pending AWB</span>
                       )}
                       <div style={{ fontSize: '10.5px', color: '#64748b' }}>
-                        {shipment.courier}
+                        {isVelocityCourier(shipment.courier, undefined, shipment.waybillNumber) ? 'Velocity' : 'Delhivery'}
                       </div>
                     </td>
                     <td>

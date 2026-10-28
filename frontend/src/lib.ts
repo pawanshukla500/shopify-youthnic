@@ -182,6 +182,21 @@ export function isVelocityCourier(courier?: string | null, labelUrlOrWaybill?: s
   )
 }
 
+export function normalizeCourierName(
+  courier?: string | null,
+  labelUrlOrWaybill?: string | null,
+  waybill?: string | null
+): string {
+  if (isVelocityCourier(courier, labelUrlOrWaybill, waybill)) {
+    return 'Velocity'
+  }
+  const c = (courier || '').toLowerCase()
+  if (c.includes('delhivery')) {
+    return 'Delhivery'
+  }
+  return courier || 'Delhivery'
+}
+
 /** Official brand logo URL for couriers and logistics partners (Brandfetch) */
 export function getCourierLogoUrl(courier?: string | null): string {
   const c = (courier || '').toLowerCase()

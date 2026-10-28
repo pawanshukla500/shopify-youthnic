@@ -10,7 +10,7 @@ import {
   openPrintableOrderLabelAndInvoice,
   syncExternalOrderFulfillment,
 } from '../api'
-import { carrierTrackingUrl } from '../lib'
+import { carrierTrackingUrl, isVelocityCourier, normalizeCourierName } from '../lib'
 import { isManifestRejected, isPrepaidOrder } from '../../../src/modules/orders/order-tabs'
 import type { Order } from '../types'
 import { Icon } from './UI'
@@ -106,6 +106,9 @@ export function OrderLogisticsActions({
     }
   }
 
+  const isVel = isVelocityCourier(order.shipment?.courier, order.shipment?.labelUrl, waybill)
+  const displayCourier = isVel ? 'Velocity' : 'Delhivery'
+
   return (
     <div className="logistics-cell" onClick={(event) => event.stopPropagation()}>
       {waybill ? (
@@ -114,13 +117,14 @@ export function OrderLogisticsActions({
           target="_blank"
           rel="noreferrer"
           className="waybill-track-link logistics-awb"
-          title={`Track ${waybill} on ${order.shipment?.courier || 'Delhivery'}`}
+          title={`Track ${waybill} on ${displayCourier}`}
         >
-          {order.shipment?.courier?.toLowerCase() === 'delhivery' ? (
-            <img src="/logos/delhivery.png" alt="" className="logistics-carrier-mark" />
+          {isVel ? (
+            <img src="/logos/velocity.svg" alt="Velocity" className="logistics-carrier-mark" />
           ) : (
-            <span className="logistics-carrier-name">{order.shipment?.courier || 'Carrier'}</span>
+            <img src="/logos/delhivery.png" alt="Delhivery" className="logistics-carrier-mark" />
           )}
+          <span className="logistics-carrier-name">{displayCourier}</span>
           <span className="mono">{waybill}</span>
         </a>
       ) : null}
@@ -219,7 +223,7 @@ export function OrderLogisticsActions({
                   >
                     Download label
                   </button>
-                  {order.shipment?.courier?.toLowerCase() === 'delhivery' ? (
+                  {!isVel ? (
                     <button
                       type="button"
                       role="menuitem"

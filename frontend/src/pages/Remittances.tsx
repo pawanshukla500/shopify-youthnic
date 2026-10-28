@@ -14,8 +14,8 @@ const options: Array<{ kind: AccountsImportKind; label: string; template: Parame
   { kind: 'GOKWIK_SETTLEMENT', label: 'GoKwik (Easebuzz) settlement', template: 'gokwik-settlement' },
   { kind: 'PHONEPE_SETTLEMENT', label: 'PhonePe settlement', template: 'phonepe-settlement' },
   { kind: 'PG_SETTLEMENT', label: 'Other gateway settlement', template: 'gokwik-settlement' },
-  { kind: 'AMAZON_SHIPPING', label: 'Velocity - Amazon Shipping partner remittance', template: 'carrier-remittance' },
-  { kind: 'EKART_SHIPPING', label: 'Velocity - Ekart partner remittance', template: 'carrier-remittance' },
+  { kind: 'AMAZON_SHIPPING', label: 'Velocity COD Remittance (Amazon mode)', template: 'carrier-remittance' },
+  { kind: 'EKART_SHIPPING', label: 'Velocity COD Remittance (Ekart mode)', template: 'carrier-remittance' },
   { kind: 'GENERIC_CARRIER', label: 'Other carrier remittance', template: 'carrier-remittance' },
 ]
 const istToday = () => new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10)

@@ -47,6 +47,11 @@ import { istDateRange } from '../modules/accounts/settlement-summary';
 
 const router = Router();
 
+function parsePositiveInt(val: any): number | null {
+  const n = parseInt(val, 10);
+  return Number.isSafeInteger(n) && n > 0 ? n : null;
+}
+
 // The file arrives base64-encoded in JSON (express.json limit 10 MB; base64
 // adds a third), so 7 MB of file is the most that fits.
 const MAX_UPLOAD_BYTES = 7 * 1024 * 1024;
@@ -351,7 +356,11 @@ router.get('/imports', async (_req: AuthenticatedRequest, res: Response): Promis
 
 router.patch('/remittance/:importId/utr', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const importId = parseInt(req.params.importId, 10);
+    const importId = parsePositiveInt(req.params.importId);
+    if (!importId) {
+      res.status(400).json({ error: 'Valid positive integer import ID is required' });
+      return;
+    }
     const utr = String(req.body?.utr || '').trim();
     if (!utr) {
       res.status(400).json({ error: 'utr is required' });
@@ -371,7 +380,11 @@ router.patch('/remittance/:importId/utr', async (req: AuthenticatedRequest, res:
 
 router.post('/orders/:id/payment-received', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const orderId = parseInt(req.params.id, 10);
+    const orderId = parsePositiveInt(req.params.id);
+    if (!orderId) {
+      res.status(400).json({ error: 'Valid positive integer order ID is required' });
+      return;
+    }
     const order = await prisma.order.findUnique({ where: { id: orderId } });
     if (!order) {
       res.status(404).json({ error: 'Order not found' });

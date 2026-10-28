@@ -274,16 +274,17 @@ export async function importDelhiveryRemittance(
   const columns = {
     awb: pickColumn(headers, AWB_COLUMN),
     order: pickColumn(headers, ORDER_COLUMN),
-    utr: pickColumn(headers, [/^utr( no| number)?$/, /bank transaction id|bank txn|utr|bank ref|transaction ref/]),
-    remittance: pickColumn(headers, [/remittance (number|no|id|ref)/, /\bcrn\b|batch (id|no)/]),
+    utr: pickColumn(headers, [/^utr( no| number)?$/, /bank transaction id|bank txn|utr|bank ref|transaction ref|payout ref|utr no/]),
+    remittance: pickColumn(headers, [/remittance (number|no|id|ref)/, /\bcrn\b|batch (id|no)|payout (id|number|ref|no)/]),
     amount: pickColumn(headers, [
       /remitted amount|remittance amount/,
       /amount payable/,
       /^cod amount$|cod amount/,
+      /payout amount|net payout/,
       /net amount/,
       /^amount$|amount/,
     ]),
-    date: pickColumn(headers, [/remittance (processed )?date|processed date|remitted (on|at|date)/, /payment date|^date$|date/]),
+    date: pickColumn(headers, [/remittance (processed )?date|processed date|remitted (on|at|date)/, /payment date|payout date|settlement date|^date$|date/]),
   };
 
   const notes: string[] = [];
@@ -1097,16 +1098,17 @@ export async function importCarrierRemittance(
   const columns = {
     awb: pickColumn(headers, AWB_COLUMN),
     order: pickColumn(headers, ORDER_COLUMN),
-    utr: pickColumn(headers, [/^utr( no| number)?$/, /bank transaction id|bank txn|utr|bank ref|transaction ref/]),
-    remittance: pickColumn(headers, [/remittance (number|no|id|ref)/, /\bcrn\b|batch (id|no)/]),
+    utr: pickColumn(headers, [/^utr( no| number)?$/, /bank transaction id|bank txn|utr|bank ref|transaction ref|payout ref|utr no/]),
+    remittance: pickColumn(headers, [/remittance (number|no|id|ref)/, /\bcrn\b|batch (id|no)|payout (id|number|ref|no)/]),
     amount: pickColumn(headers, [
       /remitted amount|remittance amount/,
       /amount payable/,
       /^cod amount$|cod amount/,
+      /payout amount|net payout/,
       /net amount/,
       /^amount$|amount/,
     ]),
-    date: pickColumn(headers, [/remittance (processed )?date|processed date|remitted (on|at|date)/, /payment date|^date$|date/]),
+    date: pickColumn(headers, [/remittance (processed )?date|processed date|remitted (on|at|date)/, /payment date|payout date|settlement date|^date$|date/]),
   };
 
   const notes: string[] = [];

@@ -2861,19 +2861,41 @@ router.get('/payments/summary', async (_req: Request, res: Response): Promise<vo
       where: { paymentVerified: false, status: 'NEW' },
     });
 
-    // 1. Delhivery COD statistics
-    const [codAgg, codCollectedAgg, codRemittedAgg] = await Promise.all([
+    // 1. COD statistics (Delhivery & Velocity)
+    const isVelShipment = { courier: { contains: 'velocity', mode: 'insensitive' as const } };
+
+    const [
+      delhiveryCodAgg,
+      delhiveryCollectedAgg,
+      delhiveryRemittedAgg,
+      velocityCodAgg,
+      velocityCollectedAgg,
+      velocityRemittedAgg,
+    ] = await Promise.all([
       prisma.order.aggregate({
-        where: { paymentMethod: 'COD' },
+        where: { paymentMethod: 'COD', NOT: { shipment: { is: isVelShipment } } },
         _count: { _all: true },
         _sum: { totalAmount: true },
       }),
       prisma.shipment.aggregate({
-        where: { paymentMode: 'COD', codCollected: true },
+        where: { paymentMode: 'COD', NOT: isVelShipment, codCollected: true },
         _sum: { codAmount: true },
       }),
       prisma.shipment.aggregate({
-        where: { paymentMode: 'COD', codRemitted: true },
+        where: { paymentMode: 'COD', NOT: isVelShipment, codRemitted: true },
+        _sum: { codAmount: true, codRemittedAmount: true },
+      }),
+      prisma.order.aggregate({
+        where: { paymentMethod: 'COD', shipment: { is: isVelShipment } },
+        _count: { _all: true },
+        _sum: { totalAmount: true },
+      }),
+      prisma.shipment.aggregate({
+        where: { paymentMode: 'COD', ...isVelShipment, codCollected: true },
+        _sum: { codAmount: true },
+      }),
+      prisma.shipment.aggregate({
+        where: { paymentMode: 'COD', ...isVelShipment, codRemitted: true },
         _sum: { codAmount: true, codRemittedAmount: true },
       }),
     ]);
@@ -2916,18 +2938,29 @@ router.get('/payments/summary', async (_req: Request, res: Response): Promise<vo
       }),
     ]);
 
-    const codCollected = codCollectedAgg._sum.codAmount || 0;
-    const codRemitted = codRemittedAgg._sum.codRemittedAmount ?? codRemittedAgg._sum.codAmount ?? 0;
+    const delhiveryCollected = delhiveryCollectedAgg._sum.codAmount || 0;
+    const delhiveryRemitted = delhiveryRemittedAgg._sum.codRemittedAmount ?? delhiveryRemittedAgg._sum.codAmount ?? 0;
+    const velocityCollected = velocityCollectedAgg._sum.codAmount || 0;
+    const velocityRemitted = velocityRemittedAgg._sum.codRemittedAmount ?? velocityRemittedAgg._sum.codAmount ?? 0;
 
     const threeWaySummary = {
       delhiveryCod: {
         channel: 'Delhivery COD',
         source: 'Delhivery Courier Cash Collection & Panel Remittance',
-        orderCount: codAgg._count._all,
-        totalAmount: codAgg._sum.totalAmount || 0,
-        collectedAmount: codCollected,
-        remittedAmount: codRemitted,
-        outstandingAmount: Math.max(0, codCollected - codRemitted),
+        orderCount: delhiveryCodAgg._count._all,
+        totalAmount: delhiveryCodAgg._sum.totalAmount || 0,
+        collectedAmount: delhiveryCollected,
+        remittedAmount: delhiveryRemitted,
+        outstandingAmount: Math.max(0, delhiveryCollected - delhiveryRemitted),
+      },
+      velocityCod: {
+        channel: 'Velocity COD',
+        source: 'Velocity Courier Cash Collection & Automated Remittance Sync',
+        orderCount: velocityCodAgg._count._all,
+        totalAmount: velocityCodAgg._sum.totalAmount || 0,
+        collectedAmount: velocityCollected,
+        remittedAmount: velocityRemitted,
+        outstandingAmount: Math.max(0, velocityCollected - velocityRemitted),
       },
       gokwikPrepaid: {
         channel: 'GoKwik Checkout',

@@ -1341,7 +1341,12 @@ class OrderService {
         status: 'CANCELLED',
         cancelledAt: order.cancelledAt || new Date(),
         ...(delhiveryCancel === 'refused'
-          ? { hasUrgentSupport: true, supportFlag: 'DELHIVERY_CANCEL_FAILED' }
+          ? {
+              hasUrgentSupport: true,
+              supportFlag: isVelocityCourier(order.shipment?.courier, order.shipment?.labelUrl, order.shipment?.waybillNumber)
+                ? 'VELOCITY_CANCEL_FAILED'
+                : 'DELHIVERY_CANCEL_FAILED',
+            }
           : {}),
       },
     });

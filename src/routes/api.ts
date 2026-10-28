@@ -1137,11 +1137,11 @@ router.post('/orders/bulk-dispatch', async (req: Request, res: Response): Promis
 
     res.json({
       success: true,
-      total: orderIds.length,
+      total: finalDispatchQueue.length,
       dispatched: successfulCount,
       prepaidDispatched,
       codDispatched,
-      failed: orderIds.length - successfulCount,
+      failed: finalDispatchQueue.length - successfulCount,
       results,
     });
   } catch (error: any) {
@@ -2061,7 +2061,12 @@ router.post('/orders/:id/cancel', async (req: Request, res: Response): Promise<v
         tags: updatedTags,
         cancelledAt: order.cancelledAt || new Date(),
         ...(delhiveryCancel === 'refused'
-          ? { hasUrgentSupport: true, supportFlag: 'DELHIVERY_CANCEL_FAILED' }
+          ? {
+              hasUrgentSupport: true,
+              supportFlag: isVelocityCourier(order.shipment?.courier, order.shipment?.labelUrl, order.shipment?.waybillNumber)
+                ? 'VELOCITY_CANCEL_FAILED'
+                : 'DELHIVERY_CANCEL_FAILED',
+            }
           : {}),
       },
       include: { items: true, shipment: true },
@@ -2304,53 +2309,18 @@ router.post('/orders/:id/returns', async (req: AuthenticatedRequest, res: Respon
       });
     });
 
-    // Auto-send Return Initiated Email to customer from Youthnic Returns <returns@youthnic.com>
-    // Triggered because this return was created from our side
-    let emailDispatched = false;
-    let emailResult: any = null;
+    // Sync event to Firebase RTDB customer history (lifecycle email + WhatsApp are handled by notifyReturnInitiated)
     try {
       const order = await prisma.order.findUnique({
         where: { id: orderId },
-        include: { items: true },
       });
       if (order?.customerEmail) {
-        const fullAddress = [order.customerAddress, order.customerCity, order.customerState, order.customerPincode]
-          .filter(Boolean)
-          .join(', ');
-
-        emailResult = await resendService.sendEmail({
-          to: order.customerEmail,
-          templateType: 'RETURN_INITIATED',
-          fromEmail: 'Youthnic Returns <returns@youthnic.com>',
-          replyTo: 'returns@youthnic.com',
-          orderId: order.id,
-          data: {
-            orderName: order.shopifyOrderName,
-            customerName: order.customerName,
-            recipientEmail: order.customerEmail,
-            waybillNumber: result.returnWaybill,
-            courier: carrierName || 'Delhivery Surface Reverse',
-            returnReason,
-            customerAddress: fullAddress || 'Customer registered address',
-            items: order.items.map((i: any) => ({
-              title: i.title,
-              variantTitle: i.variantTitle,
-              quantity: i.quantity,
-              price: i.price,
-              imageUrl: i.imageUrl,
-            })),
-            totalAmount: order.totalAmount,
-            trackingUrl: getTrackingUrl(carrierName, result.returnWaybill) || `https://www.delhivery.com/track/package/${result.returnWaybill}`,
-          },
-        });
-        emailDispatched = emailResult?.success ?? false;
-
-        // Sync event to Firebase RTDB customer history
+        const resolvedCarrier = (result as any).carrier || carrierName || 'Velocity';
         await firebaseService.syncCustomerHistory(order.customerEmail, {
           type: 'OUTBOUND_EMAIL',
           channel: 'EMAIL',
           title: `Return Pickup Scheduled: Order ${order.shopifyOrderName}`,
-          description: `Reverse pickup waybill ${result.returnWaybill} scheduled via Delhivery.`,
+          description: `Reverse pickup waybill ${result.returnWaybill} scheduled via ${resolvedCarrier}.`,
           timestamp: new Date().toISOString(),
           sender: 'Youthnic Returns <returns@youthnic.com>',
           recipient: order.customerEmail,
@@ -2361,10 +2331,10 @@ router.post('/orders/:id/returns', async (req: AuthenticatedRequest, res: Respon
         });
       }
     } catch (e: any) {
-      logger.warn('Failed to send return initiated email:', e.message);
+      logger.warn('Failed to sync return customer history:', e.message);
     }
 
-    res.json({ success: true, ...result, emailDispatched, emailResult });
+    res.json({ success: true, ...result });
   } catch (error: any) {
     res.status(400).json({ error: error.message });
   }

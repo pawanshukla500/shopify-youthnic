@@ -59,6 +59,7 @@ class ReturnService {
     pickupAutomatic: boolean;
     forwardWaybill: string | null;
     shopifyReturnId: string | null;
+    carrier?: string | null;
   }> {
     if (returnBookingsInFlight.has(orderId)) {
       throw new Error('A return for this order is already being booked. Wait for it to finish.');
@@ -87,6 +88,7 @@ class ReturnService {
     pickupAutomatic: boolean;
     forwardWaybill: string | null;
     shopifyReturnId: string | null;
+    carrier?: string | null;
   }> {
     const order = await prisma.order.findUnique({
       where: { id: orderId },
@@ -115,8 +117,8 @@ class ReturnService {
     for (const item of items) {
       const line = order.items.find((row) => row.id === item.orderItemId);
       if (!line) throw new Error('One of the return items does not belong to this order.');
-      if (!Number.isFinite(item.quantity) || item.quantity < 1 || item.quantity > line.quantity) {
-        throw new Error(`Return quantity for ${line.title} must be between 1 and ${line.quantity}.`);
+      if (!Number.isFinite(item.quantity) || !Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > line.quantity) {
+        throw new Error(`Return quantity for ${line.title} must be a whole number between 1 and ${line.quantity}.`);
       }
     }
 
@@ -297,6 +299,7 @@ class ReturnService {
       pickupAutomatic,
       forwardWaybill,
       shopifyReturnId,
+      carrier: returnRecord.carrier,
     };
   }
 
@@ -321,7 +324,7 @@ class ReturnService {
     if (!record) throw new Error('Return not found.');
     const locked = ['PICKED_UP', 'IN_TRANSIT', 'RECEIVED', 'QC_PENDING', 'QC_APPROVED', 'QC_REJECTED', 'REFUND_PENDING', 'REFUNDED', 'CANCELLED'];
     if (locked.includes(record.returnStatus)) {
-      throw new Error('The reason can only be changed before Delhivery picks up the return.');
+      throw new Error('The reason can only be changed before the courier picks up the return.');
     }
 
     const mapped = mapReturnReason(reason);

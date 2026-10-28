@@ -185,12 +185,13 @@ export async function handleVelocityWebhook(req: Request, res: Response): Promis
     // 3. Process status transition if status changed
     if (newShipmentStatus !== oldShipmentStatus) {
       // Use trackingService's transition handler to update order, send WhatsApp alerts, etc.
+      const scanLocation = data.location || data.city || data.destination || data.origin || undefined;
       await (trackingService as any).handleStatusChange(
         shipment,
         oldShipmentStatus,
         newShipmentStatus,
         mapped.description,
-        data.carrier_name || 'Velocity'
+        scanLocation
       );
     }
 

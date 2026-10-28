@@ -18,6 +18,8 @@ const { prismaStub, delhiveryStub } = vi.hoisted(() => ({
     },
     return: {
       create: vi.fn(),
+      findUnique: vi.fn(),
+      update: vi.fn(),
     },
     syncLog: {
       create: vi.fn(),
@@ -385,6 +387,34 @@ describe('Velocity Aggregator Branding, Returns & Store Linkup', () => {
             courier: 'Velocity Reverse',
           }),
         })
+      );
+    });
+
+    it('rejects non-integer return quantity (e.g. 1.5)', async () => {
+      prismaStub.order.findUnique.mockResolvedValueOnce({
+        id: 99,
+        shopifyOrderName: '#26YOU99',
+        status: 'DELIVERED',
+        returns: [],
+        items: [{ id: 101, title: 'Kurti', quantity: 2 }],
+        shipment: { waybillNumber: 'VEL12345', courier: 'Velocity' },
+      });
+
+      await expect(
+        returnService.createReturn(99, 'Defective', [{ orderItemId: 101, quantity: 1.5 } as any])
+      ).rejects.toThrow(/must be a whole number/i);
+    });
+
+    it('throws generic courier pickup error on locked return reason update', async () => {
+      prismaStub.return.findUnique.mockResolvedValueOnce({
+        id: 55,
+        returnStatus: 'PICKED_UP',
+        carrier: 'Velocity',
+        order: { shopifyOrderId: '123' },
+      });
+
+      await expect(returnService.updateReturnReason(55, 'New Reason')).rejects.toThrow(
+        'The reason can only be changed before the courier picks up the return.'
       );
     });
   });

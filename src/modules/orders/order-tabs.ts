@@ -101,7 +101,10 @@ export function returnWindowClosesAt(order: Pick<OrderTabSnapshot, 'deliveredAt'
  */
 export function accountsStatus(order: OrderTabSnapshot, now: Date = new Date()): AccountsStatus {
   const closesAt = returnWindowClosesAt(order);
-  const delivered = Boolean(toDate(order.deliveredAt)) || order.status === 'DELIVERED';
+  const delivered =
+    Boolean(toDate(order.deliveredAt)) ||
+    order.status === 'DELIVERED' ||
+    (order.status === 'EXCHANGE_REQUESTED' && Boolean(toDate(order.deliveredAt) || order.shipment?.status === 'DELIVERED'));
   // Received means the bank credit is identified: a payment recorded without
   // its UTR (e.g. a remittance file with no Bank Transaction ID) stays open.
   const paymentRecorded = Boolean(toDate(order.paymentReceivedAt));
@@ -125,7 +128,14 @@ export function accountsStatus(order: OrderTabSnapshot, now: Date = new Date()):
   if (!delivered) pending.push('Not delivered yet');
   if (!paymentRecorded) pending.push('Payment not received in bank (no UTR yet)');
   else if (!paymentReceived) pending.push('Payment recorded but the bank UTR is missing');
-  if (openReturn) pending.push('Return in progress');
+  const hasActiveExchange =
+    order.status === 'EXCHANGE_REQUESTED' ||
+    (order.returns || []).some((r: any) => r.isExchange && !['RECEIVED', 'CANCELLED', 'REFUNDED'].includes(r.returnStatus || r.status));
+  if (hasActiveExchange) {
+    pending.push('Exchange in progress');
+  } else if (openReturn) {
+    pending.push('Return in progress');
+  }
   if (delivered && !returnWindowClosed) {
     pending.push(
       closesAt
@@ -287,7 +297,7 @@ function hasWaybill(order: OrderTabSnapshot): boolean {
 function hasOpenReturn(order: OrderTabSnapshot): boolean {
   return (order.returns || []).some((entry) => {
     const status = entry?.returnStatus || entry?.status;
-    return Boolean(status) && status !== 'CANCELLED';
+    return Boolean(status) && status !== 'CANCELLED' && status !== 'REFUNDED';
   });
 }
 

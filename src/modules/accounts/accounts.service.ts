@@ -38,7 +38,7 @@ export async function backfillDeliveredAt(limit = 200): Promise<number> {
     where: {
       deliveredAt: null,
       OR: [
-        { status: { in: ['DELIVERED', 'RETURN_REQUESTED', 'RETURN_DISPATCHED', 'RETURN_RECEIVED'] } },
+        { status: { in: ['DELIVERED', 'RETURN_REQUESTED', 'EXCHANGE_REQUESTED', 'RETURN_DISPATCHED', 'RETURN_RECEIVED'] } },
         { shipment: { status: 'DELIVERED' } },
       ],
     },

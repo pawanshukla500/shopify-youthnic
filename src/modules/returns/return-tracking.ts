@@ -95,22 +95,23 @@ export function orderStatusForReturn(returnStatus: CarrierReturnStatus, currentO
   if (currentOrderStatus === 'REFUNDED' || currentOrderStatus === 'CANCELLED') return null;
 
   if (returnStatus === 'CANCELLED') {
-    return currentOrderStatus === 'RETURN_REQUESTED' ? 'DELIVERED' : null;
+    return (currentOrderStatus === 'RETURN_REQUESTED' || currentOrderStatus === 'EXCHANGE_REQUESTED') ? 'DELIVERED' : null;
   }
 
   const target =
     returnStatus === 'PICKUP_SCHEDULED'
-      ? 'RETURN_REQUESTED'
+      ? (currentOrderStatus === 'EXCHANGE_REQUESTED' ? 'EXCHANGE_REQUESTED' : 'RETURN_REQUESTED')
       : returnStatus === 'QC_PENDING'
         ? 'RETURN_RECEIVED'
         : 'RETURN_DISPATCHED';
 
-  const allowedFrom = new Set(['DELIVERED', 'RETURN_REQUESTED', 'RETURN_DISPATCHED', 'RETURN_RECEIVED']);
+  const allowedFrom = new Set(['DELIVERED', 'RETURN_REQUESTED', 'EXCHANGE_REQUESTED', 'RETURN_DISPATCHED', 'RETURN_RECEIVED']);
   if (!allowedFrom.has(currentOrderStatus)) return null;
 
   const orderRank: Record<string, number> = {
     DELIVERED: 0,
     RETURN_REQUESTED: 1,
+    EXCHANGE_REQUESTED: 1,
     RETURN_DISPATCHED: 2,
     RETURN_RECEIVED: 3,
     REFUNDED: 9,

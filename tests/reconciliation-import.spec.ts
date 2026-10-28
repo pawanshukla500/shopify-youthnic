@@ -497,5 +497,37 @@ describe('Carrier Remittance (Amazon Shipping / Ekart / Generic)', () => {
     expect(result.skippedDuplicates).toEqual(['EKART1001']);
     expect(prismaStub.shipment.update).not.toHaveBeenCalled();
   });
+
+  it('parses Velocity COD remittance format with payout ref, net payout, and payout date', async () => {
+    prismaStub.shipment.findFirst.mockImplementation(async ({ where }: any) =>
+      where.OR.some((c: any) => c.waybillNumber === 'VEL1001')
+        ? { id: 20, codAmount: 1200, codRemitted: false, order: { id: 80, totalAmount: 1200, shopifyOrderName: '#26YOU6001' } }
+        : null
+    );
+
+    const result = await importCarrierRemittance(
+      'VELOCITY_REMITTANCE',
+      'velocity_payout.csv',
+      [
+        sheet('velocity', [
+          ['Waybill Number', 'Net Payout', 'Payout ID', 'Payout Ref', 'Payout Date'],
+          ['VEL1001', '1200.00', 'VEL-PAY-99', 'UTRVEL98765432', '15-10-2026'],
+        ]),
+      ]
+    );
+
+    expect(result.matchedCount).toBe(1);
+    expect(result.totalRemittance).toBe(1200);
+    expect(prismaStub.shipment.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 20 },
+        data: expect.objectContaining({
+          codRemitted: true,
+          codRemittedAmount: 1200,
+          codRemittanceRef: 'VEL-PAY-99',
+        }),
+      })
+    );
+  });
 });
 

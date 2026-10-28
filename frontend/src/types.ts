@@ -345,6 +345,15 @@ export interface PaymentSummary {
       remittedAmount: number
       outstandingAmount: number
     }
+    velocityCod?: {
+      channel: string
+      source: string
+      orderCount: number
+      totalAmount: number
+      collectedAmount: number
+      remittedAmount: number
+      outstandingAmount: number
+    }
     gokwikPrepaid: {
       channel: string
       source: string

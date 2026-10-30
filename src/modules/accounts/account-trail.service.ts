@@ -384,6 +384,8 @@ async function recordManualRefundUnlocked(
           returnStatus: 'REFUNDED',
           refundAmount: amount,
           refundProcessedAt: new Date(),
+          qcStatus: 'APPROVED',
+          qcCheckedAt: new Date(),
         },
       });
     } catch (err: any) {

@@ -7,7 +7,7 @@ import { Button, EmptyState, ErrorBox, FormField, Icon, LoadingState, PageIntro,
 import { ManualRefundModal } from '../components/ManualRefundModal'
 import './Returns.css'
 
-type FilterTab = 'ALL' | 'COD_DUE' | 'EXCHANGES' | 'PENDING_QC' | 'REFUNDED'
+type FilterTab = 'ALL' | 'QC_PASSED_UNREFUNDED' | 'COD_DUE' | 'EXCHANGES' | 'PENDING_QC' | 'REFUNDED'
 
 export function Returns() {
   useDocumentTitle('Returns & Refunds')
@@ -84,9 +84,19 @@ export function Returns() {
 
   const returnsList = query.data ?? []
 
+  const isUnrefundedQcPassed = (r: (typeof returnsList)[number]) => {
+    if (r.isExchange) return false
+    const isSettled = r.order?.financialStatus === 'refunded' || r.order?.status === 'REFUNDED' || r.refundStatus === 'PROCESSED'
+    if (isSettled) return false
+    const qcPassed = r.qcStatus === 'APPROVED' || r.qcStatus === 'PARTIAL'
+    const packageReceived = Boolean(r.receivedAt || r.returnStatus === 'RECEIVED' || r.returnStatus === 'QC_PENDING' || r.trackingStatus === 'DTO')
+    return qcPassed || packageReceived
+  }
+
   // Metrics summary
   const metrics = useMemo(() => {
     const total = returnsList.length
+    const qcPassedUnrefunded = returnsList.filter(isUnrefundedQcPassed).length
     const pendingQc = returnsList.filter((r) => !r.qcStatus).length
     const approved = returnsList.filter((r) => r.qcStatus === 'APPROVED').length
     const exchanges = returnsList.filter((r) => r.isExchange).length
@@ -102,14 +112,16 @@ export function Returns() {
     const refundedAmt = returnsList
       .filter((r) => r.refundStatus === 'PROCESSED' || r.order?.financialStatus === 'refunded')
       .reduce((sum, r) => sum + (Number(r.refundAmount) || 0), 0)
-    return { total, pendingQc, approved, exchanges, codDue, settled, refundedAmt }
+    return { total, qcPassedUnrefunded, pendingQc, approved, exchanges, codDue, settled, refundedAmt }
   }, [returnsList])
 
   // Filtered by tab and search
   const filtered = useMemo(() => {
     let items = returnsList
 
-    if (filterTab === 'COD_DUE') {
+    if (filterTab === 'QC_PASSED_UNREFUNDED') {
+      items = items.filter(isUnrefundedQcPassed)
+    } else if (filterTab === 'COD_DUE') {
       items = items.filter((r) => {
         const isCod = r.order?.paymentMethod === 'COD' || /cash/i.test(r.order?.paymentGateway || '')
         const isSettled = r.order?.financialStatus === 'refunded' || r.order?.status === 'REFUNDED' || r.refundStatus === 'PROCESSED'
@@ -155,6 +167,19 @@ export function Returns() {
             <Icon name="package" size={14} />
           </div>
           <strong className="returns-metric-value">{metrics.total}</strong>
+        </div>
+
+        <div
+          className={`returns-metric-card highlight-amber ${filterTab === 'QC_PASSED_UNREFUNDED' ? 'active' : ''}`}
+          onClick={() => setFilterTab('QC_PASSED_UNREFUNDED')}
+          title="Click to view returns with QC passed or received at warehouse but not yet refunded (COD & Prepaid)"
+          style={{ cursor: 'pointer' }}
+        >
+          <div className="returns-metric-label" style={{ color: '#b45309' }}>
+            <span>QC Passed (Unrefunded)</span>
+            <Icon name="alert-triangle" size={14} />
+          </div>
+          <strong className="returns-metric-value" style={{ color: '#b45309' }}>{metrics.qcPassedUnrefunded}</strong>
         </div>
 
         <div
@@ -329,6 +354,15 @@ export function Returns() {
             <span className="returns-tab-count">{metrics.total}</span>
           </button>
           <button
+            className={`returns-tab-btn ${filterTab === 'QC_PASSED_UNREFUNDED' ? 'active' : ''}`}
+            onClick={() => setFilterTab('QC_PASSED_UNREFUNDED')}
+          >
+            QC Passed (Unrefunded)
+            <span className="returns-tab-count" style={{ background: '#fef3c7', color: '#92400e', fontWeight: 700 }}>
+              {metrics.qcPassedUnrefunded}
+            </span>
+          </button>
+          <button
             className={`returns-tab-btn ${filterTab === 'COD_DUE' ? 'active' : ''}`}
             onClick={() => setFilterTab('COD_DUE')}
           >
@@ -468,8 +502,10 @@ export function Returns() {
                           <span className="badge-pill badge-exchange">Size Replacement (No Cash Refund)</span>
                         ) : isRefunded ? (
                           <span className="badge-pill badge-settled">✓ Refunded</span>
-                        ) : isCod && (item.qcStatus === 'APPROVED' || item.qcStatus === 'PARTIAL') ? (
+                        ) : isCod && (item.qcStatus === 'APPROVED' || item.qcStatus === 'PARTIAL' || item.returnStatus === 'QC_PENDING' || item.trackingStatus === 'DTO' || Boolean(item.receivedAt)) ? (
                           <span className="badge-pill badge-refund-due">Manual Refund Due</span>
+                        ) : !isCod && (item.refundStatus === 'NONE' || item.refundStatus === 'FAILED') && Boolean(item.receivedAt || item.returnStatus === 'RECEIVED' || item.returnStatus === 'QC_PENDING' || item.trackingStatus === 'DTO') ? (
+                          <span className="badge-pill" style={{ background: '#fee2e2', color: '#991b1b', fontWeight: 650 }}>Refund Pending Push</span>
                         ) : (
                           <StatusBadge status={item.refundStatus} />
                         )}
@@ -490,7 +526,7 @@ export function Returns() {
                             ✓ Settled
                           </span>
                         ) : isCod ? (
-                          item.qcStatus === 'APPROVED' || item.qcStatus === 'PARTIAL' ? (
+                          item.qcStatus === 'APPROVED' || item.qcStatus === 'PARTIAL' || Boolean(item.receivedAt || item.returnStatus === 'RECEIVED' || item.returnStatus === 'QC_PENDING' || item.trackingStatus === 'DTO') ? (
                             <Button
                               className="button-small button-primary"
                               style={{ background: '#b45309', borderColor: '#b45309', color: '#fff', fontSize: '11px', fontWeight: 650 }}
@@ -509,7 +545,7 @@ export function Returns() {
                               Record COD Refund
                             </Button>
                           ) : (
-                            <span className="cell-muted">QC Required</span>
+                            <span className="cell-muted">In Transit</span>
                           )
                         ) : (item.refundStatus === 'NONE' || item.refundStatus === 'FAILED') &&
                           (item.qcStatus === 'APPROVED' || item.qcStatus === 'PARTIAL') ? (

@@ -1,6 +1,6 @@
 # Shopify OMS — Automated Order Management System
 
-[![Vitest Tests](https://img.shields.io/badge/Vitest-279%20Passed-brightgreen)](tests/)
+[![Vitest Tests](https://img.shields.io/badge/Vitest-549%20Passed-brightgreen)](tests/)
 [![TaskFlow Project](https://img.shields.io/badge/TaskFlow-Shopify%20Youthnic%20OMS-6366F1)](https://task.youthnic.shop/my-tasks?task=164ba233-9b5f-4c14-bc34-066cef4300fc)
 [![Branch](https://img.shields.io/badge/Git-origin%2Fmain-blue)](https://github.com/pawanshukla500/shopify-youthnic)
 
@@ -92,11 +92,24 @@ Shopify Store (youthnic2024.myshopify.com)
    - Filled and validated all official Delhivery integration documents (`Scan Push`, `EPOD`, `QC Image`, `Sorter Image`) for profile `fa5d92-VBEXPORT-do` (V B EXPORT) in `C:\Users\Pawan Shukla\Desktop\Delhivery Docs\`.
    - Complete technical specifications documented in [`docs/DELHIVERY_INTEGRATION_SPEC.md`](docs/DELHIVERY_INTEGRATION_SPEC.md).
 
-10. **Velocity Shipping Partner Integration, Multi-Carrier Routing & Automated Remittance (PR #14, Branch: elocityshipping)**:
+10. **Velocity Shipping Partner Integration, Multi-Carrier Routing & Automated Remittance (PR #14)**:
     - **Dual-Carrier Smart Routing**: Dispatches shipments across Delhivery Express and Velocity Shipping with configurable carrier priority (DELHIVERY_FIRST vs VELOCITY_FIRST), automatic failover protection upon destination unserviceability, and payment-mode routing rules (dedicated COD vs Prepaid courier preferences).
     - **Direct Live Remittance & Finance Reconciliation**: Direct API integration with Velocity's Finance API (/custom/api/v1/finance/remittance), automatically matching orders, recording UTR bank settlement evidence, updating accounts trails, and eliminating manual CSV download/upload routines.
     - **Authentic Official Velocity PDF Labels**: Streaming authentic PDF bytes directly from Velocity API / S3 without customized HTML mockups.
     - **De-cluttered Executive Attention Center**: Re-engineered dashboard action center from vertically stacked alert banners into a responsive attention grid with category filter chips (Critical, Fulfillment, Finance) and multi-carrier logistics telemetry pulse.
+
+11. **COD Manual Refund Workflow & Single-Refund Enforcement (PR #73)**:
+    - **Mandatory Manual COD Refund**: Zero-money automated Shopify refunds are blocked on COD returns. Passed QC marks returns as REFUND_PENDING and tags orders on Shopify with COD_MANUAL_REFUND_DUE.
+    - **Payment Proof Verification**: Manual payouts strictly require non-empty Bank UTR or payout screenshot/receipt (PNG, JPEG, WebP, PDF up to 5 MB) written to the permanent account trail.
+    - **Strict Single-Refund Invariant**: Enforces that each order can only be refunded once across prepaid and COD workflows. In-flight mutex (manualRefundsInFlight: Set<number>) prevents concurrent duplicate payouts.
+    - **Size Exchange Protection**: Returns with isExchange: true are barred from cash refunds and route exclusively to size replacement order fulfillment.
+    - Complete specifications in [docs/COD_MANUAL_REFUND_AND_REVERSE_LOGISTICS_SPEC.md](docs/COD_MANUAL_REFUND_AND_REVERSE_LOGISTICS_SPEC.md).
+
+12. **Modernized Reverse Logistics Workspace & Barcode Scanner Intake (PR #74)**:
+    - **Interactive 5-Metric Ribbon**: Displays Total Returns, Pending QC, COD Refund Due (with amber highlight), Size Exchanges, and Settled / Refunded with interactive quick-filtering.
+    - **Hands-Free Warehouse Intake**: Barcode scanner Enter key listener automatically triggers return package arrival and QC intake.
+    - **Visual Hierarchy & Badges**: High-contrast pill badges (.badge-cod, .badge-prepaid, .badge-exchange, .badge-refund-due, .badge-settled) and forward AWB tracking chips.
+    - **Full Browser Test Suite**: Covered with Playwright automation in 	ests/browser/returns_workspace.py.
 
 ---
 
@@ -104,22 +117,25 @@ Shopify Store (youthnic2024.myshopify.com)
 
 ### Order → Dispatch → Delivery
 1. New order arrives on Shopify → webhook triggers (or cron polls every 15 min).
-2. Order is stored in PostgreSQL with customer details, address, and line items (enforcing strict **`2026-09-25`** cutoff).
+2. Order is stored in PostgreSQL with customer details, address, and line items (enforcing strict **2026-09-25** cutoff).
 3. **Payment verification**: system inspects Shopify transactions to detect gateway (GoKwik / PhonePe) and ensures payment capture for prepaid orders (COD passes automatically).
-4. System auto-creates shipment on Delhivery with exact dimensions (`22x20x3` or `22x20x5 cm`, 500g slab) → AWB generated.
-5. Order status promoted to **`DISPATCHED`**; shipment promoted to **`IN_TRANSIT`**; `dispatchedAt` timestamp recorded.
-6. WhatsApp & Youthnic branded confirmation emails sent to the customer with live Delhivery tracking link.
-7. Cron job polls Delhivery tracking every 30 min.
+4. System auto-creates shipment on Delhivery or Velocity with exact dimensions (22x20x3 or 22x20x5 cm, 500g slab) → AWB generated.
+5. Order status promoted to **DISPATCHED**; shipment promoted to **IN_TRANSIT**; dispatchedAt timestamp recorded.
+6. WhatsApp & Youthnic branded confirmation emails sent to the customer with live tracking link.
+7. Cron job polls carrier tracking every 30 min.
 8. Status transitions: Picked Up → In Transit → Out for Delivery → Delivered.
 9. If delivery fails → automated NDR alert and customer re-attempt workflow.
 
-### Return → Scan → Refund
-1. Return request created (via API or admin portal).
-2. Reverse pickup scheduled with Delhivery.
-3. Returned package arrives at warehouse → **scanned** (via `/api/returns/scan`).
-4. QC check (`APPROVED` / `REJECTED` / `PARTIAL`).
-5. If QC approved → **refund automatically calculated and processed on Shopify**.
-6. Transactional notification sent to customer; money returned via original payment method.
+### Return → Scan → Refund & Settlement
+1. Return request created (via API, admin portal, or exchange action).
+2. Reverse pickup scheduled with carrier (Delhivery or Velocity).
+3. Returned package arrives at warehouse → **scanned** via barcode gun on /returns (Enter key triggers intake).
+4. QC inspection check (APPROVED / REJECTED / PARTIAL).
+5. **Settlement Decision Matrix**:
+   - **Size Exchanges (isExchange: true)**: Replacement order dispatched; zero cash refund issued.
+   - **Prepaid Orders**: Automated refund calculated and processed via Shopify API to original payment method. Order marked REFUNDED.
+   - **COD Orders**: Marked REFUND_PENDING / PENDING with tag COD_MANUAL_REFUND_DUE. Operator reviews and executes payout with required payment proof (Bank UTR or payout screenshot).
+6. Single-refund invariant verified and permanent audit event recorded in PostgreSQL account trail.
 
 ---
 

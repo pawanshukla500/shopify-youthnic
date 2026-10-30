@@ -5,6 +5,9 @@ import { api, apiError, getReturns } from '../api'
 import { RETURN_STATUSES, formatDate, formatMoney, labelize } from '../lib'
 import { Button, EmptyState, ErrorBox, FormField, Icon, LoadingState, PageIntro, Panel, PanelHeading, StatusBadge, useDocumentTitle, useToast } from '../components/UI'
 import { ManualRefundModal } from '../components/ManualRefundModal'
+import './Returns.css'
+
+type FilterTab = 'ALL' | 'COD_DUE' | 'EXCHANGES' | 'PENDING_QC' | 'REFUNDED'
 
 export function Returns() {
   useDocumentTitle('Returns & Refunds')
@@ -12,6 +15,7 @@ export function Returns() {
   const queryClient = useQueryClient()
   const [status, setStatus] = useState('')
   const [search, setSearch] = useState('')
+  const [filterTab, setFilterTab] = useState<FilterTab>('ALL')
   const [waybill, setWaybill] = useState('')
   const [qcStatus, setQcStatus] = useState<'APPROVED' | 'REJECTED' | 'PARTIAL'>('APPROVED')
   const [remark, setRemark] = useState('')
@@ -46,9 +50,6 @@ export function Returns() {
 
   const refund = useMutation({
     mutationFn: async ({ id, orderName }: { id: number; orderName?: string }) => {
-      // The server refunds only the returned items, at the price Shopify
-      // calculates (discounts and taxes applied), using the QC result recorded
-      // at the scan. There is no amount to show before Shopify calculates it.
       const confirmed = window.confirm(
         `Refund the returned items of ${orderName || `Return #${id}`} via Shopify? Shopify calculates the amount from what the customer paid.`
       )
@@ -86,105 +87,202 @@ export function Returns() {
     const total = returnsList.length
     const pendingQc = returnsList.filter((r) => !r.qcStatus).length
     const approved = returnsList.filter((r) => r.qcStatus === 'APPROVED').length
-    const refundedAmt = returnsList.filter((r) => r.refundStatus === 'PROCESSED').reduce((sum, r) => sum + (Number(r.refundAmount) || 0), 0)
-    return { total, pendingQc, approved, refundedAmt }
+    const exchanges = returnsList.filter((r) => r.isExchange).length
+    const codDue = returnsList.filter((r) => {
+      const isCod = r.order?.paymentMethod === 'COD' || /cash/i.test(r.order?.paymentGateway || '')
+      const isSettled = r.order?.financialStatus === 'refunded' || r.order?.status === 'REFUNDED' || r.refundStatus === 'PROCESSED'
+      const qcPassed = r.qcStatus === 'APPROVED' || r.qcStatus === 'PARTIAL'
+      return isCod && qcPassed && !isSettled && !r.isExchange
+    }).length
+    const settled = returnsList.filter((r) => {
+      return r.order?.financialStatus === 'refunded' || r.order?.status === 'REFUNDED' || r.refundStatus === 'PROCESSED'
+    }).length
+    const refundedAmt = returnsList
+      .filter((r) => r.refundStatus === 'PROCESSED' || r.order?.financialStatus === 'refunded')
+      .reduce((sum, r) => sum + (Number(r.refundAmount) || 0), 0)
+    return { total, pendingQc, approved, exchanges, codDue, settled, refundedAmt }
   }, [returnsList])
 
-  // Filtered by search
+  // Filtered by tab and search
   const filtered = useMemo(() => {
-    if (!search.trim()) return returnsList
+    let items = returnsList
+
+    if (filterTab === 'COD_DUE') {
+      items = items.filter((r) => {
+        const isCod = r.order?.paymentMethod === 'COD' || /cash/i.test(r.order?.paymentGateway || '')
+        const isSettled = r.order?.financialStatus === 'refunded' || r.order?.status === 'REFUNDED' || r.refundStatus === 'PROCESSED'
+        const qcPassed = r.qcStatus === 'APPROVED' || r.qcStatus === 'PARTIAL'
+        return isCod && qcPassed && !isSettled && !r.isExchange
+      })
+    } else if (filterTab === 'EXCHANGES') {
+      items = items.filter((r) => r.isExchange)
+    } else if (filterTab === 'PENDING_QC') {
+      items = items.filter((r) => !r.qcStatus)
+    } else if (filterTab === 'REFUNDED') {
+      items = items.filter((r) => r.order?.financialStatus === 'refunded' || r.order?.status === 'REFUNDED' || r.refundStatus === 'PROCESSED')
+    }
+
+    if (!search.trim()) return items
     const q = search.trim().toLowerCase()
-    return returnsList.filter((item) => {
+    return items.filter((item) => {
       const orderMatch = (item.order?.shopifyOrderName || '').toLowerCase().includes(q)
       const awbMatch = (item.returnWaybillNumber || '').toLowerCase().includes(q)
       const reasonMatch = (item.returnReason || '').toLowerCase().includes(q)
       const customerMatch = (item.order?.customerName || '').toLowerCase().includes(q)
       return orderMatch || awbMatch || reasonMatch || customerMatch
     })
-  }, [returnsList, search])
+  }, [returnsList, filterTab, search])
 
   return (
-    <>
+    <div className="returns-workspace">
       <PageIntro
-        eyebrow="Reverse Logistics"
+        eyebrow="Reverse Logistics & Settlements"
         title="Returns & Refunds"
-        description="Warehouse scanning, QC inspection, carrier tracking, and automated Shopify refund processing."
+        description="Warehouse barcode intake, QC inspection, courier tracking, COD manual payout verification, and single-refund settlements."
       />
 
-      {/* ─── Metrics Cards ────────────────────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px', marginBottom: '20px' }}>
-        <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '10px', padding: '14px 16px' }}>
-          <span style={{ fontSize: '10px', color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>Total Returns</span>
-          <strong className="tabular-nums" style={{ display: 'block', fontSize: '22px', color: 'var(--ink)', fontWeight: 800, marginTop: '4px' }}>
-            {metrics.total}
-          </strong>
+      {/* ─── Metrics Ribbon ────────────────────────────────────── */}
+      <div className="returns-metrics-grid">
+        <div
+          className={`returns-metric-card ${filterTab === 'ALL' ? 'active' : ''}`}
+          onClick={() => setFilterTab('ALL')}
+          title="Click to view all returns"
+        >
+          <div className="returns-metric-label">
+            <span>Total Returns</span>
+            <Icon name="package" size={14} />
+          </div>
+          <strong className="returns-metric-value">{metrics.total}</strong>
         </div>
-        <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '10px', padding: '14px 16px' }}>
-          <span style={{ fontSize: '10px', color: '#b45309', fontWeight: 700, textTransform: 'uppercase' }}>Pending QC</span>
-          <strong className="tabular-nums" style={{ display: 'block', fontSize: '22px', color: '#b45309', fontWeight: 800, marginTop: '4px' }}>
-            {metrics.pendingQc}
-          </strong>
+
+        <div
+          className={`returns-metric-card ${filterTab === 'PENDING_QC' ? 'active' : ''}`}
+          onClick={() => setFilterTab('PENDING_QC')}
+          title="Click to view returns pending QC"
+        >
+          <div className="returns-metric-label" style={{ color: '#b45309' }}>
+            <span>Pending QC</span>
+            <Icon name="clock" size={14} />
+          </div>
+          <strong className="returns-metric-value" style={{ color: '#b45309' }}>{metrics.pendingQc}</strong>
         </div>
-        <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '10px', padding: '14px 16px' }}>
-          <span style={{ fontSize: '10px', color: '#15803d', fontWeight: 700, textTransform: 'uppercase' }}>QC Approved</span>
-          <strong className="tabular-nums" style={{ display: 'block', fontSize: '22px', color: '#15803d', fontWeight: 800, marginTop: '4px' }}>
-            {metrics.approved}
-          </strong>
+
+        <div
+          className={`returns-metric-card highlight-amber ${filterTab === 'COD_DUE' ? 'active' : ''}`}
+          onClick={() => setFilterTab('COD_DUE')}
+          title="Click to view COD returns waiting for manual payout"
+        >
+          <div className="returns-metric-label" style={{ color: '#b45309' }}>
+            <span>COD Refund Due</span>
+            <Icon name="dollar" size={14} />
+          </div>
+          <strong className="returns-metric-value" style={{ color: '#b45309' }}>{metrics.codDue}</strong>
         </div>
-        <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '10px', padding: '14px 16px' }}>
-          <span style={{ fontSize: '10px', color: '#1d4ed8', fontWeight: 700, textTransform: 'uppercase' }}>Total Refunded</span>
-          <strong className="tabular-nums" style={{ display: 'block', fontSize: '22px', color: '#1d4ed8', fontWeight: 800, marginTop: '4px' }}>
-            {formatMoney(metrics.refundedAmt)}
-          </strong>
+
+        <div
+          className={`returns-metric-card ${filterTab === 'EXCHANGES' ? 'active' : ''}`}
+          onClick={() => setFilterTab('EXCHANGES')}
+          title="Click to view size exchange returns"
+        >
+          <div className="returns-metric-label" style={{ color: '#6b21a8' }}>
+            <span>Size Exchanges</span>
+            <Icon name="refresh" size={14} />
+          </div>
+          <strong className="returns-metric-value" style={{ color: '#6b21a8' }}>{metrics.exchanges}</strong>
+        </div>
+
+        <div
+          className={`returns-metric-card ${filterTab === 'REFUNDED' ? 'active' : ''}`}
+          onClick={() => setFilterTab('REFUNDED')}
+          title="Click to view settled / refunded returns"
+        >
+          <div className="returns-metric-label" style={{ color: '#15803d' }}>
+            <span>Settled / Refunded</span>
+            <Icon name="check" size={14} />
+          </div>
+          <strong className="returns-metric-value" style={{ color: '#15803d' }}>{metrics.settled}</strong>
         </div>
       </div>
 
-      {/* ─── Warehouse Scan Panel ──────────────────────────────── */}
-      <Panel className="scan-panel">
-        <div className="scan-copy">
-          <div className="scan-icon">
-            <Icon name="package" size={23} />
+      {/* ─── Warehouse Scan Box ──────────────────────────────── */}
+      <div className="scan-panel-card">
+        <div className="scan-header-section">
+          <div className="scan-icon-bubble">
+            <Icon name="package" size={22} />
           </div>
           <div>
-            <p className="eyebrow">Warehouse Action</p>
-            <h2>Scan returned package</h2>
-            <p>Record a carrier arrival, perform QC inspection, and close the loop.</p>
+            <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted)', letterSpacing: '0.04em' }}>
+              Warehouse Intake
+            </div>
+            <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--ink)' }}>
+              Scan Return Package
+            </div>
+            <div style={{ fontSize: '12px', color: 'var(--muted)' }}>
+              Scan barcode gun (Enter triggers submit) · Records QC arrival
+            </div>
           </div>
         </div>
-        <div className="scan-form">
-          <FormField label="Return waybill">
-            <input
-              value={waybill}
-              onChange={(event) => setWaybill(event.target.value)}
-              placeholder="Scan or enter waybill"
-            />
-          </FormField>
-          <FormField label="QC outcome">
-            <select value={qcStatus} onChange={(event) => setQcStatus(event.target.value as typeof qcStatus)}>
-              <option value="APPROVED">Approved (Pass)</option>
-              <option value="PARTIAL">Partial (Minor)</option>
-              <option value="REJECTED">Rejected (Damaged/Fake)</option>
-            </select>
-          </FormField>
-          <FormField label="Remark (optional)">
-            <input
-              value={remark}
-              onChange={(event) => setRemark(event.target.value)}
-              placeholder="Packaging condition notes"
-            />
-          </FormField>
-          <Button className="button-primary scan-submit" loading={scan.isPending} onClick={() => scan.mutate()}>
-            <Icon name="check" size={16} />
-            Complete scan
-          </Button>
+
+        <div className="scan-form-row">
+          <div className="scan-input-waybill">
+            <FormField label="Return Waybill">
+              <input
+                value={waybill}
+                onChange={(event) => setWaybill(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    scan.mutate()
+                  }
+                }}
+                placeholder="Scan or enter waybill (press Enter)"
+                autoFocus
+              />
+            </FormField>
+          </div>
+          <div className="scan-select-outcome">
+            <FormField label="QC Outcome">
+              <select value={qcStatus} onChange={(event) => setQcStatus(event.target.value as typeof qcStatus)}>
+                <option value="APPROVED">Approved (Pass)</option>
+                <option value="PARTIAL">Partial (Minor issue)</option>
+                <option value="REJECTED">Rejected (Damaged / Fake)</option>
+              </select>
+            </FormField>
+          </div>
+          <div className="scan-input-remark">
+            <FormField label="QC Remark (optional)">
+              <input
+                value={remark}
+                onChange={(event) => setRemark(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    scan.mutate()
+                  }
+                }}
+                placeholder="Condition notes..."
+              />
+            </FormField>
+          </div>
+          <div>
+            <Button
+              className="button-primary"
+              style={{ minHeight: '38px', padding: '0 18px', fontWeight: 650 }}
+              loading={scan.isPending}
+              onClick={() => scan.mutate()}
+            >
+              <Icon name="check" size={15} />
+              Complete Scan
+            </Button>
+          </div>
         </div>
-      </Panel>
+      </div>
 
       {/* ─── Returns Table & Filter Bar ────────────────────────── */}
       <Panel className="table-panel">
         <PanelHeading
-          eyebrow="Return queue"
-          title={`All Returns (${filtered.length})`}
+          eyebrow="Reverse logistics queue"
+          title={`Returns Queue (${filtered.length})`}
           action={
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <div className="search-field" style={{ width: '220px', height: '34px' }}>
@@ -192,7 +290,7 @@ export function Returns() {
                 <input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search order or waybill…"
+                  placeholder="Search order, waybill, customer…"
                 />
                 {search && (
                   <button className="search-clear-btn" onClick={() => setSearch('')}>
@@ -201,11 +299,11 @@ export function Returns() {
                 )}
               </div>
 
-              <FormField label="Filter">
+              <FormField label="Status">
                 <select
                   value={status}
                   onChange={(event) => setStatus(event.target.value)}
-                  style={{ height: '34px', fontSize: '11px' }}
+                  style={{ height: '34px', fontSize: '12px' }}
                 >
                   <option value="">All statuses</option>
                   {RETURN_STATUSES.map((item) => (
@@ -218,6 +316,53 @@ export function Returns() {
             </div>
           }
         />
+
+        {/* Quick Filter Navigation Tabs */}
+        <div className="returns-filter-nav">
+          <button
+            className={`returns-tab-btn ${filterTab === 'ALL' ? 'active' : ''}`}
+            onClick={() => setFilterTab('ALL')}
+          >
+            All Returns
+            <span className="returns-tab-count">{metrics.total}</span>
+          </button>
+          <button
+            className={`returns-tab-btn ${filterTab === 'COD_DUE' ? 'active' : ''}`}
+            onClick={() => setFilterTab('COD_DUE')}
+          >
+            COD Refund Due
+            <span className="returns-tab-count" style={{ background: '#fef3c7', color: '#92400e' }}>
+              {metrics.codDue}
+            </span>
+          </button>
+          <button
+            className={`returns-tab-btn ${filterTab === 'EXCHANGES' ? 'active' : ''}`}
+            onClick={() => setFilterTab('EXCHANGES')}
+          >
+            Size Exchanges
+            <span className="returns-tab-count" style={{ background: '#f3e8ff', color: '#6b21a8' }}>
+              {metrics.exchanges}
+            </span>
+          </button>
+          <button
+            className={`returns-tab-btn ${filterTab === 'PENDING_QC' ? 'active' : ''}`}
+            onClick={() => setFilterTab('PENDING_QC')}
+          >
+            Pending QC
+            <span className="returns-tab-count" style={{ background: '#fee2e2', color: '#991b1b' }}>
+              {metrics.pendingQc}
+            </span>
+          </button>
+          <button
+            className={`returns-tab-btn ${filterTab === 'REFUNDED' ? 'active' : ''}`}
+            onClick={() => setFilterTab('REFUNDED')}
+          >
+            Settled / Refunded
+            <span className="returns-tab-count" style={{ background: '#dcfce7', color: '#166534' }}>
+              {metrics.settled}
+            </span>
+          </button>
+        </div>
 
         {query.isError && <ErrorBox message={apiError(query.error)} />}
         {query.isLoading ? (
@@ -241,121 +386,134 @@ export function Returns() {
               <tbody>
                 {filtered.map((item) => {
                   const isCod = item.order?.paymentMethod === 'COD' || /cash/i.test(item.order?.paymentGateway || '')
-                  const isRefunded = item.order?.financialStatus === 'refunded' || item.order?.status === 'REFUNDED' || item.refundStatus === 'PROCESSED'
+                  const isRefunded =
+                    item.order?.financialStatus === 'refunded' ||
+                    item.order?.status === 'REFUNDED' ||
+                    item.refundStatus === 'PROCESSED'
                   return (
-                  <tr key={item.id}>
-                    <td>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                        <Link className="order-link" to={`/orders/${item.orderId}`}>
-                          {item.order?.shopifyOrderName ?? `Order #${item.orderId}`}
-                        </Link>
-                        {item.isExchange && (
-                          <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 6px', borderRadius: '4px', background: '#f3e8ff', color: '#6b21a8' }}>
-                            Exchange
+                    <tr key={item.id}>
+                      <td>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                          <Link className="order-link" to={`/orders/${item.orderId}`}>
+                            {item.order?.shopifyOrderName ?? `Order #${item.orderId}`}
+                          </Link>
+                          {item.isExchange && (
+                            <span className="badge-pill badge-exchange">
+                              Exchange
+                            </span>
+                          )}
+                          <span className={`badge-pill ${isCod ? 'badge-cod' : 'badge-prepaid'}`}>
+                            {isCod ? 'COD' : 'Prepaid'}
+                          </span>
+                        </div>
+                        <span className="cell-muted" style={{ display: 'block', marginTop: '3px' }}>
+                          {item.order?.customerName ?? 'Customer'}
+                        </span>
+                      </td>
+                      <td>
+                        {item.returnWaybillNumber ? (
+                          <div
+                            className="waybill-chip"
+                            onClick={() => copyWaybill(item.returnWaybillNumber || '')}
+                            title="Click to copy waybill"
+                          >
+                            <span>{item.returnWaybillNumber}</span>
+                            <Icon name="copy" size={11} />
+                          </div>
+                        ) : (
+                          <span className="cell-muted">Waybill pending</span>
+                        )}
+                        {item.pickupAutomatic ? (
+                          <span className="cell-muted" style={{ display: 'block', fontSize: '11px', marginTop: '2px' }}>
+                            Auto carrier pickup
+                          </span>
+                        ) : null}
+                        {item.trackingStatus ? (
+                          <span className="cell-muted" style={{ display: 'block', fontSize: '11px' }}>
+                            {item.trackingStatus}
+                            {item.trackingLocation ? ` · ${item.trackingLocation}` : ''}
+                          </span>
+                        ) : null}
+                        {item.forwardWaybill ? (
+                          <div className="awb-forward-chip" title="Original forward AWB">
+                            <Icon name="package" size={10} />
+                            <span>Fwd {item.forwardWaybill}</span>
+                          </div>
+                        ) : null}
+                      </td>
+                      <td>
+                        <span className="reason-cell" style={{ fontWeight: 650, color: 'var(--ink)' }}>
+                          {item.returnReason}
+                        </span>
+                        {item.qcRemark && (
+                          <span className="cell-muted" style={{ display: 'block', color: 'var(--muted)', marginTop: '2px', fontSize: '11px' }}>
+                            QC Note: {item.qcRemark}
                           </span>
                         )}
-                        <span style={{
-                          fontSize: '10px',
-                          fontWeight: 700,
-                          padding: '2px 6px',
-                          borderRadius: '4px',
-                          background: isCod ? '#fef3c7' : '#dcfce7',
-                          color: isCod ? '#b45309' : '#15803d'
-                        }}>
-                          {isCod ? 'COD' : 'Prepaid'}
-                        </span>
-                      </div>
-                      <span className="cell-muted">{item.order?.customerName ?? 'Customer'}</span>
-                    </td>
-                    <td>
-                      {item.returnWaybillNumber ? (
-                        <div
-                          className="waybill-chip"
-                          onClick={() => copyWaybill(item.returnWaybillNumber || '')}
-                          title="Click to copy waybill"
-                        >
-                          <span>{item.returnWaybillNumber}</span>
-                          <Icon name="copy" size={11} />
-                        </div>
-                      ) : (
-                        <span className="cell-muted">Waybill pending</span>
-                      )}
-                      {item.pickupAutomatic ? (
-                        <span className="cell-muted">Customer pickup automatic</span>
-                      ) : null}
-                      {item.trackingStatus ? (
-                        <span className="cell-muted">{item.trackingStatus}{item.trackingLocation ? ` · ${item.trackingLocation}` : ''}</span>
-                      ) : null}
-                      {item.forwardWaybill ? (
-                        <span className="cell-muted">Forward {item.forwardWaybill}</span>
-                      ) : null}
-                    </td>
-                    <td>
-                      <span className="reason-cell" style={{ fontWeight: 600, color: 'var(--ink)' }}>
-                        {item.returnReason}
-                      </span>
-                      {item.qcRemark && (
-                        <span className="cell-muted" style={{ display: 'block', color: 'var(--muted)' }}>
-                          Note: {item.qcRemark}
-                        </span>
-                      )}
-                    </td>
-                    <td>
-                      <StatusBadge status={item.returnStatus} />
-                    </td>
-                    <td>
-                      {item.qcStatus ? (
-                        <StatusBadge status={item.qcStatus} />
-                      ) : (
-                        <span className="cell-muted">Pending QC</span>
-                      )}
-                    </td>
-                    <td>
-                      {item.isExchange ? (
-                        <span style={{ fontSize: '11px', fontWeight: 600, color: '#6b21a8' }}>No Refund (Exchange)</span>
-                      ) : isRefunded ? (
-                        <span style={{ fontSize: '11px', fontWeight: 600, color: '#15803d' }}>✓ Refunded</span>
-                      ) : isCod && (item.qcStatus === 'APPROVED' || item.qcStatus === 'PARTIAL') ? (
-                        <span style={{ fontSize: '11px', fontWeight: 600, color: '#b45309' }}>Manual Refund Due</span>
-                      ) : (
-                        <StatusBadge status={item.refundStatus} />
-                      )}
-                    </td>
-                    <td className="amount-cell">
-                      <strong>{formatMoney(item.refundAmount)}</strong>
-                    </td>
-                    <td style={{ fontSize: '10px', color: '#64748b' }}>{formatDate(item.createdAt)}</td>
-                    <td style={{ textAlign: 'right' }}>
-                      {item.isExchange ? (
-                        <span style={{ fontSize: '11px', color: '#6b21a8', fontWeight: 600 }}>Size Replacement</span>
-                      ) : isRefunded ? (
-                        <span style={{ fontSize: '11px', color: '#15803d', fontWeight: 600 }}>✓ Settled</span>
-                      ) : isCod ? (
-                        (item.qcStatus === 'APPROVED' || item.qcStatus === 'PARTIAL') ? (
-                          <Button
-                            className="button-small button-primary"
-                            style={{ background: '#b45309', borderColor: '#b45309', color: '#fff', fontSize: '11px' }}
-                            onClick={() => setManualRefundTarget({
-                              orderId: item.orderId,
-                              shopifyOrderName: item.order?.shopifyOrderName || `Order #${item.orderId}`,
-                              suggestedAmount: Number(item.refundAmount) || Number(item.order?.totalAmount) || 0,
-                              returnId: item.id,
-                              returnWaybill: item.returnWaybillNumber || undefined,
-                              customerName: item.order?.customerName,
-                            })}
-                          >
-                            <Icon name="dollar" size={12} />
-                            Record COD Refund
-                          </Button>
+                      </td>
+                      <td>
+                        <StatusBadge status={item.returnStatus} />
+                      </td>
+                      <td>
+                        {item.qcStatus ? (
+                          <StatusBadge status={item.qcStatus} />
                         ) : (
-                          <span className="cell-muted">QC Required</span>
-                        )
-                      ) : (
-                        (item.refundStatus === 'NONE' || item.refundStatus === 'FAILED') &&
-                        (item.qcStatus === 'APPROVED' || item.qcStatus === 'PARTIAL') ? (
+                          <span className="cell-muted">Pending QC</span>
+                        )}
+                      </td>
+                      <td>
+                        {item.isExchange ? (
+                          <span className="badge-pill badge-exchange">Size Replacement (No Cash Refund)</span>
+                        ) : isRefunded ? (
+                          <span className="badge-pill badge-settled">✓ Refunded</span>
+                        ) : isCod && (item.qcStatus === 'APPROVED' || item.qcStatus === 'PARTIAL') ? (
+                          <span className="badge-pill badge-refund-due">Manual Refund Due</span>
+                        ) : (
+                          <StatusBadge status={item.refundStatus} />
+                        )}
+                      </td>
+                      <td className="amount-cell">
+                        <strong>{formatMoney(item.refundAmount)}</strong>
+                      </td>
+                      <td style={{ fontSize: '11px', color: 'var(--muted)', whiteSpace: 'nowrap' }}>
+                        {formatDate(item.createdAt)}
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        {item.isExchange ? (
+                          <span style={{ fontSize: '11px', color: '#6b21a8', fontWeight: 650 }}>
+                            Size Replacement
+                          </span>
+                        ) : isRefunded ? (
+                          <span style={{ fontSize: '11px', color: '#15803d', fontWeight: 650 }}>
+                            ✓ Settled
+                          </span>
+                        ) : isCod ? (
+                          item.qcStatus === 'APPROVED' || item.qcStatus === 'PARTIAL' ? (
+                            <Button
+                              className="button-small button-primary"
+                              style={{ background: '#b45309', borderColor: '#b45309', color: '#fff', fontSize: '11px', fontWeight: 650 }}
+                              onClick={() =>
+                                setManualRefundTarget({
+                                  orderId: item.orderId,
+                                  shopifyOrderName: item.order?.shopifyOrderName || `Order #${item.orderId}`,
+                                  suggestedAmount: Number(item.refundAmount) || Number(item.order?.totalAmount) || 0,
+                                  returnId: item.id,
+                                  returnWaybill: item.returnWaybillNumber || undefined,
+                                  customerName: item.order?.customerName,
+                                })
+                              }
+                            >
+                              <Icon name="dollar" size={12} />
+                              Record COD Refund
+                            </Button>
+                          ) : (
+                            <span className="cell-muted">QC Required</span>
+                          )
+                        ) : (item.refundStatus === 'NONE' || item.refundStatus === 'FAILED') &&
+                          (item.qcStatus === 'APPROVED' || item.qcStatus === 'PARTIAL') ? (
                           <Button
                             className="button-small button-secondary"
-                            style={{ borderColor: '#fca5a5', color: '#b91c1c' }}
+                            style={{ borderColor: '#fca5a5', color: '#b91c1c', fontSize: '11px' }}
                             loading={refund.isPending && refund.variables?.id === item.id}
                             onClick={() =>
                               refund.mutate({
@@ -370,18 +528,18 @@ export function Returns() {
                           </Button>
                         ) : (
                           <span className="cell-muted">QC Required</span>
-                        )
-                      )}
-                    </td>
-                  </tr>
-                )})}
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
         ) : (
           <EmptyState
             title="No returns found"
-            description="Scanned return packages and customer requests will appear here."
+            description="Scanned return packages and customer requests matching your filters will appear here."
             icon="return"
           />
         )}
@@ -399,6 +557,6 @@ export function Returns() {
           customerName={manualRefundTarget.customerName}
         />
       )}
-    </>
+    </div>
   )
 }

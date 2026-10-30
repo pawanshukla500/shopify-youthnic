@@ -693,10 +693,7 @@ export function OrderDetail() {
 
   // The Orders tab this order sits in, e.g. "Ready to Dispatch" or "Payment Received".
   const stageTab = ORDER_TABS.find((tab) => tab.key === classifyOrderTab(order))
-
-  const parentTag = useMemo(() => {
-    return (order?.tags || '').split(',').find((t) => t.trim().startsWith('Parent:'))?.replace('Parent:', '').trim() || null
-  }, [order?.tags])
+  const parentTag = (order.tags || '').split(',').find((t) => t.trim().startsWith('Parent:'))?.replace('Parent:', '').trim() || null
   const isCodOrder = order.paymentMethod === 'COD' || /cash/i.test(order.paymentGateway || '')
   const isRefundedOrder = order.financialStatus === 'refunded' || order.status === 'REFUNDED'
   const canRefund = !isRefundedOrder && order.status !== 'CANCELLED'
@@ -3344,7 +3341,12 @@ function ActiveExchangeCard({ record, orderName }: { record: ReturnRecord; order
                 >
                   {exchangeOrderName}
                 </Link>
-                <span className="micro-badge micro-badge-emerald" style={{ fontSize: '10px' }}>Ready to Ship</span>
+                <span
+                  className={`micro-badge ${forwardDelivered ? 'micro-badge-emerald' : record.exchangeForwardStatus === 'IN_TRANSIT' ? 'micro-badge-purple' : 'micro-badge-emerald'}`}
+                  style={{ fontSize: '10px' }}
+                >
+                  {forwardDelivered ? 'Delivered' : record.exchangeForwardStatus === 'IN_TRANSIT' ? 'In Transit' : 'Ready to Ship'}
+                </span>
               </div>
             )}
           </div>

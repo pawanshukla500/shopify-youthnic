@@ -60,6 +60,7 @@ describe('Exchange Orders API & Workflow (/agency-api-tester)', () => {
     id: 99101,
     shopifyOrderId: 'gid://shopify/Order/99101',
     shopifyOrderName: '#26YOU99101',
+    shopifyOrderNumber: 99101,
     customerName: 'Aarav Mehta',
     customerEmail: 'aarav@example.com',
     customerPhone: '9876543210',
@@ -701,6 +702,33 @@ describe('Exchange Orders API & Workflow (/agency-api-tester)', () => {
           }),
         })
       );
+    });
+
+    it('rejects approveQc if return package has not yet arrived at warehouse', async () => {
+      const mockNotReceivedReturn = {
+        id: 605,
+        orderId: 99101,
+        isExchange: false,
+        returnStatus: 'PICKUP_SCHEDULED',
+        returnWaybillNumber: '30100810014232',
+        trackingStatus: 'Scheduled',
+        qcStatus: null,
+        refundStatus: 'NONE',
+        receivedAt: null,
+        order: {
+          ...mockOrder,
+          shopifyOrderName: '#26YOU6052',
+          paymentMethod: 'Prepaid',
+          financialStatus: 'paid',
+        },
+        items: [],
+      };
+
+      prismaStub.return.findUnique.mockResolvedValueOnce(mockNotReceivedReturn);
+      const res = await returnService.processRefund(605, false, null, true);
+
+      expect(res.success).toBe(false);
+      expect(res.error).toContain('because the package has not yet been received at the warehouse');
     });
 
     it('rejects refund on exchange return to prevent cash refund for size swap', async () => {

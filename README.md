@@ -1,6 +1,6 @@
 # Shopify OMS — Automated Order Management System
 
-[![Vitest Tests](https://img.shields.io/badge/Vitest-553%20Passed-brightgreen)](tests/)
+[![Vitest Tests](https://img.shields.io/badge/Vitest-554%20Passed-brightgreen)](tests/)
 [![TaskFlow Project](https://img.shields.io/badge/TaskFlow-Shopify%20Youthnic%20OMS-6366F1)](https://task.youthnic.shop/my-tasks?task=0bbb9b56-962c-4e9a-ae9a-95c41649ee0f)
 [![Branch](https://img.shields.io/badge/Git-exchange__order-blue)](https://github.com/pawanshukla500/shopify-youthnic)
 

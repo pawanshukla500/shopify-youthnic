@@ -259,6 +259,8 @@ export interface ReturnRecord {
   trackingStatus?: string | null
   trackingLocation?: string | null
   labelUrl?: string | null
+  pickedUpAt?: string | null
+  receivedAt?: string | null
   refundStatus: RefundStatus
   refundAmount: number | null
   shopifyRefundId: string | null

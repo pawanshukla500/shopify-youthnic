@@ -854,6 +854,10 @@ class ReturnService {
       throw new Error(`Order ${order.shopifyOrderName} has an active size exchange return; replacement item is fulfilled instead of a monetary refund.`);
     }
 
+    if (order.paymentMethod === 'EXCHANGE' || (order.tags || '').includes('EXCHANGE_FORWARD')) {
+      throw new Error(`Order ${order.shopifyOrderName} is an exchange replacement order; refunds are not issued on replacement orders.`);
+    }
+
 
 
     const amount = refundAmount && refundAmount > 0 ? refundAmount : order.totalAmount;
@@ -1276,6 +1280,20 @@ class ReturnService {
     }
 
     if (approveQc && returnRecord.qcStatus !== 'APPROVED' && returnRecord.qcStatus !== 'PARTIAL') {
+      const isReceived = Boolean(
+        returnRecord.receivedAt ||
+        returnRecord.returnStatus === 'RECEIVED' ||
+        returnRecord.returnStatus === 'QC_PENDING' ||
+        returnRecord.trackingStatus === 'DTO' ||
+        /dto|delivered to origin/i.test(returnRecord.trackingStatus || '')
+      );
+      if (!isReceived) {
+        return {
+          success: false,
+          refundAmount: 0,
+          error: `Cannot approve QC or refund return ${returnRecord.returnWaybillNumber || returnId} because the package has not yet been received at the warehouse.`,
+        };
+      }
       const now = new Date();
       await prisma.return.update({
         where: { id: returnId },

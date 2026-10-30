@@ -193,6 +193,11 @@ describe('recordManualRefund', () => {
       refundMode: 'UPI',
       accountUsed: 'HDFC Current Account',
       actor,
+      evidence: {
+        fileName: 'screenshot.png',
+        contentType: 'image/png',
+        contentBase64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l0sAAAAASUVORK5CYII=',
+      },
     });
 
     expect(event).toMatchObject({ id: 96 });
@@ -221,10 +226,54 @@ describe('recordManualRefund', () => {
       amount: 100,
       refundMode: 'BANK_TRANSFER',
       accountUsed: 'HDFC Current Account',
+      externalReference: 'UTR-OWNERSHIP-CHECK',
       actor,
     })).rejects.toThrow(/does not belong to order/i);
 
     expect(prismaStub.accountTrailEvent.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects manual refund when neither externalReference nor evidence proof is provided', async () => {
+    await expect(recordManualRefund({
+      orderId: 1,
+      amount: 100,
+      refundMode: 'UPI',
+      accountUsed: 'HDFC Current Account',
+      actor,
+    })).rejects.toThrow(/Payment proof is required/i);
+  });
+
+  it('rejects manual refund if return is a size exchange', async () => {
+    prismaStub.return.findUnique.mockResolvedValue({ id: 7, orderId: 1, isExchange: true });
+
+    await expect(recordManualRefund({
+      orderId: 1,
+      returnId: 7,
+      amount: 100,
+      refundMode: 'UPI',
+      accountUsed: 'HDFC Current Account',
+      externalReference: 'UTR-EXCHANGE-FAIL',
+      actor,
+    })).rejects.toThrow(/exchange return/i);
+  });
+
+  it('rejects manual refund if order is already refunded', async () => {
+    prismaStub.order.findUnique.mockResolvedValue({
+      id: 1,
+      shopifyOrderName: '#1001',
+      totalAmount: 1000,
+      financialStatus: 'refunded',
+      status: 'REFUNDED',
+    });
+
+    await expect(recordManualRefund({
+      orderId: 1,
+      amount: 100,
+      refundMode: 'UPI',
+      accountUsed: 'HDFC Current Account',
+      externalReference: 'UTR-ALREADY-REFUNDED',
+      actor,
+    })).rejects.toThrow(/already been refunded/i);
   });
 });
 

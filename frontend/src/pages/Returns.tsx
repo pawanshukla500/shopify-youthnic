@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, apiError, getReturns } from '../api'
 import { RETURN_STATUSES, formatDate, formatMoney, labelize } from '../lib'
 import { Button, EmptyState, ErrorBox, FormField, Icon, LoadingState, PageIntro, Panel, PanelHeading, StatusBadge, useDocumentTitle, useToast } from '../components/UI'
+import { ManualRefundModal } from '../components/ManualRefundModal'
 
 export function Returns() {
   useDocumentTitle('Returns & Refunds')
@@ -14,6 +15,14 @@ export function Returns() {
   const [waybill, setWaybill] = useState('')
   const [qcStatus, setQcStatus] = useState<'APPROVED' | 'REJECTED' | 'PARTIAL'>('APPROVED')
   const [remark, setRemark] = useState('')
+  const [manualRefundTarget, setManualRefundTarget] = useState<{
+    orderId: number
+    shopifyOrderName: string
+    suggestedAmount: number
+    returnId?: number
+    returnWaybill?: string
+    customerName?: string
+  } | null>(null)
 
   const query = useQuery({ queryKey: ['returns', status || 'all'], queryFn: () => getReturns(status), retry: false })
 
@@ -230,12 +239,32 @@ export function Returns() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((item) => (
+                {filtered.map((item) => {
+                  const isCod = item.order?.paymentMethod === 'COD' || /cash/i.test(item.order?.paymentGateway || '')
+                  const isRefunded = item.order?.financialStatus === 'refunded' || item.order?.status === 'REFUNDED' || item.refundStatus === 'PROCESSED'
+                  return (
                   <tr key={item.id}>
                     <td>
-                      <Link className="order-link" to={`/orders/${item.orderId}`}>
-                        {item.order?.shopifyOrderName ?? `Order #${item.orderId}`}
-                      </Link>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                        <Link className="order-link" to={`/orders/${item.orderId}`}>
+                          {item.order?.shopifyOrderName ?? `Order #${item.orderId}`}
+                        </Link>
+                        {item.isExchange && (
+                          <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 6px', borderRadius: '4px', background: '#f3e8ff', color: '#6b21a8' }}>
+                            Exchange
+                          </span>
+                        )}
+                        <span style={{
+                          fontSize: '10px',
+                          fontWeight: 700,
+                          padding: '2px 6px',
+                          borderRadius: '4px',
+                          background: isCod ? '#fef3c7' : '#dcfce7',
+                          color: isCod ? '#b45309' : '#15803d'
+                        }}>
+                          {isCod ? 'COD' : 'Prepaid'}
+                        </span>
+                      </div>
                       <span className="cell-muted">{item.order?.customerName ?? 'Customer'}</span>
                     </td>
                     <td>
@@ -282,35 +311,70 @@ export function Returns() {
                       )}
                     </td>
                     <td>
-                      <StatusBadge status={item.refundStatus} />
+                      {item.isExchange ? (
+                        <span style={{ fontSize: '11px', fontWeight: 600, color: '#6b21a8' }}>No Refund (Exchange)</span>
+                      ) : isRefunded ? (
+                        <span style={{ fontSize: '11px', fontWeight: 600, color: '#15803d' }}>✓ Refunded</span>
+                      ) : isCod && (item.qcStatus === 'APPROVED' || item.qcStatus === 'PARTIAL') ? (
+                        <span style={{ fontSize: '11px', fontWeight: 600, color: '#b45309' }}>Manual Refund Due</span>
+                      ) : (
+                        <StatusBadge status={item.refundStatus} />
+                      )}
                     </td>
                     <td className="amount-cell">
                       <strong>{formatMoney(item.refundAmount)}</strong>
                     </td>
                     <td style={{ fontSize: '10px', color: '#64748b' }}>{formatDate(item.createdAt)}</td>
                     <td style={{ textAlign: 'right' }}>
-                      {/* Only a return that was scanned in and passed QC can be refunded; FAILED can be retried. */}
-                      {(item.refundStatus === 'NONE' || item.refundStatus === 'FAILED') &&
-                        (item.qcStatus === 'APPROVED' || item.qcStatus === 'PARTIAL') && (
-                        <Button
-                          className="button-small button-secondary"
-                          style={{ borderColor: '#fca5a5', color: '#b91c1c' }}
-                          loading={refund.isPending && refund.variables?.id === item.id}
-                          onClick={() =>
-                            refund.mutate({
-                              id: item.id,
-                              orderName: item.order?.shopifyOrderName,
-                            })
-                          }
-                          disabled={refund.isPending}
-                        >
-                          <Icon name="dollar" size={12} />
-                          Shopify Refund
-                        </Button>
+                      {item.isExchange ? (
+                        <span style={{ fontSize: '11px', color: '#6b21a8', fontWeight: 600 }}>Size Replacement</span>
+                      ) : isRefunded ? (
+                        <span style={{ fontSize: '11px', color: '#15803d', fontWeight: 600 }}>✓ Settled</span>
+                      ) : isCod ? (
+                        (item.qcStatus === 'APPROVED' || item.qcStatus === 'PARTIAL') ? (
+                          <Button
+                            className="button-small button-primary"
+                            style={{ background: '#b45309', borderColor: '#b45309', color: '#fff', fontSize: '11px' }}
+                            onClick={() => setManualRefundTarget({
+                              orderId: item.orderId,
+                              shopifyOrderName: item.order?.shopifyOrderName || `Order #${item.orderId}`,
+                              suggestedAmount: Number(item.refundAmount) || Number(item.order?.totalAmount) || 0,
+                              returnId: item.id,
+                              returnWaybill: item.returnWaybillNumber || undefined,
+                              customerName: item.order?.customerName,
+                            })}
+                          >
+                            <Icon name="dollar" size={12} />
+                            Record COD Refund
+                          </Button>
+                        ) : (
+                          <span className="cell-muted">QC Required</span>
+                        )
+                      ) : (
+                        (item.refundStatus === 'NONE' || item.refundStatus === 'FAILED') &&
+                        (item.qcStatus === 'APPROVED' || item.qcStatus === 'PARTIAL') ? (
+                          <Button
+                            className="button-small button-secondary"
+                            style={{ borderColor: '#fca5a5', color: '#b91c1c' }}
+                            loading={refund.isPending && refund.variables?.id === item.id}
+                            onClick={() =>
+                              refund.mutate({
+                                id: item.id,
+                                orderName: item.order?.shopifyOrderName,
+                              })
+                            }
+                            disabled={refund.isPending}
+                          >
+                            <Icon name="dollar" size={12} />
+                            Shopify Auto-Refund
+                          </Button>
+                        ) : (
+                          <span className="cell-muted">QC Required</span>
+                        )
                       )}
                     </td>
                   </tr>
-                ))}
+                )})}
               </tbody>
             </table>
           </div>
@@ -322,6 +386,19 @@ export function Returns() {
           />
         )}
       </Panel>
+
+      {manualRefundTarget && (
+        <ManualRefundModal
+          isOpen={Boolean(manualRefundTarget)}
+          onClose={() => setManualRefundTarget(null)}
+          orderId={manualRefundTarget.orderId}
+          shopifyOrderName={manualRefundTarget.shopifyOrderName}
+          suggestedAmount={manualRefundTarget.suggestedAmount}
+          returnId={manualRefundTarget.returnId}
+          returnWaybill={manualRefundTarget.returnWaybill}
+          customerName={manualRefundTarget.customerName}
+        />
+      )}
     </>
   )
 }

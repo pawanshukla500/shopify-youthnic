@@ -219,6 +219,7 @@ def run():
                 expect(page.get_by_text("Choose how the refund was sent.")).to_be_visible()
                 page.get_by_label(re.compile("^Refund mode")).select_option("UPI")
                 page.get_by_label(re.compile("^Account / source used")).fill("Test account ending 4821")
+                page.get_by_label(re.compile("^Payment reference")).fill("UTR-REFUND-123")
                 tab(page, "Overview")
                 tab(page, "Payments")
                 expect(page.get_by_label(re.compile("^Account / source used"))).to_have_value("Test account ending 4821")

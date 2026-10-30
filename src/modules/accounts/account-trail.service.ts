@@ -228,6 +228,8 @@ function decodeEvidence(evidence: NonNullable<ManualRefundInput['evidence']>): {
   return { buffer, extension, fileName };
 }
 
+const manualRefundsInFlight = new Set<number>();
+
 export async function recordManualRefund(input: ManualRefundInput) {
   if (!Number.isInteger(input.orderId) || input.orderId <= 0) throw new Error('A valid order is required.');
   if (input.returnId !== undefined && (!Number.isInteger(input.returnId) || input.returnId <= 0)) {
@@ -246,25 +248,52 @@ export async function recordManualRefund(input: ManualRefundInput) {
   if (accountUsed.length > 160) throw new Error('Refund account name must be 160 characters or fewer.');
   if (!input.actor?.uid) throw new Error('An authenticated user is required to record a manual refund.');
 
+  if (manualRefundsInFlight.has(input.orderId)) {
+    throw new Error('A manual refund for this order is already in progress.');
+  }
+  manualRefundsInFlight.add(input.orderId);
+  try {
+    return await recordManualRefundUnlocked(input, accountUsed);
+  } finally {
+    manualRefundsInFlight.delete(input.orderId);
+  }
+}
+
+async function recordManualRefundUnlocked(
+  input: ManualRefundInput,
+  accountUsed: string
+) {
+
   // Validate what is stored, not what was typed: a positive sub-cent amount
   // would otherwise round to a completed refund of zero.
   const amount = Math.round(input.amount * 100) / 100;
   if (!Number.isFinite(amount) || amount <= 0) throw new Error('Refund amount is too small to record.');
   const externalReference = input.externalReference?.trim() || null;
 
+  // Proof requirement: user must provide either a payment reference (UTR) or payout screenshot
+  const hasRef = Boolean(externalReference && externalReference.length > 0);
+  const hasEvidence = Boolean(input.evidence && input.evidence.contentBase64);
+  if (!hasRef && !hasEvidence) {
+    throw new Error('Payment proof is required: please provide a payment reference number (UTR / Txn ID) or upload a payout screenshot.');
+  }
+
   const order = await prisma.order.findUnique({
     where: { id: input.orderId },
-    select: { id: true, currency: true },
+    select: { id: true, currency: true, financialStatus: true, status: true, shopifyOrderName: true },
   });
   if (!order) throw new Error('Order not found.');
 
   if (input.returnId !== undefined) {
     const returnRecord = await prisma.return.findUnique({
       where: { id: input.returnId },
-      select: { id: true, orderId: true },
+      select: { id: true, orderId: true, isExchange: true },
     });
     if (!returnRecord || returnRecord.orderId !== input.orderId) {
       throw new Error('Return does not belong to order.');
+    }
+    // Exchange guard: an exchange replacement order cannot be refunded with cash
+    if (returnRecord.isExchange) {
+      throw new Error('Cannot issue a monetary refund for an exchange return. Replacement size order is fulfilled instead.');
     }
   }
 
@@ -289,6 +318,21 @@ export async function recordManualRefund(input: ManualRefundInput) {
       },
     });
     if (existing) return existing;
+  }
+
+  // Single-refund invariant: each order can only be refunded once across all channels
+  if (order.financialStatus === 'refunded' || order.status === 'REFUNDED') {
+    throw new Error(`Order ${order.shopifyOrderName} has already been refunded. An order can only be refunded once.`);
+  }
+  const priorCompletedRefund = await prisma.accountTrailEvent.findFirst({
+    where: {
+      orderId: input.orderId,
+      eventType: { in: ['REFUND_MANUAL', 'REFUND_AUTOMATIC'] },
+      status: 'COMPLETED',
+    },
+  });
+  if (priorCompletedRefund) {
+    throw new Error(`Order ${order.shopifyOrderName} has already been refunded (Ref: ${priorCompletedRefund.externalReference || priorCompletedRefund.id}). Only one refund per order is permitted.`);
   }
 
   let evidenceStoragePath: string | null = null;
@@ -325,7 +369,7 @@ export async function recordManualRefund(input: ManualRefundInput) {
   try {
     await prisma.order.update({
       where: { id: input.orderId },
-      data: { financialStatus: 'refunded' },
+      data: { financialStatus: 'refunded', status: 'REFUNDED' },
     });
   } catch (err: any) {
     logger.warn('Failed to update order financialStatus on manual refund', { orderId: input.orderId, error: err?.message });

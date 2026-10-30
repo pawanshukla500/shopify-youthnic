@@ -735,6 +735,28 @@ class ReturnService {
       throw new Error(`Order not found: ${orderId}`);
     }
 
+    // Single-refund invariant: each order can only be refunded once
+    if (order.financialStatus === 'refunded' || order.status === 'REFUNDED') {
+      throw new Error(`Order ${order.shopifyOrderName} has already been refunded. Only one refund per order is permitted.`);
+    }
+    const priorCompletedRefund = await prisma.accountTrailEvent.findFirst({
+      where: {
+        orderId,
+        eventType: { in: ['REFUND_AUTOMATIC', 'REFUND_MANUAL'] },
+        status: 'COMPLETED',
+      },
+    });
+    if (priorCompletedRefund) {
+      throw new Error(`Order ${order.shopifyOrderName} already has a completed refund. Only one refund per order is permitted.`);
+    }
+
+    // Exchange guard: an order with an active exchange return cannot have direct monetary refund
+    if (order.returns?.some((r) => r.isExchange && r.returnStatus !== 'CANCELLED')) {
+      throw new Error(`Order ${order.shopifyOrderName} has an active size exchange return; replacement item is fulfilled instead of a monetary refund.`);
+    }
+
+
+
     const amount = refundAmount && refundAmount > 0 ? refundAmount : order.totalAmount;
     const isPartial = amount < order.totalAmount;
     // An open customer return is closed by a full refund only. A partial
@@ -878,6 +900,10 @@ class ReturnService {
     moneyMoved?: boolean;
     refundError?: string;
     alreadyRefunded?: boolean;
+    isExchange?: boolean;
+    isCod?: boolean;
+    refundRequired?: boolean;
+    message?: string;
   }> {
     // Find return by waybill number
     const returnRecord = await prisma.return.findFirst({
@@ -982,7 +1008,81 @@ class ReturnService {
       });
     }
 
-    // If QC approved, auto-process refund
+    // Exchange handling: size replacement orders never receive monetary refunds
+    if (returnRecord.isExchange) {
+      await prisma.return.update({
+        where: { id: returnRecord.id },
+        data: {
+          returnStatus: qcStatus === 'REJECTED' ? 'QC_REJECTED' : 'RECEIVED',
+          qcStatus,
+          qcRemark,
+          qcCheckedAt: new Date(),
+          receivedAt: returnRecord.receivedAt || new Date(),
+        },
+      });
+      return {
+        returnId: returnRecord.id,
+        refundProcessed: false,
+        isExchange: true,
+        message: qcStatus === 'REJECTED'
+          ? 'Exchange package received but QC rejected'
+          : 'Exchange package received and QC recorded. Size replacement order will be dispatched.',
+      };
+    }
+
+    // COD handling: COD orders must be refunded manually with bank UTR or payment screenshot proof
+    const isCod = returnRecord.order.paymentMethod === 'COD' || /cash/i.test(returnRecord.order.paymentGateway || '');
+    if (isCod) {
+      if (qcStatus === 'APPROVED' || qcStatus === 'PARTIAL') {
+        await prisma.return.update({
+          where: { id: returnRecord.id },
+          data: {
+            returnStatus: 'REFUND_PENDING',
+            refundStatus: 'PENDING',
+            qcStatus,
+            qcRemark,
+            qcCheckedAt: new Date(),
+            receivedAt: returnRecord.receivedAt || new Date(),
+            errorMessage: 'COD return QC passed. Manual refund required via bank transfer or UPI with proof (screenshot or UTR).',
+          },
+        });
+        try {
+          await shopifyService.updateOrderTags(returnRecord.order.shopifyOrderId, ['COD_MANUAL_REFUND_DUE']);
+        } catch (tagErr: any) {
+          logger.warn('Failed to tag order for COD manual refund', { orderId: returnRecord.orderId, error: tagErr.message });
+        }
+        return {
+          returnId: returnRecord.id,
+          refundProcessed: false,
+          isCod: true,
+          refundRequired: true,
+          message: 'Return received and QC passed. This order was paid via COD: manual refund must be initiated with bank UTR or payment screenshot.',
+        };
+      }
+    }
+
+    // Single-refund guard: if order is already refunded, do not issue another refund
+    if (returnRecord.order.financialStatus === 'refunded' || returnRecord.order.status === 'REFUNDED') {
+      await prisma.return.update({
+        where: { id: returnRecord.id },
+        data: {
+          returnStatus: 'REFUNDED',
+          refundStatus: 'PROCESSED',
+          qcStatus,
+          qcRemark,
+          qcCheckedAt: new Date(),
+          receivedAt: returnRecord.receivedAt || new Date(),
+        },
+      });
+      return {
+        returnId: returnRecord.id,
+        refundProcessed: false,
+        alreadyRefunded: true,
+        message: 'Return received and QC recorded. Order was already refunded.',
+      };
+    }
+
+    // If QC approved on prepaid order, auto-process refund
     if (qcStatus === 'APPROVED' || qcStatus === 'PARTIAL') {
       const refundResult = await this.processRefund(returnRecord.id, qcStatus === 'PARTIAL', actor);
       return {
@@ -1045,6 +1145,34 @@ class ReturnService {
 
     if (!returnRecord) {
       throw new Error(`Return not found: ${returnId}`);
+    }
+
+    // Exchange guard
+    if (returnRecord.isExchange) {
+      return {
+        success: false,
+        refundAmount: 0,
+        error: `Return ${returnRecord.returnWaybillNumber || returnId} is a size exchange order; replacement item is fulfilled instead of a monetary refund.`,
+      };
+    }
+
+    // Single-refund invariant per order
+    if (returnRecord.order.financialStatus === 'refunded' || returnRecord.order.status === 'REFUNDED') {
+      return {
+        success: false,
+        refundAmount: 0,
+        error: `Order ${returnRecord.order.shopifyOrderName} has already been refunded. Only one refund per order is permitted.`,
+      };
+    }
+
+    // COD guard: COD returns must be refunded manually with bank proof
+    const isCod = returnRecord.order.paymentMethod === 'COD' || /cash/i.test(returnRecord.order.paymentGateway || '');
+    if (isCod) {
+      return {
+        success: false,
+        refundAmount: 0,
+        error: `Order ${returnRecord.order.shopifyOrderName} was paid via COD. COD returns must be refunded manually via bank transfer/UPI with payment proof (UTR or screenshot).`,
+      };
     }
 
     if (returnRecord.qcStatus !== 'APPROVED' && returnRecord.qcStatus !== 'PARTIAL') {
@@ -1224,7 +1352,21 @@ class ReturnService {
     return prisma.return.findMany({
       where: status ? { returnStatus: status as any } : undefined,
       include: {
-        order: { select: { shopifyOrderName: true, customerName: true, customerPhone: true } },
+        order: {
+          select: {
+            id: true,
+            shopifyOrderId: true,
+            shopifyOrderName: true,
+            customerName: true,
+            customerPhone: true,
+            customerEmail: true,
+            totalAmount: true,
+            paymentMethod: true,
+            paymentGateway: true,
+            financialStatus: true,
+            status: true,
+          },
+        },
         items: { include: { orderItem: true } },
       },
       orderBy: { createdAt: 'desc' },

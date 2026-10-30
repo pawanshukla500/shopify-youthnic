@@ -351,7 +351,7 @@ export function Returns() {
                           <span className="cell-muted">QC Required</span>
                         )
                       ) : (
-                        (item.refundStatus === 'NONE' || item.refundStatus === 'FAILED' || item.refundStatus === 'PENDING') &&
+                        (item.refundStatus === 'NONE' || item.refundStatus === 'FAILED') &&
                         (item.qcStatus === 'APPROVED' || item.qcStatus === 'PARTIAL') ? (
                           <Button
                             className="button-small button-secondary"

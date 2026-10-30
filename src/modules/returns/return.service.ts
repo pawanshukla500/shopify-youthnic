@@ -750,6 +750,11 @@ class ReturnService {
       throw new Error(`Order ${order.shopifyOrderName} already has a completed refund. Only one refund per order is permitted.`);
     }
 
+    // Exchange guard: an order with an active exchange return cannot have direct monetary refund
+    if (order.returns?.some((r) => r.isExchange && r.returnStatus !== 'CANCELLED')) {
+      throw new Error(`Order ${order.shopifyOrderName} has an active size exchange return; replacement item is fulfilled instead of a monetary refund.`);
+    }
+
 
 
     const amount = refundAmount && refundAmount > 0 ? refundAmount : order.totalAmount;

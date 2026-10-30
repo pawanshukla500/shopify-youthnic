@@ -1,4 +1,4 @@
-import { useState, useId } from 'react'
+import { useState, useId, useRef, useEffect } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, apiError } from '../api'
 import { Button, FormField, Icon, useToast } from './UI'
@@ -51,10 +51,14 @@ export function ManualRefundModal({
   const [note, setNote] = useState<string>('')
   const [evidenceFile, setEvidenceFile] = useState<File | null>(null)
   const [evidencePreview, setEvidencePreview] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] || null
     setEvidenceFile(file)
+    if (evidencePreview) {
+      URL.revokeObjectURL(evidencePreview)
+    }
     if (file && file.type.startsWith('image/')) {
       const url = URL.createObjectURL(file)
       setEvidencePreview(url)
@@ -62,6 +66,25 @@ export function ManualRefundModal({
       setEvidencePreview(null)
     }
   }
+
+  const handleRemoveFile = () => {
+    if (evidencePreview) {
+      URL.revokeObjectURL(evidencePreview)
+    }
+    setEvidenceFile(null)
+    setEvidencePreview(null)
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      if (evidencePreview) {
+        URL.revokeObjectURL(evidencePreview)
+      }
+    }
+  }, [evidencePreview])
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -108,6 +131,7 @@ export function ManualRefundModal({
       toast.toast('success', `Manual refund of ${formatMoney(Number(amount))} recorded successfully for ${shopifyOrderName}.`)
       await queryClient.invalidateQueries({ queryKey: ['returns'] })
       await queryClient.invalidateQueries({ queryKey: ['order', String(orderId)] })
+      await queryClient.invalidateQueries({ queryKey: ['account-trail', orderId] })
       await queryClient.invalidateQueries({ queryKey: ['orders'] })
       onSuccess?.()
       onClose()
@@ -230,9 +254,10 @@ export function ManualRefundModal({
 
           <FormField label="Payout Proof Screenshot / Receipt">
             <input
+              ref={fileInputRef}
               id={fileInputId}
               type="file"
-              accept="image/*,application/pdf"
+              accept="image/png,image/jpeg,image/webp,application/pdf"
               onChange={handleFileChange}
               style={{ fontSize: '12px' }}
             />
@@ -243,10 +268,7 @@ export function ManualRefundModal({
                 </span>
                 <button
                   type="button"
-                  onClick={() => {
-                    setEvidenceFile(null)
-                    setEvidencePreview(null)
-                  }}
+                  onClick={handleRemoveFile}
                   style={{
                     background: 'none',
                     border: 'none',

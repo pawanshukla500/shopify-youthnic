@@ -228,6 +228,8 @@ function decodeEvidence(evidence: NonNullable<ManualRefundInput['evidence']>): {
   return { buffer, extension, fileName };
 }
 
+const manualRefundsInFlight = new Set<number>();
+
 export async function recordManualRefund(input: ManualRefundInput) {
   if (!Number.isInteger(input.orderId) || input.orderId <= 0) throw new Error('A valid order is required.');
   if (input.returnId !== undefined && (!Number.isInteger(input.returnId) || input.returnId <= 0)) {
@@ -245,6 +247,22 @@ export async function recordManualRefund(input: ManualRefundInput) {
   }
   if (accountUsed.length > 160) throw new Error('Refund account name must be 160 characters or fewer.');
   if (!input.actor?.uid) throw new Error('An authenticated user is required to record a manual refund.');
+
+  if (manualRefundsInFlight.has(input.orderId)) {
+    throw new Error('A manual refund for this order is already in progress.');
+  }
+  manualRefundsInFlight.add(input.orderId);
+  try {
+    return await recordManualRefundUnlocked(input, accountUsed);
+  } finally {
+    manualRefundsInFlight.delete(input.orderId);
+  }
+}
+
+async function recordManualRefundUnlocked(
+  input: ManualRefundInput,
+  accountUsed: string
+) {
 
   // Validate what is stored, not what was typed: a positive sub-cent amount
   // would otherwise round to a completed refund of zero.

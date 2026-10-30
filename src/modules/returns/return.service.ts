@@ -750,10 +750,7 @@ class ReturnService {
       throw new Error(`Order ${order.shopifyOrderName} already has a completed refund. Only one refund per order is permitted.`);
     }
 
-    // COD guard: COD orders must be refunded manually with bank proof
-    if (order.paymentMethod === 'COD' || /cash/i.test(order.paymentGateway || '')) {
-      throw new Error(`Order ${order.shopifyOrderName} was paid via COD. COD orders must be refunded manually via bank transfer/UPI with payment proof.`);
-    }
+
 
     const amount = refundAmount && refundAmount > 0 ? refundAmount : order.totalAmount;
     const isPartial = amount < order.totalAmount;

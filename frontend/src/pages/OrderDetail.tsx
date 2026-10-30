@@ -695,7 +695,7 @@ export function OrderDetail() {
   const stageTab = ORDER_TABS.find((tab) => tab.key === classifyOrderTab(order))
   const isCodOrder = order.paymentMethod === 'COD' || /cash/i.test(order.paymentGateway || '')
   const isRefundedOrder = order.financialStatus === 'refunded' || order.status === 'REFUNDED'
-  const canRefund = !isRefundedOrder && order.status !== 'CANCELLED' && !isCodOrder
+  const canRefund = !isRefundedOrder && order.status !== 'CANCELLED'
   const itemCount = (order.items || []).reduce((sum, item) => sum + item.quantity, 0)
   const openMore = () => {
     if (moreOpen) {

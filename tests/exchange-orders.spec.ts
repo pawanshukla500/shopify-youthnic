@@ -23,9 +23,11 @@ const { prismaStub, delhiveryStub, notificationStub } = vi.hoisted(() => ({
       findUnique: vi.fn(),
       findFirst: vi.fn(),
       update: vi.fn(),
+      findMany: vi.fn(),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
     returnItem: {
+      findMany: vi.fn(),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
     trackingLog: {
@@ -44,6 +46,7 @@ const { prismaStub, delhiveryStub, notificationStub } = vi.hoisted(() => ({
   },
   notificationStub: {
     notifyReturnInitiated: vi.fn().mockResolvedValue(true),
+    notifyReturnReceived: vi.fn().mockResolvedValue(true),
     notifyRefundProcessed: vi.fn().mockResolvedValue(true),
   },
 }));
@@ -757,6 +760,79 @@ describe('Exchange Orders API & Workflow (/agency-api-tester)', () => {
       const res = await returnService.processRefund(603, false, null, true);
       expect(res.success).toBe(false);
       expect(res.error).toContain('Only one refund per order is permitted');
+    });
+
+    it('warehouse scan on received exchange return does not trigger auto-refund', async () => {
+      const mockExchangeReturn = {
+        id: 606,
+        orderId: 99101,
+        isExchange: true,
+        returnStatus: 'IN_TRANSIT',
+        returnWaybillNumber: 'R2757220019VE0',
+        order: mockOrder,
+        items: [],
+      };
+
+      prismaStub.return.findFirst.mockResolvedValueOnce(mockExchangeReturn);
+      prismaStub.return.update.mockResolvedValueOnce({
+        ...mockExchangeReturn,
+        returnStatus: 'RECEIVED',
+        qcStatus: 'APPROVED',
+      });
+
+      const createRefundSpy = vi.spyOn(shopifyService, 'createRefund');
+
+      const res = await returnService.scanReturn('R2757220019VE0', 'APPROVED', 'Size looks good');
+
+      expect(res.refundProcessed).toBe(false);
+      expect(res.isExchange).toBe(true);
+      expect(res.message).toContain('Size replacement order will be dispatched');
+      expect(createRefundSpy).not.toHaveBeenCalled();
+    });
+
+    it('retryFailedRefunds explicitly excludes exchange returns', async () => {
+      prismaStub.return.updateMany.mockResolvedValueOnce({ count: 0 });
+      prismaStub.return.findMany.mockResolvedValueOnce([]);
+
+      await returnService.retryFailedRefunds();
+
+      expect(prismaStub.return.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            isExchange: false,
+            refundStatus: 'FAILED',
+          }),
+        })
+      );
+    });
+
+    it('orderService.processRtoRefund marks exchange order RTO_DELIVERED without issuing monetary refund', async () => {
+      const orderService = (await import('../src/modules/orders/order.service')).default;
+      const mockExchangeForwardOrder = {
+        ...mockOrder,
+        id: 99102,
+        shopifyOrderName: '26YOU99101-EX-FWD',
+        paymentMethod: 'EXCHANGE',
+        tags: 'EXCHANGE_FORWARD, Parent:#26YOU99101',
+        totalAmount: 0,
+      };
+
+      prismaStub.order.findUnique.mockResolvedValueOnce(mockExchangeForwardOrder);
+      prismaStub.order.update.mockResolvedValueOnce({ ...mockExchangeForwardOrder, status: 'RTO_DELIVERED' });
+
+      const createRefundSpy = vi.spyOn(shopifyService, 'createRefund');
+
+      const res = await orderService.processRtoRefund(99102);
+
+      expect(res.success).toBe(true);
+      expect(res.message).toContain('Exchange forward order marked RTO Delivered');
+      expect(createRefundSpy).not.toHaveBeenCalled();
+      expect(prismaStub.order.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 99102 },
+          data: { status: 'RTO_DELIVERED' },
+        })
+      );
     });
   });
 });

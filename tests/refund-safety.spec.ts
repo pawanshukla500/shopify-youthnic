@@ -486,6 +486,7 @@ describe('returnService.scanReturn and retryFailedRefunds', () => {
           refundStatus: 'FAILED',
           qcStatus: { in: ['APPROVED', 'PARTIAL'] },
           refundAttempts: { lt: REFUND_MAX_ATTEMPTS },
+          isExchange: false,
         },
       })
     );

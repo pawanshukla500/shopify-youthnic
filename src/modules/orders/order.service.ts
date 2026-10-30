@@ -1785,6 +1785,15 @@ class OrderService {
       return { success: true, message: 'Payment was voided, nothing to refund.' };
     }
 
+    // Exchange / replacement orders must never receive money refunds on RTO
+    if (order.paymentMethod === 'EXCHANGE' || (order.tags || '').includes('EXCHANGE_FORWARD') || order.totalAmount <= 0) {
+      await prisma.order.update({
+        where: { id: order.id },
+        data: { status: 'RTO_DELIVERED' },
+      });
+      return { success: true, message: 'Exchange forward order marked RTO Delivered (no customer refund required).' };
+    }
+
     const isPrepaid = order.paymentMethod !== 'COD';
     if (!isPrepaid) {
       await prisma.order.update({

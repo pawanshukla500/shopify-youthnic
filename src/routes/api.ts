@@ -2634,7 +2634,7 @@ router.post('/returns/scan', async (req: AuthenticatedRequest, res: Response): P
       ...result,
       emailDispatched,
       emailResult,
-      message: result.refundProcessed
+      message: result.message || (result.refundProcessed
         ? result.moneyMoved === false
           ? 'Return received and QC passed. Shopify recorded the refund, but this order has no online payment (COD): pay the customer by UPI/bank transfer.'
           : 'Return received, QC passed (no issue), refund processed and details emailed to consumer from refunds@youthnic.com'
@@ -2642,7 +2642,7 @@ router.post('/returns/scan', async (req: AuthenticatedRequest, res: Response): P
           ? 'Return received and QC recorded. This return was already refunded, so no second refund was issued.'
           : result.refundError
             ? `Return received, but the refund did not go through: ${result.refundError}`
-            : 'Return received but refund not processed (QC rejected)',
+            : 'Return received but refund not processed (QC rejected)'),
     });
   } catch (error: any) {
     res.status(400).json({ error: error.message });

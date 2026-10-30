@@ -92,7 +92,7 @@ describe('Manual Refund Workflow & File Upload Validation', () => {
     });
     expect(prismaStub.order.update).toHaveBeenCalledWith({
       where: { id: 266049 },
-      data: { financialStatus: 'refunded' },
+      data: expect.objectContaining({ financialStatus: 'refunded' }),
     });
     expect(prismaStub.return.update).toHaveBeenCalledWith({
       where: { id: 12 },

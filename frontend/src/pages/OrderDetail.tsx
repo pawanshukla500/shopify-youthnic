@@ -693,7 +693,9 @@ export function OrderDetail() {
 
   // The Orders tab this order sits in, e.g. "Ready to Dispatch" or "Payment Received".
   const stageTab = ORDER_TABS.find((tab) => tab.key === classifyOrderTab(order))
-  const canRefund = order.financialStatus !== 'refunded' && order.status !== 'CANCELLED'
+  const isCodOrder = order.paymentMethod === 'COD' || /cash/i.test(order.paymentGateway || '')
+  const isRefundedOrder = order.financialStatus === 'refunded' || order.status === 'REFUNDED'
+  const canRefund = !isRefundedOrder && order.status !== 'CANCELLED' && !isCodOrder
   const itemCount = (order.items || []).reduce((sum, item) => sum + item.quantity, 0)
   const openMore = () => {
     if (moreOpen) {
@@ -1151,10 +1153,23 @@ export function OrderDetail() {
                     </span>
                   </div>
                 )}
+                {isCodOrder && !isRefundedOrder && (
+                  <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: '1px dashed #e2e8f0', display: 'flex', flexDirection: 'column', gap: '7px' }}>
+                    <div style={{ background: '#fef3c7', border: '1px solid #fde68a', borderRadius: '6px', padding: '10px 12px', fontSize: '12px', color: '#92400e' }}>
+                      <strong>COD Order:</strong> Refunds cannot be processed via Shopify online gateway. Send money manually via UPI/Bank transfer and log it in the Financial Audit panel below with payment proof (UTR / screenshot).
+                    </div>
+                  </div>
+                )}
+                {isRefundedOrder && (
+                  <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: '1px dashed #e2e8f0', display: 'flex', alignItems: 'center', gap: '8px', color: '#15803d', fontSize: '12px', fontWeight: 600 }}>
+                    <Icon name="check" size={16} />
+                    <span>Order has been refunded (Single refund completed).</span>
+                  </div>
+                )}
               </div>
             )}
           </Panel>
-        <AccountTrailPanel orderId={order.id} returns={order.returns ?? []} defaultAmount={order.totalAmount} currency={order.currency} />
+        <AccountTrailPanel orderId={order.id} returns={order.returns ?? []} defaultAmount={order.totalAmount} currency={order.currency} isRefunded={isRefundedOrder} />
         </section>
 
         {/* ─── Live Delhivery Tracking & Parcel Journey ───────────────────────── */}
@@ -2536,11 +2551,13 @@ function AccountTrailPanel({
   returns,
   defaultAmount,
   currency,
+  isRefunded,
 }: {
   orderId: number
   returns: ReturnRecord[]
   defaultAmount: number
   currency: string
+  isRefunded?: boolean
 }) {
   const queryClient = useQueryClient()
   const toast = useToast()
@@ -2576,6 +2593,11 @@ function AccountTrailPanel({
       if (!Number.isFinite(numericAmount) || numericAmount <= 0) throw new Error('Enter a refund amount greater than zero.')
       if (!refundMode) throw new Error('Choose how the refund was sent.')
       if (!accountUsed.trim()) throw new Error('Enter the account or payment source used.')
+      const hasUtr = Boolean(externalReference.trim())
+      const hasEvidence = Boolean(evidenceFile)
+      if (!hasUtr && !hasEvidence) {
+        throw new Error('Payment proof is required. Please provide either a Payment Reference Number (Bank UTR / Txn ID) or upload a payout screenshot.')
+      }
       if (evidenceFile && evidenceFile.size > 5 * 1024 * 1024) throw new Error('Screenshot must be smaller than 5 MB.')
       if (!window.confirm('Record this manual refund as already sent? This only saves the audit record; it will not transfer money or create another Shopify refund.')) {
         throw new Error('USER_CANCELLED_REFUND_RECORD')
@@ -2612,10 +2634,17 @@ function AccountTrailPanel({
     <Panel className="account-trail-panel">
       <PanelHeading eyebrow="Financial audit" title="COD approval & refund trail" />
       <p className="panel-description">A permanent, user-attributed trail of COD approval, return creation, and refunds. Manual entries record a payout already sent; they never initiate a transfer.</p>
-      <Button className="button-secondary" onClick={() => setFormOpen((open) => !open)}>
-        <Icon name="plus" size={15} />
-        {formOpen ? 'Close manual refund form' : 'Record manual refund'}
-      </Button>
+      {isRefunded ? (
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '6px 12px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '6px', color: '#15803d', fontSize: '12px', fontWeight: 600 }}>
+          <Icon name="check" size={15} />
+          Order is fully refunded (Single-refund invariant satisfied)
+        </div>
+      ) : (
+        <Button className="button-secondary" onClick={() => setFormOpen((open) => !open)}>
+          <Icon name="plus" size={15} />
+          {formOpen ? 'Close manual refund form' : 'Record manual refund'}
+        </Button>
+      )}
 
       {formOpen && (
         <div className="account-trail-form">

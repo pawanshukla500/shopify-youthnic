@@ -21,7 +21,7 @@ const { prismaStub } = vi.hoisted(() => ({
     order: { findUnique: vi.fn(), update: vi.fn(), findMany: vi.fn(), updateMany: vi.fn() },
     return: { findUnique: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
     returnItem: { updateMany: vi.fn() },
-    accountTrailEvent: { create: vi.fn(), findMany: vi.fn(), update: vi.fn(), upsert: vi.fn() },
+    accountTrailEvent: { create: vi.fn(), findMany: vi.fn(), findFirst: vi.fn(), update: vi.fn(), upsert: vi.fn() },
     syncLog: { create: vi.fn(), count: vi.fn() },
     shipment: { update: vi.fn() },
   },
@@ -54,6 +54,7 @@ function resetStubs() {
   prismaStub.order.update.mockResolvedValue({});
   prismaStub.syncLog.create.mockResolvedValue({});
   prismaStub.accountTrailEvent.create.mockResolvedValue({ id: 1 });
+  prismaStub.accountTrailEvent.findFirst.mockResolvedValue(null);
   prismaStub.returnItem.updateMany.mockResolvedValue({});
 }
 

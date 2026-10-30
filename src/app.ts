@@ -69,12 +69,12 @@ app.use((_req, res, next) => {
 });
 
 // CORS
-app.use(cors());
+app.use(cors({ origin(origin, cb) { const allowed = new Set([config.appBaseUrl, 'http://localhost:5173', 'http://localhost:3000', 'http://127.0.0.1:5173'].map((o) => o.replace(/\/$/, ''))); return cb(null, !origin || allowed.has(origin.replace(/\/$/, ''))); } })); // first-party only: SPA is same-origin (Vite proxies in dev); no-Origin callers (webhooks/curl) pass
 
 // Logging. Same as morgan's "combined" format, but a webhook secret passed as
 // ?secret= is masked so it never lands in the log files.
 morgan.token('safe-url', (req: any) =>
-  String(req.originalUrl || req.url || '').replace(/([?&](?:secret|token)=)[^&]*/gi, '$1[REDACTED]')
+  String(req.originalUrl || req.url || '').replace(/([?&](?:secret|token|auth)=)[^&]*/gi, '$1[REDACTED]')
 );
 app.use(
   morgan(
@@ -164,8 +164,10 @@ app.use((_req, res) => {
 
 // Error handler
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  logger.error('Unhandled error', { error: err.message, stack: err.stack });
-  res.status(500).json({ error: 'Internal server error' });
+  const status = Number(err.status || err.statusCode) || 500;
+  if (status >= 500) logger.error('Unhandled error', { error: err.message, stack: err.stack });
+  else logger.warn('Request error', { error: err.message, status });
+  res.status(status).json({ error: status >= 500 ? 'Internal server error' : err.message || 'Bad request' });
 });
 
 // Start server
@@ -204,22 +206,19 @@ const server = app.listen(config.port, () => {
 });
 
 // Graceful shutdown
-process.on('SIGTERM', () => {
-  logger.info('SIGTERM received — shutting down gracefully');
+let shuttingDown = false;
+function shutdown(signal: string): void {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  logger.info(`${signal} received - shutting down gracefully`);
   scheduler.stop();
+  // shortcut: hanging keep-alive sockets can stall server.close() forever; force-exit so deploys/restarts don't hang
+  setTimeout(() => process.exit(1), 10_000).unref();
   server.close(() => {
-    logger.info('Server closed');
-    process.exit(0);
+    prisma.$disconnect().finally(() => process.exit(0));
   });
-});
-
-process.on('SIGINT', () => {
-  logger.info('SIGINT received — shutting down gracefully');
-  scheduler.stop();
-  server.close(() => {
-    logger.info('Server closed');
-    process.exit(0);
-  });
-});
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 
 export default app;

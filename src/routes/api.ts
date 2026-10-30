@@ -2477,6 +2477,10 @@ router.post('/orders/:id/refund', async (req: AuthenticatedRequest, res: Respons
     }
     const { amount, reason } = req.body;
     const result = await returnService.refundOrder(orderId, amount ? parseFloat(amount) : undefined, reason, req.user);
+    if (!result.success) {
+      res.status(400).json({ error: 'Refund could not be processed.' });
+      return;
+    }
 
     // Send Refund Processed Email from Youthnic Refunds <refunds@youthnic.com>
     // only when money went back (a COD order has no online payment to refund).

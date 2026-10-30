@@ -2684,12 +2684,13 @@ router.post('/returns/cod-refund-digest', async (_req: AuthenticatedRequest, res
 router.post('/returns/:id/refund', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const returnId = parseInt(req.params.id, 10);
-    const { partial } = req.body;
+    const { partial, approveQc } = req.body;
     // Without an explicit flag, the QC result stored on the return decides.
     const result = await returnService.processRefund(
       returnId,
       typeof partial === 'boolean' ? partial : undefined,
-      req.user
+      req.user,
+      Boolean(approveQc)
     );
     if (!result.success) {
       res.status(409).json({ success: false, refundAmount: result.refundAmount, error: result.error || 'Refund not processed' });

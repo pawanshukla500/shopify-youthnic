@@ -68,6 +68,8 @@ class ReturnService {
     returnId: number;
     returnWaybill: string;
     exchangeForwardAwb?: string;
+    exchangeForwardOrderId?: number | null;
+    exchangeForwardOrderName?: string | null;
     exchangeLabelUrl?: string;
     shopifyReturnId?: string | null;
     shopifyTriggered: boolean;
@@ -101,6 +103,8 @@ class ReturnService {
     returnId: number;
     returnWaybill: string;
     exchangeForwardAwb?: string;
+    exchangeForwardOrderId?: number | null;
+    exchangeForwardOrderName?: string | null;
     exchangeLabelUrl?: string;
     shopifyReturnId?: string | null;
     shopifyTriggered: boolean;
@@ -289,6 +293,99 @@ class ReturnService {
       data: { status: 'EXCHANGE_REQUESTED' },
     });
 
+    // 5. Create companion forward replacement order in OMS so it appears under "Ready to Ship"
+    let exchangeOrder: any = null;
+    try {
+      const exchangeOrderName = `${order.shopifyOrderName.replace('#', '')}-EX-FWD`;
+      const existingFwd = await prisma.order.findFirst({
+        where: {
+          OR: [
+            { shopifyOrderName: exchangeOrderName },
+            { shopifyOrderName: `#${exchangeOrderName}` },
+            { shopifyOrderId: `EX-FWD-${order.shopifyOrderId}` },
+          ],
+        },
+      });
+
+      if (!existingFwd) {
+        const now = new Date();
+        const existingShipment = exchangeForwardAwb
+          ? await prisma.shipment.findUnique({ where: { waybillNumber: exchangeForwardAwb } })
+          : null;
+
+        exchangeOrder = await prisma.order.create({
+          data: {
+            shopifyOrderId: `EX-FWD-${order.shopifyOrderId}`,
+            shopifyOrderName: exchangeOrderName,
+            shopifyOrderNumber: order.shopifyOrderNumber * 100 + 1,
+            customerName: order.customerName,
+            customerPhone: order.customerPhone,
+            customerEmail: order.customerEmail,
+            customerAddress: order.customerAddress,
+            customerCity: order.customerCity,
+            customerState: order.customerState,
+            customerPincode: order.customerPincode,
+            customerCountry: order.customerCountry,
+            totalAmount: 0,
+            totalShipping: 0,
+            totalDiscounts: 0,
+            totalTax: 0,
+            currency: order.currency || 'INR',
+            paymentMethod: 'EXCHANGE',
+            financialStatus: 'paid',
+            fulfillmentStatus: exchangeForwardAwb ? 'fulfilled' : 'unfulfilled',
+            status: exchangeForwardAwb ? 'DISPATCHED' : 'DISPATCH_PENDING',
+            tags: `EXCHANGE_FORWARD,REPLACEMENT,Parent:${order.shopifyOrderName},Size:${params.exchangeTitle || 'Replacement'},${exchangeForwardAwb ? `${isVel ? 'Velocity' : carrierName}-AWB:${exchangeForwardAwb},ReadyToShip` : 'NeedsDispatch'}`,
+            shopifyNote: `Replacement size exchange forward order for parent ${order.shopifyOrderName}. Replacement: ${params.exchangeTitle || 'New Size'} (${params.exchangeSku || returnItem.sku}). Forward AWB: ${exchangeForwardAwb || 'Pending'}.`,
+            salesChannel: 'Exchange Desk',
+            sourceName: 'oms_exchange',
+            shopifyCreatedAt: now,
+            shopifyUpdatedAt: now,
+            items: {
+              create: [
+                {
+                  title: returnItem ? returnItem.title : 'Replacement Item',
+                  variantTitle: params.exchangeTitle || returnItem?.variantTitle || 'Replacement Size',
+                  sku: params.exchangeSku || returnItem?.sku || `SKU-${returnItem.id}`,
+                  quantity: returnQty,
+                  price: 0,
+                  returnable: true,
+                },
+              ],
+            },
+            ...(exchangeForwardAwb && !existingShipment ? {
+              shipment: {
+                create: {
+                  courier: isVel ? 'Velocity' : carrierName,
+                  waybillNumber: exchangeForwardAwb,
+                  labelUrl: exchangeLabelUrl || null,
+                  status: 'CREATED',
+                  paymentMode: 'Pre-paid',
+                  declaredValue: Math.round(returnItem?.price || 0),
+                  manifestedByOms: true,
+                  omsManifestedAt: now,
+                },
+              },
+            } : {}),
+          },
+        });
+
+        if (existingShipment && exchangeOrder) {
+          await prisma.shipment.update({
+            where: { id: existingShipment.id },
+            data: { orderId: exchangeOrder.id },
+          });
+        }
+      } else {
+        exchangeOrder = existingFwd;
+      }
+    } catch (orderCreateErr: any) {
+      logger.warn('Failed to create exchange forward order row', {
+        orderId: order.id,
+        error: orderCreateErr.message,
+      });
+    }
+
     // Notify customer
     await notificationEngine.notifyReturnInitiated(order, returnRecord);
 
@@ -314,6 +411,8 @@ class ReturnService {
       returnId: returnRecord.id,
       returnWaybill: finalReturnWaybill,
       exchangeForwardAwb,
+      exchangeForwardOrderId: exchangeOrder?.id || null,
+      exchangeForwardOrderName: exchangeOrder?.shopifyOrderName || null,
       exchangeLabelUrl,
       shopifyReturnId,
       shopifyTriggered,
@@ -1133,7 +1232,8 @@ class ReturnService {
   async processRefund(
     returnId: number,
     partial?: boolean,
-    actor?: AccountTrailActor | null
+    actor?: AccountTrailActor | null,
+    approveQc?: boolean
   ): Promise<{ success: boolean; refundAmount: number; shopifyRefundId?: string; moneyMoved?: boolean; error?: string }> {
     const returnRecord = await prisma.return.findUnique({
       where: { id: returnId },
@@ -1173,6 +1273,26 @@ class ReturnService {
         refundAmount: 0,
         error: `Order ${returnRecord.order.shopifyOrderName} was paid via COD. COD returns must be refunded manually via bank transfer/UPI with payment proof (UTR or screenshot).`,
       };
+    }
+
+    if (approveQc && returnRecord.qcStatus !== 'APPROVED' && returnRecord.qcStatus !== 'PARTIAL') {
+      const now = new Date();
+      await prisma.return.update({
+        where: { id: returnId },
+        data: {
+          qcStatus: 'APPROVED',
+          qcCheckedAt: now,
+          returnStatus: 'RECEIVED',
+          receivedAt: returnRecord.receivedAt || now,
+        },
+      });
+      await prisma.returnItem.updateMany({
+        where: { returnId },
+        data: { qcStatus: 'APPROVED' },
+      });
+      returnRecord.qcStatus = 'APPROVED';
+      returnRecord.returnStatus = 'RECEIVED';
+      returnRecord.receivedAt = returnRecord.receivedAt || now;
     }
 
     if (returnRecord.qcStatus !== 'APPROVED' && returnRecord.qcStatus !== 'PARTIAL') {

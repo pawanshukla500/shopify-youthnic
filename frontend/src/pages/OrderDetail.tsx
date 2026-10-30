@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   api,
   apiError,
@@ -693,6 +693,10 @@ export function OrderDetail() {
 
   // The Orders tab this order sits in, e.g. "Ready to Dispatch" or "Payment Received".
   const stageTab = ORDER_TABS.find((tab) => tab.key === classifyOrderTab(order))
+
+  const parentTag = useMemo(() => {
+    return (order?.tags || '').split(',').find((t) => t.trim().startsWith('Parent:'))?.replace('Parent:', '').trim() || null
+  }, [order?.tags])
   const isCodOrder = order.paymentMethod === 'COD' || /cash/i.test(order.paymentGateway || '')
   const isRefundedOrder = order.financialStatus === 'refunded' || order.status === 'REFUNDED'
   const canRefund = !isRefundedOrder && order.status !== 'CANCELLED'
@@ -818,6 +822,11 @@ export function OrderDetail() {
         <span className={`shopify-pill ${paymentPill.tone}`}>{paymentPill.label}</span>
         <span className={`shopify-pill ${fulfillmentPill.tone}`}>{fulfillmentPill.label}</span>
         <span className="shopify-order-stage" title={stageTab?.hint}>{stageTab?.label || labelize(order.status)}</span>
+        {(order.tags?.includes('EXCHANGE_FORWARD') || order.shopifyOrderName.includes('-EX-FWD')) && (
+          <span className="shopify-pill" style={{ background: '#ede9fe', color: '#6d28d9', borderColor: '#c4b5fd' }}>
+            Exchange Replacement
+          </span>
+        )}
         {order.hasUrgentSupport && (
           <button type="button" className="shopify-pill shopify-pill-alert" onClick={() => navigate(`/support?search=${order.shopifyOrderName}`)}>
             Support
@@ -827,6 +836,14 @@ export function OrderDetail() {
     </div>
     <div className="shopify-order-meta">
       <span>{formatDate(order.shopifyCreatedAt || order.createdAt)}</span>
+      {parentTag && (
+        <>
+          <span className="meta-sep" aria-hidden="true">·</span>
+          <span>
+            Parent order: <Link to={`/orders?search=${encodeURIComponent(parentTag)}`} style={{ color: '#6d28d9', fontWeight: 600 }}>{parentTag}</Link>
+          </span>
+        </>
+      )}
       <span className="meta-sep" aria-hidden="true">·</span>
       <span>via {order.salesChannel || 'Online Store'}</span>
       {order.customerCity ? (
@@ -2791,7 +2808,7 @@ function ReturnForm({
       <PanelHeading eyebrow="Reverse logistics" title="Create reverse pickup" />
       {active ? (
         active.isExchange ? (
-          <ActiveExchangeCard record={active} />
+          <ActiveExchangeCard record={active} orderName={order.shopifyOrderName} />
         ) : (
           <ActiveReturnCard record={active} />
         )
@@ -3242,9 +3259,10 @@ function ExchangeModal({
   )
 }
 
-function ActiveExchangeCard({ record }: { record: ReturnRecord }) {
+function ActiveExchangeCard({ record, orderName }: { record: ReturnRecord; orderName?: string }) {
   const forwardDelivered = record.exchangeForwardStatus === 'DELIVERED'
   const reverseDelivered = record.returnStatus === 'RECEIVED' || record.returnStatus === 'QC_APPROVED'
+  const exchangeOrderName = `${(orderName || '').replace('#', '')}-EX-FWD`
   return (
     <div className="active-return-card" style={{ borderLeft: '4px solid #7c3aed' }}>
       <div>
@@ -3316,6 +3334,19 @@ function ActiveExchangeCard({ record }: { record: ReturnRecord }) {
                 </a>
               )}
             </div>
+            {record.exchangeForwardAwb && (
+              <div style={{ marginTop: '8px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ color: '#64748b' }}>Exchange Order:</span>
+                <Link
+                  to={`/orders?search=${encodeURIComponent(exchangeOrderName)}`}
+                  className="link-primary"
+                  style={{ fontWeight: 600, color: '#7c3aed', textDecoration: 'underline' }}
+                >
+                  {exchangeOrderName}
+                </Link>
+                <span className="micro-badge micro-badge-emerald" style={{ fontSize: '10px' }}>Ready to Ship</span>
+              </div>
+            )}
           </div>
         </div>
 

@@ -139,3 +139,29 @@ The `/returns` workspace has been modernized with:
 - **Playwright Browser End-to-End Suite**:
   - `tests/browser/order_workspace.py`
   - `tests/browser/returns_workspace.py`
+
+---
+
+## 6. Size Exchange Replacement Forward Orders (`-EX-FWD`)
+
+When an exchange is initiated:
+1. **Automated Order Provisioning**: The OMS automatically synthesizes and creates a dedicated replacement forward order in the database:
+   - **Order Name**: `{ParentOrder}-EX-FWD` (e.g., `26YOU6128-EX-FWD`)
+   - **Payment Method**: `EXCHANGE` (Price: ₹0, `financialStatus: 'paid'`)
+   - **Revised Size & SKU**: Extracted from customer exchange selection (e.g., Size `S`, SKU `BT216-Geomi-Kattha_S`)
+   - **Status & Operational Queue**: `DISPATCHED` with forward AWB, automatically mapped to **"Ready to Ship"** tab
+2. **Shipment Constraint Safety**: If the carrier forward AWB was already temporarily recorded, the shipment is safely transferred to the forward replacement order with zero constraint collision (`P2002`).
+3. **Cross-Linked Navigation**: The Parent Order Detail workspace provides a direct one-click link to the exchange forward order with a "Ready to Ship" badge, and the forward order links back to the parent.
+
+---
+
+## 7. Prepaid Received Returns (DTO / Delivered to Warehouse) & Refund Action
+
+1. **Warehouse Intake Status**: When reverse tracking transitions to Delivered to Origin (`DTO`) or package arrives, return is marked `QC_PENDING`.
+2. **One-Click QC Approval & Push Refund**: The Returns table displays an **Approve QC & Refund** action button for any received prepaid return. Clicking it calls `POST /api/returns/:id/refund` with `{ approveQc: true }`, approving QC and pushing the automated refund to Shopify in one step.
+3. **Audited Invariant Enforcement**:
+   - Total Prepaid Returns in System: 12
+   - Fully Refunded: 4 (`#26YOU5804`, `#26YOU5867`, `#26YOU5868`, `#26YOU5967`)
+   - In Transit / Scheduled: 6 (`#26YOU6038`, `#26YOU6052`, `#26YOU6056`, `#26YOU6063`, `#26YOU6104`, `#26YOU6166`)
+   - Cancelled: 1 (`#26YOU6141`)
+   - **Received & Unrefunded**: 1 (`#26YOU5892`, Return ID 6, AWB `30100810012681`, received at Surat on 2026-10-16).

@@ -9,6 +9,7 @@ const { prismaStub, delhiveryStub, notificationStub } = vi.hoisted(() => ({
     order: {
       findUnique: vi.fn(),
       findFirst: vi.fn(),
+      create: vi.fn(),
       update: vi.fn(),
     },
     shipment: {
@@ -22,6 +23,10 @@ const { prismaStub, delhiveryStub, notificationStub } = vi.hoisted(() => ({
       findUnique: vi.fn(),
       findFirst: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+    },
+    returnItem: {
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
     trackingLog: {
       create: vi.fn().mockResolvedValue({}),
@@ -39,6 +44,7 @@ const { prismaStub, delhiveryStub, notificationStub } = vi.hoisted(() => ({
   },
   notificationStub: {
     notifyReturnInitiated: vi.fn().mockResolvedValue(true),
+    notifyRefundProcessed: vi.fn().mockResolvedValue(true),
   },
 }));
 
@@ -551,6 +557,178 @@ describe('Exchange Orders API & Workflow (/agency-api-tester)', () => {
           }),
         })
       );
+    });
+  });
+  describe('5. Exchange Forward Order Creation & Prepaid Received Return Refund (/agency-senior-developer)', () => {
+    it('creates companion forward replacement order with revised size and status DISPATCHED', async () => {
+      prismaStub.order.findUnique.mockResolvedValueOnce(mockOrder);
+      prismaStub.order.findFirst.mockResolvedValueOnce(null); // not exists yet
+      prismaStub.shipment.findUnique.mockResolvedValueOnce(null);
+
+      vi.spyOn(velocityService, 'createReverseShipment').mockResolvedValueOnce({
+        awbCode: 'VEL-REV-99101',
+        shipmentId: 'SHI-REV-99',
+        courierName: 'Velocity',
+        raw: {},
+      });
+
+      vi.spyOn(velocityService, 'createExchangeForwardShipment').mockResolvedValueOnce({
+        orderId: '26YOU99101-EX-FWD',
+        shipmentId: 'SHI-FWD-99',
+        awbCode: 'VEL-FWD-889900',
+        courierName: 'Velocity',
+        labelUrl: 'https://cdn.velocity.in/labels/fwd-889900.pdf',
+      });
+
+      vi.spyOn(shopifyService, 'registerExchangeOnShopify').mockResolvedValueOnce({
+        success: true,
+        shopifyReturnId: 'gid://shopify/Return/9900',
+      });
+
+      prismaStub.return.create.mockResolvedValueOnce({
+        id: 701,
+        orderId: 99101,
+        isExchange: true,
+        exchangeForwardAwb: 'VEL-FWD-889900',
+        exchangeTitle: 'XL',
+        carrier: 'Velocity',
+      });
+      prismaStub.order.update.mockResolvedValueOnce({});
+
+      const createdExchangeOrder = {
+        id: 99102,
+        shopifyOrderId: 'EX-FWD-gid://shopify/Order/99101',
+        shopifyOrderName: '26YOU99101-EX-FWD',
+        status: 'DISPATCHED',
+      };
+      prismaStub.order.create.mockResolvedValueOnce(createdExchangeOrder);
+
+      const res = await returnService.createExchange(99101, {
+        returnOrderItemId: 101,
+        returnQuantity: 1,
+        returnReason: 'Size exchange to XL',
+        exchangeVariantId: '5003',
+        exchangeSku: 'KURTA-ANARKALI-XL',
+        exchangeTitle: 'XL',
+        dispatchMode: 'IMMEDIATE',
+        carrier: 'Velocity',
+      });
+
+      expect(res.returnId).toBe(701);
+      expect(res.exchangeForwardAwb).toBe('VEL-FWD-889900');
+      expect(res.exchangeForwardOrderId).toBe(99102);
+      expect(res.exchangeForwardOrderName).toBe('26YOU99101-EX-FWD');
+
+      expect(prismaStub.order.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            shopifyOrderName: '26YOU99101-EX-FWD',
+            paymentMethod: 'EXCHANGE',
+            status: 'DISPATCHED',
+            items: expect.objectContaining({
+              create: expect.arrayContaining([
+                expect.objectContaining({
+                  variantTitle: 'XL',
+                  sku: 'KURTA-ANARKALI-XL',
+                  price: 0,
+                }),
+              ]),
+            }),
+          }),
+        })
+      );
+    });
+
+    it('approves QC and processes refund when approveQc: true is passed for received prepaid return', async () => {
+      const mockPrepaidReturn = {
+        id: 601,
+        orderId: 99101,
+        isExchange: false,
+        returnStatus: 'QC_PENDING',
+        returnWaybillNumber: '30100810012681',
+        trackingStatus: 'DTO',
+        qcStatus: null,
+        refundStatus: 'NONE',
+        order: {
+          ...mockOrder,
+          id: 99101,
+          shopifyOrderName: '#26YOU5892',
+          paymentMethod: 'Prepaid',
+          financialStatus: 'paid',
+          status: 'DELIVERED',
+        },
+        items: [
+          {
+            id: 11,
+            returnId: 601,
+            orderItemId: 101,
+            quantity: 1,
+            orderItem: mockOrder.items[0],
+          },
+        ],
+      };
+
+      prismaStub.return.findUnique.mockResolvedValueOnce(mockPrepaidReturn);
+      prismaStub.return.update.mockResolvedValueOnce({ ...mockPrepaidReturn, qcStatus: 'APPROVED' });
+      prismaStub.return.updateMany.mockResolvedValueOnce({ count: 1 }); // claim refund
+
+      vi.spyOn(shopifyService, 'fetchOrder').mockResolvedValueOnce({
+        id: 99101,
+        line_items: [{ id: 501, sku: 'KURTA-ANARKALI-M', quantity: 1, price: '799.00' }],
+      } as any);
+
+      vi.spyOn(shopifyService, 'createRefund').mockResolvedValueOnce({
+        refundId: 'gid://shopify/Refund/88991',
+        success: true,
+        amount: 799,
+        moneyMoved: true,
+        alreadyRefunded: false,
+      });
+
+      const refundResult = await returnService.processRefund(601, false, null, true);
+
+      expect(refundResult.success).toBe(true);
+      expect(refundResult.refundAmount).toBe(799);
+      expect(refundResult.shopifyRefundId).toBe('gid://shopify/Refund/88991');
+
+      // Verify QC was approved automatically
+      expect(prismaStub.return.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 601 },
+          data: expect.objectContaining({
+            qcStatus: 'APPROVED',
+            returnStatus: 'RECEIVED',
+          }),
+        })
+      );
+    });
+
+    it('rejects refund on exchange return to prevent cash refund for size swap', async () => {
+      prismaStub.return.findUnique.mockResolvedValueOnce({
+        id: 602,
+        orderId: 99101,
+        isExchange: true,
+        order: mockOrder,
+        items: [],
+      });
+
+      const res = await returnService.processRefund(602, false, null, true);
+      expect(res.success).toBe(false);
+      expect(res.error).toContain('size exchange order; replacement item is fulfilled instead of a monetary refund');
+    });
+
+    it('rejects refund when order is already refunded (single-refund invariant)', async () => {
+      prismaStub.return.findUnique.mockResolvedValueOnce({
+        id: 603,
+        orderId: 99101,
+        isExchange: false,
+        order: { ...mockOrder, financialStatus: 'refunded' },
+        items: [],
+      });
+
+      const res = await returnService.processRefund(603, false, null, true);
+      expect(res.success).toBe(false);
+      expect(res.error).toContain('Only one refund per order is permitted');
     });
   });
 });

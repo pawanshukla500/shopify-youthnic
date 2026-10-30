@@ -49,12 +49,14 @@ export function Returns() {
   })
 
   const refund = useMutation({
-    mutationFn: async ({ id, orderName }: { id: number; orderName?: string }) => {
+    mutationFn: async ({ id, orderName, approveQc }: { id: number; orderName?: string; approveQc?: boolean }) => {
       const confirmed = window.confirm(
-        `Refund the returned items of ${orderName || `Return #${id}`} via Shopify? Shopify calculates the amount from what the customer paid.`
+        approveQc
+          ? `Approve QC and refund the returned items of ${orderName || `Return #${id}`} via Shopify?`
+          : `Refund the returned items of ${orderName || `Return #${id}`} via Shopify? Shopify calculates the amount from what the customer paid.`
       )
       if (!confirmed) throw new Error('USER_CANCELLED_REFUND')
-      return (await api.post(`/api/returns/${id}/refund`, {})).data
+      return (await api.post(`/api/returns/${id}/refund`, { approveQc })).data
     },
     onSuccess: async (data) => {
       if (data.moneyMoved === false) {
@@ -525,6 +527,25 @@ export function Returns() {
                           >
                             <Icon name="dollar" size={12} />
                             Shopify Auto-Refund
+                          </Button>
+                        ) : (item.refundStatus === 'NONE' || item.refundStatus === 'FAILED') &&
+                          Boolean(item.receivedAt || item.returnStatus === 'RECEIVED' || item.returnStatus === 'QC_PENDING' || item.trackingStatus === 'DTO') ? (
+                          <Button
+                            className="button-small button-primary"
+                            style={{ background: '#059669', borderColor: '#059669', color: '#fff', fontSize: '11px', fontWeight: 650 }}
+                            loading={refund.isPending && refund.variables?.id === item.id}
+                            onClick={() =>
+                              refund.mutate({
+                                id: item.id,
+                                orderName: item.order?.shopifyOrderName,
+                                approveQc: true,
+                              })
+                            }
+                            disabled={refund.isPending}
+                            title="Package received at warehouse: approve QC and push refund to Shopify"
+                          >
+                            <Icon name="check" size={12} />
+                            Approve QC & Refund
                           </Button>
                         ) : (
                           <span className="cell-muted">QC Required</span>

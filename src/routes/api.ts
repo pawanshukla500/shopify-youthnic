@@ -37,6 +37,7 @@ import shippingRouterService, { CarrierPriority, CourierChoice } from '../module
 import velocityService from '../modules/velocity/velocity.service';
 import { isVelocityCourier, getTrackingUrl } from '../utils/courier';
 import { mergePdfBuffers, create4x6FallbackPdf } from '../utils/pdf-merger';
+import { analyticsService } from '../modules/analytics/analytics.service';
 
 const router = Router();
 
@@ -537,268 +538,34 @@ router.get('/dashboard/stats', async (_req: Request, res: Response): Promise<voi
   }
 });
 
-// ─── Reports & Analytics (Financial P&L, Couriers, State Breakdown) ───
+// ─── Reports & Analytics (Financial P&L, Couriers, State Breakdown, Account Strategist, Distribution) ───
 router.get('/reports/analytics', async (_req: Request, res: Response): Promise<void> => {
   try {
-    const allOrders = await prisma.order.findMany({
-      include: { items: true, shipment: true, returns: true },
-      orderBy: { shopifyCreatedAt: 'asc' },
-    });
-
-    const totalAllOrders = allOrders.length;
-
-    // ─────────────────────────────────────────────────────────────
-    // 1. Monthly Financial P&L Breakdown (media_1790266204581.png)
-    // ─────────────────────────────────────────────────────────────
-    const monthMap: Record<string, {
-      monthKey: string;
-      label: string;
-      dateObj: Date;
-      orders: typeof allOrders;
-    }> = {};
-
-    for (const order of allOrders) {
-      const d = new Date(order.shopifyCreatedAt || order.createdAt);
-      const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      const monthLabel = d.toLocaleString('en-US', { month: 'long', year: 'numeric' });
-
-      if (!monthMap[monthKey]) {
-        monthMap[monthKey] = {
-          monthKey,
-          label: monthLabel,
-          dateObj: new Date(d.getFullYear(), d.getMonth(), 1),
-          orders: [],
-        };
-      }
-      monthMap[monthKey].orders.push(order);
-    }
-
-    const sortedMonths = Object.values(monthMap).sort((a, b) => a.dateObj.getTime() - b.dateObj.getTime());
-
-    const monthlyReport = sortedMonths.map((m) => {
-      const mOrders = m.orders;
-      const noOfOrders = mOrders.length;
-      const prepaidOrders = mOrders.filter((o) => o.paymentMethod !== 'COD');
-      const prepaidCount = prepaidOrders.length;
-      const prepaidPercent = noOfOrders > 0 ? Math.round((prepaidCount / noOfOrders) * 1000) / 10 : 0;
-
-      const grossAmount = Math.round(mOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0) * 100) / 100;
-      const grossQty = mOrders.reduce(
-        (sum, o) => sum + (o.items && o.items.length > 0 ? o.items.reduce((s, i) => s + (i.quantity || 1), 0) : 1),
-        0
-      );
-
-      // RTO, Cancel, RVP
-      const rtoOrCancelledOrders = mOrders.filter((o) =>
-        ['CANCELLED', 'RTO_INITIATED', 'RTO_DELIVERED', 'FAILED_DELIVERY'].includes(o.status) ||
-        (o.tags && /rto|cancelled|cancel/i.test(o.tags))
-      );
-      const rtoCancelAmount = Math.round(rtoOrCancelledOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0) * 100) / 100;
-      const rtoCancelQty = rtoOrCancelledOrders.reduce(
-        (sum, o) => sum + (o.items && o.items.length > 0 ? o.items.reduce((s, i) => s + (i.quantity || 1), 0) : 1),
-        0
-      );
-
-      // Cancel by Seller
-      const sellerCancelOrders = mOrders.filter(
-        (o) => o.tags && /cancel_by_seller|seller_cancelled|out_of_stock/i.test(o.tags)
-      );
-      const sellerCancelAmount = Math.round(sellerCancelOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0) * 100) / 100;
-      const sellerCancelQty = sellerCancelOrders.reduce(
-        (sum, o) => sum + (o.items && o.items.length > 0 ? o.items.reduce((s, i) => s + (i.quantity || 1), 0) : 1),
-        0
-      );
-
-      // Forward Sales [A]
-      const forwardSalesAmount = Math.max(0, Math.round((grossAmount - rtoCancelAmount - sellerCancelAmount) * 100) / 100);
-      const forwardSalesQty = Math.max(0, grossQty - rtoCancelQty - sellerCancelQty);
-
-      // Forward Shipping Cost [B]
-      const shippingCostF = Math.round(
-        mOrders.reduce((sum, o) => {
-          const cost = o.shipment?.initialCost || o.shipment?.netBilledCost || o.actualShippingCost || 106.44;
-          return sum + cost;
-        }, 0) * 100
-      ) / 100;
-
-      // Reverse Shipping Cost [C]
-      const shippingCostR = Math.round(
-        rtoOrCancelledOrders.reduce((sum, o) => {
-          const revCost = o.shipment?.reversalAmount || 95.0; // standard reverse freight
-          return sum + revCost;
-        }, 0) * 100
-      ) / 100;
-
-      // COD Collection Fees [D] (₹38 standard COD collection fee on COD orders)
-      const codOrders = mOrders.filter((o) => o.paymentMethod === 'COD');
-      const codCollectionFee = Math.round(codOrders.length * 38.0 * 100) / 100;
-
-      // Payment Gateway Fee [E] (approx 2% MDR on prepaid sales)
-      const prepaidSales = prepaidOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
-      const paymentGatewayFee = Math.round(prepaidSales * 0.02 * 100) / 100;
-
-      // Received Payment [F = A - E]
-      const receivedPayment = Math.max(0, Math.round((forwardSalesAmount - paymentGatewayFee) * 100) / 100);
-
-      return {
-        month: m.label,
-        monthKey: m.monthKey,
-        noOfOrders,
-        prepaidCount,
-        prepaidPercent,
-        grossAmount,
-        grossQty,
-        rtoCancelAmount,
-        rtoCancelQty,
-        sellerCancelAmount,
-        sellerCancelQty,
-        forwardSalesAmount,
-        forwardSalesQty,
-        shippingCostF,
-        shippingCostR,
-        codCollectionFee,
-        paymentGatewayFee,
-        receivedPayment,
-      };
-    });
-
-    // ─────────────────────────────────────────────────────────────
-    // 2. Courier Performance Breakdown (media_1790266219905.png)
-    // ─────────────────────────────────────────────────────────────
-    const courierMap: Record<string, {
-      courierName: string;
-      orders: typeof allOrders;
-      totalCost: number;
-      rtoOrders: number;
-    }> = {};
-
-    for (const order of allOrders) {
-      const isVel = isVelocityCourier(order.shipment?.courier, order.shipment?.labelUrl, order.shipment?.waybillNumber);
-      let courierName = isVel ? 'Velocity' : (order.shipment?.courier?.trim() || 'Delhivery');
-      if (!isVel) {
-        if (courierName.toLowerCase().includes('delhivery')) courierName = 'Delhivery';
-        else if (courierName.toLowerCase().includes('ekart')) courierName = 'Ekart Logistics';
-        else if (courierName.toLowerCase().includes('ecom')) courierName = 'Ecom Express';
-      }
-
-      if (!courierMap[courierName]) {
-        courierMap[courierName] = {
-          courierName,
-          orders: [],
-          totalCost: 0,
-          rtoOrders: 0,
-        };
-      }
-
-      const cost = order.shipment?.netBilledCost || order.shipment?.initialCost || order.actualShippingCost || 106.44;
-      courierMap[courierName].orders.push(order);
-      courierMap[courierName].totalCost += cost;
-
-      const isRto =
-        order.status === 'RTO_INITIATED' ||
-        order.status === 'RTO_DELIVERED' ||
-        order.shipment?.status === 'RTO' ||
-        (order.shipment?.trackingStatus && /rto|return/i.test(order.shipment.trackingStatus));
-
-      if (isRto) {
-        courierMap[courierName].rtoOrders += 1;
-      }
-    }
-
-    const courierReport = Object.values(courierMap)
-      .map((c) => {
-        const totalOrders = c.orders.length;
-        const totalCost = Math.round(c.totalCost * 100) / 100;
-        const totalRtoOrders = c.rtoOrders;
-        const avgPerOrderAmount = totalOrders > 0 ? Math.round((totalCost / totalOrders) * 100) / 100 : 0;
-        const rtoPercent = totalOrders > 0 ? Math.round((totalRtoOrders / totalOrders) * 1000) / 10 : 0;
-
-        return {
-          courierName: c.courierName,
-          totalOrders,
-          totalCost,
-          totalRtoOrders,
-          avgPerOrderAmount,
-          rtoPercent,
-        };
-      })
-      .sort((a, b) => b.totalOrders - a.totalOrders);
-
-    // ─────────────────────────────────────────────────────────────
-    // 3. State-wise Geographic Breakdown
-    // ─────────────────────────────────────────────────────────────
-    const stateMap: Record<string, {
-      state: string;
-      orders: typeof allOrders;
-      cities: Set<string>;
-    }> = {};
-
-    for (const order of allOrders) {
-      const state = (order.customerState || 'Other').trim();
-      if (!stateMap[state]) {
-        stateMap[state] = { state, orders: [], cities: new Set() };
-      }
-      stateMap[state].orders.push(order);
-      if (order.customerCity) stateMap[state].cities.add(order.customerCity.trim());
-    }
-
-    const stateReport = Object.values(stateMap)
-      .map((s) => {
-        const orderCount = s.orders.length;
-        const grossRevenue = Math.round(s.orders.reduce((sum, o) => sum + (o.totalAmount || 0), 0) * 100) / 100;
-        const prepaidCount = s.orders.filter((o) => o.paymentMethod !== 'COD').length;
-        const codCount = orderCount - prepaidCount;
-        const percentage = totalAllOrders > 0 ? Math.round((orderCount / totalAllOrders) * 1000) / 10 : 0;
-
-        const deliveredCount = s.orders.filter((o) => o.status === 'DELIVERED').length;
-        const rtoCount = s.orders.filter((o) =>
-          ['RTO_INITIATED', 'RTO_DELIVERED', 'FAILED_DELIVERY'].includes(o.status)
-        ).length;
-        const rtoRate = orderCount > 0 ? Math.round((rtoCount / orderCount) * 1000) / 10 : 0;
-
-        const topCities = Array.from(s.cities).slice(0, 4);
-
-        return {
-          state: s.state,
-          orderCount,
-          percentage,
-          grossRevenue,
-          prepaidCount,
-          codCount,
-          prepaidPercent: orderCount > 0 ? Math.round((prepaidCount / orderCount) * 1000) / 10 : 0,
-          citiesCount: s.cities.size,
-          topCities,
-          deliveredCount,
-          rtoCount,
-          rtoRate,
-        };
-      })
-      .sort((a, b) => b.orderCount - a.orderCount);
-
-    // Overall Totals
-    const totalGrossRevenue = Math.round(allOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0) * 100) / 100;
-    const totalPrepaidOrders = allOrders.filter((o) => o.paymentMethod !== 'COD').length;
-    const totalCodOrders = totalAllOrders - totalPrepaidOrders;
-    const totalShippingSpend = courierReport.reduce((sum, c) => sum + c.totalCost, 0);
-
-    res.json({
-      success: true,
-      timestamp: new Date().toISOString(),
-      kpis: {
-        totalOrders: totalAllOrders,
-        totalGrossRevenue,
-        totalPrepaidOrders,
-        totalCodOrders,
-        prepaidRatio: totalAllOrders > 0 ? Math.round((totalPrepaidOrders / totalAllOrders) * 1000) / 10 : 0,
-        totalShippingSpend: Math.round(totalShippingSpend * 100) / 100,
-        totalStatesCount: stateReport.length,
-      },
-      monthlyReport,
-      courierReport,
-      stateReport,
-    });
+    const report = await analyticsService.computeComprehensiveAnalyticsReport();
+    res.json(report);
   } catch (error: any) {
     logger.error('Error generating analytics report', { error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/reports/distribute', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const result = await analyticsService.distributeAnalyticsReport(req.body);
+    res.json(result);
+  } catch (error: any) {
+    logger.error('Error distributing analytics report', { error: error.message });
+    res.status(400).json({ error: error.message });
+  }
+});
+
+router.get('/reports/distribution-history', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : 20;
+    const history = await analyticsService.getDistributionHistory(limit);
+    res.json({ success: true, history });
+  } catch (error: any) {
+    logger.error('Error fetching report distribution history', { error: error.message });
     res.status(500).json({ error: error.message });
   }
 });

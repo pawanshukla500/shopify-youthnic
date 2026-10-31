@@ -649,9 +649,117 @@ export interface AnalyticsData {
     totalShippingSpend: number
     totalStatesCount: number
   }
+  executiveInsights?: ExecutiveInsights
+  accountStrategist?: AccountStrategistData
+  distributionSchedule?: DistributionSchedule
   monthlyReport: MonthlyReportItem[]
   courierReport: CourierReportItem[]
   stateReport: StateReportItem[]
+}
+
+export interface StrategicRecommendation {
+  priority: 'HIGH' | 'MEDIUM' | 'GROWTH'
+  title: string
+  action: string
+  impact: string
+}
+
+export interface ExecutiveInsights {
+  realizedNetMargin: number
+  netMarginPercent: number
+  averageOrderValue: number
+  deliverySuccessRate: number
+  rtoLossRate: number
+  momGrowthRate: number
+  dataQualityScore: number
+  totalRefundsDebited: number
+  totalGatewayFeeDeducted: number
+  strategicRecommendations: StrategicRecommendation[]
+}
+
+export interface CustomerAccountItem {
+  phone: string
+  name: string
+  email: string | null
+  city: string
+  state: string
+  orderCount: number
+  deliveredCount: number
+  rtoCount: number
+  lifetimeGross: number
+  lastOrderDate: string
+  healthScore: 'GREEN' | 'YELLOW' | 'RED'
+  segment: 'CHAMPION' | 'LOYAL' | 'POTENTIAL' | 'AT_RISK' | 'CANNOT_LOSE' | 'NEW'
+  recommendedPlay: string
+}
+
+export interface RfmSegmentDetail {
+  count: number
+  totalRevenue: number
+  description: string
+  play: string
+}
+
+export interface RfmSummary {
+  champions: RfmSegmentDetail
+  loyal: RfmSegmentDetail
+  potential: RfmSegmentDetail
+  atRisk: RfmSegmentDetail
+  cannotLoseThem: RfmSegmentDetail
+  newCustomers: RfmSegmentDetail
+}
+
+export interface AccountStrategistData {
+  totalCustomerAccounts: number
+  repeatCustomerAccounts: number
+  repeatCustomerRate: number
+  avgCustomerLtv: number
+  repeatRevenueShare: number
+  rfmSummary: RfmSummary
+  topAccounts: CustomerAccountItem[]
+}
+
+export interface DistributionScheduleItem {
+  name: string
+  cron: string
+  humanSchedule: string
+  targetAudience: string
+  status: string
+}
+
+export interface DistributionSchedule {
+  dailyReport: DistributionScheduleItem
+  weeklyReport: DistributionScheduleItem
+  lastDistribution: {
+    id: number
+    recipient: string
+    name: string | null
+    subject: string
+    status: string
+    timestamp: string
+  } | null
+  totalDistributionsCount: number
+}
+
+export interface DistributionHistoryItem {
+  id: number
+  recipientEmail: string
+  recipientName: string
+  subject: string
+  status: string
+  resendId: string | null
+  errorMessage: string | null
+  metadata: any
+  createdAt: string
+  sentAt: string | null
+}
+
+export interface DistributeReportPayload {
+  recipientEmail: string
+  recipientName?: string
+  reportType: 'EXECUTIVE_PL_DIGEST' | 'CUSTOMER_ACCOUNTS_DIGEST' | 'TERRITORY_LOGISTICS_DIGEST'
+  scope?: string
+  notes?: string
 }
 
 export interface SystemUser {

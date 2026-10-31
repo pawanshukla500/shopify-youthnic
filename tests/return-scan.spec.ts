@@ -205,6 +205,62 @@ describe('ReturnScanService.syncReturnScans', () => {
     expect(prismaStub.order.findFirst).not.toHaveBeenCalled();
     expect(orderStub.processRtoRefund).not.toHaveBeenCalled();
   });
+
+  it('skips automatic refund and does not call processRtoRefund when scanned parcel is an exchange return', async () => {
+    const mockScans = [
+      {
+        id: 104,
+        expected_return_id: 55,
+        scanned_at: new Date('2026-10-17T12:00:00Z'),
+        outcome: 'clear',
+        issue_label: 'No issue',
+        tracking_id_snapshot: 'R2757220019VEO',
+        order_number_snapshot: '#26YOU6128',
+        marketplace_snapshot: 'Shopify',
+        scanned_tracking: 'R2757220019VEO',
+      },
+    ];
+
+    pgQueryStub.mockResolvedValueOnce({ rows: mockScans });
+
+    prismaStub.order.findFirst.mockResolvedValueOnce({
+      id: 6128,
+      shopifyOrderId: 'gid://shopify/Order/6128',
+      shopifyOrderName: '#26YOU6128',
+      status: 'DELIVERED',
+      paymentMethod: 'Prepaid',
+      financialStatus: 'paid',
+      totalAmount: 1299,
+      returns: [
+        {
+          id: 55,
+          returnWaybillNumber: 'R2757220019VEO',
+          isExchange: true,
+          returnStatus: 'PICKUP_SCHEDULED',
+        },
+      ],
+    });
+
+    prismaStub.order.update.mockResolvedValueOnce({});
+    prismaStub.return.update.mockResolvedValueOnce({});
+    prismaStub.accountTrailEvent.create.mockResolvedValueOnce({});
+
+    const result = await returnScanService.syncReturnScans(30);
+
+    expect(result.scansChecked).toBe(1);
+    expect(result.matchedOrders).toBe(1);
+    expect(result.prepaidRefunded).toBe(0);
+    expect(orderStub.processRtoRefund).not.toHaveBeenCalled();
+    expect(prismaStub.return.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 55 },
+        data: expect.objectContaining({
+          returnStatus: 'RECEIVED',
+          qcStatus: 'APPROVED',
+        }),
+      })
+    );
+  });
 });
 
 describe('ReturnScanService.sendDailyCodManualRefundDigest', () => {

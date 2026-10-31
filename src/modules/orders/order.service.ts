@@ -882,7 +882,7 @@ class OrderService {
   ): Promise<{ waybillNumber: string; courier?: string }> {
     const order = await prisma.order.findUnique({
       where: { id: orderId },
-      include: { items: true, shipment: true },
+      include: { items: true, shipment: true, returns: true },
     });
 
     if (!order) {
@@ -1786,7 +1786,12 @@ class OrderService {
     }
 
     // Exchange / replacement orders must never receive money refunds on RTO
-    if (order.paymentMethod === 'EXCHANGE' || (order.tags || '').includes('EXCHANGE_FORWARD') || order.totalAmount <= 0) {
+    if (
+      order.paymentMethod === 'EXCHANGE' ||
+      (order.tags || '').includes('EXCHANGE_FORWARD') ||
+      order.totalAmount <= 0 ||
+      (order as any).returns?.some((r: any) => r.isExchange && r.returnStatus !== 'CANCELLED')
+    ) {
       await prisma.order.update({
         where: { id: order.id },
         data: { status: 'RTO_DELIVERED' },

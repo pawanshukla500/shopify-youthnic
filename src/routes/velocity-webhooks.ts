@@ -234,52 +234,68 @@ export async function handleVelocityWebhook(req: Request, res: Response): Promis
             },
           });
 
-          // If ON_PICKUP exchange dispatch is pending, trigger forward replacement!
+          // If ON_PICKUP exchange dispatch is pending, trigger forward replacement with atomic claim lock
           if (
             returnRecord.isExchange &&
             returnRecord.exchangeDispatchMode === 'ON_PICKUP' &&
             returnRecord.exchangeForwardStatus === 'PENDING' &&
             (mapped.shipmentStatus === 'PICKED_UP' || mapped.shipmentStatus === 'IN_TRANSIT')
           ) {
-            try {
-              const order = returnRecord.order;
-              const fwdRes = await velocityService.createExchangeForwardShipment({
-                order,
-                exchangeItem: {
-                  name: returnRecord.exchangeTitle || 'Replacement Size',
-                  sku: returnRecord.exchangeSku || 'EXCH-SKU',
-                  units: 1,
-                  selling_price: Math.max(1, Math.round(order.totalAmount || 0)),
-                },
-                customOrderId: `${order.shopifyOrderName.replace('#', '')}-EX-FWD`,
-              });
+            const claimDispatch = await prisma.return.updateMany({
+              where: {
+                id: returnRecord.id,
+                exchangeForwardStatus: 'PENDING',
+              },
+              data: {
+                exchangeForwardStatus: 'DISPATCHING',
+              },
+            });
 
-              await prisma.return.update({
-                where: { id: returnRecord.id },
-                data: {
-                  exchangeForwardAwb: fwdRes.awbCode,
-                  exchangeForwardShipmentId: fwdRes.shipmentId,
-                  exchangeForwardStatus: 'DISPATCHED',
-                  exchangeLabelUrl: fwdRes.labelUrl,
-                },
-              });
+            if (claimDispatch.count > 0) {
+              try {
+                const order = returnRecord.order;
+                const fwdRes = await velocityService.createExchangeForwardShipment({
+                  order,
+                  exchangeItem: {
+                    name: returnRecord.exchangeTitle || 'Replacement Size',
+                    sku: returnRecord.exchangeSku || 'EXCH-SKU',
+                    units: 1,
+                    selling_price: Math.max(1, Math.round(order.totalAmount || 0)),
+                  },
+                  customOrderId: `${order.shopifyOrderName.replace('#', '')}-EX-FWD`,
+                });
 
-              await shopifyService.fulfillOrderOnShopify(
-                order.shopifyOrderId,
-                fwdRes.awbCode,
-                'Velocity'
-              );
+                await prisma.return.update({
+                  where: { id: returnRecord.id },
+                  data: {
+                    exchangeForwardAwb: fwdRes.awbCode,
+                    exchangeForwardShipmentId: fwdRes.shipmentId,
+                    exchangeForwardStatus: 'DISPATCHED',
+                    exchangeLabelUrl: fwdRes.labelUrl,
+                  },
+                });
 
-              logger.info('Auto-dispatched exchange forward replacement on reverse pickup', {
-                orderId: order.id,
-                returnId: returnRecord.id,
-                forwardAwb: fwdRes.awbCode,
-              });
-            } catch (autoErr: any) {
-              logger.error('Failed to auto-dispatch forward exchange on reverse pickup', {
-                returnId: returnRecord.id,
-                error: autoErr.message,
-              });
+                await shopifyService.fulfillOrderOnShopify(
+                  order.shopifyOrderId,
+                  fwdRes.awbCode,
+                  'Velocity'
+                );
+
+                logger.info('Auto-dispatched exchange forward replacement on reverse pickup', {
+                  orderId: order.id,
+                  returnId: returnRecord.id,
+                  forwardAwb: fwdRes.awbCode,
+                });
+              } catch (autoErr: any) {
+                logger.error('Failed to auto-dispatch forward exchange on reverse pickup', {
+                  returnId: returnRecord.id,
+                  error: autoErr.message,
+                });
+                await prisma.return.update({
+                  where: { id: returnRecord.id },
+                  data: { exchangeForwardStatus: 'PENDING' },
+                }).catch(() => {});
+              }
             }
           }
         }

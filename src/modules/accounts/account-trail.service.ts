@@ -279,7 +279,7 @@ async function recordManualRefundUnlocked(
 
   const order = await prisma.order.findUnique({
     where: { id: input.orderId },
-    select: { id: true, currency: true, financialStatus: true, status: true, shopifyOrderName: true },
+    select: { id: true, currency: true, financialStatus: true, status: true, shopifyOrderName: true, totalAmount: true },
   });
   if (!order) throw new Error('Order not found.');
 
@@ -324,15 +324,42 @@ async function recordManualRefundUnlocked(
   if (order.financialStatus === 'refunded' || order.status === 'REFUNDED') {
     throw new Error(`Order ${order.shopifyOrderName} has already been refunded. An order can only be refunded once.`);
   }
-  const priorCompletedRefund = await prisma.accountTrailEvent.findFirst({
+  if (input.returnId) {
+    const priorForSameReturn = await prisma.accountTrailEvent.findFirst({
+      where: {
+        orderId: input.orderId,
+        returnId: input.returnId,
+        eventType: { in: ['REFUND_MANUAL', 'REFUND_AUTOMATIC'] },
+        status: 'COMPLETED',
+      },
+    });
+    if (priorForSameReturn) {
+      throw new Error(`Return #${input.returnId} for order ${order.shopifyOrderName} has already been refunded (Ref: ${priorForSameReturn.externalReference || priorForSameReturn.id}).`);
+    }
+  } else {
+    const priorCompletedRefund = await prisma.accountTrailEvent.findFirst({
+      where: {
+        orderId: input.orderId,
+        eventType: { in: ['REFUND_MANUAL', 'REFUND_AUTOMATIC'] },
+        status: 'COMPLETED',
+      },
+    });
+    if (priorCompletedRefund) {
+      throw new Error(`Order ${order.shopifyOrderName} has already been refunded (Ref: ${priorCompletedRefund.externalReference || priorCompletedRefund.id}). Only one refund per order is permitted.`);
+    }
+  }
+
+  // Cumulative refund cap: total refunds across all items cannot exceed total order amount
+  const priorRefunds = await prisma.accountTrailEvent.findMany({
     where: {
       orderId: input.orderId,
       eventType: { in: ['REFUND_MANUAL', 'REFUND_AUTOMATIC'] },
       status: 'COMPLETED',
     },
   });
-  if (priorCompletedRefund) {
-    throw new Error(`Order ${order.shopifyOrderName} has already been refunded (Ref: ${priorCompletedRefund.externalReference || priorCompletedRefund.id}). Only one refund per order is permitted.`);
+  const cumulativeRefunded = (priorRefunds || []).reduce((sum, e) => sum + (e.amount || 0), 0);
+  if (cumulativeRefunded + amount > (order.totalAmount + 0.5)) {
+    throw new Error(`Total refund amount (₹${Math.round(cumulativeRefunded + amount)}) exceeds the order total of ₹${order.totalAmount}. Prior refunds: ₹${cumulativeRefunded}.`);
   }
 
   let evidenceStoragePath: string | null = null;

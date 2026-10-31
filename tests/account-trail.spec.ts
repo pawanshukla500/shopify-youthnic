@@ -275,6 +275,100 @@ describe('recordManualRefund', () => {
       actor,
     })).rejects.toThrow(/already been refunded/i);
   });
+
+  it('allows second partial manual refund for a different returnId if cumulative amount <= totalAmount', async () => {
+    prismaStub.order.findUnique.mockResolvedValue({
+      id: 1,
+      shopifyOrderName: '#1001',
+      totalAmount: 2000,
+      financialStatus: 'partially_refunded',
+      status: 'DELIVERED',
+    });
+    prismaStub.return.findUnique.mockResolvedValue({
+      id: 8,
+      orderId: 1,
+      isExchange: false,
+      items: [{ quantity: 1 }],
+      order: { items: [{ quantity: 1 }, { quantity: 1 }] },
+    });
+    // Return 8 has not been refunded yet
+    prismaStub.accountTrailEvent.findFirst.mockResolvedValue(null);
+    // Prior refund exists for Return 7 (amount 1000)
+    prismaStub.accountTrailEvent.findMany.mockResolvedValue([
+      { id: 89, amount: 1000, returnId: 7 },
+    ]);
+    prismaStub.order.update.mockResolvedValue({});
+    prismaStub.return.update.mockResolvedValue({});
+    prismaStub.accountTrailEvent.create.mockResolvedValue({ id: 91 });
+
+    const res = await recordManualRefund({
+      orderId: 1,
+      returnId: 8,
+      amount: 1000,
+      refundMode: 'UPI',
+      accountUsed: 'HDFC Current Account',
+      externalReference: 'UTR-SECOND-PARTIAL',
+      actor,
+    });
+
+    expect(res).toBeDefined();
+    expect(prismaStub.accountTrailEvent.create).toHaveBeenCalled();
+  });
+
+  it('rejects second manual refund for the same returnId', async () => {
+    prismaStub.order.findUnique.mockResolvedValue({
+      id: 1,
+      shopifyOrderName: '#1001',
+      totalAmount: 2000,
+      financialStatus: 'partially_refunded',
+      status: 'DELIVERED',
+    });
+    prismaStub.return.findUnique.mockResolvedValue({ id: 7, orderId: 1, isExchange: false });
+    // First findFirst (replay dedup check within 3 min) returns null; second findFirst (prior return refund check) returns existing refund
+    prismaStub.accountTrailEvent.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: 89,
+        returnId: 7,
+        externalReference: 'UTR-ALREADY-REFUNDED-RET7',
+      });
+
+    await expect(recordManualRefund({
+      orderId: 1,
+      returnId: 7,
+      amount: 500,
+      refundMode: 'UPI',
+      accountUsed: 'HDFC Current Account',
+      externalReference: 'UTR-ATTEMPT-2',
+      actor,
+    })).rejects.toThrow(/already been refunded/i);
+  });
+
+  it('rejects manual refund if cumulative amount exceeds order totalAmount', async () => {
+    prismaStub.order.findUnique.mockResolvedValue({
+      id: 1,
+      shopifyOrderName: '#1001',
+      totalAmount: 1500,
+      financialStatus: 'partially_refunded',
+      status: 'DELIVERED',
+    });
+    prismaStub.return.findUnique.mockResolvedValue({ id: 9, orderId: 1, isExchange: false });
+    prismaStub.accountTrailEvent.findFirst.mockResolvedValue(null);
+    // Prior refund of 1000 already logged
+    prismaStub.accountTrailEvent.findMany.mockResolvedValue([
+      { id: 89, amount: 1000, returnId: 7 },
+    ]);
+
+    await expect(recordManualRefund({
+      orderId: 1,
+      returnId: 9,
+      amount: 600, // 1000 + 600 = 1600 > 1500
+      refundMode: 'UPI',
+      accountUsed: 'HDFC Current Account',
+      externalReference: 'UTR-EXCEED-CAP',
+      actor,
+    })).rejects.toThrow(/exceeds the order total/i);
+  });
 });
 
 describe('backfillMissingRefundTrailEvents', () => {

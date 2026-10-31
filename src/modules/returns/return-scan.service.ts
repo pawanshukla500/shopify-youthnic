@@ -329,7 +329,10 @@ class ReturnScanService {
 
             // Update associated return record if customer return
             if (order.returns?.length) {
-              for (const ret of order.returns) {
+              const matchingReturns = order.returns.filter(
+                (ret: any) => ret.returnWaybillNumber === tracking || order.returns.length === 1
+              );
+              for (const ret of matchingReturns) {
                 if (ret.returnStatus !== 'RECEIVED' && ret.returnStatus !== 'REFUNDED') {
                   await prisma.return.update({
                     where: { id: ret.id },
@@ -390,6 +393,19 @@ class ReturnScanService {
               continue;
             }
 
+            // Exchange guard: Exchange orders receive a replacement size parcel, never a monetary refund
+            const isExchangeReturn = (order.returns || []).some(
+              (r: any) => r.isExchange && (r.returnWaybillNumber === tracking || order.returns.length === 1)
+            );
+            if (isExchangeReturn || order.paymentMethod === 'EXCHANGE' || (order.tags || '').includes('EXCHANGE_FORWARD')) {
+              logger.info('Skipping automatic refund for exchange order return scan (replacement item dispatched)', {
+                orderId: order.id,
+                orderName: order.shopifyOrderName,
+                tracking,
+              });
+              continue;
+            }
+
             try {
               // Find matching Return record from order.returns to refund only the returned line items (and prevent full-order RTO refund on partial returns)
               const matchingReturn = (order.returns || []).find((r: any) =>
@@ -421,7 +437,8 @@ class ReturnScanService {
                     error: refundRes.error,
                   });
                 }
-              } else {
+              } else if (!order.returns || order.returns.length === 0) {
+                // Only a true forward courier RTO (no customer returns raised) triggers full-order RTO refund
                 const refundRes = await orderService.processRtoRefund(order.id);
                 if (refundRes.success) {
                   result.prepaidRefunded++;
@@ -431,6 +448,12 @@ class ReturnScanService {
                     refundId: refundRes.refundId,
                   });
                 }
+              } else {
+                logger.warn('Prepaid return scan could not match an unrefunded customer return record', {
+                  orderId: order.id,
+                  orderName: order.shopifyOrderName,
+                  tracking,
+                });
               }
             } catch (refErr: any) {
               logger.error('Failed to process automatic refund for prepaid return order', {

@@ -228,11 +228,12 @@ export function Accounts() {
   const tiles: Array<{ label: string; value: string | number; tone: string }> = stateData
     ? [
         { label: 'Orders placed', value: stateData.totals.totalOrders, tone: 'var(--ink)' },
+        { label: 'Opening balance (B/F)', value: formatMoney(stateData.totals.openingBalance || 0), tone: '#64748b' },
         { label: 'Gross sales in period', value: formatMoney(stateData.totals.grossSales), tone: '#1e293b' },
         { label: 'Returns deducted in period', value: `-${formatMoney(stateData.totals.returnsDeducted)}`, tone: '#dc2626' },
-        { label: 'Net sales (sales - returns)', value: formatMoney(stateData.totals.netSales), tone: '#0f766e' },
+        { label: 'Net period sales', value: formatMoney(stateData.totals.netSales), tone: '#0f766e' },
         { label: 'Received in bank', value: formatMoney(stateData.totals.paymentReceived), tone: '#1d4ed8' },
-        { label: 'Net outstanding balance', value: formatMoney(stateData.totals.outstanding), tone: stateData.totals.outstanding > 0 ? '#b91c1c' : '#15803d' },
+        { label: 'Closing balance (C/F)', value: formatMoney(stateData.totals.closingBalance !== undefined ? stateData.totals.closingBalance : stateData.totals.outstanding), tone: (stateData.totals.closingBalance !== undefined ? stateData.totals.closingBalance : stateData.totals.outstanding) > 0 ? '#b91c1c' : '#15803d' },
       ]
     : data
       ? [
@@ -248,7 +249,7 @@ export function Accounts() {
       <PageIntro
         eyebrow="Logistics & Finance"
         title="Payments & Accounts (Tally ERP)"
-        description="State-wise monthly sales, returns deductions, bank settlement tracking, and automated 10th-of-month Tally ERP closing reports."
+        description="State-wise monthly sales, returns deductions, bank settlement tracking, and automated 10th-of-month Tally ERP closing reports with carry-forward ledger."
         action={
           <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
             <FormField label="Accounting month">
@@ -256,7 +257,7 @@ export function Accounts() {
             </FormField>
             <Button className="button-primary" loading={download.isPending} onClick={() => download.mutate()}>
               <Icon name="download" size={14} />
-              Download Tally Excel
+              Download Tally Excel (8 Sheets)
             </Button>
             <Button className="button-secondary" loading={email.isPending} onClick={() => email.mutate()}>
               <Icon name="mail" size={14} />
@@ -271,11 +272,11 @@ export function Accounts() {
 
       {/* KPI Header Tiles */}
       {tiles.length > 0 && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '16px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '12px', marginBottom: '16px' }}>
           {tiles.map((tile) => (
             <div key={tile.label} style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '10px', padding: '14px 16px' }}>
               <span style={{ fontSize: '11px', color: 'var(--muted)', fontWeight: 700, textTransform: 'uppercase' }}>{tile.label}</span>
-              <strong className="tabular-nums" style={{ display: 'block', fontSize: '20px', color: tile.tone, fontWeight: 800, marginTop: '4px' }}>
+              <strong className="tabular-nums" style={{ display: 'block', fontSize: '19px', color: tile.tone, fontWeight: 800, marginTop: '4px' }}>
                 {tile.value}
               </strong>
             </div>
@@ -287,7 +288,7 @@ export function Accounts() {
       {stateData && (
         <Panel className="table-panel" style={{ marginBottom: '20px', border: '1px solid var(--accent, #3b82f6)' }}>
           <PanelHeading
-            eyebrow="Tally ERP Ledger Matrix"
+            eyebrow="Tally ERP Ledger Matrix with Carry Forward"
             title={`State-Wise Monthly Sales, Returns & Settlement (${stateData.label})`}
             action={
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -306,11 +307,11 @@ export function Accounts() {
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
               <span style={{ fontWeight: 700, color: 'var(--ink)' }}>Formula:</span>
               <code style={{ background: 'var(--panel)', padding: '2px 6px', borderRadius: '4px', border: '1px solid var(--line)', fontWeight: 600 }}>
-                State Monthly Sales - Returns Deducted - Payment Received = Net Outstanding
+                Opening Balance (B/F) + Gross Sales - Returns Deducted - Payment Received = Closing Balance (C/F)
               </code>
             </div>
             <div style={{ fontSize: '12px', color: 'var(--muted)' }}>
-              <strong>Tally Cutoff Rule:</strong> Returns processed in {stateData.label} are deducted from this month&rsquo;s sales. Orders placed in {stateData.label} returned after the month-end are deducted under the subsequent month&rsquo;s books.
+              <strong>Tally Carry Forward & Cutoff Rule:</strong> Prior month closing balances carry forward automatically as current month opening balance. Returns processed in {stateData.label} are deducted from current month sales. Orders placed in {stateData.label} returned after the month-end are deducted under subsequent month&rsquo;s books.
             </div>
             <div style={{ display: 'flex', gap: '16px', marginTop: '4px', fontSize: '12px', flexWrap: 'wrap' }}>
               <span>Bank Payments by Rail:</span>
@@ -326,12 +327,14 @@ export function Accounts() {
               <thead>
                 <tr>
                   <th>State</th>
+                  <th style={{ textAlign: 'center' }}>GST POS</th>
                   <th style={{ textAlign: 'center' }}>Orders</th>
+                  <th style={{ textAlign: 'right' }}>Opening (B/F) (₹)</th>
                   <th style={{ textAlign: 'right' }}>Gross Sales (₹)</th>
                   <th style={{ textAlign: 'right' }}>Returns Deducted (₹)</th>
                   <th style={{ textAlign: 'right' }}>Net Sales (₹)</th>
                   <th style={{ textAlign: 'right' }}>Payment Received (₹)</th>
-                  <th style={{ textAlign: 'right' }}>Outstanding (₹)</th>
+                  <th style={{ textAlign: 'right' }}>Closing (C/F) (₹)</th>
                   <th style={{ textAlign: 'right' }}>Delhivery</th>
                   <th style={{ textAlign: 'right' }}>EaseBuzz</th>
                   <th style={{ textAlign: 'right' }}>PhonePe</th>
@@ -340,43 +343,50 @@ export function Accounts() {
                 </tr>
               </thead>
               <tbody>
-                {stateData.states.map((s) => (
-                  <tr key={s.state}>
-                    <td><strong>{s.state}</strong></td>
-                    <td style={{ textAlign: 'center' }}>{s.orderCount}</td>
-                    <td className="amount-cell">{formatMoney(s.grossSales)}</td>
-                    <td className="amount-cell" style={{ color: s.returnsDeducted > 0 ? '#dc2626' : 'inherit' }}>
-                      {s.returnsDeducted > 0 ? `-${formatMoney(s.returnsDeducted)}` : '₹0.00'}
-                    </td>
-                    <td className="amount-cell" style={{ fontWeight: 700 }}>{formatMoney(s.netSales)}</td>
-                    <td className="amount-cell" style={{ color: '#16a34a' }}>{formatMoney(s.paymentReceived)}</td>
-                    <td className="amount-cell" style={{ fontWeight: 700, color: s.outstanding > 0 ? '#b91c1c' : '#15803d' }}>
-                      {formatMoney(s.outstanding)}
-                    </td>
-                    <td className="amount-cell" style={{ fontSize: '12px' }}>{s.delhivery ? formatMoney(s.delhivery) : '—'}</td>
-                    <td className="amount-cell" style={{ fontSize: '12px' }}>{s.easebuzz ? formatMoney(s.easebuzz) : '—'}</td>
-                    <td className="amount-cell" style={{ fontSize: '12px' }}>{s.phonepe ? formatMoney(s.phonepe) : '—'}</td>
-                    <td className="amount-cell" style={{ fontSize: '12px' }}>{s.velocity ? formatMoney(s.velocity) : '—'}</td>
-                    <td style={{ fontSize: '12px' }}>
-                      {s.outstanding <= 0.05 ? (
-                        <span style={{ color: '#15803d', fontWeight: 600 }}>Settled</span>
-                      ) : (
-                        <span style={{ color: '#b91c1c' }}>Pending</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                {stateData.states.map((s) => {
+                  const closing = s.closingBalance !== undefined ? s.closingBalance : s.outstanding
+                  return (
+                    <tr key={s.state}>
+                      <td><strong>{s.state}</strong></td>
+                      <td style={{ textAlign: 'center', fontSize: '12px', color: 'var(--muted)' }}>{s.gstStateCode || '—'}</td>
+                      <td style={{ textAlign: 'center' }}>{s.orderCount}</td>
+                      <td className="amount-cell" style={{ color: 'var(--muted)' }}>{formatMoney(s.openingBalance || 0)}</td>
+                      <td className="amount-cell">{formatMoney(s.grossSales)}</td>
+                      <td className="amount-cell" style={{ color: s.returnsDeducted > 0 ? '#dc2626' : 'inherit' }}>
+                        {s.returnsDeducted > 0 ? `-${formatMoney(s.returnsDeducted)}` : '₹0.00'}
+                      </td>
+                      <td className="amount-cell" style={{ fontWeight: 700 }}>{formatMoney(s.netSales)}</td>
+                      <td className="amount-cell" style={{ color: '#16a34a' }}>{formatMoney(s.paymentReceived)}</td>
+                      <td className="amount-cell" style={{ fontWeight: 700, color: closing > 0 ? '#b91c1c' : '#15803d' }}>
+                        {formatMoney(closing)}
+                      </td>
+                      <td className="amount-cell" style={{ fontSize: '12px' }}>{s.delhivery ? formatMoney(s.delhivery) : '—'}</td>
+                      <td className="amount-cell" style={{ fontSize: '12px' }}>{s.easebuzz ? formatMoney(s.easebuzz) : '—'}</td>
+                      <td className="amount-cell" style={{ fontSize: '12px' }}>{s.phonepe ? formatMoney(s.phonepe) : '—'}</td>
+                      <td className="amount-cell" style={{ fontSize: '12px' }}>{s.velocity ? formatMoney(s.velocity) : '—'}</td>
+                      <td style={{ fontSize: '12px' }}>
+                        {Math.abs(closing) <= 0.05 ? (
+                          <span style={{ color: '#15803d', fontWeight: 600 }}>Settled</span>
+                        ) : (
+                          <span style={{ color: '#b91c1c' }}>Carried Fwd</span>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
               <tfoot>
                 <tr style={{ background: 'var(--panel)', fontWeight: 800, borderTop: '2px solid var(--line)' }}>
                   <td>TOTAL (NATIONAL)</td>
+                  <td style={{ textAlign: 'center' }}>ALL</td>
                   <td style={{ textAlign: 'center' }}>{stateData.totals.totalOrders}</td>
+                  <td className="amount-cell" style={{ color: 'var(--muted)' }}>{formatMoney(stateData.totals.openingBalance || 0)}</td>
                   <td className="amount-cell">{formatMoney(stateData.totals.grossSales)}</td>
                   <td className="amount-cell" style={{ color: '#dc2626' }}>-{formatMoney(stateData.totals.returnsDeducted)}</td>
                   <td className="amount-cell">{formatMoney(stateData.totals.netSales)}</td>
                   <td className="amount-cell" style={{ color: '#16a34a' }}>{formatMoney(stateData.totals.paymentReceived)}</td>
-                  <td className="amount-cell" style={{ color: stateData.totals.outstanding > 0 ? '#b91c1c' : '#15803d' }}>
-                    {formatMoney(stateData.totals.outstanding)}
+                  <td className="amount-cell" style={{ color: (stateData.totals.closingBalance !== undefined ? stateData.totals.closingBalance : stateData.totals.outstanding) > 0 ? '#b91c1c' : '#15803d' }}>
+                    {formatMoney(stateData.totals.closingBalance !== undefined ? stateData.totals.closingBalance : stateData.totals.outstanding)}
                   </td>
                   <td className="amount-cell">{formatMoney(stateData.totals.delhivery)}</td>
                   <td className="amount-cell">{formatMoney(stateData.totals.easebuzz)}</td>

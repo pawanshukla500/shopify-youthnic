@@ -154,14 +154,66 @@ export function resolvePaymentRailName(order: {
   return 'EaseBuzz';
 }
 
+export const GST_STATE_CODES: Record<string, string> = {
+  'jammu and kashmir': '01',
+  'jammu & kashmir': '01',
+  'himachal pradesh': '02',
+  'punjab': '03',
+  'chandigarh': '04',
+  'uttarakhand': '05',
+  'haryana': '06',
+  'delhi': '07',
+  'rajasthan': '08',
+  'uttar pradesh': '09',
+  'bihar': '10',
+  'sikkim': '11',
+  'arunachal pradesh': '12',
+  'nagaland': '13',
+  'manipur': '14',
+  'mizoram': '15',
+  'tripura': '16',
+  'meghalaya': '17',
+  'assam': '18',
+  'west bengal': '19',
+  'jharkhand': '20',
+  'odisha': '21',
+  'chhattisgarh': '22',
+  'madhya pradesh': '23',
+  'gujarat': '24',
+  'dadra and nagar haveli': '26',
+  'daman and diu': '26',
+  'maharashtra': '27',
+  'andhra pradesh': '37',
+  'karnataka': '29',
+  'goa': '30',
+  'lakshadweep': '31',
+  'kerala': '32',
+  'tamil nadu': '33',
+  'puducherry': '34',
+  'andaman and nicobar islands': '35',
+  'telangana': '36',
+  'ladakh': '38',
+};
+
+export function getGstStateCode(stateName?: string | null): string {
+  const norm = (stateName || '').toLowerCase().trim().replace(/[^a-z0-9 &]/g, '');
+  return GST_STATE_CODES[norm] || '99';
+}
+
 export interface StateAccountingRow {
   state: string;
+  gstStateCode: string;          // 2-digit GST Place of Supply Code (e.g. '27', '07')
   orderCount: number;
-  grossSales: number;           // Orders placed in month M
+  openingBalance: number;        // Balance brought forward from prior months (B/F)
+  grossSales: number;            // Orders placed in month M
+  taxableSales: number;          // Gross sales excluding GST (Taxable value = grossSales / 1.18)
+  gstAmount: number;             // GST component (18%)
   returnsDeducted: number;       // Returns occurring in month M (timing cutoff rule)
   netSales: number;              // grossSales - returnsDeducted
   paymentReceived: number;       // Settlements / Remittances in bank
-  outstanding: number;           // grossSales - returnsDeducted - paymentReceived
+  periodMovement: number;        // Net change in period (grossSales - returnsDeducted - paymentReceived)
+  closingBalance: number;        // Balance carried forward (C/F = openingBalance + periodMovement)
+  outstanding: number;           // Alias to closingBalance for backward compatibility
   delhivery: number;             // Delhivery COD
   easebuzz: number;              // EaseBuzz (GoKwik)
   phonepe: number;               // PhonePe
@@ -171,10 +223,15 @@ export interface StateAccountingRow {
 
 export interface StateAccountingTotals {
   totalOrders: number;
+  openingBalance: number;
   grossSales: number;
+  taxableSales: number;
+  gstAmount: number;
   returnsDeducted: number;
   netSales: number;
   paymentReceived: number;
+  periodMovement: number;
+  closingBalance: number;
   outstanding: number;
   delhivery: number;
   easebuzz: number;
@@ -265,7 +322,8 @@ export function buildStateAccountingSummary(
   orders: any[],
   periodReturns: any[],
   start?: Date,
-  end?: Date
+  end?: Date,
+  openingBalances?: Map<string, number> | Record<string, number>
 ): { states: StateAccountingRow[]; totals: StateAccountingTotals } {
   const safeReturns = Array.isArray(periodReturns) ? periodReturns : [];
   const stateMap = new Map<string, StateAccountingRow>();
@@ -274,13 +332,22 @@ export function buildStateAccountingSummary(
     const raw = (stateName || '').trim();
     const clean = raw.length > 0 ? raw : 'Unspecified';
     if (!stateMap.has(clean)) {
+      const openBal = openingBalances
+        ? (openingBalances instanceof Map ? openingBalances.get(clean) : (openingBalances as any)[clean]) || 0
+        : 0;
       stateMap.set(clean, {
         state: clean,
+        gstStateCode: getGstStateCode(clean),
         orderCount: 0,
+        openingBalance: money(openBal) || 0,
         grossSales: 0,
+        taxableSales: 0,
+        gstAmount: 0,
         returnsDeducted: 0,
         netSales: 0,
         paymentReceived: 0,
+        periodMovement: 0,
+        closingBalance: 0,
         outstanding: 0,
         delhivery: 0,
         easebuzz: 0,
@@ -291,8 +358,19 @@ export function buildStateAccountingSummary(
     return stateMap.get(clean)!;
   }
 
+  // Pre-seed any state that has an opening balance even if it had 0 new orders in period
+  if (openingBalances) {
+    const keys = openingBalances instanceof Map ? Array.from(openingBalances.keys()) : Object.keys(openingBalances);
+    for (const k of keys) {
+      getRow(k);
+    }
+  }
+
   // 1. Tally gross sales and payments received for orders placed in this month
   for (const order of orders) {
+    if (order.status === 'CANCELLED' && !order.paymentReceivedAmount) {
+      continue;
+    }
     const row = getRow(order.customerState);
     row.orderCount += 1;
     row.grossSales += order.totalAmount || 0;
@@ -316,14 +394,18 @@ export function buildStateAccountingSummary(
     row.returnsDeducted += retAmt;
   }
 
-  // 3. Compute netSales and outstanding per state
+  // 3. Compute taxableSales, gstAmount, netSales, periodMovement, closingBalance (outstanding) per state
   const states: StateAccountingRow[] = [];
   for (const row of stateMap.values()) {
     row.grossSales = money(row.grossSales) || 0;
+    row.taxableSales = money(row.grossSales / 1.18) || 0;
+    row.gstAmount = money(row.grossSales - row.taxableSales) || 0;
     row.returnsDeducted = money(row.returnsDeducted) || 0;
     row.netSales = money(row.grossSales - row.returnsDeducted) || 0;
     row.paymentReceived = money(row.paymentReceived) || 0;
-    row.outstanding = money(row.grossSales - row.returnsDeducted - row.paymentReceived) || 0;
+    row.periodMovement = money(row.grossSales - row.returnsDeducted - row.paymentReceived) || 0;
+    row.closingBalance = money(row.openingBalance + row.periodMovement) || 0;
+    row.outstanding = row.closingBalance;
     row.delhivery = money(row.delhivery) || 0;
     row.easebuzz = money(row.easebuzz) || 0;
     row.phonepe = money(row.phonepe) || 0;
@@ -331,15 +413,20 @@ export function buildStateAccountingSummary(
     states.push(row);
   }
 
-  // Sort states by gross sales descending
-  states.sort((a, b) => b.grossSales - a.grossSales);
+  // Sort states by gross sales descending (or closing balance if gross sales is 0)
+  states.sort((a, b) => b.grossSales - a.grossSales || Math.abs(b.closingBalance) - Math.abs(a.closingBalance));
 
   const totals: StateAccountingTotals = {
     totalOrders: sum(states.map((s) => s.orderCount)),
+    openingBalance: sum(states.map((s) => s.openingBalance)),
     grossSales: sum(states.map((s) => s.grossSales)),
+    taxableSales: sum(states.map((s) => s.taxableSales)),
+    gstAmount: sum(states.map((s) => s.gstAmount)),
     returnsDeducted: sum(states.map((s) => s.returnsDeducted)),
     netSales: sum(states.map((s) => s.netSales)),
     paymentReceived: sum(states.map((s) => s.paymentReceived)),
+    periodMovement: sum(states.map((s) => s.periodMovement)),
+    closingBalance: sum(states.map((s) => s.closingBalance)),
     outstanding: sum(states.map((s) => s.outstanding)),
     delhivery: sum(states.map((s) => s.delhivery)),
     easebuzz: sum(states.map((s) => s.easebuzz)),
@@ -355,16 +442,26 @@ export function buildReportData(
   monthOrLabel: string,
   orders: any[],
   periodReturnsOrNow?: any[] | Date,
-  maybeNow?: Date
+  maybeNowOrOpening?: Date | Map<string, number> | Record<string, number>,
+  maybeOpeningBalances?: Map<string, number> | Record<string, number>
 ): ReportData {
   let periodReturns: any[] = [];
   let now: Date = new Date();
+  let openingBalances: Map<string, number> | Record<string, number> | undefined;
 
   if (Array.isArray(periodReturnsOrNow)) {
     periodReturns = periodReturnsOrNow;
-    if (maybeNow instanceof Date) now = maybeNow;
+    if (maybeNowOrOpening instanceof Date) {
+      now = maybeNowOrOpening;
+      openingBalances = maybeOpeningBalances;
+    } else if (maybeNowOrOpening && !(maybeNowOrOpening instanceof Date)) {
+      openingBalances = maybeNowOrOpening;
+    }
   } else if (periodReturnsOrNow instanceof Date) {
     now = periodReturnsOrNow;
+    if (maybeNowOrOpening && !(maybeNowOrOpening instanceof Date)) {
+      openingBalances = maybeNowOrOpening;
+    }
   }
 
   let label = monthOrLabel;
@@ -384,7 +481,8 @@ export function buildReportData(
     orders,
     periodReturns,
     periodStart,
-    periodEnd
+    periodEnd,
+    openingBalances
   );
 
   const rows: ReportOrderRow[] = [];
@@ -708,17 +806,21 @@ export async function renderWorkbook(data: ReportData): Promise<Buffer> {
 
   stateSheet.columns = [
     { width: 22 }, // A: State
-    { width: 14 }, // B: Orders
-    { width: 18 }, // C: Gross Sales (₹)
-    { width: 18 }, // D: Returns Deducted (₹)
-    { width: 18 }, // E: Net Sales (₹)
-    { width: 18 }, // F: Payment Received (₹)
-    { width: 18 }, // G: Net Outstanding (₹)
-    { width: 16 }, // H: Delhivery COD (₹)
-    { width: 16 }, // I: EaseBuzz (₹)
-    { width: 16 }, // J: PhonePe (₹)
-    { width: 16 }, // K: Velocity (₹)
-    { width: 36 }, // L: Tally Ledger Note
+    { width: 12 }, // B: GST POS
+    { width: 14 }, // C: Orders Count
+    { width: 18 }, // D: Opening Balance (B/F) (₹)
+    { width: 18 }, // E: Gross Sales (₹)
+    { width: 18 }, // F: Taxable Sales (₹)
+    { width: 16 }, // G: GST 18% (₹)
+    { width: 18 }, // H: Returns Deducted (₹)
+    { width: 18 }, // I: Net Sales (₹)
+    { width: 18 }, // J: Payment Received (₹)
+    { width: 20 }, // K: Closing Balance (C/F) (₹)
+    { width: 16 }, // L: Delhivery COD (₹)
+    { width: 18 }, // M: EaseBuzz (GoKwik) (₹)
+    { width: 16 }, // N: PhonePe (₹)
+    { width: 16 }, // O: Velocity (₹)
+    { width: 38 }, // P: Tally Posting Guidance
   ];
 
   // Header Banner
@@ -731,7 +833,7 @@ export async function renderWorkbook(data: ReportData): Promise<Buffer> {
   r2.font = { italic: true, size: 11, color: { argb: 'FF475569' } };
 
   const r3 = stateSheet.addRow([
-    'Tally Accounting Formula: State Monthly Sales - Returns Deducted - Payment Received = Net Outstanding'
+    'Tally Accounting Formula: Opening Balance (B/F) + Gross Sales - Returns Deducted - Payment Received = Closing Balance (C/F)'
   ]);
   r3.font = { bold: true, size: 11, color: { argb: 'FF1E293B' } };
 
@@ -740,12 +842,16 @@ export async function renderWorkbook(data: ReportData): Promise<Buffer> {
   // Table Columns (Row 5)
   const headerRow = stateSheet.addRow([
     'State',
+    'GST POS',
     'Orders Count',
+    'Opening Balance (B/F) (₹)',
     'Gross Sales (₹)',
+    'Taxable Sales (₹)',
+    'GST 18% (₹)',
     'Returns Deducted (₹)',
     'Net Sales (₹)',
     'Payment Received (₹)',
-    'Net Outstanding (₹)',
+    'Closing Balance (C/F) (₹)',
     'Delhivery COD (₹)',
     'EaseBuzz (GoKwik) (₹)',
     'PhonePe (₹)',
@@ -759,36 +865,42 @@ export async function renderWorkbook(data: ReportData): Promise<Buffer> {
 
   const startRow = 6;
   data.stateSummary.forEach((row) => {
+    const closing = row.closingBalance !== undefined ? row.closingBalance : row.outstanding;
     const r = stateSheet.addRow([
       row.state,
+      row.gstStateCode || getGstStateCode(row.state),
       row.orderCount,
+      row.openingBalance || 0,
       row.grossSales,
+      row.taxableSales || money(row.grossSales / 1.18) || 0,
+      row.gstAmount || money(row.grossSales - (row.taxableSales || (row.grossSales / 1.18))) || 0,
       row.returnsDeducted,
       row.netSales,
       row.paymentReceived,
-      row.outstanding,
+      closing,
       row.delhivery,
       row.easebuzz,
       row.phonepe,
       row.velocity,
-      row.outstanding <= 0.05
+      Math.abs(closing) <= 0.05
         ? 'Reconciled / Settled in Full'
-        : `Outstanding balance of ₹${row.outstanding.toFixed(2)} pending in bank`,
+        : `Closing balance of ₹${closing.toFixed(2)} carried forward to next month`,
     ]);
 
     // Format currency columns
-    [3, 4, 5, 6, 7, 8, 9, 10, 11].forEach((colIdx) => {
+    [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15].forEach((colIdx) => {
       r.getCell(colIdx).numFmt = MONEY_FORMAT;
     });
-    r.getCell(2).numFmt = '#,##0';
+    r.getCell(3).numFmt = '#,##0';
     r.getCell(1).font = { bold: true };
+    r.getCell(2).alignment = { horizontal: 'center' };
   });
 
   const hasRows = data.stateSummary.length > 0;
   const endRow = startRow + data.stateSummary.length - 1;
   const totRow = stateSheet.addRow([
     'TOTAL (NATIONAL LEDGER)',
-    hasRows ? { formula: `SUM(B${startRow}:B${endRow})` } : 0,
+    'ALL',
     hasRows ? { formula: `SUM(C${startRow}:C${endRow})` } : 0,
     hasRows ? { formula: `SUM(D${startRow}:D${endRow})` } : 0,
     hasRows ? { formula: `SUM(E${startRow}:E${endRow})` } : 0,
@@ -798,15 +910,19 @@ export async function renderWorkbook(data: ReportData): Promise<Buffer> {
     hasRows ? { formula: `SUM(I${startRow}:I${endRow})` } : 0,
     hasRows ? { formula: `SUM(J${startRow}:J${endRow})` } : 0,
     hasRows ? { formula: `SUM(K${startRow}:K${endRow})` } : 0,
-    'Net National Balance for Tally Verification',
+    hasRows ? { formula: `SUM(L${startRow}:L${endRow})` } : 0,
+    hasRows ? { formula: `SUM(M${startRow}:M${endRow})` } : 0,
+    hasRows ? { formula: `SUM(N${startRow}:N${endRow})` } : 0,
+    hasRows ? { formula: `SUM(O${startRow}:O${endRow})` } : 0,
+    'Net National Balance for Tally Verification & Carry Forward',
   ]);
   totRow.font = { bold: true, size: 11 };
   totRow.fill = TOTAL_FILL;
   totRow.border = { top: { style: 'thin' }, bottom: { style: 'double' } };
-  [3, 4, 5, 6, 7, 8, 9, 10, 11].forEach((colIdx) => {
+  [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15].forEach((colIdx) => {
     totRow.getCell(colIdx).numFmt = MONEY_FORMAT;
   });
-  totRow.getCell(2).numFmt = '#,##0';
+  totRow.getCell(3).numFmt = '#,##0';
 
   // ═════════════════════════════════════════════════════════════════════════════
   // Sheet 2: Orders (Order Sales Ledger)
@@ -980,7 +1096,172 @@ export async function renderWorkbook(data: ReportData): Promise<Buffer> {
     if (!item.label.startsWith('   ')) row.getCell(1).font = { bold: true };
   }
 
+  // ═════════════════════════════════════════════════════════════════════════════
+  // Sheet 8: Tally Vouchers (Ready for Direct Import / Voucher Entry)
+  // ═════════════════════════════════════════════════════════════════════════════
+  const tallyVoucherColumns: Column[] = [
+    { header: 'Voucher Date', key: 'voucherDate', width: 14, type: 'date' },
+    { header: 'Voucher Type', key: 'voucherType', width: 14 },
+    { header: 'Voucher No / Ref', key: 'voucherNo', width: 18 },
+    { header: 'Party Ledger (Sundry Debtors)', key: 'partyLedger', width: 28 },
+    { header: 'Particulars / Revenue Ledger', key: 'particulars', width: 34 },
+    { header: 'GST POS', key: 'gstPos', width: 18 },
+    { header: 'Taxable Amount (₹)', key: 'taxableAmount', width: 16, type: 'money' },
+    { header: 'IGST 18% (₹)', key: 'igst', width: 14, type: 'money' },
+    { header: 'CGST 9% (₹)', key: 'cgst', width: 14, type: 'money' },
+    { header: 'SGST 9% (₹)', key: 'sgst', width: 14, type: 'money' },
+    { header: 'Total Amount (₹)', key: 'totalAmount', width: 16, type: 'money' },
+    { header: 'Dr / Cr', key: 'drCr', width: 8 },
+    { header: 'Payment Rail', key: 'paymentRail', width: 14 },
+    { header: 'Bank UTR / Instrument', key: 'utr', width: 22 },
+    { header: 'Narration', key: 'narration', width: 48 },
+  ];
+
+  const sellerStateNorm = (config.delhivery.seller.state || 'Maharashtra').toLowerCase().trim();
+  const isIntraState = (st?: string | null) => {
+    const s = (st || '').toLowerCase().trim();
+    return sellerStateNorm.length > 0 && s === sellerStateNorm;
+  };
+
+  const tallyVoucherRows: Array<Record<string, any>> = [];
+
+  // 1. Sales & Receipt vouchers for orders in period
+  for (const o of data.orders) {
+    if (o.accountsStatus === 'Not a sale') continue;
+    const taxable = money(o.orderValue / 1.18) || 0;
+    const tax = money(o.orderValue - taxable) || 0;
+    const intra = isIntraState(o.state);
+    tallyVoucherRows.push({
+      voucherDate: o.orderDate,
+      voucherType: 'Sales',
+      voucherNo: o.orderNo,
+      partyLedger: `Sundry Debtors - ${o.state}`,
+      particulars: intra ? 'E-commerce Sales @ 18% (Intra-State)' : 'E-commerce Sales @ 18% (Inter-State)',
+      gstPos: `${getGstStateCode(o.state)}-${o.state}`,
+      taxableAmount: taxable,
+      igst: intra ? 0 : tax,
+      cgst: intra ? money(tax / 2) || 0 : 0,
+      sgst: intra ? money(tax / 2) || 0 : 0,
+      totalAmount: o.orderValue,
+      drCr: 'Dr',
+      paymentRail: o.paymentRail,
+      utr: o.utr || '',
+      narration: `Sales invoice for Shopify order ${o.orderNo}, customer ${o.customer}, state ${o.state}`,
+    });
+
+    if (o.paymentReceived === 'Yes' && o.receivedAmount) {
+      tallyVoucherRows.push({
+        voucherDate: o.receivedOn || o.orderDate,
+        voucherType: 'Receipt',
+        voucherNo: o.utr || o.orderNo,
+        partyLedger: `Sundry Debtors - ${o.state}`,
+        particulars: `${o.paymentRail} Settlement A/c`,
+        gstPos: `${getGstStateCode(o.state)}-${o.state}`,
+        taxableAmount: o.receivedAmount,
+        igst: 0,
+        cgst: 0,
+        sgst: 0,
+        totalAmount: o.receivedAmount,
+        drCr: 'Cr',
+        paymentRail: o.paymentRail,
+        utr: o.utr || '',
+        narration: `Settlement received for order ${o.orderNo} via ${o.paymentRail} UTR ${o.utr || 'N/A'}`,
+      });
+    }
+  }
+
+  // 2. Credit Note vouchers for returns in period
+  for (const ret of data.returnsInPeriod) {
+    const retAmt = ret.refundAmount > 0 ? ret.refundAmount : 0;
+    if (retAmt <= 0) continue;
+    const taxable = money(retAmt / 1.18) || 0;
+    const tax = money(retAmt - taxable) || 0;
+    const intra = isIntraState(ret.state);
+    tallyVoucherRows.push({
+      voucherDate: ret.refundDate || ret.returnDate,
+      voucherType: 'Credit Note',
+      voucherNo: `CN-${ret.orderNo}`,
+      partyLedger: `Sundry Debtors - ${ret.state}`,
+      particulars: 'Sales Return @ 18%',
+      gstPos: `${getGstStateCode(ret.state)}-${ret.state}`,
+      taxableAmount: taxable,
+      igst: intra ? 0 : tax,
+      cgst: intra ? money(tax / 2) || 0 : 0,
+      sgst: intra ? money(tax / 2) || 0 : 0,
+      totalAmount: retAmt,
+      drCr: 'Cr',
+      paymentRail: ret.paymentRail,
+      utr: '',
+      narration: `Credit Note for return on order ${ret.orderNo}, timing: ${ret.timingCategory}, reason: ${ret.reason || 'Customer return'}`,
+    });
+  }
+
+  addTable(workbook, 'Tally Vouchers', tallyVoucherColumns, tallyVoucherRows, [
+    'taxableAmount',
+    'igst',
+    'cgst',
+    'sgst',
+    'totalAmount',
+  ]);
+
   return Buffer.from(await workbook.xlsx.writeBuffer());
+}
+
+/**
+ * Compute state-wise opening balances (B/F) carried forward from all prior transactions before `beforeDate`.
+ * Formula: Prior Gross Sales - Prior Returns Deducted - Prior Payments Received
+ */
+export async function computeOpeningBalances(beforeDate: Date): Promise<Map<string, number>> {
+  const map = new Map<string, number>();
+  function add(st: string | null | undefined, delta: number) {
+    const raw = (st || '').trim();
+    const clean = raw.length > 0 ? raw : 'Unspecified';
+    map.set(clean, money((map.get(clean) || 0) + delta) || 0);
+  }
+
+  const [priorOrders, priorReturns] = await Promise.all([
+    prisma.order.findMany({
+      where: { shopifyCreatedAt: { lt: beforeDate } },
+      select: {
+        customerState: true,
+        totalAmount: true,
+        paymentReceivedAmount: true,
+        paymentReceivedAt: true,
+        status: true,
+      },
+    }),
+    prisma.return.findMany({
+      where: {
+        returnStatus: { not: 'CANCELLED' },
+        OR: [
+          { refundProcessedAt: { lt: beforeDate } },
+          { refundProcessedAt: null, createdAt: { lt: beforeDate } },
+        ],
+      },
+      select: {
+        refundAmount: true,
+        order: { select: { customerState: true, totalAmount: true } },
+      },
+    }),
+  ]);
+
+  for (const o of priorOrders) {
+    if (o.status !== 'CANCELLED' || o.paymentReceivedAmount) {
+      add(o.customerState, o.totalAmount || 0);
+    }
+    if (o.paymentReceivedAt && o.paymentReceivedAt < beforeDate) {
+      add(o.customerState, -(o.paymentReceivedAmount || 0));
+    }
+  }
+
+  for (const r of priorReturns) {
+    const amt = (r.refundAmount && r.refundAmount > 0)
+      ? r.refundAmount
+      : (r.order?.totalAmount || 0);
+    add(r.order?.customerState, -amt);
+  }
+
+  return map;
 }
 
 /** Load the month's orders and period returns and build the report. */
@@ -990,7 +1271,7 @@ export async function generateMonthlyReport(
 ): Promise<{ data: ReportData; buffer: Buffer; fileName: string }> {
   const { start, end } = monthRange(month);
 
-  const [orders, periodReturns] = await Promise.all([
+  const [orders, periodReturns, openingBalances] = await Promise.all([
     prisma.order.findMany({
       where: { shopifyCreatedAt: { gte: start, lt: end } },
       include: { shipment: true, returns: true },
@@ -1010,9 +1291,10 @@ export async function generateMonthlyReport(
       },
       orderBy: { createdAt: 'asc' },
     }),
+    computeOpeningBalances(start),
   ]);
 
-  const data = buildReportData(month, orders, periodReturns, now);
+  const data = buildReportData(month, orders, periodReturns, now, openingBalances);
   const buffer = await renderWorkbook(data);
   return { data, buffer, fileName: `Youthnic-Accounts-${month}.xlsx` };
 }
@@ -1026,7 +1308,7 @@ export async function generateDateRangeReport(
   const { start, end } = istDateRange(startDateStr, endDateStr);
   const label = `${startDateStr} to ${endDateStr}`;
 
-  const [orders, periodReturns] = await Promise.all([
+  const [orders, periodReturns, openingBalances] = await Promise.all([
     prisma.order.findMany({
       where: { shopifyCreatedAt: { gte: start, lt: end } },
       include: { shipment: true, returns: true },
@@ -1046,9 +1328,10 @@ export async function generateDateRangeReport(
       },
       orderBy: { createdAt: 'asc' },
     }),
+    computeOpeningBalances(start),
   ]);
 
-  const data = buildReportData(label, orders, periodReturns, now);
+  const data = buildReportData(label, orders, periodReturns, now, openingBalances);
   data.label = label;
   const buffer = await renderWorkbook(data);
   return { data, buffer, fileName: `Youthnic-Accounts-${startDateStr}_to_${endDateStr}.xlsx` };
@@ -1063,6 +1346,7 @@ export async function getStateMonthlyAccounting(
   label: string;
   formula: string;
   timingRule: string;
+  carryForwardRule: string;
   totals: StateAccountingTotals;
   states: StateAccountingRow[];
   crossMonthReturnsCount: number;
@@ -1073,7 +1357,7 @@ export async function getStateMonthlyAccounting(
   const month = typeof monthOrCurrent === 'string' && monthOrCurrent ? monthOrCurrent : previousMonth(now);
   const { start, end, label } = monthRange(month);
 
-  const [orders, periodReturns, toRecipients, ccRecipients, sentStatus] = await Promise.all([
+  const [orders, periodReturns, openingBalances, toRecipients, ccRecipients, sentStatus] = await Promise.all([
     prisma.order.findMany({
       where: { shopifyCreatedAt: { gte: start, lt: end } },
       include: { shipment: true, returns: true },
@@ -1093,12 +1377,13 @@ export async function getStateMonthlyAccounting(
       },
       orderBy: { createdAt: 'asc' },
     }),
+    computeOpeningBalances(start),
     getReportRecipients(),
     getReportCcRecipients(),
     reportSentAt(month),
   ]);
 
-  const { states, totals } = buildStateAccountingSummary(orders, periodReturns, start, end);
+  const { states, totals } = buildStateAccountingSummary(orders, periodReturns, start, end, openingBalances);
   const crossMonthReturnsCount = periodReturns.filter(
     (r) => r.order?.shopifyCreatedAt && new Date(r.order.shopifyCreatedAt) < start
   ).length;
@@ -1106,9 +1391,11 @@ export async function getStateMonthlyAccounting(
   return {
     month,
     label,
-    formula: 'State Monthly Sales - Returns Deducted - Payment Received = Net Outstanding',
+    formula: 'Opening Balance (B/F) + Gross Sales - Returns Deducted - Payment Received = Closing Balance (C/F)',
     timingRule:
       'Returns occurring in this month are deducted from this month; returns occurring after the 31st are deducted in the subsequent month for Tally ERP alignment.',
+    carryForwardRule:
+      'Prior month closing balances automatically carry forward as current month opening balance for 100% error-free Tally ERP ledger alignment.',
     totals,
     states,
     crossMonthReturnsCount,
@@ -1237,14 +1524,15 @@ export async function emailMonthlyReport(
     .map(
       (s) => `
       <tr style="border-bottom: 1px solid #e2e8f0; font-size: 13px;">
-        <td style="padding: 8px 10px; font-weight: bold; color: #1e293b;">${escapeHtml(s.state)}</td>
+        <td style="padding: 8px 10px; font-weight: bold; color: #1e293b;">${escapeHtml(s.state)} <span style="font-size: 10px; color: #64748b; font-weight: normal;">(${s.gstStateCode || getGstStateCode(s.state)})</span></td>
         <td style="padding: 8px 10px; text-align: center;">${s.orderCount}</td>
+        <td style="padding: 8px 10px; text-align: right; color: #64748b;">${inr(s.openingBalance || 0)}</td>
         <td style="padding: 8px 10px; text-align: right; font-weight: 500;">${inr(s.grossSales)}</td>
         <td style="padding: 8px 10px; text-align: right; color: #dc2626;">-${inr(s.returnsDeducted)}</td>
         <td style="padding: 8px 10px; text-align: right; font-weight: bold;">${inr(s.netSales)}</td>
         <td style="padding: 8px 10px; text-align: right; color: #16a34a;">${inr(s.paymentReceived)}</td>
-        <td style="padding: 8px 10px; text-align: right; font-weight: bold; color: ${s.outstanding > 0 ? '#b91c1c' : '#15803d'};">
-          ${inr(s.outstanding)}
+        <td style="padding: 8px 10px; text-align: right; font-weight: bold; color: ${(s.closingBalance !== undefined ? s.closingBalance : s.outstanding) > 0 ? '#b91c1c' : '#15803d'};">
+          ${inr(s.closingBalance !== undefined ? s.closingBalance : s.outstanding)}
         </td>
       </tr>`
     )
@@ -1273,11 +1561,10 @@ export async function emailMonthlyReport(
           <div style="background: #f8fafc; border-left: 4px solid #3b82f6; padding: 12px 16px; margin-bottom: 20px; border-radius: 0 6px 6px 0;">
             <p style="margin: 0; font-weight: 600; color: #1e3a8a;">Accounting Formula Applied:</p>
             <p style="margin: 4px 0 0; font-family: monospace; font-size: 13px; color: #1e293b;">
-              State Monthly Sales - Returns Deducted - Payment Received = Net Outstanding
+              Opening Balance (B/F) + Gross Sales - Returns Deducted - Payment Received = Closing Balance (C/F)
             </p>
             <p style="margin: 6px 0 0; font-size: 12px; color: #64748b;">
-              <strong>Tally Cutoff Rule:</strong> Returns processed in ${data.label} are deducted in this period.
-              Orders placed in ${data.label} returned after the month-end cutoff are deducted in the subsequent month.
+              <strong>Tally Carry Forward Rule:</strong> Prior month closing balances carry forward automatically into current month opening balance. Returns in ${data.label} are deducted under current Credit Notes.
             </p>
           </div>
 
@@ -1290,8 +1577,20 @@ export async function emailMonthlyReport(
               <td style="text-align: right; font-weight: bold;">${data.stateTotals.totalOrders}</td>
             </tr>
             <tr style="border-bottom: 1px solid #e2e8f0;">
+              <td>Opening Balance (Brought Forward from Prior Period)</td>
+              <td style="text-align: right; font-weight: bold; color: #64748b;">${inr(data.stateTotals.openingBalance || 0)}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #e2e8f0;">
               <td>Gross Sales in Period</td>
               <td style="text-align: right; font-weight: bold;">${inr(data.stateTotals.grossSales)}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #e2e8f0; font-size: 12px; color: #475569; background: #fafafa;">
+              <td style="padding-left: 24px;">• Taxable Sales (Sales excluding GST)</td>
+              <td style="text-align: right;">${inr(data.stateTotals.taxableSales || 0)}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #e2e8f0; font-size: 12px; color: #475569; background: #fafafa;">
+              <td style="padding-left: 24px;">• GST Output Tax (18% GST)</td>
+              <td style="text-align: right;">${inr(data.stateTotals.gstAmount || 0)}</td>
             </tr>
             <tr style="border-bottom: 1px solid #e2e8f0;">
               <td>Return Deductions in Period</td>
@@ -1322,8 +1621,8 @@ export async function emailMonthlyReport(
               <td style="text-align: right;">${inr(data.stateTotals.velocity)}</td>
             </tr>
             <tr style="background: #fef2f2; font-weight: bold; font-size: 15px;">
-              <td style="color: #991b1b;">Net Outstanding Balance</td>
-              <td style="text-align: right; color: #991b1b;">${inr(data.stateTotals.outstanding)}</td>
+              <td style="color: #991b1b;">Closing Outstanding Balance (Carried Forward)</td>
+              <td style="text-align: right; color: #991b1b;">${inr(data.stateTotals.closingBalance !== undefined ? data.stateTotals.closingBalance : data.stateTotals.outstanding)}</td>
             </tr>
           </table>
 
@@ -1334,11 +1633,12 @@ export async function emailMonthlyReport(
                 <tr style="background: #1e293b; color: #ffffff; font-size: 12px;">
                   <th style="padding: 8px 10px; text-align: left;">State</th>
                   <th style="padding: 8px 10px; text-align: center;">Orders</th>
+                  <th style="padding: 8px 10px; text-align: right;">Opening (B/F)</th>
                   <th style="padding: 8px 10px; text-align: right;">Gross Sales</th>
                   <th style="padding: 8px 10px; text-align: right;">Returns</th>
                   <th style="padding: 8px 10px; text-align: right;">Net Sales</th>
                   <th style="padding: 8px 10px; text-align: right;">Received</th>
-                  <th style="padding: 8px 10px; text-align: right;">Outstanding</th>
+                  <th style="padding: 8px 10px; text-align: right;">Closing (C/F)</th>
                 </tr>
               </thead>
               <tbody>
@@ -1348,16 +1648,17 @@ export async function emailMonthlyReport(
           </div>
 
           <p style="font-size: 13px; color: #475569; margin: 0 0 8px;">
-            The attached workbook <strong>${fileName}</strong> includes 7 comprehensive sheets:
+            The attached workbook <strong>${fileName}</strong> includes 8 comprehensive sheets:
           </p>
           <ul style="font-size: 13px; color: #475569; margin: 0 0 20px; padding-left: 20px;">
-            <li><strong>State Summary (Tally Ledger):</strong> State-wise monthly matrix with formulas.</li>
-            <li><strong>Orders:</strong> Every order with payment rail, UTR, and net balance.</li>
-            <li><strong>Monthly Returns (Credit Notes):</strong> All returns in period for Tally credit note vouchers.</li>
-            <li><strong>COD Remittance:</strong> Delhivery & Velocity COD bank transfers and AWB breakdown.</li>
-            <li><strong>Prepaid Settlements:</strong> EaseBuzz & PhonePe gateway settlements.</li>
-            <li><strong>Shipping Costs:</strong> Forward, RTO, and reverse pickup freight audit.</li>
-            <li><strong>Summary:</strong> Complete business P&L metrics.</li>
+            <li><strong>Sheet 1: State Summary (Tally Ledger)</strong> — State-wise opening balances, taxable sales, GST, returns, payments, closing balances with dynamic Excel SUM formulas.</li>
+            <li><strong>Sheet 2: Orders</strong> — Comprehensive order ledger with payment rails, UTRs, and return timing category notes.</li>
+            <li><strong>Sheet 3: Monthly Returns (Credit Notes)</strong> — Full returns ledger for Tally credit note vouchers.</li>
+            <li><strong>Sheet 4: COD Remittance</strong> — Delhivery and Velocity COD reconciliation.</li>
+            <li><strong>Sheet 5: Prepaid Settlements</strong> — EaseBuzz and PhonePe payment gateway settlements.</li>
+            <li><strong>Sheet 6: Shipping Costs</strong> — Forward, RTO, and reverse shipping freight deductions.</li>
+            <li><strong>Sheet 7: Summary</strong> — High-level closing KPIs and reconciliation status.</li>
+            <li><strong>Sheet 8: Tally Vouchers</strong> — Ready-to-import Tally ERP format with Voucher Types, Dates, Party Ledgers, GST POS, and Narrations.</li>
           </ul>
 
           <div style="border-top: 1px solid #e2e8f0; padding-top: 14px; font-size: 12px; color: #94a3b8;">

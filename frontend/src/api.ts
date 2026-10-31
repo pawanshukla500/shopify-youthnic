@@ -1581,11 +1581,17 @@ export async function emailAccountsReport(month: string, recipients?: string, cc
 
 export interface StateAccountingRow {
   state: string
+  gstStateCode?: string
   orderCount: number
+  openingBalance?: number
   grossSales: number
+  taxableSales?: number
+  gstAmount?: number
   returnsDeducted: number
   netSales: number
   paymentReceived: number
+  periodMovement?: number
+  closingBalance?: number
   outstanding: number
   delhivery: number
   easebuzz: number
@@ -1596,10 +1602,15 @@ export interface StateAccountingRow {
 
 export interface StateAccountingTotals {
   totalOrders: number
+  openingBalance?: number
   grossSales: number
+  taxableSales?: number
+  gstAmount?: number
   returnsDeducted: number
   netSales: number
   paymentReceived: number
+  periodMovement?: number
+  closingBalance?: number
   outstanding: number
   delhivery: number
   easebuzz: number
@@ -1612,6 +1623,7 @@ export interface StateMonthlyAccountingData {
   label: string
   formula: string
   timingRule: string
+  carryForwardRule?: string
   totals: StateAccountingTotals
   states: StateAccountingRow[]
   crossMonthReturnsCount: number

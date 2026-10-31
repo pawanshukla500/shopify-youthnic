@@ -97,10 +97,17 @@ export function OrderMoneyCard({ order, onChanged }: { order: Order; onChanged: 
 
       <Row label="Payment in bank">
         {order.paymentReceivedAt ? (
-          <>
-            <strong>{order.paymentReceivedAmount == null ? 'Amount not recorded' : formatMoney(order.paymentReceivedAmount)}</strong> on {shortDate(order.paymentReceivedAt)}
-            <span className="money-muted"> · {SOURCE_LABELS[order.paymentReceivedSource || ''] || order.paymentReceivedSource}</span>
-          </>
+          <div>
+            <div>
+              <strong>{order.paymentReceivedAmount == null ? 'Amount not recorded' : formatMoney(order.paymentReceivedAmount)}</strong> on {shortDate(order.paymentReceivedAt)}
+              <span className="money-muted"> · {SOURCE_LABELS[order.paymentReceivedSource || ''] || order.paymentReceivedSource}</span>
+            </div>
+            {order.gatewayFee && order.totalAmount ? (
+              <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
+                Net credited after deducting gateway fee & GST (Gross {formatMoney(order.totalAmount)} − Fee {formatMoney(order.gatewayFee)})
+              </div>
+            ) : null}
+          </div>
         ) : (
           <span className="money-muted">
             Not yet. {order.paymentMethod === 'COD' ? 'Comes with the Delhivery COD remittance.' : 'Comes with the gateway settlement.'}
@@ -113,7 +120,12 @@ export function OrderMoneyCard({ order, onChanged }: { order: Order; onChanged: 
           {order.paymentReceivedRef && <span className="money-muted"> · ref {order.paymentReceivedRef}</span>}
         </Row>
       )}
-      {order.gatewayFee ? <Row label="Gateway fee">{formatMoney(order.gatewayFee)}</Row> : null}
+      {order.gatewayFee ? (
+        <Row label="Gateway fee">
+          <strong>{formatMoney(order.gatewayFee)}</strong>
+          <span className="money-muted"> · deducted at gateway (incl. 18% GST)</span>
+        </Row>
+      ) : null}
       {order.paymentMethod !== 'COD' && order.paymentReference && (
         <Row label="Customer payment ref">
           <code>{order.paymentReference}</code>

@@ -1,22 +1,55 @@
 import { useState, useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { getAnalyticsReport } from '../api'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { getAnalyticsReport, distributeAnalyticsReport, getDistributionHistory } from '../api'
 import { formatMoney } from '../lib'
 import { ErrorBox, Icon, LoadingState, PageIntro, Panel, PanelHeading, useDocumentTitle, useToast } from '../components/UI'
-import type { MonthlyReportItem, CourierReportItem, StateReportItem } from '../types'
+import type { CustomerAccountItem } from '../types'
 
-type ActiveTab = 'monthly' | 'courier' | 'state'
+type ActiveTab = 'monthly' | 'courier' | 'state' | 'accounts' | 'distribution'
 
 export function Analytics() {
   useDocumentTitle('Reports & Analytics')
   const toast = useToast()
+  const queryClient = useQueryClient()
   const [activeTab, setActiveTab] = useState<ActiveTab>('monthly')
   const [stateSearch, setStateSearch] = useState('')
+
+  // Account Strategist Filters
+  const [accountSearch, setAccountSearch] = useState('')
+  const [accountSegmentFilter, setAccountSegmentFilter] = useState<string>('ALL')
+
+  // Report Distribution Form State
+  const [distRecipient, setDistRecipient] = useState('accounts@youthnic.com')
+  const [distRecipientName, setDistRecipientName] = useState('Accounts & Finance')
+  const [distReportType, setDistReportType] = useState<
+    'EXECUTIVE_PL_DIGEST' | 'CUSTOMER_ACCOUNTS_DIGEST' | 'TERRITORY_LOGISTICS_DIGEST'
+  >('EXECUTIVE_PL_DIGEST')
+  const [distNotes, setDistNotes] = useState('')
+  const [previewLogHtml, setPreviewLogHtml] = useState<string | null>(null)
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ['analytics-report'],
     queryFn: getAnalyticsReport,
     staleTime: 60_000,
+  })
+
+  const { data: historyData, refetch: refetchHistory } = useQuery({
+    queryKey: ['distribution-history'],
+    queryFn: () => getDistributionHistory(20),
+    enabled: activeTab === 'distribution',
+    staleTime: 15_000,
+  })
+
+  const distributeMutation = useMutation({
+    mutationFn: distributeAnalyticsReport,
+    onSuccess: (res) => {
+      toast.toast('success', res.message || 'Report distributed successfully!')
+      queryClient.invalidateQueries({ queryKey: ['distribution-history'] })
+      queryClient.invalidateQueries({ queryKey: ['analytics-report'] })
+    },
+    onError: (err: any) => {
+      toast.toast('error', err.message || 'Failed to distribute report')
+    },
   })
 
   // Filtered states for Geographic tab
@@ -30,6 +63,30 @@ export function Analytics() {
         s.topCities.some((c) => c.toLowerCase().includes(q))
     )
   }, [data?.stateReport, stateSearch])
+
+  // Filtered accounts for Account Strategist tab
+  const filteredAccounts = useMemo(() => {
+    const list = data?.accountStrategist?.topAccounts ?? []
+    let result = list
+
+    if (accountSegmentFilter !== 'ALL') {
+      result = result.filter((a) => a.segment === accountSegmentFilter)
+    }
+
+    if (accountSearch.trim()) {
+      const q = accountSearch.toLowerCase().trim()
+      result = result.filter(
+        (a) =>
+          a.name.toLowerCase().includes(q) ||
+          a.phone.includes(q) ||
+          (a.email && a.email.toLowerCase().includes(q)) ||
+          a.city.toLowerCase().includes(q) ||
+          a.state.toLowerCase().includes(q)
+      )
+    }
+
+    return result
+  }, [data?.accountStrategist?.topAccounts, accountSegmentFilter, accountSearch])
 
   // Monthly summary row
   const monthlySummary = useMemo(() => {
@@ -246,8 +303,41 @@ export function Analytics() {
     toast.toast('success', 'Exported State Distribution Report to CSV!')
   }
 
+  const exportAccountsCsv = () => {
+    const list = data?.accountStrategist?.topAccounts ?? []
+    if (!list.length) return
+
+    const headers = ['Phone', 'Customer Name', 'Email', 'City', 'State', 'Orders', 'Delivered', 'RTO', 'Lifetime GMV', 'Health Score', 'RFM Cohort', 'Strategic Play']
+    const rows = list.map((a) => [
+      `"${a.phone}"`,
+      `"${a.name}"`,
+      `"${a.email || ''}"`,
+      `"${a.city}"`,
+      `"${a.state}"`,
+      a.orderCount,
+      a.deliveredCount,
+      a.rtoCount,
+      a.lifetimeGross.toFixed(2),
+      a.healthScore,
+      a.segment,
+      `"${a.recommendedPlay}"`,
+    ])
+
+    const csvContent = '\uFEFF' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\r\n')
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.setAttribute('download', `youthnic_customer_accounts_rfm_${new Date().toISOString().slice(0, 10)}.csv`)
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+    toast.toast('success', 'Exported Customer Accounts to CSV!')
+  }
+
   if (isLoading) {
-    return <LoadingState label="Computing financial P&L, courier performance, and geographic order matrices…" />
+    return <LoadingState label="Computing financial P&L, customer accounts LTV, and distribution matrices…" />
   }
 
   if (isError) {
@@ -255,13 +345,16 @@ export function Analytics() {
   }
 
   const kpis = data?.kpis
+  const insights = data?.executiveInsights
+  const accounts = data?.accountStrategist
+  const schedule = data?.distributionSchedule
 
   return (
     <div className="analytics-page">
       <PageIntro
-        eyebrow="Intelligence & Financial Reporting"
-        title="Executive Reports & Order Analytics"
-        description="Comprehensive analysis of order volumes by state, courier logistics performance, and monthly financial P&L."
+        eyebrow="Intelligence & Executive Reporting"
+        title="Executive Analytics, Account Strategy & Report Distribution"
+        description="P&L net margin tracking, customer lifetime value (LTV) cohorts, geographic logistics, and automated report distribution."
         action={
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
             <button
@@ -270,18 +363,25 @@ export function Analytics() {
               onClick={() => {
                 if (activeTab === 'monthly') exportMonthlyCsv()
                 else if (activeTab === 'courier') exportCourierCsv()
-                else exportStateCsv()
+                else if (activeTab === 'state') exportStateCsv()
+                else if (activeTab === 'accounts') exportAccountsCsv()
+                else refetchHistory()
               }}
               title="Download active report as CSV"
             >
               <Icon name="download" size={15} />
-              <span>Export {activeTab === 'monthly' ? 'P&L' : activeTab === 'courier' ? 'Courier' : 'State'} CSV</span>
+              <span>
+                Export {activeTab === 'monthly' ? 'P&L' : activeTab === 'courier' ? 'Courier' : activeTab === 'state' ? 'State' : activeTab === 'accounts' ? 'Accounts' : 'Logs'} CSV
+              </span>
             </button>
             <button
               type="button"
               className="btn-export"
               style={{ background: '#10b981', color: '#ffffff', borderColor: '#059669' }}
-              onClick={() => refetch()}
+              onClick={() => {
+                refetch()
+                if (activeTab === 'distribution') refetchHistory()
+              }}
               disabled={isFetching}
               title="Refresh live metrics from database"
             >
@@ -296,33 +396,43 @@ export function Analytics() {
       {kpis && (
         <div className="kpi-grid" style={{ marginBottom: '24px' }}>
           <div className="kpi-card">
-            <div className="kpi-label">Total Order Volume</div>
+            <div className="kpi-label">Gross Order Volume</div>
             <div className="kpi-val">{kpis.totalOrders}</div>
-            <span className="kpi-sub">Since 1-July-2026 onwards</span>
+            <span className="kpi-sub">{kpis.totalStatesCount} states delivery reach</span>
           </div>
 
           <div className="kpi-card">
-            <div className="kpi-label">Gross Order Value</div>
+            <div className="kpi-label">Gross Revenue (GMV)</div>
             <div className="kpi-val" style={{ color: '#059669' }}>{formatMoney(kpis.totalGrossRevenue, 'INR')}</div>
-            <span className="kpi-sub">Cumulative GMV across all channels</span>
+            <span className="kpi-sub">Across all payment channels</span>
           </div>
 
           <div className="kpi-card">
-            <div className="kpi-label">Prepaid Volume Ratio</div>
-            <div className="kpi-val" style={{ color: '#2563eb' }}>{kpis.prepaidRatio}%</div>
+            <div className="kpi-label">Realized Net Margin</div>
+            <div className="kpi-val" style={{ color: '#047857' }}>
+              {insights ? formatMoney(insights.realizedNetMargin, 'INR') : '—'}
+            </div>
+            <span className="kpi-sub">
+              {insights ? `${insights.netMarginPercent}% net margin after deductions` : 'Reconciled bank margin'}
+            </span>
+          </div>
+
+          <div className="kpi-card">
+            <div className="kpi-label">Delivery Success Rate</div>
+            <div className="kpi-val" style={{ color: '#2563eb' }}>
+              {insights ? `${insights.deliverySuccessRate}%` : `${kpis.prepaidRatio}%`}
+            </div>
             <span className="kpi-sub">{kpis.totalPrepaidOrders} Prepaid · {kpis.totalCodOrders} COD</span>
           </div>
 
           <div className="kpi-card">
-            <div className="kpi-label">Logistics Freight Spend</div>
-            <div className="kpi-val">{formatMoney(kpis.totalShippingSpend, 'INR')}</div>
-            <span className="kpi-sub">Across Delhivery, Ekart & ATS</span>
-          </div>
-
-          <div className="kpi-card">
-            <div className="kpi-label">Geographic Reach</div>
-            <div className="kpi-val" style={{ color: '#7c3aed' }}>{kpis.totalStatesCount} States</div>
-            <span className="kpi-sub">Active delivery footprint</span>
+            <div className="kpi-label">Customer Accounts LTV</div>
+            <div className="kpi-val" style={{ color: '#7c3aed' }}>
+              {accounts ? formatMoney(accounts.avgCustomerLtv, 'INR') : '—'}
+            </div>
+            <span className="kpi-sub">
+              {accounts ? `${accounts.repeatCustomerRate}% repeat buyer rate` : 'Customer lifetime value'}
+            </span>
           </div>
         </div>
       )}
@@ -335,7 +445,7 @@ export function Analytics() {
           onClick={() => setActiveTab('monthly')}
         >
           <Icon name="grid" size={16} />
-          <span>Monthly Financial Analysis & P&L</span>
+          <span>Monthly Financial P&L & Strategy</span>
         </button>
 
         <button
@@ -353,113 +463,208 @@ export function Analytics() {
           onClick={() => setActiveTab('state')}
         >
           <Icon name="pin" size={16} />
-          <span>State-wise Geographic Volume ({data?.stateReport?.length ?? 0})</span>
+          <span>Geographic Volume ({data?.stateReport?.length ?? 0})</span>
+        </button>
+
+        <button
+          type="button"
+          className={`analytics-tab-btn ${activeTab === 'accounts' ? 'active' : ''}`}
+          onClick={() => setActiveTab('accounts')}
+        >
+          <Icon name="users" size={16} />
+          <span>Account Strategist & Customer LTV ({accounts?.totalCustomerAccounts ?? 0})</span>
+        </button>
+
+        <button
+          type="button"
+          className={`analytics-tab-btn ${activeTab === 'distribution' ? 'active' : ''}`}
+          onClick={() => setActiveTab('distribution')}
+        >
+          <Icon name="mail" size={16} />
+          <span>Report Distribution & Audit Trail</span>
         </button>
       </div>
 
-      {/* TAB 1: Monthly Financial Analysis (Exact sheet replica) */}
+      {/* TAB 1: Monthly Financial Analysis (with Analytics Reporter Strategy) */}
       {activeTab === 'monthly' && (
-        <Panel>
-          <PanelHeading
-            title="Monthly Financial & Operational P&L Analysis"
-            eyebrow="Financial Breakdown"
-            action={
-              <button type="button" className="btn-table-action" onClick={exportMonthlyCsv}>
-                <Icon name="download" size={14} />
-                <span>Download Excel/CSV</span>
-              </button>
-            }
-          />
-          <div className="table-wrap report-table-wrap">
-            <table className="data-table report-table">
-              <thead>
-                <tr>
-                  <th style={{ minWidth: '110px' }}>Month</th>
-                  <th style={{ textAlign: 'right' }}>No Of Orders</th>
-                  <th style={{ textAlign: 'right' }}>Prepaid Count</th>
-                  <th style={{ textAlign: 'right' }}>Prepaid %</th>
-                  <th style={{ textAlign: 'right' }}>Gross Amount</th>
-                  <th style={{ textAlign: 'right' }}>Gross Qty</th>
-                  <th style={{ textAlign: 'right' }}>RTO & Cancel (Amt)</th>
-                  <th style={{ textAlign: 'right' }}>RTO Qty</th>
-                  <th style={{ textAlign: 'right' }}>Seller Cancel (Amt)</th>
-                  <th style={{ textAlign: 'right' }}>Seller Qty</th>
-                  <th style={{ textAlign: 'right', background: 'rgba(37, 99, 235, 0.08)' }}>Forward Sales [A]</th>
-                  <th style={{ textAlign: 'right' }}>Forward Qty</th>
-                  <th style={{ textAlign: 'right' }}>Shipping Cost (F) [B]</th>
-                  <th style={{ textAlign: 'right' }}>Shipping Cost (R) [C]</th>
-                  <th style={{ textAlign: 'right' }}>COD Fee [D]</th>
-                  <th style={{ textAlign: 'right' }}>Gateway Fee [E]</th>
-                  <th style={{ textAlign: 'right', background: 'rgba(16, 185, 129, 0.12)', color: '#047857' }}>
-                    Received Payment [F=A-E]
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {data?.monthlyReport?.map((row) => (
-                  <tr key={row.monthKey}>
-                    <td><strong>{row.month}</strong></td>
-                    <td className="mono" style={{ textAlign: 'right' }}>{row.noOfOrders}</td>
-                    <td className="mono" style={{ textAlign: 'right' }}>{row.prepaidCount}</td>
-                    <td className="mono" style={{ textAlign: 'right', color: '#2563eb', fontWeight: 700 }}>
-                      {row.prepaidPercent}%
-                    </td>
-                    <td className="mono" style={{ textAlign: 'right' }}>{formatMoney(row.grossAmount, 'INR')}</td>
-                    <td className="mono" style={{ textAlign: 'right' }}>{row.grossQty}</td>
-                    <td className="mono" style={{ textAlign: 'right', color: row.rtoCancelAmount > 0 ? '#b91c1c' : '#64748b' }}>
-                      {formatMoney(row.rtoCancelAmount, 'INR')}
-                    </td>
-                    <td className="mono" style={{ textAlign: 'right' }}>{row.rtoCancelQty}</td>
-                    <td className="mono" style={{ textAlign: 'right' }}>{formatMoney(row.sellerCancelAmount, 'INR')}</td>
-                    <td className="mono" style={{ textAlign: 'right' }}>{row.sellerCancelQty}</td>
-                    <td className="mono" style={{ textAlign: 'right', fontWeight: 800, background: 'rgba(37, 99, 235, 0.04)' }}>
-                      {formatMoney(row.forwardSalesAmount, 'INR')}
-                    </td>
-                    <td className="mono" style={{ textAlign: 'right' }}>{row.forwardSalesQty}</td>
-                    <td className="mono" style={{ textAlign: 'right' }}>{formatMoney(row.shippingCostF, 'INR')}</td>
-                    <td className="mono" style={{ textAlign: 'right' }}>{formatMoney(row.shippingCostR, 'INR')}</td>
-                    <td className="mono" style={{ textAlign: 'right' }}>{formatMoney(row.codCollectionFee, 'INR')}</td>
-                    <td className="mono" style={{ textAlign: 'right' }}>{formatMoney(row.paymentGatewayFee, 'INR')}</td>
-                    <td className="mono" style={{ textAlign: 'right', fontWeight: 850, color: '#047857', background: 'rgba(16, 185, 129, 0.06)' }}>
-                      {formatMoney(row.receivedPayment, 'INR')}
-                    </td>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          {/* Executive Analytics Reporter Strategic Decision Card */}
+          {insights && (
+            <Panel>
+              <PanelHeading
+                title="Executive Business Intelligence & Strategy (/agency-analytics-reporter)"
+                eyebrow="Decision Support"
+              />
+              <div style={{ padding: '16px 20px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px', marginBottom: '16px' }}>
+                  <div style={{ background: '#ffffff', padding: '12px 14px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                    <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 700 }}>AVERAGE ORDER VALUE</div>
+                    <div style={{ fontSize: '18px', fontWeight: 800, color: '#0f172a', marginTop: '2px' }}>
+                      {formatMoney(insights.averageOrderValue, 'INR')}
+                    </div>
+                  </div>
+                  <div style={{ background: '#ffffff', padding: '12px 14px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                    <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 700 }}>MOM REVENUE GROWTH</div>
+                    <div style={{ fontSize: '18px', fontWeight: 800, color: insights.momGrowthRate >= 0 ? '#059669' : '#dc2626', marginTop: '2px' }}>
+                      {insights.momGrowthRate >= 0 ? `+${insights.momGrowthRate}%` : `${insights.momGrowthRate}%`}
+                    </div>
+                  </div>
+                  <div style={{ background: '#ffffff', padding: '12px 14px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                    <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 700 }}>RTO LOSS RATIO</div>
+                    <div style={{ fontSize: '18px', fontWeight: 800, color: '#d97706', marginTop: '2px' }}>
+                      {insights.rtoLossRate}%
+                    </div>
+                  </div>
+                  <div style={{ background: '#ffffff', padding: '12px 14px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                    <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 700 }}>DATA QUALITY & AUDIT SCORE</div>
+                    <div style={{ fontSize: '18px', fontWeight: 800, color: '#2563eb', marginTop: '2px' }}>
+                      {insights.dataQualityScore}%
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  {insights.strategicRecommendations.map((rec) => (
+                    <div
+                      key={rec.title}
+                      style={{
+                        background: '#ffffff',
+                        borderLeft: `4px solid ${rec.priority === 'HIGH' ? '#dc2626' : rec.priority === 'MEDIUM' ? '#2563eb' : '#059669'}`,
+                        padding: '12px 16px',
+                        borderRadius: '0 8px 8px 0',
+                        boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                        <span
+                          style={{
+                            fontSize: '10px',
+                            fontWeight: 800,
+                            padding: '2px 6px',
+                            borderRadius: '4px',
+                            color: '#ffffff',
+                            background: rec.priority === 'HIGH' ? '#dc2626' : rec.priority === 'MEDIUM' ? '#2563eb' : '#059669',
+                          }}
+                        >
+                          {rec.priority}
+                        </span>
+                        <strong style={{ fontSize: '13px', color: '#0f172a' }}>{rec.title}</strong>
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#334155', lineHeight: 1.5 }}>
+                        <strong>Action:</strong> {rec.action}
+                      </div>
+                      <div style={{ fontSize: '11.5px', color: '#64748b', marginTop: '2px' }}>
+                        <em>Expected Impact:</em> {rec.impact}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </Panel>
+          )}
+
+          <Panel>
+            <PanelHeading
+              title="Monthly Financial & Operational P&L Analysis"
+              eyebrow="Financial Breakdown"
+              action={
+                <button type="button" className="btn-table-action" onClick={exportMonthlyCsv}>
+                  <Icon name="download" size={14} />
+                  <span>Download Excel/CSV</span>
+                </button>
+              }
+            />
+            <div className="table-wrap report-table-wrap">
+              <table className="data-table report-table">
+                <thead>
+                  <tr>
+                    <th style={{ minWidth: '110px' }}>Month</th>
+                    <th style={{ textAlign: 'right' }}>No Of Orders</th>
+                    <th style={{ textAlign: 'right' }}>Prepaid Count</th>
+                    <th style={{ textAlign: 'right' }}>Prepaid %</th>
+                    <th style={{ textAlign: 'right' }}>Gross Amount</th>
+                    <th style={{ textAlign: 'right' }}>Gross Qty</th>
+                    <th style={{ textAlign: 'right' }}>RTO & Cancel (Amt)</th>
+                    <th style={{ textAlign: 'right' }}>RTO Qty</th>
+                    <th style={{ textAlign: 'right' }}>Seller Cancel (Amt)</th>
+                    <th style={{ textAlign: 'right' }}>Seller Qty</th>
+                    <th style={{ textAlign: 'right', background: 'rgba(37, 99, 235, 0.08)' }}>Forward Sales [A]</th>
+                    <th style={{ textAlign: 'right' }}>Forward Qty</th>
+                    <th style={{ textAlign: 'right' }}>Shipping Cost (F) [B]</th>
+                    <th style={{ textAlign: 'right' }}>Shipping Cost (R) [C]</th>
+                    <th style={{ textAlign: 'right' }}>COD Fee [D]</th>
+                    <th style={{ textAlign: 'right' }}>Gateway Fee [E]</th>
+                    <th style={{ textAlign: 'right', background: 'rgba(16, 185, 129, 0.12)', color: '#047857' }}>
+                      Received Payment [F=A-E]
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-              {monthlySummary && (
-                <tfoot>
-                  <tr className="report-summary-row">
-                    <td><strong>TOTAL</strong></td>
-                    <td className="mono" style={{ textAlign: 'right' }}><strong>{monthlySummary.noOfOrders}</strong></td>
-                    <td className="mono" style={{ textAlign: 'right' }}><strong>{monthlySummary.prepaidCount}</strong></td>
-                    <td className="mono" style={{ textAlign: 'right' }}><strong>{monthlySummary.prepaidPercent}%</strong></td>
-                    <td className="mono" style={{ textAlign: 'right' }}><strong>{formatMoney(monthlySummary.grossAmount, 'INR')}</strong></td>
-                    <td className="mono" style={{ textAlign: 'right' }}><strong>{monthlySummary.grossQty}</strong></td>
-                    <td className="mono" style={{ textAlign: 'right' }}><strong>{formatMoney(monthlySummary.rtoCancelAmount, 'INR')}</strong></td>
-                    <td className="mono" style={{ textAlign: 'right' }}><strong>{monthlySummary.rtoCancelQty}</strong></td>
-                    <td className="mono" style={{ textAlign: 'right' }}><strong>{formatMoney(monthlySummary.sellerCancelAmount, 'INR')}</strong></td>
-                    <td className="mono" style={{ textAlign: 'right' }}><strong>{monthlySummary.sellerCancelQty}</strong></td>
-                    <td className="mono" style={{ textAlign: 'right' }}><strong>{formatMoney(monthlySummary.forwardSalesAmount, 'INR')}</strong></td>
-                    <td className="mono" style={{ textAlign: 'right' }}><strong>{monthlySummary.forwardSalesQty}</strong></td>
-                    <td className="mono" style={{ textAlign: 'right' }}><strong>{formatMoney(monthlySummary.shippingCostF, 'INR')}</strong></td>
-                    <td className="mono" style={{ textAlign: 'right' }}><strong>{formatMoney(monthlySummary.shippingCostR, 'INR')}</strong></td>
-                    <td className="mono" style={{ textAlign: 'right' }}><strong>{formatMoney(monthlySummary.codCollectionFee, 'INR')}</strong></td>
-                    <td className="mono" style={{ textAlign: 'right' }}><strong>{formatMoney(monthlySummary.paymentGatewayFee, 'INR')}</strong></td>
-                    <td className="mono" style={{ textAlign: 'right', color: '#047857' }}>
-                      <strong>{formatMoney(monthlySummary.receivedPayment, 'INR')}</strong>
-                    </td>
-                  </tr>
-                </tfoot>
-              )}
-            </table>
-          </div>
-          <div className="report-formula-note">
-            <span><strong>Formula Key:</strong> [A] Forward Sales = Gross Amount − RTO/Cancellations − Seller Cancellations · [B] Forward Shipping Cost · [C] Reverse/RTO Shipping · [D] COD Handling Fee · [E] Gateway MDR Fees · [F = A − E] Net Received Payout</span>
-          </div>
-        </Panel>
+                </thead>
+                <tbody>
+                  {data?.monthlyReport?.map((row) => (
+                    <tr key={row.monthKey}>
+                      <td><strong>{row.month}</strong></td>
+                      <td className="mono" style={{ textAlign: 'right' }}>{row.noOfOrders}</td>
+                      <td className="mono" style={{ textAlign: 'right' }}>{row.prepaidCount}</td>
+                      <td className="mono" style={{ textAlign: 'right', color: '#2563eb', fontWeight: 700 }}>
+                        {row.prepaidPercent}%
+                      </td>
+                      <td className="mono" style={{ textAlign: 'right' }}>{formatMoney(row.grossAmount, 'INR')}</td>
+                      <td className="mono" style={{ textAlign: 'right' }}>{row.grossQty}</td>
+                      <td className="mono" style={{ textAlign: 'right', color: row.rtoCancelAmount > 0 ? '#b91c1c' : '#64748b' }}>
+                        {formatMoney(row.rtoCancelAmount, 'INR')}
+                      </td>
+                      <td className="mono" style={{ textAlign: 'right' }}>{row.rtoCancelQty}</td>
+                      <td className="mono" style={{ textAlign: 'right' }}>{formatMoney(row.sellerCancelAmount, 'INR')}</td>
+                      <td className="mono" style={{ textAlign: 'right' }}>{row.sellerCancelQty}</td>
+                      <td className="mono" style={{ textAlign: 'right', fontWeight: 800, background: 'rgba(37, 99, 235, 0.04)' }}>
+                        {formatMoney(row.forwardSalesAmount, 'INR')}
+                      </td>
+                      <td className="mono" style={{ textAlign: 'right' }}>{row.forwardSalesQty}</td>
+                      <td className="mono" style={{ textAlign: 'right' }}>{formatMoney(row.shippingCostF, 'INR')}</td>
+                      <td className="mono" style={{ textAlign: 'right' }}>{formatMoney(row.shippingCostR, 'INR')}</td>
+                      <td className="mono" style={{ textAlign: 'right' }}>{formatMoney(row.codCollectionFee, 'INR')}</td>
+                      <td className="mono" style={{ textAlign: 'right' }}>{formatMoney(row.paymentGatewayFee, 'INR')}</td>
+                      <td className="mono" style={{ textAlign: 'right', fontWeight: 850, color: '#047857', background: 'rgba(16, 185, 129, 0.06)' }}>
+                        {formatMoney(row.receivedPayment, 'INR')}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                {monthlySummary && (
+                  <tfoot>
+                    <tr className="report-summary-row">
+                      <td><strong>TOTAL</strong></td>
+                      <td className="mono" style={{ textAlign: 'right' }}><strong>{monthlySummary.noOfOrders}</strong></td>
+                      <td className="mono" style={{ textAlign: 'right' }}><strong>{monthlySummary.prepaidCount}</strong></td>
+                      <td className="mono" style={{ textAlign: 'right' }}><strong>{monthlySummary.prepaidPercent}%</strong></td>
+                      <td className="mono" style={{ textAlign: 'right' }}><strong>{formatMoney(monthlySummary.grossAmount, 'INR')}</strong></td>
+                      <td className="mono" style={{ textAlign: 'right' }}><strong>{monthlySummary.grossQty}</strong></td>
+                      <td className="mono" style={{ textAlign: 'right' }}><strong>{formatMoney(monthlySummary.rtoCancelAmount, 'INR')}</strong></td>
+                      <td className="mono" style={{ textAlign: 'right' }}><strong>{monthlySummary.rtoCancelQty}</strong></td>
+                      <td className="mono" style={{ textAlign: 'right' }}><strong>{formatMoney(monthlySummary.sellerCancelAmount, 'INR')}</strong></td>
+                      <td className="mono" style={{ textAlign: 'right' }}><strong>{monthlySummary.sellerCancelQty}</strong></td>
+                      <td className="mono" style={{ textAlign: 'right' }}><strong>{formatMoney(monthlySummary.forwardSalesAmount, 'INR')}</strong></td>
+                      <td className="mono" style={{ textAlign: 'right' }}><strong>{monthlySummary.forwardSalesQty}</strong></td>
+                      <td className="mono" style={{ textAlign: 'right' }}><strong>{formatMoney(monthlySummary.shippingCostF, 'INR')}</strong></td>
+                      <td className="mono" style={{ textAlign: 'right' }}><strong>{formatMoney(monthlySummary.shippingCostR, 'INR')}</strong></td>
+                      <td className="mono" style={{ textAlign: 'right' }}><strong>{formatMoney(monthlySummary.codCollectionFee, 'INR')}</strong></td>
+                      <td className="mono" style={{ textAlign: 'right' }}><strong>{formatMoney(monthlySummary.paymentGatewayFee, 'INR')}</strong></td>
+                      <td className="mono" style={{ textAlign: 'right', color: '#047857' }}>
+                        <strong>{formatMoney(monthlySummary.receivedPayment, 'INR')}</strong>
+                      </td>
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </div>
+            <div className="report-formula-note">
+              <span><strong>Formula Key:</strong> [A] Forward Sales = Gross Amount − RTO/Cancellations − Seller Cancellations · [B] Forward Shipping Cost · [C] Reverse/RTO Shipping · [D] COD Handling Fee · [E] Gateway MDR Fees · [F = A − E] Net Received Payout</span>
+            </div>
+          </Panel>
+        </div>
       )}
 
-      {/* TAB 2: Courier Performance Breakdown (Exact sheet replica) */}
+      {/* TAB 2: Courier Performance Breakdown */}
       {activeTab === 'courier' && (
         <Panel>
           <PanelHeading
@@ -609,6 +814,508 @@ export function Analytics() {
             </table>
           </div>
         </Panel>
+      )}
+
+      {/* TAB 4: Account Strategist & Customer LTV (/agency-account-strategist) */}
+      {activeTab === 'accounts' && accounts && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          {/* RFM Cohort Summary Cards */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '14px' }}>
+            <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '10px', padding: '14px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '11px', fontWeight: 800, color: '#166534', textTransform: 'uppercase' }}>Champions</span>
+                <span style={{ background: '#166534', color: '#fff', fontSize: '10px', fontWeight: 800, padding: '2px 6px', borderRadius: '4px' }}>
+                  {accounts.rfmSummary.champions.count} ACCOUNTS
+                </span>
+              </div>
+              <div style={{ fontSize: '18px', fontWeight: 800, color: '#166534', marginTop: '6px' }}>
+                {formatMoney(accounts.rfmSummary.champions.totalRevenue, 'INR')}
+              </div>
+              <div style={{ fontSize: '11px', color: '#15803d', marginTop: '4px' }}>
+                {accounts.rfmSummary.champions.description}
+              </div>
+              <div style={{ fontSize: '11px', color: '#0f172a', fontWeight: 600, marginTop: '8px', borderTop: '1px dashed #bbf7d0', paddingTop: '6px' }}>
+                <em>Play:</em> {accounts.rfmSummary.champions.play}
+              </div>
+            </div>
+
+            <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '10px', padding: '14px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '11px', fontWeight: 800, color: '#1e40af', textTransform: 'uppercase' }}>Loyal Customers</span>
+                <span style={{ background: '#1e40af', color: '#fff', fontSize: '10px', fontWeight: 800, padding: '2px 6px', borderRadius: '4px' }}>
+                  {accounts.rfmSummary.loyal.count} ACCOUNTS
+                </span>
+              </div>
+              <div style={{ fontSize: '18px', fontWeight: 800, color: '#1e40af', marginTop: '6px' }}>
+                {formatMoney(accounts.rfmSummary.loyal.totalRevenue, 'INR')}
+              </div>
+              <div style={{ fontSize: '11px', color: '#1d4ed8', marginTop: '4px' }}>
+                {accounts.rfmSummary.loyal.description}
+              </div>
+              <div style={{ fontSize: '11px', color: '#0f172a', fontWeight: 600, marginTop: '8px', borderTop: '1px dashed #bfdbfe', paddingTop: '6px' }}>
+                <em>Play:</em> {accounts.rfmSummary.loyal.play}
+              </div>
+            </div>
+
+            <div style={{ background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: '10px', padding: '14px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '11px', fontWeight: 800, color: '#5b21b6', textTransform: 'uppercase' }}>Potential Loyalists</span>
+                <span style={{ background: '#5b21b6', color: '#fff', fontSize: '10px', fontWeight: 800, padding: '2px 6px', borderRadius: '4px' }}>
+                  {accounts.rfmSummary.potential.count} ACCOUNTS
+                </span>
+              </div>
+              <div style={{ fontSize: '18px', fontWeight: 800, color: '#5b21b6', marginTop: '6px' }}>
+                {formatMoney(accounts.rfmSummary.potential.totalRevenue, 'INR')}
+              </div>
+              <div style={{ fontSize: '11px', color: '#6d28d9', marginTop: '4px' }}>
+                {accounts.rfmSummary.potential.description}
+              </div>
+              <div style={{ fontSize: '11px', color: '#0f172a', fontWeight: 600, marginTop: '8px', borderTop: '1px dashed #ddd6fe', paddingTop: '6px' }}>
+                <em>Play:</em> {accounts.rfmSummary.potential.play}
+              </div>
+            </div>
+
+            <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '10px', padding: '14px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '11px', fontWeight: 800, color: '#991b1b', textTransform: 'uppercase' }}>At Risk (RTO Flagged)</span>
+                <span style={{ background: '#991b1b', color: '#fff', fontSize: '10px', fontWeight: 800, padding: '2px 6px', borderRadius: '4px' }}>
+                  {accounts.rfmSummary.atRisk.count} ACCOUNTS
+                </span>
+              </div>
+              <div style={{ fontSize: '18px', fontWeight: 800, color: '#991b1b', marginTop: '6px' }}>
+                {formatMoney(accounts.rfmSummary.atRisk.totalRevenue, 'INR')}
+              </div>
+              <div style={{ fontSize: '11px', color: '#b91c1c', marginTop: '4px' }}>
+                {accounts.rfmSummary.atRisk.description}
+              </div>
+              <div style={{ fontSize: '11px', color: '#0f172a', fontWeight: 600, marginTop: '8px', borderTop: '1px dashed #fecaca', paddingTop: '6px' }}>
+                <em>Play:</em> {accounts.rfmSummary.atRisk.play}
+              </div>
+            </div>
+          </div>
+
+          {/* Top Accounts Table */}
+          <Panel>
+            <PanelHeading
+              title="Customer Account Intelligence & Strategic Retention"
+              eyebrow="Account Portfolio"
+              action={
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                  <select
+                    className="table-search-input"
+                    style={{ width: 'auto' }}
+                    value={accountSegmentFilter}
+                    onChange={(e) => setAccountSegmentFilter(e.target.value)}
+                  >
+                    <option value="ALL">All Cohorts ({accounts.topAccounts.length})</option>
+                    <option value="CHAMPION">Champions</option>
+                    <option value="LOYAL">Loyal Customers</option>
+                    <option value="POTENTIAL">Potential Loyalists</option>
+                    <option value="AT_RISK">At Risk (RTO)</option>
+                    <option value="CANNOT_LOSE">Cannot Lose Them</option>
+                    <option value="NEW">New Customers</option>
+                  </select>
+                  <input
+                    type="text"
+                    placeholder="Search name, phone, city…"
+                    className="table-search-input"
+                    value={accountSearch}
+                    onChange={(e) => setAccountSearch(e.target.value)}
+                  />
+                  <button type="button" className="btn-table-action" onClick={exportAccountsCsv}>
+                    <Icon name="download" size={14} />
+                    <span>Download CSV</span>
+                  </button>
+                </div>
+              }
+            />
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Customer Name & Contact</th>
+                    <th>Location</th>
+                    <th style={{ textAlign: 'center' }}>Orders (Del / RTO)</th>
+                    <th style={{ textAlign: 'right' }}>Lifetime GMV</th>
+                    <th style={{ textAlign: 'center' }}>Health</th>
+                    <th>Cohort</th>
+                    <th style={{ minWidth: '220px' }}>Account Strategy Play (/agency-account-strategist)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredAccounts.map((a: CustomerAccountItem) => (
+                    <tr key={a.phone}>
+                      <td>
+                        <div style={{ fontWeight: 700, color: '#0f172a' }}>{a.name}</div>
+                        <div style={{ fontSize: '11px', color: '#64748b' }}>
+                          <code>{a.phone}</code>
+                          {a.email ? ` · ${a.email}` : ''}
+                        </div>
+                      </td>
+                      <td>
+                        <div style={{ fontSize: '12px', fontWeight: 600 }}>{a.city}</div>
+                        <div style={{ fontSize: '11px', color: '#64748b' }}>{a.state}</div>
+                      </td>
+                      <td className="mono" style={{ textAlign: 'center' }}>
+                        <strong>{a.orderCount}</strong>
+                        <span style={{ fontSize: '11px', color: '#64748b' }}>
+                          {' '}(<span style={{ color: '#047857' }}>{a.deliveredCount} del</span>
+                          {a.rtoCount > 0 ? <span style={{ color: '#dc2626' }}>, {a.rtoCount} rto</span> : null})
+                        </span>
+                      </td>
+                      <td className="mono" style={{ textAlign: 'right', fontWeight: 800, color: '#0f172a' }}>
+                        {formatMoney(a.lifetimeGross, 'INR')}
+                      </td>
+                      <td style={{ textAlign: 'center' }}>
+                        <span
+                          style={{
+                            display: 'inline-block',
+                            padding: '3px 8px',
+                            borderRadius: '12px',
+                            fontSize: '10px',
+                            fontWeight: 800,
+                            background:
+                              a.healthScore === 'GREEN' ? '#dcfce7' : a.healthScore === 'YELLOW' ? '#fef3c7' : '#fee2e2',
+                            color:
+                              a.healthScore === 'GREEN' ? '#15803d' : a.healthScore === 'YELLOW' ? '#b45309' : '#b91c1c',
+                          }}
+                        >
+                          {a.healthScore}
+                        </span>
+                      </td>
+                      <td>
+                        <span
+                          style={{
+                            display: 'inline-block',
+                            padding: '3px 8px',
+                            borderRadius: '6px',
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            background: '#f1f5f9',
+                            color: '#334155',
+                          }}
+                        >
+                          {a.segment}
+                        </span>
+                      </td>
+                      <td style={{ fontSize: '12px', color: '#1e293b' }}>
+                        {a.recommendedPlay}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Panel>
+        </div>
+      )}
+
+      {/* TAB 5: Report Distribution & Audit Trail (/agency-report-distribution-agent) */}
+      {activeTab === 'distribution' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          {/* Automated Distribution Schedules */}
+          {schedule && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '14px' }}>
+              <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 800, color: '#2563eb', textTransform: 'uppercase' }}>
+                    DAILY TERRITORY SCHEDULE
+                  </span>
+                  <span style={{ background: '#dcfce7', color: '#15803d', fontSize: '10px', fontWeight: 800, padding: '2px 8px', borderRadius: '10px' }}>
+                    {schedule.dailyReport.status}
+                  </span>
+                </div>
+                <div style={{ fontSize: '16px', fontWeight: 800, color: '#0f172a', marginTop: '6px' }}>
+                  {schedule.dailyReport.name}
+                </div>
+                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
+                  <strong>Cadence:</strong> {schedule.dailyReport.humanSchedule} (<code>{schedule.dailyReport.cron}</code>)
+                </div>
+                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
+                  <strong>Target Audience:</strong> {schedule.dailyReport.targetAudience}
+                </div>
+              </div>
+
+              <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 800, color: '#7c3aed', textTransform: 'uppercase' }}>
+                    WEEKLY EXECUTIVE SCHEDULE
+                  </span>
+                  <span style={{ background: '#dcfce7', color: '#15803d', fontSize: '10px', fontWeight: 800, padding: '2px 8px', borderRadius: '10px' }}>
+                    {schedule.weeklyReport.status}
+                  </span>
+                </div>
+                <div style={{ fontSize: '16px', fontWeight: 800, color: '#0f172a', marginTop: '6px' }}>
+                  {schedule.weeklyReport.name}
+                </div>
+                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
+                  <strong>Cadence:</strong> {schedule.weeklyReport.humanSchedule} (<code>{schedule.weeklyReport.cron}</code>)
+                </div>
+                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
+                  <strong>Target Audience:</strong> {schedule.weeklyReport.targetAudience}
+                </div>
+              </div>
+
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '16px' }}>
+                <div style={{ fontSize: '11px', fontWeight: 800, color: '#64748b', textTransform: 'uppercase' }}>
+                  DISTRIBUTION AGENT AUDIT STATUS
+                </div>
+                <div style={{ fontSize: '20px', fontWeight: 900, color: '#0f172a', marginTop: '6px' }}>
+                  {schedule.totalDistributionsCount} Dispatches Logged
+                </div>
+                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
+                  Last run: {schedule.lastDistribution ? `${schedule.lastDistribution.recipient} (${new Date(schedule.lastDistribution.timestamp).toLocaleDateString()})` : 'Never'}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* On-Demand Report Distribution Form */}
+          <Panel>
+            <PanelHeading
+              title="Manual & On-Demand Report Distribution"
+              eyebrow="Instant Trigger"
+            />
+            <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '6px' }}>
+                    Recipient Email Address
+                  </label>
+                  <input
+                    type="email"
+                    className="table-search-input"
+                    style={{ width: '100%' }}
+                    value={distRecipient}
+                    onChange={(e) => setDistRecipient(e.target.value)}
+                    placeholder="e.g. accounts@youthnic.com"
+                  />
+                  <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
+                    <button
+                      type="button"
+                      style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', border: '1px solid #cbd5e1', background: '#f8fafc', cursor: 'pointer' }}
+                      onClick={() => {
+                        setDistRecipient('accounts@youthnic.com')
+                        setDistRecipientName('Finance & Accounts')
+                      }}
+                    >
+                      Accounts
+                    </button>
+                    <button
+                      type="button"
+                      style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', border: '1px solid #cbd5e1', background: '#f8fafc', cursor: 'pointer' }}
+                      onClick={() => {
+                        setDistRecipient('management@youthnic.com')
+                        setDistRecipientName('Executive Leadership')
+                      }}
+                    >
+                      Leadership
+                    </button>
+                    <button
+                      type="button"
+                      style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', border: '1px solid #cbd5e1', background: '#f8fafc', cursor: 'pointer' }}
+                      onClick={() => {
+                        setDistRecipient('ops@youthnic.com')
+                        setDistRecipientName('Operations Lead')
+                      }}
+                    >
+                      Operations
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '6px' }}>
+                    Recipient Name / Department
+                  </label>
+                  <input
+                    type="text"
+                    className="table-search-input"
+                    style={{ width: '100%' }}
+                    value={distRecipientName}
+                    onChange={(e) => setDistRecipientName(e.target.value)}
+                    placeholder="e.g. Finance & Accounts Desk"
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '6px' }}>
+                    Report Package
+                  </label>
+                  <select
+                    className="table-search-input"
+                    style={{ width: '100%' }}
+                    value={distReportType}
+                    onChange={(e: any) => setDistReportType(e.target.value)}
+                  >
+                    <option value="EXECUTIVE_PL_DIGEST">Executive Business Intelligence & P&L Digest</option>
+                    <option value="CUSTOMER_ACCOUNTS_DIGEST">Customer Accounts & RFM Expansion Analysis</option>
+                    <option value="TERRITORY_LOGISTICS_DIGEST">Territory Distribution & Courier Logistics</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '6px' }}>
+                  Executive Context / Custom Notes (Optional)
+                </label>
+                <textarea
+                  className="table-search-input"
+                  style={{ width: '100%', minHeight: '60px', resize: 'vertical' }}
+                  value={distNotes}
+                  onChange={(e) => setDistNotes(e.target.value)}
+                  placeholder="Add any strategic guidance or highlights for this report distribution run…"
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <button
+                  type="button"
+                  className="btn-export"
+                  style={{ background: '#2563eb', color: '#ffffff', borderColor: '#1d4ed8', padding: '10px 20px', fontWeight: 700 }}
+                  disabled={distributeMutation.isPending || !distRecipient.trim()}
+                  onClick={() => {
+                    distributeMutation.mutate({
+                      recipientEmail: distRecipient.trim(),
+                      recipientName: distRecipientName.trim() || undefined,
+                      reportType: distReportType,
+                      notes: distNotes.trim() || undefined,
+                    })
+                  }}
+                >
+                  <Icon name="mail" size={15} />
+                  <span>{distributeMutation.isPending ? 'Distributing Report…' : 'Send Report to Email Now'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="btn-export"
+                  style={{ background: '#f8fafc', color: '#334155', borderColor: '#cbd5e1' }}
+                  disabled={distributeMutation.isPending}
+                  onClick={() => {
+                    distributeMutation.mutate({
+                      recipientEmail: 'management@youthnic.com',
+                      recipientName: 'Executive Team',
+                      reportType: 'EXECUTIVE_PL_DIGEST',
+                      notes: 'Manual trigger of scheduled weekly company-wide roll-up.',
+                    })
+                  }}
+                >
+                  <Icon name="refresh" size={14} />
+                  <span>Trigger Scheduled Distribution Now</span>
+                </button>
+              </div>
+            </div>
+          </Panel>
+
+          {/* Distribution History Audit Log Table */}
+          <Panel>
+            <PanelHeading
+              title="Distribution Audit Trail & Compliance Log (/agency-report-distribution-agent)"
+              eyebrow="Activity Ledger"
+              action={
+                <button type="button" className="btn-table-action" onClick={() => refetchHistory()}>
+                  <Icon name="refresh" size={14} />
+                  <span>Refresh Ledger</span>
+                </button>
+              }
+            />
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Date & Timestamp</th>
+                    <th>Recipient</th>
+                    <th>Report Subject</th>
+                    <th style={{ textAlign: 'center' }}>Delivery Status</th>
+                    <th>Scope / Mode</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(!historyData?.history || historyData.history.length === 0) ? (
+                    <tr>
+                      <td colSpan={5} style={{ textAlign: 'center', padding: '24px', color: '#64748b' }}>
+                        No reports distributed yet. Click "Send Report to Email Now" above to trigger your first distribution.
+                      </td>
+                    </tr>
+                  ) : (
+                    historyData.history.map((log) => (
+                      <tr key={log.id}>
+                        <td className="mono" style={{ fontSize: '11.5px', color: '#334155' }}>
+                          {new Date(log.sentAt || log.createdAt).toLocaleString()}
+                        </td>
+                        <td>
+                          <div style={{ fontWeight: 700, color: '#0f172a' }}>{log.recipientName}</div>
+                          <div style={{ fontSize: '11px', color: '#64748b' }}>{log.recipientEmail}</div>
+                        </td>
+                        <td style={{ fontSize: '12px', fontWeight: 600 }}>
+                          {log.subject}
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          <span
+                            style={{
+                              display: 'inline-block',
+                              padding: '3px 8px',
+                              borderRadius: '12px',
+                              fontSize: '10px',
+                              fontWeight: 800,
+                              background: log.status === 'SENT' ? '#dcfce7' : log.status === 'SIMULATED' ? '#eff6ff' : '#fee2e2',
+                              color: log.status === 'SENT' ? '#15803d' : log.status === 'SIMULATED' ? '#1d4ed8' : '#b91c1c',
+                            }}
+                          >
+                            {log.status}
+                          </span>
+                        </td>
+                        <td style={{ fontSize: '11px', color: '#64748b' }}>
+                          <code>{log.metadata?.reportType || 'EXECUTIVE_DIGEST'}</code>
+                          {log.metadata?.mode ? ` · ${log.metadata.mode}` : ''}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Panel>
+        </div>
+      )}
+
+      {/* Modal to Preview Sent HTML if needed */}
+      {previewLogHtml && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.5)',
+            zIndex: 9999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px',
+          }}
+          onClick={() => setPreviewLogHtml(null)}
+        >
+          <div
+            style={{
+              background: '#ffffff',
+              borderRadius: '12px',
+              maxWidth: '750px',
+              width: '100%',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              padding: '24px',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ margin: 0 }}>Report HTML Preview</h3>
+              <button type="button" onClick={() => setPreviewLogHtml(null)} style={{ border: 0, background: 'none', cursor: 'pointer' }}>
+                <Icon name="close" size={18} />
+              </button>
+            </div>
+            <div dangerouslySetInnerHTML={{ __html: previewLogHtml }} />
+          </div>
+        </div>
       )}
     </div>
   )

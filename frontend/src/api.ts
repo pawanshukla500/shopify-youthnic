@@ -306,6 +306,20 @@ export async function getAnalyticsReport(): Promise<import('./types').AnalyticsD
   return response.data
 }
 
+export async function distributeAnalyticsReport(
+  payload: import('./types').DistributeReportPayload
+): Promise<{ success: boolean; message: string; logId?: number; recipient?: string }> {
+  const response = await api.post('/api/reports/distribute', payload)
+  return response.data
+}
+
+export async function getDistributionHistory(
+  limit = 20
+): Promise<{ success: boolean; history: import('./types').DistributionHistoryItem[] }> {
+  const response = await api.get('/api/reports/distribution-history', { params: { limit } })
+  return response.data
+}
+
 export async function getSystemStatus(): Promise<import('./types').SystemStatusData> {
   const response = await api.get<import('./types').SystemStatusData>('/api/settings/system-status')
   return response.data

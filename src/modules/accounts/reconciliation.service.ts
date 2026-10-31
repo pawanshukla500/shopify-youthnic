@@ -85,6 +85,8 @@ export interface RemittanceDefaults {
 
 const AWB_COLUMN = [/^(waybill|awb|lrn)( number| no| num)?$/, /waybill|^awb|awb no|tracking (number|id)|\blrn\b/];
 const ORDER_COLUMN = [
+  /platform order (id|number|no|name)/,
+  /merchant order (id|number|no)/,
   /^(client )?order (number|no|id|name|ref|reference)$/,
   /merchant order id|order id|order no|order number|order name|client order|reference (number|no|id)|^reference$/,
 ];
@@ -905,6 +907,7 @@ export async function importGatewaySettlement(
     date: pickColumn(headers, [/settlement date|settled (on|date)|payout (actual )?date|settlement time/, /^date$|date/]),
     amount: pickColumn(headers, [
       /settlement amount|settled amount|net settlement|payout amount|net amount|amount settled/,
+      /^credit$|^net credit$/,
       /^amount$|amount/,
     ]),
     fee: pickColumn(headers, [/total charges|fee|mdr|service charge|commission/]),
@@ -956,9 +959,12 @@ export async function importGatewaySettlement(
     }
   >();
   const ambiguousOrders = new Set<number>();
+  const matchedOrders: MatchedOrderSummary[] = [];
   let rowCount = 0;
   let skippedState = 0;
   let codRows = 0;
+  let refundDebitsMatched = 0;
+  let totalSettled = 0;
   for (const { row } of rowsOf(sheets)) {
     const orderRef = columns.order ? row[columns.order] : '';
     const txn = columns.transaction ? row[columns.transaction] : '';
@@ -983,6 +989,57 @@ export async function importGatewaySettlement(
       /c2p|prepaid|converted/i.test((order as any).tags || '');
     if (order.paymentMethod === 'COD' && !isC2P) {
       codRows++;
+      continue;
+    }
+
+    const txnType = (row['Transaction Type'] || row['transaction type'] || row['Type'] || row['type'] || '').toLowerCase();
+    const debitVal = parseAmount(row['Debit'] || row['debit']);
+    const isRefundDebit = txnType === 'refund' || (debitVal !== null && debitVal > 0);
+
+    if (isRefundDebit) {
+      const debitAmount = Math.abs(debitVal || (columns.amount ? parseAmount(row[columns.amount]) : null) || 0);
+      const utr = (columns.utr ? row[columns.utr] : '') || typedUtr || '';
+      const at = (columns.date && parseDateLoose(row[columns.date])) || new Date();
+
+      const matchingReturn = await prisma.return.findFirst({
+        where: { orderId: order.id, refundStatus: { not: 'PROCESSED' } },
+      });
+      if (matchingReturn) {
+        await prisma.return.update({
+          where: { id: matchingReturn.id },
+          data: {
+            refundStatus: 'PROCESSED',
+            refundAmount: matchingReturn.refundAmount ?? debitAmount,
+            refundProcessedAt: matchingReturn.refundProcessedAt || at,
+          },
+        });
+      }
+
+      await recordAccountTrailEvent({
+        orderId: order.id,
+        returnId: matchingReturn?.id || null,
+        eventType: 'REFUND_SETTLED',
+        actorType: 'SYSTEM',
+        source: kind === 'GOKWIK_SETTLEMENT' ? 'GOKWIK_SETTLEMENT' : 'PG_SETTLEMENT_REPORT',
+        status: 'COMPLETED',
+        amount: debitAmount,
+        refundMode: 'ORIGINAL_PAYMENT_METHOD',
+        externalReference: utr || null,
+        note: `Gateway refund debited against settlement batch UTR ${utr || 'pending'}.`,
+        metadata: { settlementRef: (columns.settlementRef && row[columns.settlementRef]) || utr || txn },
+      });
+
+      refundDebitsMatched++;
+      totalSettled -= debitAmount;
+      matchedOrders.push({
+        orderId: order.id,
+        shopifyOrderName: order.shopifyOrderName,
+        amount: -debitAmount,
+        utr: utr || null,
+        status: 'Gateway refund debited',
+        remittanceRef: utr,
+        city: (order as any).city || row['City'] || row['city'] || undefined,
+      });
       continue;
     }
 
@@ -1013,10 +1070,8 @@ export async function importGatewaySettlement(
   }
 
   let missingUtr = 0;
-  let totalSettled = 0;
   let recordedCount = 0;
   let primaryUtr: string | null = null;
-  const matchedOrders: MatchedOrderSummary[] = [];
 
   for (const [orderId, entry] of perOrder) {
     if (!entry.utr) missingUtr++;
@@ -1068,7 +1123,7 @@ export async function importGatewaySettlement(
       kind,
       fileName,
       rowCount,
-      matchedCount: recordedCount,
+      matchedCount: recordedCount + refundDebitsMatched,
       unmatched,
       columns,
       notes,

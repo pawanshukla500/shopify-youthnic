@@ -36,6 +36,9 @@ import {
   generateDateRangeReport,
   generateMonthlyReport,
   getReportRecipients,
+  getReportCcRecipients,
+  getStateMonthlyAccounting,
+  parseRecipients,
   monthRange,
   previousMonth,
   reportSentAt,
@@ -72,6 +75,16 @@ function requestedMonth(value: unknown): string {
   monthRange(month); // validates
   return month;
 }
+
+router.get('/state-monthly', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const month = typeof req.query.month === 'string' && req.query.month ? req.query.month : previousMonth();
+    const data = await getStateMonthlyAccounting(month);
+    res.json(data);
+  } catch (error: any) {
+    res.status(400).json({ error: error.message });
+  }
+});
 
 router.get('/overview', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
@@ -220,8 +233,10 @@ router.get('/template/:type', async (req: AuthenticatedRequest, res: Response): 
 router.post('/report/email', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const month = requestedMonth(req.body?.month);
-    const result = await emailMonthlyReport(month);
-    logger.info('Accounts report emailed on request', { month, by: req.user?.email });
+    const recipients = req.body?.recipients ? parseRecipients(req.body.recipients) : undefined;
+    const ccRecipients = req.body?.ccRecipients ? parseRecipients(req.body.ccRecipients) : undefined;
+    const result = await emailMonthlyReport(month, recipients, ccRecipients);
+    logger.info('Accounts report emailed on request', { month, by: req.user?.email, result });
     res.json({ success: true, month, ...result });
   } catch (error: any) {
     res.status(400).json({ error: error.message });
@@ -229,14 +244,18 @@ router.post('/report/email', async (req: AuthenticatedRequest, res: Response): P
 });
 
 router.get('/settings', async (_req: AuthenticatedRequest, res: Response): Promise<void> => {
-  res.json({ recipients: await getReportRecipients(), reportDay: config.accounts.reportDayOfMonth });
+  const [to, cc] = await Promise.all([getReportRecipients(), getReportCcRecipients()]);
+  res.json({ recipients: to, ccRecipients: cc, reportDay: config.accounts.reportDayOfMonth });
 });
 
 router.put('/settings', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const recipients = await setReportRecipients(String(req.body?.recipients ?? ''));
-    logger.info('Accounts report recipients changed', { recipients, by: req.user?.email });
-    res.json({ recipients });
+    const { to, cc } = await setReportRecipients(
+      String(req.body?.recipients ?? ''),
+      req.body?.ccRecipients !== undefined ? String(req.body.ccRecipients) : undefined
+    );
+    logger.info('Accounts report recipients changed', { to, cc, by: req.user?.email });
+    res.json({ recipients: to, ccRecipients: cc });
   } catch (error: any) {
     res.status(400).json({ error: error.message });
   }

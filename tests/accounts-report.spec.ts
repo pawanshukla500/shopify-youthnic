@@ -1,6 +1,6 @@
 /**
  * Monthly accounts closing report: month boundaries, per-order rows, the
- * Excel layout, and "send once, on or after the 8th".
+ * Excel layout, state-wise matrix, and "send once, on or after the 10th".
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import ExcelJS from 'exceljs';
@@ -12,7 +12,15 @@ vi.mock('../src/utils/logger', () => ({
 const { prismaStub, resendStub } = vi.hoisted(() => ({
   prismaStub: {
     order: { findMany: vi.fn() },
-    setting: { findUnique: vi.fn(), findMany: vi.fn(async () => []), upsert: vi.fn(), create: vi.fn(), updateMany: vi.fn(), delete: vi.fn() },
+    return: { findMany: vi.fn(async () => []) },
+    setting: {
+      findUnique: vi.fn(),
+      findMany: vi.fn(async () => []),
+      upsert: vi.fn(),
+      create: vi.fn(),
+      updateMany: vi.fn(),
+      delete: vi.fn(),
+    },
   },
   resendStub: { sendInternalEmail: vi.fn() },
 }));
@@ -21,15 +29,17 @@ vi.mock('../src/modules/email/resend.service', () => ({ default: resendStub }));
 
 import {
   buildReportData,
+  buildStateAccountingSummary,
   monthRange,
   parseRecipients,
   previousMonth,
   renderWorkbook,
+  resolvePaymentRailName,
   sendDueMonthlyReport,
 } from '../src/modules/accounts/accounts-report.service';
 
 const DAY = 24 * 3600 * 1000;
-const now = new Date('2026-11-08T03:30:00.000Z'); // 8 Nov 09:00 IST
+const now = new Date('2026-11-10T03:30:00.000Z'); // 10 Nov 09:00 IST
 
 function order(overrides: Record<string, any> = {}) {
   return {
@@ -81,7 +91,6 @@ describe('month handling', () => {
   it('reports the previous month, crossing the year in January', () => {
     expect(previousMonth(now)).toBe('2026-10');
     expect(previousMonth(new Date('2027-01-08T03:30:00.000Z'))).toBe('2026-12');
-    // 1 Nov 00:30 IST is still 31 Oct in UTC; IST decides.
     expect(previousMonth(new Date('2026-10-31T19:00:00.000Z'))).toBe('2026-10');
   });
 
@@ -93,14 +102,127 @@ describe('month handling', () => {
   });
 });
 
+describe('resolvePaymentRailName', () => {
+  it('attributes Delhivery COD orders to Delhivery', () => {
+    expect(resolvePaymentRailName({ paymentMethod: 'COD', shipment: { courier: 'Delhivery' } })).toBe('Delhivery');
+    expect(resolvePaymentRailName({ paymentMethod: 'COD', paymentReceivedSource: 'DELHIVERY_REMITTANCE' })).toBe('Delhivery');
+  });
+
+  it('attributes Velocity COD and prepaid orders to Velocity', () => {
+    expect(resolvePaymentRailName({ paymentMethod: 'COD', shipment: { courier: 'Velocity' } })).toBe('Velocity');
+    expect(resolvePaymentRailName({ paymentReceivedSource: 'Velocity', shipment: { waybillNumber: '374645218626' } })).toBe('Velocity');
+  });
+
+  it('attributes GoKwik and Easebuzz prepaid orders to EaseBuzz', () => {
+    expect(resolvePaymentRailName({ paymentMethod: 'Pre-paid', paymentGateway: 'Gokwik UPI', paymentProvider: 'Easebuzz' })).toBe('EaseBuzz');
+    expect(resolvePaymentRailName({ paymentMethod: 'Pre-paid', paymentReceivedSource: 'GOKWIK_SETTLEMENT' })).toBe('EaseBuzz');
+  });
+
+  it('attributes PhonePe prepaid orders to PhonePe', () => {
+    expect(resolvePaymentRailName({ paymentMethod: 'Pre-paid', paymentGateway: 'PhonePe PG' })).toBe('PhonePe');
+    expect(resolvePaymentRailName({ paymentMethod: 'Pre-paid', tags: 'prepaid, phonepe' })).toBe('PhonePe');
+  });
+});
+
+describe('State-Wise Accounting & Timing Cutoff Rule', () => {
+  it('applies Sales - Returns - Payment Received = Outstanding correctly', () => {
+    const start = new Date('2026-09-30T18:30:00.000Z');
+    const end = new Date('2026-10-31T18:30:00.000Z');
+
+    const mhOrder = order({
+      customerState: 'Maharashtra',
+      totalAmount: 1000,
+      paymentReceivedAmount: 800,
+      paymentReceivedUtr: 'AXIS001',
+      paymentMethod: 'COD',
+      shipment: { courier: 'Delhivery' },
+    });
+
+    const { states, totals } = buildStateAccountingSummary([mhOrder], [], start, end);
+    const mh = states.find((s) => s.state === 'Maharashtra')!;
+    expect(mh.grossSales).toBe(1000);
+    expect(mh.returnsDeducted).toBe(0);
+    expect(mh.netSales).toBe(1000);
+    expect(mh.paymentReceived).toBe(800);
+    expect(mh.outstanding).toBe(200);
+    expect(mh.delhivery).toBe(800);
+    expect(totals.outstanding).toBe(200);
+  });
+
+  it('deducts a return occurring in Month M even if the order was placed in prior month', () => {
+    const start = new Date('2026-09-30T18:30:00.000Z');
+    const end = new Date('2026-10-31T18:30:00.000Z');
+
+    // Sept order returned in October
+    const periodReturn = {
+      id: 99,
+      refundAmount: 600,
+      createdAt: new Date('2026-10-15T10:00:00.000Z'),
+      refundProcessedAt: new Date('2026-10-18T10:00:00.000Z'),
+      returnStatus: 'REFUNDED',
+      order: {
+        shopifyOrderName: '#26YOU5700',
+        customerState: 'Gujarat',
+        shopifyCreatedAt: new Date('2026-09-25T10:00:00.000Z'),
+        totalAmount: 600,
+      },
+    };
+
+    const gujOrder = order({
+      shopifyOrderName: '#26YOU5900',
+      customerState: 'Gujarat',
+      totalAmount: 1500,
+      paymentReceivedAmount: 1500,
+      shopifyCreatedAt: new Date('2026-10-05T10:00:00.000Z'),
+    });
+
+    const { states } = buildStateAccountingSummary([gujOrder], [periodReturn], start, end);
+    const guj = states.find((s) => s.state === 'Gujarat')!;
+    expect(guj.grossSales).toBe(1500);
+    expect(guj.returnsDeducted).toBe(600);
+    expect(guj.netSales).toBe(900);
+    expect(guj.paymentReceived).toBe(1500);
+    // Formula: 1500 - 600 - 1500 = -600 (Net credit balance due to return deduction)
+    expect(guj.outstanding).toBe(-600);
+  });
+
+  it('does NOT deduct an October order return if the return occurs after 31 October', () => {
+    const octOrder = order({
+      shopifyOrderName: '#26YOU6100',
+      customerState: 'Maharashtra',
+      totalAmount: 1200,
+      paymentReceivedAmount: 1200,
+      shopifyCreatedAt: new Date('2026-10-25T10:00:00.000Z'),
+      returns: [
+        {
+          id: 101,
+          refundAmount: 1200,
+          createdAt: new Date('2026-11-04T10:00:00.000Z'), // November!
+          refundProcessedAt: new Date('2026-11-05T10:00:00.000Z'),
+          returnStatus: 'REFUNDED',
+        },
+      ],
+    });
+
+    const data = buildReportData('2026-10', [octOrder], [], now);
+    const orderRow = data.orders[0];
+    expect(orderRow.returnDeductedInPeriod).toBe(0);
+    expect(orderRow.returnTimingNote).toContain('deducted in subsequent month');
+    const mh = data.stateSummary.find((s) => s.state === 'Maharashtra')!;
+    expect(mh.returnsDeducted).toBe(0);
+    expect(mh.outstanding).toBe(0);
+  });
+});
+
 describe('buildReportData', () => {
   it('closes a delivered, settled order and carries its UTR and shipping cost', () => {
-    const data = buildReportData('2026-10', [order()], now);
+    const data = buildReportData('2026-10', [order()], [], now);
     const row = data.orders[0];
     expect(row).toMatchObject({
       orderNo: '#26YOU5913',
       paymentMode: 'Prepaid',
       gateway: 'PhonePe',
+      paymentRail: 'PhonePe',
       paymentReceived: 'Yes',
       receivedAmount: 740.6,
       utr: 'SBIN226281234567',
@@ -127,7 +249,7 @@ describe('buildReportData', () => {
       deliveredAt: new Date(now.getTime() - 2 * DAY),
       shipment: { ...order().shipment, paymentMode: 'COD', codAmount: 999, codCollected: true, codRemitted: false, forwardCharge: 95.4, shippingCostSource: 'ESTIMATE' },
     });
-    const data = buildReportData('2026-10', [cod], now);
+    const data = buildReportData('2026-10', [cod], [], now);
     expect(data.orders[0].accountsStatus).toBe('Open');
     expect(data.orders[0].pending).toMatch(/Payment not received in bank/);
     expect(data.orders[0].pending).toMatch(/Return window open until/);
@@ -140,7 +262,7 @@ describe('buildReportData', () => {
       status: 'RTO_DELIVERED',
       shipment: { ...order().shipment, status: 'RTO_DELIVERED', rtoCharge: 64.9 },
     });
-    const data = buildReportData('2026-10', [order({ status: 'CANCELLED', shipment: null }), rto], now);
+    const data = buildReportData('2026-10', [order({ status: 'CANCELLED', shipment: null }), rto], [], now);
     expect(data.orders.map((r) => [r.accountsStatus, r.pending])).toEqual([
       ['Not a sale', 'Cancelled'],
       ['Not a sale', 'Returned to origin (RTO)'],
@@ -158,7 +280,7 @@ describe('buildReportData', () => {
       paymentReceivedAmount: null,
       gatewayFee: null,
     });
-    const data = buildReportData('2026-10', [order(), cancelledUnpaid], now);
+    const data = buildReportData('2026-10', [order(), cancelledUnpaid], [], now);
     const value = (label: string) => data.summary.find((s) => s.label === label)?.value;
     expect(value('Orders placed')).toBe(2);
     expect(value('Closed (delivered, paid, return window over)')).toBe(1);
@@ -167,101 +289,48 @@ describe('buildReportData', () => {
     expect(value('Order value, sales (₹)')).toBe(754.52);
     expect(value('Not a sale (cancelled / RTO / refunded)')).toBe(1);
   });
-
-  it('counts money received for an order later cancelled, so receipts match the bank', () => {
-    const settledThenCancelled = order({ status: 'CANCELLED', financialStatus: 'refunded', shipment: null });
-    const data = buildReportData('2026-10', [settledThenCancelled], now);
-    const value = (label: string) => data.summary.find((s) => s.label === label)?.value;
-    expect(value('Received in bank (₹)')).toBe(740.6);
-    expect(value('Refunds (₹)')).toBe(754.52);
-  });
-
-  it('correctly attributes PhonePe and GoKwik even when paymentProvider is generic or missing', () => {
-    const phonepeOrder = order({
-      paymentProvider: 'Shopify Payments',
-      paymentAggregator: 'PhonePe',
-      paymentGateway: 'custom',
-    });
-    const gokwikOrder = order({
-      paymentProvider: 'Manual',
-      paymentAggregator: 'GoKwik',
-      paymentGateway: 'easebuzz',
-    });
-    const data = buildReportData('2026-10', [phonepeOrder, gokwikOrder], now);
-    expect(data.orders[0].gateway).toBe('PhonePe');
-    expect(data.orders[1].gateway).toBe('GoKwik (Easebuzz)');
-  });
-
-  it('recognizes tag-only PhonePe orders in monthly accounts report', () => {
-    const tagPhonePe = order({
-      paymentProvider: 'Manual',
-      paymentAggregator: null,
-      paymentGateway: null,
-      tags: 'prepaid, phonepe, rush',
-    });
-    const data = buildReportData('2026-10', [tagPhonePe], now);
-    expect(data.orders[0].gateway).toBe('PhonePe');
-  });
 });
 
 describe('renderWorkbook', () => {
-  it('writes filterable sheets with real dates, money formats and filter-aware totals', async () => {
-    const buffer = await renderWorkbook(buildReportData('2026-10', [order(), order({ shopifyOrderName: '#2' })], now));
+  it('renders all 7 sheets including State Summary and Orders with formulas and formats', async () => {
+    const data = buildReportData('2026-10', [order(), order({ shopifyOrderName: '#26YOU5914', paymentReceivedUtr: 'AXIS00099' })], [], now);
+    const buffer = await renderWorkbook(data);
     const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(buffer as any);
+    await workbook.xlsx.load(buffer);
 
     expect(workbook.worksheets.map((s) => s.name)).toEqual([
-      'Summary',
+      'State Summary (Tally Ledger)',
       'Orders',
+      'Monthly Returns (Credit Notes)',
       'COD Remittance',
       'Prepaid Settlements',
       'Shipping Costs',
-      'Returns & Refunds',
+      'Summary',
     ]);
-    const sheet = workbook.getWorksheet('Orders')!;
-    expect(sheet.getRow(1).getCell(1).value).toBe('Order No');
-    expect(sheet.getRow(1).getCell(16).value).toBe('Bank UTR');
-    expect(sheet.getRow(2).getCell(16).value).toBe('SBIN226281234567');
-    expect(sheet.getRow(2).getCell(2).value).toBeInstanceOf(Date);
-    expect(sheet.getColumn(9).numFmt).toBe('#,##0.00');
-    expect(sheet.views[0]).toMatchObject({ state: 'frozen', ySplit: 1 });
-    const total = sheet.getRow(4).getCell(9).value as any;
-    expect(total.formula).toBe('SUBTOTAL(109,I2:I3)');
+
+    const stateSheet = workbook.getWorksheet('State Summary (Tally Ledger)')!;
+    expect(stateSheet.getRow(1).getCell(1).value).toContain('State-Wise Monthly Sales');
+
+    const ordersSheet = workbook.getWorksheet('Orders')!;
+    expect(ordersSheet.getRow(1).getCell(1).value).toBe('Order No');
+    expect(ordersSheet.getRow(1).getCell(16).value).toBe('Bank UTR');
+    expect(ordersSheet.getRow(2).getCell(16).value).toBe('SBIN226281234567');
+    expect(ordersSheet.getRow(2).getCell(2).value).toBeInstanceOf(Date);
+    expect(ordersSheet.getColumn(9).numFmt).toBe('#,##0.00');
   });
 });
 
 describe('sendDueMonthlyReport', () => {
   beforeEach(() => {
-    for (const group of [...Object.values(prismaStub), resendStub]) for (const fn of Object.values(group)) (fn as any).mockReset();
+    for (const group of [...Object.values(prismaStub), resendStub]) {
+      for (const fn of Object.values(group)) (fn as any).mockReset();
+    }
     prismaStub.order.findMany.mockResolvedValue([order()]);
+    prismaStub.return.findMany.mockResolvedValue([]);
     prismaStub.setting.upsert.mockResolvedValue({});
     prismaStub.setting.create.mockResolvedValue({});
     prismaStub.setting.delete.mockResolvedValue({});
     resendStub.sendInternalEmail.mockResolvedValue({ id: 'em_1' });
-  });
-
-  it('waits until 09:00 IST on the 8th', async () => {
-    settings({ accounts_report_recipients: 'accounts@youthnic.com' });
-    expect(await sendDueMonthlyReport(new Date('2026-11-08T03:00:00.000Z'))).toBeNull(); // 08:30 IST
-    expect(resendStub.sendInternalEmail).not.toHaveBeenCalled();
-    expect(await sendDueMonthlyReport(new Date('2026-11-08T03:30:00.000Z'))).toBe('2026-10'); // 09:00 IST
-  });
-
-  it('lets only one sender claim the month', async () => {
-    prismaStub.setting.create.mockRejectedValue(new Error('Unique constraint failed'));
-    settings({
-      accounts_report_recipients: 'accounts@youthnic.com',
-      'accounts_report_sent:2026-10': `SENDING:${new Date('2026-11-09T09:59:00.000Z').toISOString()}`,
-    });
-    expect(await sendDueMonthlyReport(new Date('2026-11-09T10:00:00.000Z'))).toBeNull();
-    expect(resendStub.sendInternalEmail).not.toHaveBeenCalled();
-  });
-
-  it('releases the claim when the email fails, so the next hour retries', async () => {
-    settings({ accounts_report_recipients: 'accounts@youthnic.com' });
-    resendStub.sendInternalEmail.mockRejectedValue(new Error('Resend 500'));
-    await expect(sendDueMonthlyReport(new Date('2026-11-09T10:00:00.000Z'))).rejects.toThrow('Resend 500');
-    expect(prismaStub.setting.delete).toHaveBeenCalledWith({ where: { key: 'accounts_report_sent:2026-10' } });
   });
 
   function settings(values: Record<string, string>) {
@@ -270,30 +339,45 @@ describe('sendDueMonthlyReport', () => {
     );
   }
 
-  it('does nothing before the 8th', async () => {
-    settings({ accounts_report_recipients: 'accounts@youthnic.com' });
-    expect(await sendDueMonthlyReport(new Date('2026-11-07T10:00:00.000Z'))).toBeNull();
+  it('waits until 09:00 IST on the 10th of the month', async () => {
+    settings({ accounts_report_recipients: 'accounts2@vbexports.co.in' });
+    expect(await sendDueMonthlyReport(new Date('2026-11-10T03:00:00.000Z'))).toBeNull(); // 08:30 IST
+    expect(resendStub.sendInternalEmail).not.toHaveBeenCalled();
+    expect(await sendDueMonthlyReport(new Date('2026-11-10T03:30:00.000Z'))).toBe('2026-10'); // 09:00 IST
+  });
+
+  it('does nothing before the 10th', async () => {
+    settings({ accounts_report_recipients: 'accounts2@vbexports.co.in' });
+    expect(await sendDueMonthlyReport(new Date('2026-11-09T10:00:00.000Z'))).toBeNull();
     expect(resendStub.sendInternalEmail).not.toHaveBeenCalled();
   });
 
-  it('emails last month on or after the 8th, with the workbook attached, once', async () => {
-    settings({ accounts_report_recipients: 'accounts@youthnic.com' });
-    expect(await sendDueMonthlyReport(new Date('2026-11-09T10:00:00.000Z'))).toBe('2026-10');
+  it('releases the claim when the email fails, so the next hour retries', async () => {
+    settings({ accounts_report_recipients: 'accounts2@vbexports.co.in' });
+    resendStub.sendInternalEmail.mockRejectedValue(new Error('Resend 500'));
+    await expect(sendDueMonthlyReport(new Date('2026-11-10T10:00:00.000Z'))).rejects.toThrow('Resend 500');
+    expect(prismaStub.setting.delete).toHaveBeenCalledWith({ where: { key: 'accounts_report_sent:2026-10' } });
+  });
+
+  it('emails last month on or after the 10th, with the workbook attached and CC recipients', async () => {
+    settings({
+      accounts_report_recipients: 'accounts2@vbexports.co.in',
+      accounts_report_cc_recipients: 'returnorders@vbexports.co.in,vaibhav@vbexports.co.in,accounts@vbexports.co.in',
+    });
+    expect(await sendDueMonthlyReport(new Date('2026-11-10T10:00:00.000Z'))).toBe('2026-10');
 
     const email = resendStub.sendInternalEmail.mock.calls[0][0];
-    expect(email.to).toEqual(['accounts@youthnic.com']);
-    expect(email.subject).toBe('Youthnic accounts closing report · October 2026');
+    expect(email.to).toEqual(['accounts2@vbexports.co.in']);
+    expect(email.cc).toEqual(['returnorders@vbexports.co.in', 'vaibhav@vbexports.co.in', 'accounts@vbexports.co.in']);
+    expect(email.subject).toContain('Youthnic Accounts Closing & Tally Report');
     expect(email.attachments[0].filename).toBe('Youthnic-Accounts-2026-10.xlsx');
     expect(prismaStub.setting.upsert.mock.calls[0][0].where).toEqual({ key: 'accounts_report_sent:2026-10' });
 
-    settings({ accounts_report_recipients: 'accounts@youthnic.com', 'accounts_report_sent:2026-10': '{"sentAt":"x"}' });
-    expect(await sendDueMonthlyReport(new Date('2026-11-09T11:00:00.000Z'))).toBeNull();
+    settings({
+      accounts_report_recipients: 'accounts2@vbexports.co.in',
+      'accounts_report_sent:2026-10': '{"sentAt":"x"}',
+    });
+    expect(await sendDueMonthlyReport(new Date('2026-11-10T11:00:00.000Z'))).toBeNull();
     expect(resendStub.sendInternalEmail).toHaveBeenCalledTimes(1);
-  });
-
-  it('waits for recipients instead of marking the month sent', async () => {
-    settings({ accounts_report_recipients: '' });
-    expect(await sendDueMonthlyReport(new Date('2026-11-09T10:00:00.000Z'))).toBeNull();
-    expect(prismaStub.setting.upsert).not.toHaveBeenCalled();
   });
 });

@@ -380,6 +380,7 @@ class ResendService {
    */
   async sendInternalEmail(options: {
     to: string[];
+    cc?: string[];
     subject: string;
     html: string;
     attachments?: Array<{ filename: string; content: Buffer }>;
@@ -392,6 +393,7 @@ class ResendService {
       {
         from: this.fromEmail,
         to: options.to,
+        ...(options.cc?.length ? { cc: options.cc } : {}),
         subject: options.subject,
         html: options.html,
         ...(config.resend.replyToEmail ? { reply_to: config.resend.replyToEmail } : {}),

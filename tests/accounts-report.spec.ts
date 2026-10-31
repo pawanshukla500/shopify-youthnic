@@ -30,6 +30,7 @@ vi.mock('../src/modules/email/resend.service', () => ({ default: resendStub }));
 import {
   buildReportData,
   buildStateAccountingSummary,
+  getGstStateCode,
   monthRange,
   parseRecipients,
   previousMonth,
@@ -292,7 +293,7 @@ describe('buildReportData', () => {
 });
 
 describe('renderWorkbook', () => {
-  it('renders all 7 sheets including State Summary and Orders with formulas and formats', async () => {
+  it('renders all 8 sheets including State Summary, Orders and Tally Vouchers with formulas and formats', async () => {
     const data = buildReportData('2026-10', [order(), order({ shopifyOrderName: '#26YOU5914', paymentReceivedUtr: 'AXIS00099' })], [], now);
     const buffer = await renderWorkbook(data);
     const workbook = new ExcelJS.Workbook();
@@ -306,6 +307,7 @@ describe('renderWorkbook', () => {
       'Prepaid Settlements',
       'Shipping Costs',
       'Summary',
+      'Tally Vouchers',
     ]);
 
     const stateSheet = workbook.getWorksheet('State Summary (Tally Ledger)')!;
@@ -317,6 +319,55 @@ describe('renderWorkbook', () => {
     expect(ordersSheet.getRow(2).getCell(16).value).toBe('SBIN226281234567');
     expect(ordersSheet.getRow(2).getCell(2).value).toBeInstanceOf(Date);
     expect(ordersSheet.getColumn(9).numFmt).toBe('#,##0.00');
+
+    const tallySheet = workbook.getWorksheet('Tally Vouchers')!;
+    expect(tallySheet.getRow(1).getCell(1).value).toBe('Voucher Date');
+    expect(tallySheet.getRow(1).getCell(2).value).toBe('Voucher Type');
+    expect(tallySheet.getRow(1).getCell(4).value).toBe('Party Ledger (Sundry Debtors)');
+    expect(tallySheet.getRow(1).getCell(6).value).toBe('GST POS');
+    expect(tallySheet.getRow(2).getCell(2).value).toBe('Sales');
+    expect(tallySheet.getRow(2).getCell(4).value).toBe('Sundry Debtors - Karnataka');
+    expect(tallySheet.getRow(2).getCell(6).value).toBe('29-Karnataka');
+  });
+});
+
+describe('getGstStateCode', () => {
+  it('resolves standard 2-digit Indian GST codes for states', () => {
+    expect(getGstStateCode('Maharashtra')).toBe('27');
+    expect(getGstStateCode('Delhi')).toBe('07');
+    expect(getGstStateCode('Gujarat')).toBe('24');
+    expect(getGstStateCode('Rajasthan')).toBe('08');
+    expect(getGstStateCode('Karnataka')).toBe('29');
+    expect(getGstStateCode('Uttar Pradesh')).toBe('09');
+    expect(getGstStateCode('Unknown Territory')).toBe('99');
+  });
+});
+
+describe('carry forward and opening balance', () => {
+  it('applies opening balance from prior month into closing balance with zero discrepancy', () => {
+    const octOrder = order({
+      customerState: 'Maharashtra',
+      totalAmount: 1000,
+      paymentReceivedAmount: 800,
+    });
+    const opening = new Map<string, number>([['Maharashtra', 500]]);
+    const summary = buildStateAccountingSummary([octOrder], [], new Date('2026-10-01'), new Date('2026-11-01'), opening);
+    const mh = summary.states.find((s) => s.state === 'Maharashtra')!;
+    expect(mh.openingBalance).toBe(500);
+    expect(mh.grossSales).toBe(1000);
+    expect(mh.taxableSales).toBeCloseTo(847.46, 1);
+    expect(mh.gstAmount).toBeCloseTo(152.54, 1);
+    expect(mh.returnsDeducted).toBe(0);
+    expect(mh.paymentReceived).toBe(800);
+    expect(mh.periodMovement).toBe(200); // 1000 - 0 - 800
+    expect(mh.closingBalance).toBe(700); // 500 + 200
+    expect(mh.outstanding).toBe(700);
+    expect(mh.gstStateCode).toBe('27');
+
+    // Totals check
+    expect(summary.totals.openingBalance).toBe(500);
+    expect(summary.totals.grossSales).toBe(1000);
+    expect(summary.totals.closingBalance).toBe(700);
   });
 });
 

@@ -1574,13 +1574,59 @@ export async function downloadAccountsTemplate(
   window.URL.revokeObjectURL(url)
 }
 
-export async function emailAccountsReport(month: string): Promise<{ success: boolean; sentTo: string[]; fileName: string }> {
-  const response = await api.post('/api/accounts/report/email', { month })
+export async function emailAccountsReport(month: string, recipients?: string, ccRecipients?: string): Promise<{ success: boolean; sentTo: string[]; ccTo?: string[]; fileName: string }> {
+  const response = await api.post('/api/accounts/report/email', { month, recipients, ccRecipients })
   return response.data
 }
 
-export async function saveAccountsRecipients(recipients: string): Promise<{ recipients: string[] }> {
-  const response = await api.put('/api/accounts/settings', { recipients })
+export interface StateAccountingRow {
+  state: string
+  orderCount: number
+  grossSales: number
+  returnsDeducted: number
+  netSales: number
+  paymentReceived: number
+  outstanding: number
+  delhivery: number
+  easebuzz: number
+  phonepe: number
+  velocity: number
+  notes?: string
+}
+
+export interface StateAccountingTotals {
+  totalOrders: number
+  grossSales: number
+  returnsDeducted: number
+  netSales: number
+  paymentReceived: number
+  outstanding: number
+  delhivery: number
+  easebuzz: number
+  phonepe: number
+  velocity: number
+}
+
+export interface StateMonthlyAccountingData {
+  month: string
+  label: string
+  formula: string
+  timingRule: string
+  totals: StateAccountingTotals
+  states: StateAccountingRow[]
+  crossMonthReturnsCount: number
+  recipients: { to: string[]; cc: string[] }
+  reportDay: number
+  reportSentAt: { sentAt: string; to: string[] } | null
+}
+
+export async function getStateMonthlyAccounting(month?: string): Promise<StateMonthlyAccountingData> {
+  const response = await api.get('/api/accounts/state-monthly', { params: { month } })
+  return response.data
+}
+
+export async function saveAccountsRecipients(recipients: string, ccRecipients?: string): Promise<{ recipients: string[]; ccRecipients?: string[] }> {
+  const response = await api.put('/api/accounts/settings', { recipients, ccRecipients })
   return response.data
 }
 

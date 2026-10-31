@@ -5,6 +5,7 @@ import {
   downloadAccountsReport,
   emailAccountsReport,
   getAccountsOverview,
+  getStateMonthlyAccounting,
   importAccountsFile,
   runAccountsNow,
   saveAccountsRecipients,
@@ -100,33 +101,50 @@ function UploadCard({ upload, onDone }: { upload: (typeof UPLOADS)[number]; onDo
           <strong>Where:</strong> {upload.where}
         </p>
       </div>
-      <input type="file" accept=".xlsx,.csv,.tsv,.txt" onChange={(event) => { setFile(event.target.files?.[0] || null); setResult(null) }} />
+
+      <input
+        type="file"
+        accept=".csv,.xlsx,.xls"
+        onChange={(e) => {
+          setFile(e.target.files?.[0] || null)
+          setResult(null)
+        }}
+      />
+
       {upload.withRemittanceFields && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-          <FormField label="UTR / Bank Transaction ID" hint="Used for rows that have none">
-            <input value={utr} onChange={(e) => setUtr(e.target.value)} placeholder="e.g. UTIBR52026100800123" />
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '8px' }}>
+          <FormField label="Bank UTR" hint="Optional, if missing from file">
+            <input value={utr} onChange={(e) => setUtr(e.target.value)} placeholder="e.g. AXISP00847547449" />
           </FormField>
-          <FormField label="Remittance No">
-            <input value={remittanceRef} onChange={(e) => setRemittanceRef(e.target.value)} placeholder="Optional" />
+          <FormField label="Remittance no." hint="Optional">
+            <input value={remittanceRef} onChange={(e) => setRemittanceRef(e.target.value)} placeholder="e.g. R335935…" />
           </FormField>
-          <FormField label="Remitted on">
+          <FormField label="Remitted on" hint="Optional">
             <input type="date" value={remittedAt} onChange={(e) => setRemittedAt(e.target.value)} />
           </FormField>
         </div>
       )}
-      <Button className="button-primary" loading={mutation.isPending} disabled={!file || mutation.isPending} onClick={() => mutation.mutate()}>
-        <Icon name="download" size={14} />
-        Upload and match
-      </Button>
+
+      <div>
+        <Button className="button-primary button-small" loading={mutation.isPending} onClick={() => mutation.mutate()}>
+          Process file
+        </Button>
+      </div>
+
       {result && (
-        <div style={{ fontSize: '12px', borderTop: '1px solid var(--line)', paddingTop: '8px' }}>
+        <div
+          style={{
+            fontSize: '12px',
+            background: 'var(--bg-subtle, rgba(0,0,0,0.02))',
+            border: '1px solid var(--line)',
+            borderRadius: '6px',
+            padding: '8px 10px',
+          }}
+        >
           <div>
-            <strong>{result.matchedCount}</strong> matched of <strong>{result.rowCount}</strong> rows
-            {result.unmatched.length > 0 && <> · <strong>{result.unmatched.length}</strong> not found</>}
+            <strong>{result.matchedCount}</strong> of <strong>{result.rowCount}</strong> rows matched
+            {(result.closedNow ?? 0) > 0 && <> · <strong>{result.closedNow}</strong> order(s) moved to Payment Received</>}
           </div>
-          {result.notes.map((note) => (
-            <div key={note} style={{ color: '#b45309', marginTop: '4px' }}>{note}</div>
-          ))}
           {result.unmatched.length > 0 && (
             <details style={{ marginTop: '4px' }}>
               <summary>Not found in the OMS</summary>
@@ -150,15 +168,24 @@ export function Accounts() {
   const toast = useToast()
   const queryClient = useQueryClient()
   const [month, setMonth] = useState(defaultMonth)
-  const [recipients, setRecipients] = useState('')
+  const [recipients, setRecipients] = useState('accounts2@vbexports.co.in')
+  const [ccRecipients, setCcRecipients] = useState('returnorders@vbexports.co.in, vaibhav@vbexports.co.in, accounts@vbexports.co.in')
 
   const overview = useQuery({ queryKey: ['accounts-overview', month], queryFn: () => getAccountsOverview(month), retry: false })
+  const stateAccounting = useQuery({ queryKey: ['state-monthly-accounting', month], queryFn: () => getStateMonthlyAccounting(month), retry: false })
+
   useEffect(() => {
-    if (overview.data) setRecipients(overview.data.recipients.join(', '))
-  }, [overview.data?.recipients.join(',')])
+    if (stateAccounting.data) {
+      if (stateAccounting.data.recipients.to.length) setRecipients(stateAccounting.data.recipients.to.join(', '))
+      if (stateAccounting.data.recipients.cc.length) setCcRecipients(stateAccounting.data.recipients.cc.join(', '))
+    } else if (overview.data) {
+      setRecipients(overview.data.recipients.join(', '))
+    }
+  }, [stateAccounting.data, overview.data])
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ['accounts-overview'] })
+    queryClient.invalidateQueries({ queryKey: ['state-monthly-accounting'] })
     queryClient.invalidateQueries({ queryKey: ['orders'] })
   }
 
@@ -166,22 +193,25 @@ export function Accounts() {
     mutationFn: () => downloadAccountsReport(month),
     onError: (error) => toast.toast('error', apiError(error)),
   })
+
   const email = useMutation({
-    mutationFn: () => emailAccountsReport(month),
+    mutationFn: () => emailAccountsReport(month, recipients, ccRecipients),
     onSuccess: (data) => {
-      toast.toast('success', `Report emailed to ${data.sentTo.join(', ')}.`)
+      toast.toast('success', `Tally report emailed to ${data.sentTo.join(', ')}${data.ccTo?.length ? ` (CC: ${data.ccTo.join(', ')})` : ''}.`)
       refresh()
     },
     onError: (error) => toast.toast('error', apiError(error)),
   })
+
   const saveRecipients = useMutation({
-    mutationFn: () => saveAccountsRecipients(recipients),
+    mutationFn: () => saveAccountsRecipients(recipients, ccRecipients),
     onSuccess: (data) => {
-      toast.toast('success', data.recipients.length ? `Report will go to ${data.recipients.join(', ')}.` : 'Recipients cleared.')
+      toast.toast('success', `Recipients updated: To: ${data.recipients.join(', ')} · CC: ${data.ccRecipients?.join(', ') || 'None'}`)
       refresh()
     },
     onError: (error) => toast.toast('error', apiError(error)),
   })
+
   const runNow = useMutation({
     mutationFn: runAccountsNow,
     onSuccess: (data) => {
@@ -192,55 +222,176 @@ export function Accounts() {
   })
 
   const data = overview.data
+  const stateData = stateAccounting.data
   const value = (label: string) => data?.summary.find((s) => s.label === label)?.value ?? 0
-  const tiles: Array<{ label: string; value: string | number; tone: string }> = data
+
+  const tiles: Array<{ label: string; value: string | number; tone: string }> = stateData
     ? [
-        { label: 'Orders placed', value: value('Orders placed'), tone: 'var(--ink)' },
-        { label: 'Payment received & closed', value: value('Closed (delivered, paid, return window over)'), tone: '#0f766e' },
-        { label: 'Still open', value: value('Open'), tone: '#b45309' },
-        { label: 'Received in bank', value: formatMoney(Number(value('Received in bank (₹)'))), tone: '#1d4ed8' },
+        { label: 'Orders placed', value: stateData.totals.totalOrders, tone: 'var(--ink)' },
+        { label: 'Gross sales in period', value: formatMoney(stateData.totals.grossSales), tone: '#1e293b' },
+        { label: 'Returns deducted in period', value: `-${formatMoney(stateData.totals.returnsDeducted)}`, tone: '#dc2626' },
+        { label: 'Net sales (sales - returns)', value: formatMoney(stateData.totals.netSales), tone: '#0f766e' },
+        { label: 'Received in bank', value: formatMoney(stateData.totals.paymentReceived), tone: '#1d4ed8' },
+        { label: 'Net outstanding balance', value: formatMoney(stateData.totals.outstanding), tone: stateData.totals.outstanding > 0 ? '#b91c1c' : '#15803d' },
       ]
-    : []
+    : data
+      ? [
+          { label: 'Orders placed', value: value('Orders placed'), tone: 'var(--ink)' },
+          { label: 'Payment received & closed', value: value('Closed (delivered, paid, return window over)'), tone: '#0f766e' },
+          { label: 'Still open', value: value('Open'), tone: '#b45309' },
+          { label: 'Received in bank', value: formatMoney(Number(value('Received in bank (₹)'))), tone: '#1d4ed8' },
+        ]
+      : []
 
   return (
     <>
       <PageIntro
         eyebrow="Logistics & Finance"
-        title="Payments & Accounts"
-        description="Money received per order with its bank UTR, shipping cost per AWB, and the monthly closing report for the accounts team."
+        title="Payments & Accounts (Tally ERP)"
+        description="State-wise monthly sales, returns deductions, bank settlement tracking, and automated 10th-of-month Tally ERP closing reports."
         action={
           <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-            <FormField label="Orders placed in">
+            <FormField label="Accounting month">
               <input type="month" value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} />
             </FormField>
             <Button className="button-primary" loading={download.isPending} onClick={() => download.mutate()}>
               <Icon name="download" size={14} />
-              Download Excel
+              Download Tally Excel
             </Button>
             <Button className="button-secondary" loading={email.isPending} onClick={() => email.mutate()}>
               <Icon name="mail" size={14} />
-              Email to accounts
+              Email to Accounts Team
             </Button>
           </div>
         }
       />
 
-      {overview.isLoading && <LoadingState label="Loading the month…" />}
-      {overview.isError && <ErrorBox message={apiError(overview.error)} />}
+      {(overview.isLoading || stateAccounting.isLoading) && <LoadingState label="Loading accounting ledger…" />}
+      {(overview.isError || stateAccounting.isError) && <ErrorBox message={apiError(overview.error || stateAccounting.error)} />}
+
+      {/* KPI Header Tiles */}
+      {tiles.length > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '16px' }}>
+          {tiles.map((tile) => (
+            <div key={tile.label} style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '10px', padding: '14px 16px' }}>
+              <span style={{ fontSize: '11px', color: 'var(--muted)', fontWeight: 700, textTransform: 'uppercase' }}>{tile.label}</span>
+              <strong className="tabular-nums" style={{ display: 'block', fontSize: '20px', color: tile.tone, fontWeight: 800, marginTop: '4px' }}>
+                {tile.value}
+              </strong>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* State-Wise Monthly Accounts & Tally Ledger Matrix */}
+      {stateData && (
+        <Panel className="table-panel" style={{ marginBottom: '20px', border: '1px solid var(--accent, #3b82f6)' }}>
+          <PanelHeading
+            eyebrow="Tally ERP Ledger Matrix"
+            title={`State-Wise Monthly Sales, Returns & Settlement (${stateData.label})`}
+            action={
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                  Auto-dispatch: <strong>10th of every month (09:00 IST)</strong>
+                </span>
+                <Button className="button-secondary button-small" loading={email.isPending} onClick={() => email.mutate()}>
+                  <Icon name="mail" size={13} />
+                  Send Now
+                </Button>
+              </div>
+            }
+          />
+
+          <div style={{ padding: '12px 16px', background: 'var(--bg-subtle, rgba(0,0,0,0.02))', borderBottom: '1px solid var(--line)', fontSize: '13px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <span style={{ fontWeight: 700, color: 'var(--ink)' }}>Formula:</span>
+              <code style={{ background: 'var(--panel)', padding: '2px 6px', borderRadius: '4px', border: '1px solid var(--line)', fontWeight: 600 }}>
+                State Monthly Sales - Returns Deducted - Payment Received = Net Outstanding
+              </code>
+            </div>
+            <div style={{ fontSize: '12px', color: 'var(--muted)' }}>
+              <strong>Tally Cutoff Rule:</strong> Returns processed in {stateData.label} are deducted from this month&rsquo;s sales. Orders placed in {stateData.label} returned after the month-end are deducted under the subsequent month&rsquo;s books.
+            </div>
+            <div style={{ display: 'flex', gap: '16px', marginTop: '4px', fontSize: '12px', flexWrap: 'wrap' }}>
+              <span>Bank Payments by Rail:</span>
+              <span>Delhivery COD: <strong>{formatMoney(stateData.totals.delhivery)}</strong></span>
+              <span>EaseBuzz: <strong>{formatMoney(stateData.totals.easebuzz)}</strong></span>
+              <span>PhonePe: <strong>{formatMoney(stateData.totals.phonepe)}</strong></span>
+              <span>Velocity: <strong>{formatMoney(stateData.totals.velocity)}</strong></span>
+            </div>
+          </div>
+
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>State</th>
+                  <th style={{ textAlign: 'center' }}>Orders</th>
+                  <th style={{ textAlign: 'right' }}>Gross Sales (₹)</th>
+                  <th style={{ textAlign: 'right' }}>Returns Deducted (₹)</th>
+                  <th style={{ textAlign: 'right' }}>Net Sales (₹)</th>
+                  <th style={{ textAlign: 'right' }}>Payment Received (₹)</th>
+                  <th style={{ textAlign: 'right' }}>Outstanding (₹)</th>
+                  <th style={{ textAlign: 'right' }}>Delhivery</th>
+                  <th style={{ textAlign: 'right' }}>EaseBuzz</th>
+                  <th style={{ textAlign: 'right' }}>PhonePe</th>
+                  <th style={{ textAlign: 'right' }}>Velocity</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stateData.states.map((s) => (
+                  <tr key={s.state}>
+                    <td><strong>{s.state}</strong></td>
+                    <td style={{ textAlign: 'center' }}>{s.orderCount}</td>
+                    <td className="amount-cell">{formatMoney(s.grossSales)}</td>
+                    <td className="amount-cell" style={{ color: s.returnsDeducted > 0 ? '#dc2626' : 'inherit' }}>
+                      {s.returnsDeducted > 0 ? `-${formatMoney(s.returnsDeducted)}` : '₹0.00'}
+                    </td>
+                    <td className="amount-cell" style={{ fontWeight: 700 }}>{formatMoney(s.netSales)}</td>
+                    <td className="amount-cell" style={{ color: '#16a34a' }}>{formatMoney(s.paymentReceived)}</td>
+                    <td className="amount-cell" style={{ fontWeight: 700, color: s.outstanding > 0 ? '#b91c1c' : '#15803d' }}>
+                      {formatMoney(s.outstanding)}
+                    </td>
+                    <td className="amount-cell" style={{ fontSize: '12px' }}>{s.delhivery ? formatMoney(s.delhivery) : '—'}</td>
+                    <td className="amount-cell" style={{ fontSize: '12px' }}>{s.easebuzz ? formatMoney(s.easebuzz) : '—'}</td>
+                    <td className="amount-cell" style={{ fontSize: '12px' }}>{s.phonepe ? formatMoney(s.phonepe) : '—'}</td>
+                    <td className="amount-cell" style={{ fontSize: '12px' }}>{s.velocity ? formatMoney(s.velocity) : '—'}</td>
+                    <td style={{ fontSize: '12px' }}>
+                      {s.outstanding <= 0.05 ? (
+                        <span style={{ color: '#15803d', fontWeight: 600 }}>Settled</span>
+                      ) : (
+                        <span style={{ color: '#b91c1c' }}>Pending</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr style={{ background: 'var(--panel)', fontWeight: 800, borderTop: '2px solid var(--line)' }}>
+                  <td>TOTAL (NATIONAL)</td>
+                  <td style={{ textAlign: 'center' }}>{stateData.totals.totalOrders}</td>
+                  <td className="amount-cell">{formatMoney(stateData.totals.grossSales)}</td>
+                  <td className="amount-cell" style={{ color: '#dc2626' }}>-{formatMoney(stateData.totals.returnsDeducted)}</td>
+                  <td className="amount-cell">{formatMoney(stateData.totals.netSales)}</td>
+                  <td className="amount-cell" style={{ color: '#16a34a' }}>{formatMoney(stateData.totals.paymentReceived)}</td>
+                  <td className="amount-cell" style={{ color: stateData.totals.outstanding > 0 ? '#b91c1c' : '#15803d' }}>
+                    {formatMoney(stateData.totals.outstanding)}
+                  </td>
+                  <td className="amount-cell">{formatMoney(stateData.totals.delhivery)}</td>
+                  <td className="amount-cell">{formatMoney(stateData.totals.easebuzz)}</td>
+                  <td className="amount-cell">{formatMoney(stateData.totals.phonepe)}</td>
+                  <td className="amount-cell">{formatMoney(stateData.totals.velocity)}</td>
+                  <td>National Balance</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </Panel>
+      )}
 
       {data && (
         <>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '16px' }}>
-            {tiles.map((tile) => (
-              <div key={tile.label} style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '10px', padding: '14px 16px' }}>
-                <span style={{ fontSize: '11px', color: 'var(--muted)', fontWeight: 700, textTransform: 'uppercase' }}>{tile.label}</span>
-                <strong className="tabular-nums" style={{ display: 'block', fontSize: '22px', color: tile.tone, fontWeight: 800, marginTop: '4px' }}>
-                  {tile.value}
-                </strong>
-              </div>
-            ))}
-          </div>
-
           <Panel>
             <PanelHeading
               eyebrow={data.label}
@@ -280,17 +431,20 @@ export function Accounts() {
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '12px', marginTop: '16px' }}>
             <Panel>
-              <PanelHeading eyebrow="Monthly report" title={`Emailed on the ${data.reportDay}th of every month`} />
+              <PanelHeading eyebrow="Monthly report" title={`Automated dispatch on the ${data.reportDay}th of every month`} />
               <p style={{ margin: '0 0 8px', fontSize: '13px' }}>
                 {data.reportSentAt
                   ? <>The {data.label} report was emailed on {formatDate(data.reportSentAt.sentAt)} to {data.reportSentAt.to.join(', ')}.</>
                   : <>The {data.label} report goes out on <strong>{nextReportDate(month, data.reportDay)}</strong> at 09:00 IST.</>}
               </p>
-              <FormField label="Send the report to" hint="Comma-separated email addresses of the accounts team">
-                <input value={recipients} onChange={(e) => setRecipients(e.target.value)} placeholder="accounts@youthnic.com, finance@vbexports.co.in" />
+              <FormField label="Primary Accounts Email (To)" hint="Main recipient for Tally entries">
+                <input value={recipients} onChange={(e) => setRecipients(e.target.value)} placeholder="accounts2@vbexports.co.in" />
+              </FormField>
+              <FormField label="CC Emails" hint="Comma-separated executive & audit emails">
+                <input value={ccRecipients} onChange={(e) => setCcRecipients(e.target.value)} placeholder="returnorders@vbexports.co.in, vaibhav@vbexports.co.in, accounts@vbexports.co.in" />
               </FormField>
               <Button className="button-primary button-small" style={{ marginTop: '8px' }} loading={saveRecipients.isPending} onClick={() => saveRecipients.mutate()}>
-                Save recipients
+                Save recipients &amp; CCs
               </Button>
             </Panel>
 

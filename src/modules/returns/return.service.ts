@@ -605,11 +605,14 @@ class ReturnService {
       }
       const selectedLines = items.map((item) => {
         const line = order.items.find((row) => row.id === item.orderItemId)!;
+        const unitPrice = Math.max(1, Math.round(line.price || 0));
         return {
           name: line.title,
           sku: line.sku || `SKU-${line.id}`,
           units: item.quantity,
-          selling_price: Math.max(1, Math.round(line.price || 0)),
+          quantity: item.quantity,
+          selling_price: unitPrice,
+          price: unitPrice,
         };
       });
       const rawName = (order.customerName || 'Customer').trim();
@@ -619,8 +622,21 @@ class ReturnService {
           `Cannot create Velocity reverse pickup for ${order.shopifyOrderName}: forward AWB is required to link the return to the delivered shipment.`
         );
       }
+      const totalOrderItemsSum = (order.items || []).reduce((sum, i) => sum + (i.price || 0) * i.quantity, 0);
+      const returnedItemsSum = items.reduce((sum, item) => {
+        const line = order.items.find((i) => i.id === item.orderItemId);
+        return sum + (line?.price || 0) * item.quantity;
+      }, 0);
+      const proRatedReturnAmount = totalOrderItemsSum > 0
+        ? Math.round((order.totalAmount * (returnedItemsSum / totalOrderItemsSum)) * 100) / 100
+        : returnedItemsSum;
+
+      const cleanOrderName = order.shopifyOrderName.replace('#', '').trim();
+      const returnCount = (order.returns || []).length;
+      const returnOrderId = returnCount > 0 ? `${cleanOrderName}-RET-${returnCount + 1}` : `${cleanOrderName}-RET`;
+
       const velReturn = await velocityService.createReverseShipment({
-        orderId: order.shopifyOrderName,
+        orderId: returnOrderId,
         forwardAwb: forwardWaybill || undefined,
         returnReason,
         storeName: 'youthnic2024',
@@ -633,7 +649,7 @@ class ReturnService {
         pickupPhone: order.customerPhone || '9999999999',
         pickupEmail: order.customerEmail || undefined,
         items: selectedLines,
-        totalAmount: Math.max(1, Math.round(order.totalAmount || 0)),
+        totalAmount: Math.max(1, Math.round(proRatedReturnAmount)),
       });
       finalReturnWaybill = velReturn.awbCode;
       labelUrl = velReturn.labelUrl || null;
@@ -666,6 +682,16 @@ class ReturnService {
         trackingStatus: pickupAutomatic ? 'Pickup scheduled' : 'Linked AWB',
         labelUrl,
         refundStatus: 'NONE',
+        refundAmount: (() => {
+          const totalOrderItemsSum = (order.items || []).reduce((sum, i) => sum + (i.price || 0) * i.quantity, 0);
+          const returnedItemsSum = items.reduce((sum, item) => {
+            const line = order.items.find((i) => i.id === item.orderItemId);
+            return sum + (line?.price || 0) * item.quantity;
+          }, 0);
+          return totalOrderItemsSum > 0
+            ? Math.round((order.totalAmount * (returnedItemsSum / totalOrderItemsSum)) * 100) / 100
+            : returnedItemsSum;
+        })(),
         items: {
           create: items.map((item) => ({
             orderItemId: item.orderItemId,
@@ -1392,6 +1418,8 @@ class ReturnService {
       };
     }
 
+    const orderUnits = (returnRecord.order.items || []).reduce((sum, item) => sum + item.quantity, 0);
+    const returnedUnits = returnRecord.items.reduce((sum, item) => sum + item.quantity, 0);
     let refundResult: Awaited<ReturnType<typeof shopifyService.createRefund>>;
     try {
       const shopifyOrderId = returnRecord.order.shopifyOrderId;
@@ -1412,8 +1440,6 @@ class ReturnService {
         return { lineItemId: lineItem.id, quantity: retItem.quantity, restockType };
       });
 
-      const orderUnits = (returnRecord.order.items || []).reduce((sum, item) => sum + item.quantity, 0);
-      const returnedUnits = returnRecord.items.reduce((sum, item) => sum + item.quantity, 0);
       const refundShipping = !partialQc && orderUnits > 0 && returnedUnits >= orderUnits;
 
       refundResult = await shopifyService.createRefund(
@@ -1454,6 +1480,7 @@ class ReturnService {
     // Shopify has the refund now. Bookkeeping failures below are logged and
     // must never mark the refund FAILED, which would make the cron retry it.
     const refundAmount = refundResult.amount;
+    const isPartialReturn = orderUnits > 0 && returnedUnits < orderUnits;
     try {
       await prisma.return.update({
         where: { id: returnId },
@@ -1465,7 +1492,10 @@ class ReturnService {
           refundProcessedAt: new Date(),
           errorMessage: refundResult.moneyMoved ? null : NO_ONLINE_PAYMENT_NOTE,
           order: {
-            update: { status: 'REFUNDED' },
+            update: {
+              status: isPartialReturn ? (returnRecord.order.deliveredAt ? 'DELIVERED' : 'RETURN_RECEIVED') : 'REFUNDED',
+              financialStatus: isPartialReturn ? 'partially_refunded' : 'refunded',
+            },
           },
         },
       });
@@ -1559,6 +1589,7 @@ class ReturnService {
             paymentGateway: true,
             financialStatus: true,
             status: true,
+            items: true,
           },
         },
         items: { include: { orderItem: true } },

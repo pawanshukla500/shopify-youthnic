@@ -534,7 +534,16 @@ export function Returns() {
                                 setManualRefundTarget({
                                   orderId: item.orderId,
                                   shopifyOrderName: item.order?.shopifyOrderName || `Order #${item.orderId}`,
-                                  suggestedAmount: Number(item.refundAmount) || Number(item.order?.totalAmount) || 0,
+                                  suggestedAmount: Number(item.refundAmount) || (() => {
+                                    if (item.items && item.items.length > 0 && (item.order as any)?.items && (item.order as any).items.length > 0) {
+                                      const totalItemsSum = (item.order as any).items.reduce((s: number, i: any) => s + (Number(i.price) || 0) * (Number(i.quantity) || 1), 0);
+                                      const returnedSum = item.items.reduce((s: number, ri: any) => s + (Number(ri.orderItem?.price || ri.price) || 0) * (Number(ri.quantity) || 1), 0);
+                                      if (totalItemsSum > 0 && Number(item.order?.totalAmount) > 0) {
+                                        return Math.round((Number(item.order?.totalAmount) * (returnedSum / totalItemsSum)) * 100) / 100;
+                                      }
+                                    }
+                                    return Number(item.order?.totalAmount) || 0;
+                                  })(),
                                   returnId: item.id,
                                   returnWaybill: item.returnWaybillNumber || undefined,
                                   customerName: item.order?.customerName,

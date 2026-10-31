@@ -851,6 +851,19 @@ export class VelocityService {
     const warehouseId = params.warehouseId || config.velocity.warehouseId || 'WHGSYR';
     const storeName = params.storeName || config.shopify.shopDomain?.replace('.myshopify.com', '') || 'youthnic2024';
 
+    const mappedItems = (params.items || []).map((item: any) => {
+      const qty = item.units ?? item.quantity ?? 1;
+      const prc = item.selling_price ?? item.price ?? 0;
+      return {
+        name: item.name || 'Product',
+        sku: item.sku || 'SKU',
+        units: qty,
+        quantity: qty,
+        selling_price: prc,
+        price: prc,
+      };
+    });
+
     const payload: any = {
       order_id: params.orderId,
       order_date: params.orderDate || new Date().toISOString().slice(0, 10),
@@ -877,14 +890,16 @@ export class VelocityService {
       shipping_pincode: params.shippingPincode || config.delhivery.seller.pincode || '395002',
       shipping_phone: (params.shippingPhone || config.delhivery.seller.phone || '9999999999').replace(/\D/g, '').slice(-10),
       warehouse_id: warehouseId,
-      order_items: params.items,
+      order_items: mappedItems,
+      return_items: mappedItems,
+      items: mappedItems,
       payment_method: 'PREPAID',
       sub_total: Math.round(params.totalAmount),
       total_discount: 0,
       length: params.length || 3,
       breadth: params.breadth || 1,
       height: params.height || 1,
-      weight: params.weight || 0.4,
+      weight: params.weight || Math.max(0.2, Math.round(mappedItems.reduce((s, i) => s + (i.quantity || 1) * 0.3, 0) * 10) / 10),
       request_pickup: true,
     };
 

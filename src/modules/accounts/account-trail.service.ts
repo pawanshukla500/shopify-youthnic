@@ -366,10 +366,26 @@ async function recordManualRefundUnlocked(
     evidenceContentType,
   });
 
+  let isPartialReturn = false;
+  if (input.returnId) {
+    const returnRec = await prisma.return.findUnique({
+      where: { id: input.returnId },
+      include: { items: true, order: { include: { items: true } } },
+    });
+    if (returnRec) {
+      const orderUnits = (returnRec?.order?.items || []).reduce((s, i) => s + i.quantity, 0);
+      const returnedUnits = (returnRec?.items || []).reduce((s, i) => s + i.quantity, 0);
+      isPartialReturn = orderUnits > 0 && returnedUnits < orderUnits;
+    }
+  }
+
   try {
     await prisma.order.update({
       where: { id: input.orderId },
-      data: { financialStatus: 'refunded', status: 'REFUNDED' },
+      data: {
+        financialStatus: isPartialReturn ? 'partially_refunded' : 'refunded',
+        status: isPartialReturn ? (order.status === 'DELIVERED' ? 'DELIVERED' : 'RETURN_RECEIVED') : 'REFUNDED',
+      },
     });
   } catch (err: any) {
     logger.warn('Failed to update order financialStatus on manual refund', { orderId: input.orderId, error: err?.message });

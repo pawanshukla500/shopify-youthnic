@@ -258,7 +258,7 @@ describe('Velocity Aggregator Branding, Returns & Store Linkup', () => {
       });
 
       const res = await velocityService.createReverseShipment({
-        orderId: '#26YOU6156',
+        orderId: '26YOU6156-RET',
         forwardAwb: '374645218626',
         returnReason: 'Size too small',
         storeName: 'youthnic2024',
@@ -285,7 +285,7 @@ describe('Velocity Aggregator Branding, Returns & Store Linkup', () => {
       expect(mockAxios.post).toHaveBeenCalledWith(
         '/custom/api/v1/reverse-order-orchestration',
         expect.objectContaining({
-          order_id: '#26YOU6156',
+          order_id: '26YOU6156-RET',
           forward_awb: '374645218626',
           store_name: 'youthnic2024',
           pickup_customer_name: 'Pawan',
@@ -350,7 +350,7 @@ describe('Velocity Aggregator Branding, Returns & Store Linkup', () => {
 
       expect(spyReverse).toHaveBeenCalledWith(
         expect.objectContaining({
-          orderId: '#26YOU6156',
+          orderId: '26YOU6156-RET',
           forwardAwb: '374645218626',
           storeName: 'youthnic2024',
         })
@@ -364,6 +364,91 @@ describe('Velocity Aggregator Branding, Returns & Store Linkup', () => {
             carrier: 'Velocity',
             returnWaybillNumber: 'REV-VEL-777',
             pickupAutomatic: true,
+          }),
+        })
+      );
+    });
+
+    it('calculates pro-rated refund amount and passes only returned SKU to Velocity reverse shipment for partial returns', async () => {
+      const mockMultiItemOrder: any = {
+        id: 1988,
+        shopifyOrderName: '#26YOU6166',
+        status: 'DELIVERED',
+        deliveredAt: new Date(),
+        customerName: 'Neha Gandhi',
+        customerPhone: '919601295245',
+        customerAddress: 'Surat, Gujarat',
+        customerCity: 'Surat',
+        customerState: 'Gujarat',
+        customerPincode: '395009',
+        totalAmount: 2350.04,
+        items: [
+          {
+            id: 2268,
+            title: 'SKD193-Gulnaaz-Orange_M',
+            sku: 'SKD193-Gulnaaz-Orange_M',
+            quantity: 1,
+            price: 1399,
+          },
+          {
+            id: 2269,
+            title: 'SKD241-Apple-Gold_M',
+            sku: 'SKD241-Apple-Gold_M',
+            quantity: 1,
+            price: 1499,
+          },
+        ],
+        returns: [],
+        shipment: {
+          courier: 'Velocity',
+          waybillNumber: '374797840485',
+          status: 'DELIVERED',
+          trackingStatus: 'Delivered to recipient',
+        },
+      };
+
+      prismaStub.order.findUnique.mockResolvedValueOnce(mockMultiItemOrder);
+      prismaStub.return.create.mockImplementationOnce(({ data }: any) => ({
+        id: 77,
+        ...data,
+      }));
+
+      const velServiceModule = await import('../src/modules/velocity/velocity.service');
+      const spyReverse = vi.spyOn(velServiceModule.default, 'createReverseShipment').mockResolvedValueOnce({
+        awbCode: 'R2770632938VEO',
+        shipmentId: 'SHP-RET-77',
+        courierName: 'Velocity',
+        labelUrl: 'https://labels.velocityshipping.in/R2770632938VEO.pdf',
+        raw: {},
+      });
+
+      await returnService.createReturn(
+        1988,
+        'Customer returning 1 SKU',
+        [{ orderItemId: 2269, quantity: 1 }],
+        { triggerShopify: false }
+      );
+
+      expect(spyReverse).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orderId: '26YOU6166-RET',
+          totalAmount: 1216,
+          items: [
+            expect.objectContaining({
+              sku: 'SKD241-Apple-Gold_M',
+              units: 1,
+              selling_price: 1499,
+            }),
+          ],
+        })
+      );
+
+      expect(prismaStub.return.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            refundAmount: 1215.57,
+            carrier: 'Velocity',
+            returnWaybillNumber: 'R2770632938VEO',
           }),
         })
       );

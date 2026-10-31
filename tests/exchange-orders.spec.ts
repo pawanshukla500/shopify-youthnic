@@ -896,7 +896,7 @@ describe('Exchange Orders API & Workflow (/agency-api-tester)', () => {
       expect(res.pickupAutomatic).toBe(true);
       expect(velSpy).toHaveBeenCalledWith(
         expect.objectContaining({
-          orderId: '#26YOU6138',
+          orderId: '26YOU6138-RET',
           forwardAwb: '30100810014000',
           pickupPincode: '400080',
         })
@@ -946,7 +946,7 @@ describe('Exchange Orders API & Workflow (/agency-api-tester)', () => {
       expect(delhiveryStub.createReturnShipment).toHaveBeenCalled();
       expect(velSpy).toHaveBeenCalledWith(
         expect.objectContaining({
-          orderId: '#26YOU6138',
+          orderId: '26YOU6138-RET',
           forwardAwb: '30100810014000',
           pickupPincode: '400080',
         })

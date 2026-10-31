@@ -4,6 +4,7 @@ import { config } from '../../config';
 import logger from '../../utils/logger';
 import shopifyService from '../shopify/shopify.service';
 import orderService from '../orders/order.service';
+import returnService from './return.service';
 import resendService from '../email/resend.service';
 import { recordAccountTrailEvent } from '../accounts/account-trail.service';
 import { isPrepaidOrder } from '../orders/order-tabs';
@@ -390,14 +391,46 @@ class ReturnScanService {
             }
 
             try {
-              const refundRes = await orderService.processRtoRefund(order.id);
-              if (refundRes.success) {
-                result.prepaidRefunded++;
-                logger.info('Initiated automatic refund for prepaid return delivered order', {
-                  orderId: order.id,
-                  orderName: order.shopifyOrderName,
-                  refundId: refundRes.refundId,
-                });
+              // Find matching Return record from order.returns to refund only the returned line items (and prevent full-order RTO refund on partial returns)
+              const matchingReturn = (order.returns || []).find((r: any) =>
+                r.refundStatus !== 'PROCESSED' &&
+                !r.isExchange &&
+                (r.returnWaybillNumber === tracking || ['RECEIVED', 'QC_PENDING', 'PICKUP_SCHEDULED'].includes(r.returnStatus))
+              );
+
+              if (matchingReturn) {
+                const refundRes = await returnService.processRefund(
+                  matchingReturn.id,
+                  false,
+                  { name: 'Warehouse Return Scan', role: 'SYSTEM' },
+                  true
+                );
+                if (refundRes.success) {
+                  result.prepaidRefunded++;
+                  logger.info('Initiated automatic itemized refund for prepaid return delivered order', {
+                    orderId: order.id,
+                    orderName: order.shopifyOrderName,
+                    returnId: matchingReturn.id,
+                    refundAmount: refundRes.refundAmount,
+                    refundId: refundRes.shopifyRefundId,
+                  });
+                } else {
+                  logger.warn('Itemized return refund was skipped or deferred', {
+                    orderId: order.id,
+                    returnId: matchingReturn.id,
+                    error: refundRes.error,
+                  });
+                }
+              } else {
+                const refundRes = await orderService.processRtoRefund(order.id);
+                if (refundRes.success) {
+                  result.prepaidRefunded++;
+                  logger.info('Initiated automatic refund for prepaid return delivered order', {
+                    orderId: order.id,
+                    orderName: order.shopifyOrderName,
+                    refundId: refundRes.refundId,
+                  });
+                }
               }
             } catch (refErr: any) {
               logger.error('Failed to process automatic refund for prepaid return order', {

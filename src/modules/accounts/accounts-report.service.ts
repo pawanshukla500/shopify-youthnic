@@ -264,9 +264,10 @@ export interface ReportData {
 export function buildStateAccountingSummary(
   orders: any[],
   periodReturns: any[],
-  start: Date,
-  end: Date
+  start?: Date,
+  end?: Date
 ): { states: StateAccountingRow[]; totals: StateAccountingTotals } {
+  const safeReturns = Array.isArray(periodReturns) ? periodReturns : [];
   const stateMap = new Map<string, StateAccountingRow>();
 
   function getRow(stateName?: string | null): StateAccountingRow {
@@ -306,7 +307,7 @@ export function buildStateAccountingSummary(
   }
 
   // 2. Tally return deductions for all returns effective in this month
-  for (const ret of periodReturns) {
+  for (const ret of safeReturns) {
     const state = ret.order?.customerState || 'Unspecified';
     const row = getRow(state);
     const retAmt = (ret.refundAmount && ret.refundAmount > 0)
@@ -353,9 +354,19 @@ export function buildStateAccountingSummary(
 export function buildReportData(
   monthOrLabel: string,
   orders: any[],
-  periodReturns: any[] = [],
-  now: Date = new Date()
+  periodReturnsOrNow?: any[] | Date,
+  maybeNow?: Date
 ): ReportData {
+  let periodReturns: any[] = [];
+  let now: Date = new Date();
+
+  if (Array.isArray(periodReturnsOrNow)) {
+    periodReturns = periodReturnsOrNow;
+    if (maybeNow instanceof Date) now = maybeNow;
+  } else if (periodReturnsOrNow instanceof Date) {
+    now = periodReturnsOrNow;
+  }
+
   let label = monthOrLabel;
   let periodStart = new Date(0);
   let periodEnd = new Date(8640000000000000);

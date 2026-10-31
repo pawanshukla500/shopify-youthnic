@@ -178,7 +178,7 @@ export function isVelocityCourier(courier?: string | null, labelUrlOrWaybill?: s
     l.includes('velocity') ||
     l.includes('velocity-shazam') ||
     l.includes('shipfastt') ||
-    (Boolean(w) && /^(pd|vehr|vel)[0-9a-z]+$/i.test(w))
+    (Boolean(w) && (/^(pd|vehr|vel|r\d+.*ve)[0-9a-z]*$/i.test(w) || /^r\d{6,}[0-9a-z]*$/i.test(w)))
   )
 }
 
@@ -240,7 +240,8 @@ export function carrierTrackingUrl(courier: string | null | undefined, waybill: 
     name.includes('amazon') ||
     name.includes('ats') ||
     (name.includes('ekart') && (name.includes('velocity') || name.includes('shipfastt'))) ||
-    /^(pd|vehr|vel)/i.test(wb)
+    /^(pd|vehr|vel|r\d+.*ve)/i.test(wb) ||
+    /^r\d{6,}/i.test(wb)
   ) {
     return `https://www.velocityshipping.in/track/${encodeURIComponent(wb)}`
   }

@@ -59,7 +59,9 @@ export function isVelocityCourier(
   }
 
   // Velocity specific waybill prefixes
-  if (wb && /^(PD|VEHR|VEL)[0-9A-Z]+$/i.test(wb)) return true;
+  // Velocity specific waybill prefixes (including reverse AWBs like R2757220019VE0)
+  if (wb && /^(PD|VEHR|VEL|R\d+.*VE)[0-9A-Z]*$/i.test(wb)) return true;
+  if (wb && /^R\d{6,}[0-9A-Z]*$/i.test(wb)) return true;
 
   return false;
 }

@@ -49,7 +49,7 @@ export function OrderDetail() {
   const [selected, setSelected] = useState<Record<number, number>>({})
   const [reason, setReason] = useState('')
   const [returnTracking, setReturnTracking] = useState('')
-  const [carrier, setCarrier] = useState('Delhivery')
+  const [carrier, setCarrier] = useState('Velocity')
   const [section, setSection] = useState<OrderSection>(() => window.location.hash === '#return-panel' ? 'returns' : 'overview')
   useEffect(() => {
     if (orderQuery.dataUpdatedAt) queryClient.invalidateQueries({ queryKey: ['order-activity', id] })
@@ -1397,10 +1397,10 @@ export function OrderDetail() {
                 {isReturnOrder && returnAwb ? (
                   <a
                     className="button button-secondary"
-                    href={carrierTrackingUrl(order.shipment.courier || 'Delhivery', returnAwb)}
+                    href={carrierTrackingUrl(order.returns?.[0]?.carrier || (order.returns?.[0]?.isExchange ? 'Velocity' : order.shipment.courier) || 'Velocity', returnAwb)}
                     target="_blank"
                     rel="noopener noreferrer"
-                    title={`Open Return tracking on ${order.shipment.courier || 'Delhivery'}`}
+                    title={`Open Return tracking on ${order.returns?.[0]?.carrier || 'Velocity'}`}
                     style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: '#7c3aed', borderColor: '#c4b5fd', background: '#f5f3ff', fontWeight: 600 }}
                   >
                     <Icon name="refresh" size={15} />
@@ -2924,21 +2924,31 @@ function ReturnForm({
           <button type="button" className="reverse-link-toggle" onClick={() => {
             setLinkExisting((value) => !value)
             if (linkExisting) {
-              setCarrier(order.shipment && isVelocityCourier(order.shipment.courier, order.shipment.waybillNumber) ? 'Velocity' : 'Delhivery')
+              setCarrier('Velocity')
               setReturnTracking('')
             } else {
               setCarrier('Other')
             }
           }}>
-            {linkExisting ? `Use automatic ${carrier === 'Velocity' || (order.shipment && isVelocityCourier(order.shipment.courier, order.shipment.waybillNumber)) ? 'Velocity' : 'Delhivery'} pickup` : 'Link an AWB that already exists'}
+            {linkExisting ? 'Use automatic Velocity pickup' : 'Link an AWB that already exists'}
           </button>
 
-          {linkExisting ? (
+          {!linkExisting ? (
+            <div className="reverse-partner-select" style={{ marginTop: '12px', marginBottom: '14px' }}>
+              <FormField label="Reverse Logistics Partner">
+                <select value={carrier} onChange={(event) => setCarrier(event.target.value)}>
+                  <option value="Velocity">Velocity (Primary Aggregator · Recommended)</option>
+                  <option value="Delhivery">Delhivery Direct</option>
+                  <option value="Other">Other Carrier</option>
+                </select>
+              </FormField>
+            </div>
+          ) : (
             <div className="reverse-manual">
               <FormField label="Carrier">
                 <select value={carrier} onChange={(event) => setCarrier(event.target.value)}>
-                  <option value="Delhivery">Delhivery</option>
                   <option value="Velocity">Velocity</option>
+                  <option value="Delhivery">Delhivery</option>
                   <option value="Other">Other carrier</option>
                 </select>
               </FormField>
@@ -2946,11 +2956,11 @@ function ReturnForm({
                 <input
                   value={returnTracking}
                   onChange={(event) => setReturnTracking(event.target.value)}
-                  placeholder="Numeric Delhivery AWB"
+                  placeholder="Return AWB Number"
                 />
               </FormField>
             </div>
-          ) : null}
+          )}
 
           <Button className="button-primary full-button" loading={loading} disabled={!items.length || !delivered} onClick={onSubmit}>
             <Icon name="return" size={16} />

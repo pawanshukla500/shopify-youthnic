@@ -835,4 +835,191 @@ describe('Exchange Orders API & Workflow (/agency-api-tester)', () => {
       );
     });
   });
+
+  describe('6. Cross-Carrier Return & Velocity Non-Serviceable Fallback (/agency-senior-developer)', () => {
+    const mockDelhiveryDeliveredOrder = {
+      ...mockOrder,
+      id: 6138,
+      shopifyOrderName: '#26YOU6138',
+      customerName: 'Khushbu Savla',
+      customerPincode: '400080',
+      status: 'DELIVERED',
+      deliveredAt: new Date(),
+      shipment: {
+        id: 1471,
+        orderId: 6138,
+        waybillNumber: '30100810014000',
+        courier: 'Delhivery',
+        status: 'DELIVERED',
+      },
+      items: [
+        {
+          id: 2235,
+          orderId: 6138,
+          title: 'Navy Blue Embroidered Kurti',
+          sku: 'BT248-Albela-Navy_XL',
+          variantTitle: 'XL',
+          quantity: 1,
+          price: 1149,
+          returnable: true,
+        },
+      ],
+      returns: [],
+    };
+
+    it('creates return via Velocity for Delhivery forward order when Velocity is selected', async () => {
+      prismaStub.order.findUnique.mockResolvedValueOnce(mockDelhiveryDeliveredOrder);
+      prismaStub.return.create.mockResolvedValueOnce({
+        id: 801,
+        orderId: 6138,
+        carrier: 'Velocity',
+        returnWaybillNumber: 'R2757220019VE0',
+      });
+      prismaStub.order.update.mockResolvedValueOnce({});
+
+      const velSpy = vi.spyOn(velocityService, 'createReverseShipment').mockResolvedValueOnce({
+        awbCode: 'R2757220019VE0',
+        shipmentId: 'SHI-REV-801',
+        courierName: 'Velocity',
+        labelUrl: 'https://cdn.velocity.in/labels/r801.pdf',
+        raw: {},
+      });
+
+      const res = await returnService.createReturn(
+        6138,
+        'Size mismatch',
+        [{ orderItemId: 2235, quantity: 1 }],
+        { carrier: 'Velocity', triggerShopify: false }
+      );
+
+      expect(res.returnWaybill).toBe('R2757220019VE0');
+      expect(res.pickupAutomatic).toBe(true);
+      expect(velSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orderId: '#26YOU6138',
+          forwardAwb: '30100810014000',
+          pickupPincode: '400080',
+        })
+      );
+      expect(prismaStub.return.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            carrier: 'Velocity',
+            returnWaybillNumber: 'R2757220019VE0',
+            forwardWaybill: '30100810014000',
+          }),
+        })
+      );
+    });
+
+    it('automatically falls back to Velocity reverse pickup when Delhivery throws non-serviceable pincode exception', async () => {
+      prismaStub.order.findUnique.mockResolvedValueOnce(mockDelhiveryDeliveredOrder);
+      prismaStub.return.create.mockResolvedValueOnce({
+        id: 802,
+        orderId: 6138,
+        carrier: 'Velocity',
+        returnWaybillNumber: 'R2757220019VE0',
+      });
+      prismaStub.order.update.mockResolvedValueOnce({});
+
+      delhiveryStub.createReturnShipment.mockRejectedValueOnce(
+        new Error("Crashing while saving package due to exception '400080 is non serviceable pincode'. Package might have been partially saved.")
+      );
+
+      const velSpy = vi.spyOn(velocityService, 'createReverseShipment').mockResolvedValueOnce({
+        awbCode: 'R2757220019VE0',
+        shipmentId: 'SHI-REV-802',
+        courierName: 'Velocity',
+        labelUrl: 'https://cdn.velocity.in/labels/r802.pdf',
+        raw: {},
+      });
+
+      const res = await returnService.createReturn(
+        6138,
+        'Size mismatch',
+        [{ orderItemId: 2235, quantity: 1 }],
+        { carrier: 'Delhivery', triggerShopify: false }
+      );
+
+      expect(res.returnWaybill).toBe('R2757220019VE0');
+      expect(res.pickupAutomatic).toBe(true);
+      expect(delhiveryStub.createReturnShipment).toHaveBeenCalled();
+      expect(velSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orderId: '#26YOU6138',
+          forwardAwb: '30100810014000',
+          pickupPincode: '400080',
+        })
+      );
+      expect(prismaStub.return.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            carrier: 'Velocity',
+            returnWaybillNumber: 'R2757220019VE0',
+          }),
+        })
+      );
+    });
+
+    it('falls back to Velocity in exchange reverse leg when Delhivery reports non-serviceable pincode', async () => {
+      prismaStub.order.findUnique.mockResolvedValueOnce(mockDelhiveryDeliveredOrder);
+      prismaStub.order.findFirst.mockResolvedValueOnce(null);
+      prismaStub.shipment.findUnique.mockResolvedValueOnce(null);
+
+      delhiveryStub.createReturnShipment.mockRejectedValueOnce(
+        new Error("Crashing while saving package due to exception '400080 is non serviceable pincode'. Package might have been partially saved.")
+      );
+
+      vi.spyOn(velocityService, 'createReverseShipment').mockResolvedValueOnce({
+        awbCode: 'R2757220019VE0',
+        shipmentId: 'SHI-REV-803',
+        courierName: 'Velocity',
+        labelUrl: 'https://cdn.velocity.in/labels/r803.pdf',
+        raw: {},
+      });
+
+      vi.spyOn(velocityService, 'createExchangeForwardShipment').mockResolvedValueOnce({
+        orderId: '26YOU6138-EX-FWD',
+        shipmentId: 'SHI-FWD-803',
+        awbCode: 'VEL-FWD-6138',
+        courierName: 'Velocity',
+        labelUrl: 'https://cdn.velocity.in/labels/fwd-6138.pdf',
+      });
+
+      vi.spyOn(shopifyService, 'registerExchangeOnShopify').mockResolvedValueOnce({
+        success: true,
+        shopifyReturnId: 'gid://shopify/Return/6138',
+      });
+
+      prismaStub.return.create.mockResolvedValueOnce({
+        id: 803,
+        orderId: 6138,
+        isExchange: true,
+        carrier: 'Velocity',
+        exchangeForwardAwb: 'VEL-FWD-6138',
+      });
+      prismaStub.order.update.mockResolvedValueOnce({});
+      prismaStub.order.create.mockResolvedValueOnce({ id: 99103, shopifyOrderName: '26YOU6138-EX-FWD' });
+
+      const res = await returnService.createExchange(6138, {
+        returnOrderItemId: 2235,
+        returnQuantity: 1,
+        returnReason: 'Size exchange',
+        exchangeVariantId: '47015814660295',
+        exchangeSku: 'BT248-Albela-Navy_XXL',
+        exchangeTitle: 'XXL',
+        carrier: 'Delhivery',
+      });
+
+      expect(res.returnId).toBe(803);
+      expect(res.exchangeForwardAwb).toBe('VEL-FWD-6138');
+      expect(delhiveryStub.createReturnShipment).toHaveBeenCalled();
+    });
+
+    it('carrierTrackingUrl resolves Velocity reverse AWBs starting with R to velocityshipping.in', async () => {
+      const { carrierTrackingUrl } = await import('../frontend/src/lib');
+      const url = carrierTrackingUrl(null, 'R2757220019VE0');
+      expect(url).toBe('https://www.velocityshipping.in/track/R2757220019VE0');
+    });
+  });
 });

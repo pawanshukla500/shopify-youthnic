@@ -784,19 +784,20 @@ export async function renderWorkbook(data: ReportData): Promise<Buffer> {
     r.getCell(1).font = { bold: true };
   });
 
-  const endRow = Math.max(startRow, startRow + data.stateSummary.length - 1);
+  const hasRows = data.stateSummary.length > 0;
+  const endRow = startRow + data.stateSummary.length - 1;
   const totRow = stateSheet.addRow([
     'TOTAL (NATIONAL LEDGER)',
-    { formula: `SUM(B${startRow}:B${endRow})` },
-    { formula: `SUM(C${startRow}:C${endRow})` },
-    { formula: `SUM(D${startRow}:D${endRow})` },
-    { formula: `SUM(E${startRow}:E${endRow})` },
-    { formula: `SUM(F${startRow}:F${endRow})` },
-    { formula: `SUM(G${startRow}:G${endRow})` },
-    { formula: `SUM(H${startRow}:H${endRow})` },
-    { formula: `SUM(I${startRow}:I${endRow})` },
-    { formula: `SUM(J${startRow}:J${endRow})` },
-    { formula: `SUM(K${startRow}:K${endRow})` },
+    hasRows ? { formula: `SUM(B${startRow}:B${endRow})` } : 0,
+    hasRows ? { formula: `SUM(C${startRow}:C${endRow})` } : 0,
+    hasRows ? { formula: `SUM(D${startRow}:D${endRow})` } : 0,
+    hasRows ? { formula: `SUM(E${startRow}:E${endRow})` } : 0,
+    hasRows ? { formula: `SUM(F${startRow}:F${endRow})` } : 0,
+    hasRows ? { formula: `SUM(G${startRow}:G${endRow})` } : 0,
+    hasRows ? { formula: `SUM(H${startRow}:H${endRow})` } : 0,
+    hasRows ? { formula: `SUM(I${startRow}:I${endRow})` } : 0,
+    hasRows ? { formula: `SUM(J${startRow}:J${endRow})` } : 0,
+    hasRows ? { formula: `SUM(K${startRow}:K${endRow})` } : 0,
     'Net National Balance for Tally Verification',
   ]);
   totRow.font = { bold: true, size: 11 };
@@ -1202,6 +1203,15 @@ async function claimMonthlySend(month: string, now: Date): Promise<boolean> {
   }
 }
 
+function escapeHtml(str: string): string {
+  return String(str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 /** Email the month's report to the accounts team and remember that it was sent. */
 export async function emailMonthlyReport(
   month: string,
@@ -1227,7 +1237,7 @@ export async function emailMonthlyReport(
     .map(
       (s) => `
       <tr style="border-bottom: 1px solid #e2e8f0; font-size: 13px;">
-        <td style="padding: 8px 10px; font-weight: bold; color: #1e293b;">${s.state}</td>
+        <td style="padding: 8px 10px; font-weight: bold; color: #1e293b;">${escapeHtml(s.state)}</td>
         <td style="padding: 8px 10px; text-align: center;">${s.orderCount}</td>
         <td style="padding: 8px 10px; text-align: right; font-weight: 500;">${inr(s.grossSales)}</td>
         <td style="padding: 8px 10px; text-align: right; color: #dc2626;">-${inr(s.returnsDeducted)}</td>

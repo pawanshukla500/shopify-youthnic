@@ -143,8 +143,8 @@ class ReturnService {
     }
 
     const returnQty = Math.max(1, Math.min(returnItem.quantity, params.returnQuantity || 1));
-    const carrierName = (params.carrier || (order.shipment && isVelocityCourier(order.shipment.courier, order.shipment.labelUrl, order.shipment.waybillNumber)) ? 'Velocity' : 'Delhivery').trim();
-    const isVel = isVelocityCourier(carrierName, null, undefined) || /velocity/i.test(carrierName);
+    const carrierName = (params.carrier || (order.shipment && isVelocityCourier(order.shipment.courier, order.shipment.labelUrl, order.shipment.waybillNumber) ? 'Velocity' : 'Delhivery')).trim();
+    let isVel = isVelocityCourier(carrierName, null, undefined) || /velocity/i.test(carrierName);
     const forwardWaybill = order.shipment?.waybillNumber || null;
     const dispatchMode = params.dispatchMode || 'IMMEDIATE';
 
@@ -181,17 +181,57 @@ class ReturnService {
       finalReturnWaybill = velReturn.awbCode;
       reverseLabelUrl = velReturn.labelUrl || null;
     } else {
-      const created = await delhiveryService.createReturnShipment(
-        order,
-        params.returnReason,
-        forwardWaybill || undefined,
-        [{ title: returnItem.title, sku: returnItem.sku, quantity: returnQty }]
-      );
-      finalReturnWaybill = created.waybillNumber;
       try {
-        reverseLabelUrl = await delhiveryService.generateLabel(finalReturnWaybill);
-      } catch {
-        reverseLabelUrl = null;
+        const created = await delhiveryService.createReturnShipment(
+          order,
+          params.returnReason,
+          forwardWaybill || undefined,
+          [{ title: returnItem.title, sku: returnItem.sku, quantity: returnQty }]
+        );
+        finalReturnWaybill = created.waybillNumber;
+        try {
+          reverseLabelUrl = await delhiveryService.generateLabel(finalReturnWaybill);
+        } catch {
+          reverseLabelUrl = null;
+        }
+      } catch (delhiveryErr: any) {
+        const isNonServiceable = /non serviceable|not serviceable|unserviceable/i.test(delhiveryErr?.message || '');
+        if (isNonServiceable) {
+          logger.warn(`Delhivery exchange reverse pickup non-serviceable for pincode ${order.customerPincode}. Falling back to Velocity reverse orchestration.`, {
+            orderId: order.id,
+            error: delhiveryErr.message,
+          });
+          const rawName = (order.customerName || 'Customer').trim();
+          const parts = rawName.split(/\s+/);
+          const velReturn = await velocityService.createReverseShipment({
+            orderId: `${order.shopifyOrderName.replace('#', '')}-EX-RET`,
+            forwardAwb: forwardWaybill || undefined,
+            returnReason: params.returnReason,
+            storeName: 'youthnic2024',
+            pickupCustomerName: parts[0] || 'Customer',
+            pickupLastName: parts.slice(1).join(' ') || '.',
+            pickupAddress: (order.customerAddress || 'Address').substring(0, 200),
+            pickupCity: order.customerCity || 'City',
+            pickupState: order.customerState || 'State',
+            pickupPincode: order.customerPincode?.trim() || '000000',
+            pickupPhone: order.customerPhone || '9999999999',
+            pickupEmail: order.customerEmail || undefined,
+            items: [
+              {
+                name: returnItem.title,
+                sku: returnItem.sku || `SKU-${returnItem.id}`,
+                units: returnQty,
+                selling_price: Math.max(1, Math.round(returnItem.price || 0)),
+              },
+            ],
+            totalAmount: Math.max(1, Math.round((returnItem.price || 0) * returnQty)),
+          });
+          finalReturnWaybill = velReturn.awbCode;
+          reverseLabelUrl = velReturn.labelUrl || null;
+          isVel = true;
+        } else {
+          throw delhiveryErr;
+        }
       }
     }
 
@@ -500,10 +540,9 @@ class ReturnService {
       }
     }
 
-    const defaultCarrier = (order.shipment && isVelocityCourier(order.shipment.courier, order.shipment.labelUrl, order.shipment.waybillNumber))
-      ? 'Velocity'
-      : 'Delhivery';
-    const carrierName = (options?.carrier || defaultCarrier).trim() || defaultCarrier;
+    // Default to Velocity (our primary multi-carrier partner) unless caller explicitly requested Delhivery
+    const defaultCarrier = (options?.carrier || (order.shipment && isVelocityCourier(order.shipment.courier, order.shipment.labelUrl, order.shipment.waybillNumber) ? 'Velocity' : 'Velocity')).trim();
+    let carrierName = (options?.carrier || defaultCarrier).trim() || defaultCarrier;
     const typedWaybill = (options?.returnWaybillNumber || '').trim();
     if (/^REV-DEL-/i.test(typedWaybill)) {
       throw new Error('Placeholder return codes are not accepted. Leave the AWB blank so Delhivery can assign a real reverse waybill.');
@@ -520,8 +559,8 @@ class ReturnService {
     let pickupAutomatic = false;
     let labelUrl: string | null = null;
 
-    const isVel = isVelocityCourier(carrierName, null, typedWaybill) || /velocity/i.test(carrierName);
-    const isDelhivery = /delhivery/i.test(carrierName) && !isVel;
+    let isVel = isVelocityCourier(carrierName, null, typedWaybill) || /velocity/i.test(carrierName);
+    let isDelhivery = /delhivery/i.test(carrierName) && !isVel;
 
     if (isDelhivery && !finalReturnWaybill) {
       if (!forwardDelivered) {
@@ -533,15 +572,32 @@ class ReturnService {
         const line = order.items.find((row) => row.id === item.orderItemId)!;
         return { title: line.title, sku: line.sku, quantity: item.quantity };
       });
-      const created = await delhiveryService.createReturnShipment(
-        order,
-        returnReason,
-        forwardWaybill || undefined,
-        selectedLines
-      );
-      finalReturnWaybill = created.waybillNumber;
-      pickupAutomatic = true;
-    } else if (isVel && !finalReturnWaybill) {
+      try {
+        const created = await delhiveryService.createReturnShipment(
+          order,
+          returnReason,
+          forwardWaybill || undefined,
+          selectedLines
+        );
+        finalReturnWaybill = created.waybillNumber;
+        pickupAutomatic = true;
+      } catch (delhiveryErr: any) {
+        const isNonServiceable = /non serviceable|not serviceable|unserviceable/i.test(delhiveryErr?.message || '');
+        if (isNonServiceable) {
+          logger.warn(`Delhivery return reverse pickup non-serviceable for pincode ${order.customerPincode}. Falling back to Velocity reverse orchestration.`, {
+            orderId: order.id,
+            error: delhiveryErr.message,
+          });
+          isVel = true;
+          isDelhivery = false;
+          carrierName = 'Velocity';
+        } else {
+          throw delhiveryErr;
+        }
+      }
+    }
+
+    if (isVel && !finalReturnWaybill) {
       if (!forwardDelivered) {
         throw new Error(
           `Reverse pickup is created after the forward shipment is delivered. ${order.shopifyOrderName} is still ${order.status}.`

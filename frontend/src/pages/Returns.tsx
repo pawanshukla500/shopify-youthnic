@@ -177,7 +177,7 @@ export function Returns() {
         >
           <div className="returns-metric-label" style={{ color: '#b45309' }}>
             <span>QC Passed (Unrefunded)</span>
-            <Icon name="alert-triangle" size={14} />
+            <Icon name="alert" size={14} />
           </div>
           <strong className="returns-metric-value" style={{ color: '#b45309' }}>{metrics.qcPassedUnrefunded}</strong>
         </div>

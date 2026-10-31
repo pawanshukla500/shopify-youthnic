@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, apiError, getReturns } from '../api'
 import { RETURN_STATUSES, formatDate, formatMoney, labelize } from '../lib'
@@ -15,7 +15,30 @@ export function Returns() {
   const queryClient = useQueryClient()
   const [status, setStatus] = useState('')
   const [search, setSearch] = useState('')
-  const [filterTab, setFilterTab] = useState<FilterTab>('ALL')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const initialParamTab = searchParams.get('tab') as FilterTab | null
+  const validFilterTabs: FilterTab[] = ['ALL', 'QC_PASSED_UNREFUNDED', 'COD_DUE', 'EXCHANGES', 'PENDING_QC', 'REFUNDED']
+  const [filterTab, setFilterTab] = useState<FilterTab>(
+    initialParamTab && validFilterTabs.includes(initialParamTab) ? initialParamTab : 'ALL'
+  )
+
+  useEffect(() => {
+    const tabParam = searchParams.get('tab') as FilterTab | null
+    if (tabParam && validFilterTabs.includes(tabParam)) {
+      setFilterTab(tabParam)
+    }
+  }, [searchParams])
+
+  const selectFilterTab = (tab: FilterTab) => {
+    setFilterTab(tab)
+    const next = new URLSearchParams(searchParams)
+    if (tab === 'ALL') {
+      next.delete('tab')
+    } else {
+      next.set('tab', tab)
+    }
+    setSearchParams(next, { replace: true })
+  }
   const [waybill, setWaybill] = useState('')
   const [qcStatus, setQcStatus] = useState<'APPROVED' | 'REJECTED' | 'PARTIAL'>('APPROVED')
   const [remark, setRemark] = useState('')
@@ -159,7 +182,7 @@ export function Returns() {
       <div className="returns-metrics-grid">
         <div
           className={`returns-metric-card ${filterTab === 'ALL' ? 'active' : ''}`}
-          onClick={() => setFilterTab('ALL')}
+          onClick={() => selectFilterTab('ALL')}
           title="Click to view all returns"
         >
           <div className="returns-metric-label">
@@ -171,7 +194,7 @@ export function Returns() {
 
         <div
           className={`returns-metric-card highlight-amber ${filterTab === 'QC_PASSED_UNREFUNDED' ? 'active' : ''}`}
-          onClick={() => setFilterTab('QC_PASSED_UNREFUNDED')}
+          onClick={() => selectFilterTab('QC_PASSED_UNREFUNDED')}
           title="Click to view returns with QC passed or received at warehouse but not yet refunded (COD & Prepaid)"
           style={{ cursor: 'pointer' }}
         >
@@ -184,7 +207,7 @@ export function Returns() {
 
         <div
           className={`returns-metric-card ${filterTab === 'PENDING_QC' ? 'active' : ''}`}
-          onClick={() => setFilterTab('PENDING_QC')}
+          onClick={() => selectFilterTab('PENDING_QC')}
           title="Click to view returns pending QC"
         >
           <div className="returns-metric-label" style={{ color: '#b45309' }}>
@@ -196,7 +219,7 @@ export function Returns() {
 
         <div
           className={`returns-metric-card highlight-amber ${filterTab === 'COD_DUE' ? 'active' : ''}`}
-          onClick={() => setFilterTab('COD_DUE')}
+          onClick={() => selectFilterTab('COD_DUE')}
           title="Click to view COD returns waiting for manual payout"
         >
           <div className="returns-metric-label" style={{ color: '#b45309' }}>
@@ -208,7 +231,7 @@ export function Returns() {
 
         <div
           className={`returns-metric-card ${filterTab === 'EXCHANGES' ? 'active' : ''}`}
-          onClick={() => setFilterTab('EXCHANGES')}
+          onClick={() => selectFilterTab('EXCHANGES')}
           title="Click to view size exchange returns"
         >
           <div className="returns-metric-label" style={{ color: '#6b21a8' }}>
@@ -220,7 +243,7 @@ export function Returns() {
 
         <div
           className={`returns-metric-card ${filterTab === 'REFUNDED' ? 'active' : ''}`}
-          onClick={() => setFilterTab('REFUNDED')}
+          onClick={() => selectFilterTab('REFUNDED')}
           title="Click to view settled / refunded returns"
         >
           <div className="returns-metric-label" style={{ color: '#15803d' }}>
@@ -348,14 +371,14 @@ export function Returns() {
         <div className="returns-filter-nav">
           <button
             className={`returns-tab-btn ${filterTab === 'ALL' ? 'active' : ''}`}
-            onClick={() => setFilterTab('ALL')}
+            onClick={() => selectFilterTab('ALL')}
           >
             All Returns
             <span className="returns-tab-count">{metrics.total}</span>
           </button>
           <button
             className={`returns-tab-btn ${filterTab === 'QC_PASSED_UNREFUNDED' ? 'active' : ''}`}
-            onClick={() => setFilterTab('QC_PASSED_UNREFUNDED')}
+            onClick={() => selectFilterTab('QC_PASSED_UNREFUNDED')}
           >
             QC Passed (Unrefunded)
             <span className="returns-tab-count" style={{ background: '#fef3c7', color: '#92400e', fontWeight: 700 }}>
@@ -364,7 +387,7 @@ export function Returns() {
           </button>
           <button
             className={`returns-tab-btn ${filterTab === 'COD_DUE' ? 'active' : ''}`}
-            onClick={() => setFilterTab('COD_DUE')}
+            onClick={() => selectFilterTab('COD_DUE')}
           >
             COD Refund Due
             <span className="returns-tab-count" style={{ background: '#fef3c7', color: '#92400e' }}>
@@ -373,7 +396,7 @@ export function Returns() {
           </button>
           <button
             className={`returns-tab-btn ${filterTab === 'EXCHANGES' ? 'active' : ''}`}
-            onClick={() => setFilterTab('EXCHANGES')}
+            onClick={() => selectFilterTab('EXCHANGES')}
           >
             Size Exchanges
             <span className="returns-tab-count" style={{ background: '#f3e8ff', color: '#6b21a8' }}>
@@ -382,7 +405,7 @@ export function Returns() {
           </button>
           <button
             className={`returns-tab-btn ${filterTab === 'PENDING_QC' ? 'active' : ''}`}
-            onClick={() => setFilterTab('PENDING_QC')}
+            onClick={() => selectFilterTab('PENDING_QC')}
           >
             Pending QC
             <span className="returns-tab-count" style={{ background: '#fee2e2', color: '#991b1b' }}>
@@ -391,7 +414,7 @@ export function Returns() {
           </button>
           <button
             className={`returns-tab-btn ${filterTab === 'REFUNDED' ? 'active' : ''}`}
-            onClick={() => setFilterTab('REFUNDED')}
+            onClick={() => selectFilterTab('REFUNDED')}
           >
             Settled / Refunded
             <span className="returns-tab-count" style={{ background: '#dcfce7', color: '#166534' }}>

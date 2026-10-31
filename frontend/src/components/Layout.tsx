@@ -17,6 +17,7 @@ interface NavItem {
 const operationsNav: NavItem[] = [
   { to: '/', label: 'Dashboard', icon: 'grid', end: true },
   { to: '/orders', label: 'Orders', icon: 'box', hasPendingBadge: true },
+  { to: '/workflows', label: 'Workflow Trees', icon: 'workflow' },
   { to: '/products', label: 'Products & Listings', icon: 'package' },
   { to: '/support', label: 'Support & Returns Desk', icon: 'shield' },
   { to: '/communications', label: 'Communications & Emails', icon: 'mail' },

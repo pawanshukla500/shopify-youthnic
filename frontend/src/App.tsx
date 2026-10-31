@@ -15,6 +15,7 @@ function lazyPage<T extends string>(load: () => Promise<Record<T, ComponentType>
 }
 const Dashboard = lazyPage(() => import('./pages/Dashboard'), 'Dashboard')
 const Orders = lazyPage(() => import('./pages/Orders'), 'Orders')
+const Workflows = lazyPage(() => import('./pages/Workflows'), 'Workflows')
 const OrderDetail = lazyPage(() => import('./pages/OrderDetail'), 'OrderDetail')
 const Returns = lazyPage(() => import('./pages/Returns'), 'Returns')
 const Tracking = lazyPage(() => import('./pages/Tracking'), 'Tracking')
@@ -70,6 +71,7 @@ export function App() {
                     >
                       <Route path="/" element={<Dashboard />} />
                       <Route path="/orders" element={<Orders />} />
+                      <Route path="/workflows" element={<Workflows />} />
                       <Route path="/orders/:id" element={<OrderDetail />} />
                       <Route path="/products" element={<Products />} />
                       <Route path="/analytics" element={<Analytics />} />

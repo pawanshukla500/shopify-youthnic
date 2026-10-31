@@ -1,0 +1,417 @@
+/* Workflow Trees · Architect View Stylesheet */
+.workflows-page {
+  max-width: 1440px;
+  margin: 0 auto;
+  color: var(--ink);
+  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+/* ─── Top Level Operational Ribbon ──────────────────────────────── */
+.workflow-ribbon-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.wf-ribbon-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px 16px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: flex;
+  flex-direction: column;
+}
+
+.wf-ribbon-card:hover {
+  border-color: var(--line-strong, #94a3b8);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
+}
+
+.wf-ribbon-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 750;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.wf-ribbon-val {
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--ink);
+  line-height: 1.1;
+  margin-bottom: 4px;
+}
+
+.wf-ribbon-sub {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ─── Invariants Panel ─────────────────────────────────────────── */
+.wf-invariants-panel {
+  margin-bottom: 24px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+}
+
+.wf-invariants-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  padding: 16px;
+  background: var(--canvas);
+  border-radius: var(--radius-md);
+  margin: 12px 16px 16px;
+}
+
+.wf-guard-item {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wf-guard-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 750;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #15803d;
+  margin-bottom: 2px;
+}
+
+.wf-guard-tag .live-dot {
+  width: 6px;
+  height: 6px;
+}
+
+.wf-guard-item strong {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.wf-guard-item p {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.wf-guard-item code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  background: var(--line-subtle);
+  padding: 1px 4px;
+  border-radius: 4px;
+  color: var(--ink-secondary);
+}
+
+/* ─── Stage Selector Tabs ──────────────────────────────────────── */
+.wf-tabs-container {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 12px;
+  overflow-x: auto;
+}
+
+.wf-stage-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  font-size: 12.5px;
+  font-weight: 650;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.wf-stage-tab:hover {
+  background: var(--line-subtle);
+  color: var(--ink);
+}
+
+.wf-stage-tab.active {
+  background: var(--panel);
+  border-color: var(--line);
+  color: var(--blue, #2563eb);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+  font-weight: 750;
+}
+
+/* ─── Workflow Trees Canvas ────────────────────────────────────── */
+.wf-trees-canvas {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  margin-bottom: 40px;
+}
+
+.wf-tree-section {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 20px 22px;
+  box-shadow: var(--shadow-sm);
+}
+
+.wf-tree-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 22px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line-subtle);
+}
+
+.wf-section-badge {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 4px 10px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.wf-section-badge.s1 { background: #dbeafe; color: #1d4ed8; }
+.wf-section-badge.s2 { background: #e0e7ff; color: #4338ca; }
+.wf-section-badge.s3 { background: #f3e8ff; color: #7e22ce; }
+.wf-section-badge.s4 { background: #dcfce7; color: #15803d; }
+
+.wf-section-title h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 750;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+
+.wf-section-title p {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ─── Node Flow Layout ─────────────────────────────────────────── */
+.wf-nodes-flow {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  overflow-x: auto;
+  padding: 6px 2px 14px;
+}
+
+.wf-arrow-connector {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--muted-light);
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.wf-node-card {
+  width: 220px;
+  min-width: 220px;
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  transition: all 0.15s ease;
+  position: relative;
+}
+
+.wf-node-card:hover {
+  border-color: var(--line-strong, #94a3b8);
+  background: var(--panel);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.05);
+}
+
+.wf-node-card.decision-node {
+  border-left: 3px solid #f59e0b;
+}
+
+.wf-node-card.highlighted-node {
+  border-color: #93c5fd;
+  background: #f8fafc;
+  box-shadow: 0 0 0 1px #bfdbfe;
+}
+
+.wf-node-card.success-node {
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+
+.wf-node-card.danger-node {
+  border-color: #fca5a5;
+  background: #fef2f2;
+}
+
+.wf-node-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.wf-node-pill {
+  font-size: 9.5px;
+  font-weight: 750;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.pill-gray { background: #e2e8f0; color: #475569; }
+.pill-blue { background: #dbeafe; color: #1e40af; }
+.pill-purple { background: #f3e8ff; color: #6b21a8; }
+.pill-amber { background: #fef3c7; color: #92400e; }
+.pill-green { background: #dcfce7; color: #166534; }
+.pill-red { background: #fee2e2; color: #991b1b; }
+
+.wf-node-id {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--muted-light);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.wf-node-count-badge {
+  font-size: 10px;
+  font-weight: 800;
+  background: #2563eb;
+  color: #ffffff;
+  padding: 1px 7px;
+  border-radius: 999px;
+}
+
+.wf-node-card h4 {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 750;
+  color: var(--ink);
+  line-height: 1.3;
+}
+
+.wf-node-card h4 code {
+  font-size: 11.5px;
+  background: rgba(15, 23, 42, 0.06);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.wf-node-card p {
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.45;
+  flex-grow: 1;
+}
+
+.wf-node-card p code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  background: var(--line-subtle);
+  padding: 1px 3px;
+  border-radius: 3px;
+}
+
+.wf-branch-pills {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+}
+
+.wf-branch-pill {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  display: inline-block;
+}
+
+.wf-branch-pill.green { background: #dcfce7; color: #15803d; }
+.wf-branch-pill.red { background: #fee2e2; color: #b91c1c; }
+.wf-branch-pill.blue { background: #dbeafe; color: #1e40af; }
+.wf-branch-pill.orange { background: #ffedd5; color: #c2410c; }
+.wf-branch-pill.purple { background: #f3e8ff; color: #6b21a8; }
+
+.wf-node-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 10px;
+}
+
+.wf-badge-tag {
+  font-size: 9.5px;
+  font-weight: 650;
+  background: var(--line-subtle);
+  color: var(--muted);
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+}
+
+.wf-node-action {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line-subtle);
+}
+
+.wf-action-link {
+  font-size: 11px;
+  font-weight: 750;
+  color: var(--blue, #2563eb);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+}
+
+.wf-action-link:hover {
+  text-decoration: underline;
+  transform: translateX(2px);
+}
+
+/* ─── Responsive Adjustments ───────────────────────────────────── */
+@media (max-width: 1200px) {
+  .workflow-ribbon-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .wf-invariants-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

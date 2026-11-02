@@ -15,6 +15,7 @@ import { config } from '../config';
 import prisma from '../database/prisma';
 import logger from '../utils/logger';
 import kwikengageService, { KwikEngageTriggerType } from '../modules/whatsapp/kwikengage.service';
+import whatsappGatewayService from '../modules/whatsapp/whatsapp-gateway.service';
 import gokwikService from '../modules/payments/gokwik.service';
 import productService from '../modules/products/product.service';
 import resendService, { EmailTemplateType } from '../modules/email/resend.service';
@@ -4548,6 +4549,36 @@ router.get('/settings/whatsapp/usage', async (_req: Request, res: Response): Pro
       senderPhone: config.kwikengage.senderPhone,
       wabaId: config.kwikengage.wabaId,
       status: pingStatus.status,
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ─── WhatsApp Gateway (GoWA Self-Hosted on OCI Mumbai) ──────────────
+router.get('/settings/whatsapp-gateway/status', async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const status = await whatsappGatewayService.ping();
+    res.json({
+      success: true,
+      ...status,
+      recipient: config.whatsappGateway.ektaJid,
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.post('/settings/whatsapp-gateway/test-ekta', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const customMessage = req.body.message || `🔔 *OMS Gateway Test Message*\nThis is a live connection test from Youthnic OMS to Ekta Bhayani.\nTimestamp: ${new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }).format(new Date())}`;
+    const targetJid = req.body.targetJid || config.whatsappGateway.ektaJid;
+    const result = await whatsappGatewayService.sendTextMessage(targetJid, customMessage);
+    res.json({
+      success: result.success,
+      messageId: result.messageId,
+      recipient: targetJid,
+      error: result.error,
     });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });

@@ -858,6 +858,29 @@ class ShopifyService {
   }
 
   /**
+   * Appends a timestamped note to a Shopify order, preserving existing notes.
+   */
+  async appendOrderNote(shopifyOrderId: string, noteAddition: string): Promise<{ success: boolean; note?: string; error?: string }> {
+    try {
+      const order = await this.fetchOrder(shopifyOrderId);
+      const existingNote = (order as any).note || '';
+      const updatedNote = existingNote ? `${existingNote}\n${noteAddition.trim()}` : noteAddition.trim();
+
+      await this.client.put(`/orders/${shopifyOrderId}.json`, {
+        order: {
+          id: shopifyOrderId,
+          note: updatedNote,
+        },
+      });
+
+      return { success: true, note: updatedNote };
+    } catch (err: any) {
+      logger.warn('Failed to append note to Shopify order', { shopifyOrderId, error: err.message });
+      return { success: false, error: err.message };
+    }
+  }
+
+  /**
    * Closes an open Return in Shopify using GraphQL mutation returnClose.
    * This officially marks the return as completed/received in Shopify Admin.
    */

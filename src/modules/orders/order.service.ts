@@ -7,6 +7,7 @@ import shippingRouterService, { CourierChoice } from '../shipping/shipping-route
 import { isVelocityCourier, isDelhiveryCourier, getTrackingUrl, normalizeCourierName } from '../../utils/courier';
 import notificationEngine from '../notifications/notification.service';
 import paymentService from '../payments/payment.service';
+import whatsappGatewayService from '../whatsapp/whatsapp-gateway.service';
 import { recordAccountTrailEvent, type AccountTrailActor } from '../accounts/account-trail.service';
 import { queueManifestForPickup } from '../delhivery/pickup-batch.service';
 import logger from '../../utils/logger';
@@ -1813,6 +1814,9 @@ class OrderService {
       } catch (e: any) {
         logger.warn('Could not update tags on Shopify for COD RTO', { error: e.message });
       }
+      Promise.resolve(whatsappGatewayService.notifyEktaCodRtoReceived({ order })).catch((waErr) =>
+        logger.warn('Failed to dispatch Ekta WhatsApp notification for COD RTO', { error: waErr.message })
+      );
       return { success: true, message: 'COD Order marked RTO Delivered and restocked (no customer refund required).' };
     }
 
@@ -1946,6 +1950,24 @@ class OrderService {
     } catch (tagErr: any) {
       logger.warn('Failed to add refund tags to Shopify', { error: tagErr.message });
     }
+
+    // Append refund details note on Shopify and OMS
+    const rtoNote = `[Prepaid RTO Refunded - ${new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }).format(new Date())}] Undelivered parcel returned to warehouse. Auto-refunded ₹${refundedAmount.toFixed(2)} (Shopify Refund ID: ${refundResult.refundId}). AWB: ${waybill || 'N/A'}`;
+    Promise.resolve(shopifyService.appendOrderNote(order.shopifyOrderId, rtoNote)).catch((e) =>
+      logger.warn('Failed to append Shopify order note for RTO refund', { error: e.message })
+    );
+    Promise.resolve(prisma.order.update({ where: { id: order.id }, data: { shopifyNote: rtoNote } })).catch(() => undefined);
+
+    // Notify Ekta on WhatsApp
+    Promise.resolve(
+      whatsappGatewayService.notifyEktaPrepaidRtoRefund({
+        order,
+        refundAmount: refundedAmount,
+        shopifyRefundId: refundResult.refundId,
+      })
+    ).catch((waErr) =>
+      logger.warn('Failed to dispatch Ekta WhatsApp notification for prepaid RTO refund', { error: waErr.message })
+    );
 
     // Tell the customer only when money actually moved back to them.
     if (refundResult.moneyMoved) {

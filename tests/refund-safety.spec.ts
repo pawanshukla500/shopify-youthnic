@@ -28,16 +28,25 @@ const { prismaStub } = vi.hoisted(() => ({
 }));
 vi.mock('../src/database/prisma', () => ({ default: prismaStub }));
 
-const { delhiveryStub, notifyStub } = vi.hoisted(() => ({
+const { delhiveryStub, notifyStub, whatsappStub } = vi.hoisted(() => ({
   delhiveryStub: { trackShipment: vi.fn(), mapTrackingToShipmentStatus: vi.fn() },
   notifyStub: {
     notifyRefundProcessed: vi.fn(),
     notifyReturnReceived: vi.fn(),
     sendCustomMessage: vi.fn(),
   },
+  whatsappStub: {
+    notifyEktaPrepaidReturnRefund: vi.fn().mockResolvedValue({ success: true }),
+    notifyEktaPrepaidRtoRefund: vi.fn().mockResolvedValue({ success: true }),
+    notifyEktaCodReturnReceived: vi.fn().mockResolvedValue({ success: true }),
+    notifyEktaCodRtoReceived: vi.fn().mockResolvedValue({ success: true }),
+    sendTextMessage: vi.fn().mockResolvedValue({ success: true }),
+    ping: vi.fn().mockResolvedValue({ success: true, status: 'CONNECTED' }),
+  },
 }));
 vi.mock('../src/modules/delhivery/delhivery.service', () => ({ default: delhiveryStub }));
 vi.mock('../src/modules/notifications/notification.service', () => ({ default: notifyStub }));
+vi.mock('../src/modules/whatsapp/whatsapp-gateway.service', () => ({ default: whatsappStub }));
 
 import shopifyService, { matchShopifyLineItem, roundMoney } from '../src/modules/shopify/shopify.service';
 import returnService, { REFUND_MAX_ATTEMPTS } from '../src/modules/returns/return.service';
@@ -47,7 +56,7 @@ const kurtaS = { id: 501, variant_id: 9001, sku: 'KURTA-S', title: 'Cotton Kurta
 const kurtaM = { id: 502, variant_id: 9002, sku: 'KURTA-M', title: 'Cotton Kurta', variant_title: 'M' };
 
 function resetStubs() {
-  for (const group of [...Object.values(prismaStub), delhiveryStub, notifyStub]) {
+  for (const group of [...Object.values(prismaStub), delhiveryStub, notifyStub, whatsappStub]) {
     for (const fn of Object.values(group)) (fn as any).mockReset();
   }
   prismaStub.return.update.mockResolvedValue({});
@@ -56,6 +65,11 @@ function resetStubs() {
   prismaStub.accountTrailEvent.create.mockResolvedValue({ id: 1 });
   prismaStub.accountTrailEvent.findFirst.mockResolvedValue(null);
   prismaStub.returnItem.updateMany.mockResolvedValue({});
+  whatsappStub.notifyEktaPrepaidReturnRefund.mockResolvedValue({ success: true });
+  whatsappStub.notifyEktaPrepaidRtoRefund.mockResolvedValue({ success: true });
+  whatsappStub.notifyEktaCodReturnReceived.mockResolvedValue({ success: true });
+  whatsappStub.notifyEktaCodRtoReceived.mockResolvedValue({ success: true });
+  whatsappStub.sendTextMessage.mockResolvedValue({ success: true });
 }
 
 describe('matchShopifyLineItem', () => {
@@ -218,6 +232,7 @@ describe('returnService.processRefund', () => {
       moneyMoved: true,
       alreadyRefunded: false,
     });
+    vi.spyOn(shopifyService, 'appendOrderNote').mockResolvedValue({ success: true } as any);
   });
 
   it('refunds only the returned size, at the calculated price, without shipping', async () => {
@@ -247,6 +262,18 @@ describe('returnService.processRefund', () => {
         externalReference: '3001',
       }),
     });
+    expect(whatsappStub.notifyEktaPrepaidReturnRefund).toHaveBeenCalledWith(
+      expect.objectContaining({
+        order: twoKurtaOrder,
+        refundAmount: 719.1,
+        shopifyRefundId: '3001',
+        isPartialReturn: true,
+      })
+    );
+    expect(shopifyService.appendOrderNote).toHaveBeenCalledWith(
+      '123',
+      expect.stringContaining('[Refund Processed')
+    );
   });
 
   it('refunds shipping when QC approved a return of every unit', async () => {
@@ -515,6 +542,7 @@ describe('returnService.refundOrder (direct refund from the order page)', () => 
       moneyMoved: true,
       alreadyRefunded: false,
     });
+    vi.spyOn(shopifyService, 'appendOrderNote').mockResolvedValue({ success: true } as any);
   });
 
   it('a partial goodwill refund is money only and leaves the order and its return open', async () => {
@@ -622,6 +650,33 @@ describe('orderService.processRtoRefund', () => {
         externalReference: '4001',
       }),
     });
+    expect(whatsappStub.notifyEktaPrepaidRtoRefund).toHaveBeenCalledWith(
+      expect.objectContaining({
+        order: rtoOrder,
+        refundAmount: 999,
+        shopifyRefundId: '4001',
+      })
+    );
+  });
+
+  it('marks a COD RTO delivered and notifies Ekta on WhatsApp without monetary refund', async () => {
+    prismaStub.order.findUnique.mockResolvedValue({
+      ...rtoOrder,
+      paymentMethod: 'COD',
+      financialStatus: 'pending',
+    });
+    delhiveryStub.trackShipment.mockResolvedValue({ statusType: 'DL', status: 'RTO' });
+    delhiveryStub.mapTrackingToShipmentStatus.mockReturnValue('RTO_DELIVERED');
+
+    const result = await orderService.processRtoRefund(5);
+
+    expect(result.success).toBe(true);
+    expect(shopifyService.createRefund).not.toHaveBeenCalled();
+    expect(whatsappStub.notifyEktaCodRtoReceived).toHaveBeenCalledWith(
+      expect.objectContaining({
+        order: expect.objectContaining({ paymentMethod: 'COD' }),
+      })
+    );
   });
 
   it('never refunds an order the customer received, whatever the carrier data says', async () => {

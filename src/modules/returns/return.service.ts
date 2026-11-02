@@ -6,6 +6,7 @@ import { isVelocityCourier } from '../../utils/courier';
 import shopifyService, { matchShopifyLineItem } from '../shopify/shopify.service';
 import notificationEngine from '../notifications/notification.service';
 import { recordAccountTrailEvent, type AccountTrailActor } from '../accounts/account-trail.service';
+import whatsappGatewayService from '../whatsapp/whatsapp-gateway.service';
 import logger from '../../utils/logger';
 import { applyReturnCarrierScan } from './return-tracking';
 import { mapReturnReason, reverseProductDescription } from './return-reasons';
@@ -1049,6 +1050,14 @@ class ReturnService {
       });
     }
 
+    // Append refund details note on Shopify and OMS
+    const itemNames = (order.items || []).map((i: any) => `${i.title || 'Item'} (x${i.quantity})`).join(', ');
+    const refundNote = `[Refund Processed - ${new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }).format(new Date())}] ${isPartial ? 'Partial refund' : 'Refund'} processed ₹${refundedAmount.toFixed(2)} (Shopify Refund ID: ${refundResult.refundId}) | Items: ${itemNames}`;
+    Promise.resolve(shopifyService.appendOrderNote(order.shopifyOrderId, refundNote)).catch((e) =>
+      logger.warn('Failed to append Shopify order note for refund', { error: e.message })
+    );
+    Promise.resolve(prisma.order.update({ where: { id: order.id }, data: { shopifyNote: refundNote } })).catch(() => undefined);
+
     // Tell the customer only when money actually went back to them.
     if (refundResult.moneyMoved) {
       await notificationEngine.notifyRefundProcessed(order, refundedAmount, activeReturn);
@@ -1236,6 +1245,16 @@ class ReturnService {
         } catch (tagErr: any) {
           logger.warn('Failed to tag order for COD manual refund', { orderId: returnRecord.orderId, error: tagErr.message });
         }
+        Promise.resolve(
+          whatsappGatewayService.notifyEktaCodReturnReceived({
+            order: returnRecord.order,
+            returnRecord,
+            qcStatus,
+            qcRemark,
+          })
+        ).catch((waErr) =>
+          logger.warn('Failed to dispatch Ekta WhatsApp notification for COD return scan', { error: waErr.message })
+        );
         return {
           returnId: returnRecord.id,
           refundProcessed: false,
@@ -1548,6 +1567,27 @@ class ReturnService {
         error: auditError.message,
       });
     }
+
+    // Append refund details note on Shopify and OMS
+    const itemNames = returnRecord.items.map((i: any) => `${i.orderItem?.title || 'Item'} (x${i.quantity})`).join(', ');
+    const refundNote = `[Refund Processed - ${new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }).format(new Date())}] ${isPartialReturn ? 'Partial return' : 'Return'} auto-refunded ₹${refundAmount.toFixed(2)} (Shopify Refund ID: ${refundResult.refundId}) | Items: ${itemNames} | AWB: ${returnRecord.returnWaybillNumber || 'N/A'}`;
+    Promise.resolve(shopifyService.appendOrderNote(returnRecord.order.shopifyOrderId, refundNote)).catch((e) =>
+      logger.warn('Failed to append Shopify order note for return refund', { error: e.message })
+    );
+    Promise.resolve(prisma.order.update({ where: { id: returnRecord.orderId }, data: { shopifyNote: refundNote } })).catch(() => undefined);
+
+    // Notify Ekta on WhatsApp
+    Promise.resolve(
+      whatsappGatewayService.notifyEktaPrepaidReturnRefund({
+        order: returnRecord.order,
+        returnRecord,
+        refundAmount,
+        shopifyRefundId: refundResult.refundId,
+        isPartialReturn,
+      })
+    ).catch((waErr) =>
+      logger.warn('Failed to dispatch Ekta WhatsApp notification for prepaid return refund', { error: waErr.message })
+    );
 
     // Tell the customer only when money actually went back to them.
     if (refundResult.moneyMoved) {

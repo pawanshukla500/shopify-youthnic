@@ -196,6 +196,15 @@ export const config = {
     return this.kwikengage;
   },
 
+  // Operations WhatsApp Gateway (Self-hosted GoWA multi-device gateway on OCI Mumbai instance)
+  // Used for internal operations alerts (Ekta Bhayani return & refund dispatch)
+  whatsappGateway: {
+    apiUrl: optional('WHATSAPP_GATEWAY_URL', 'https://wa.youthnic.shop'),
+    auth: optional('WHATSAPP_GATEWAY_AUTH', 'returnorders@vbexports.co.in:Xchange4WA$'),
+    ektaJid: optional('EKTA_WHATSAPP_JID', '918866077404@s.whatsapp.net'),
+    enabled: optional('WHATSAPP_GATEWAY_ENABLED', 'true') === 'true',
+  },
+
   // GoKwik (primary payment gateway)
   gokwik: {
     merchantId: optional('GOKWIK_MERCHANT_ID', ''),

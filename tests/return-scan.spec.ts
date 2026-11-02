@@ -4,7 +4,7 @@ vi.mock('../src/utils/logger', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
-const { prismaStub, shopifyStub, orderStub, resendStub, pgQueryStub } = vi.hoisted(() => ({
+const { prismaStub, shopifyStub, orderStub, returnStub, resendStub, whatsappStub, pgQueryStub } = vi.hoisted(() => ({
   prismaStub: {
     order: { findFirst: vi.fn(), findMany: vi.fn(), update: vi.fn() },
     shipment: { update: vi.fn() },
@@ -15,16 +15,28 @@ const { prismaStub, shopifyStub, orderStub, resendStub, pgQueryStub } = vi.hoist
     updateOrderTags: vi.fn().mockResolvedValue({ success: true, tags: [] }),
     markReturnReceivedOnShopify: vi.fn().mockResolvedValue({ success: true, closedReturnIds: ['gid://shopify/Return/37529714887'], tagsAdded: ['Return Received', 'Return Delivered'], noteUpdated: true, errors: [] }),
     closeShopifyReturn: vi.fn().mockResolvedValue({ success: true, status: 'CLOSED' }),
+    appendOrderNote: vi.fn().mockResolvedValue({ success: true }),
   },
   orderStub: { processRtoRefund: vi.fn() },
+  returnStub: { processRefund: vi.fn() },
   resendStub: { sendEmail: vi.fn() },
+  whatsappStub: {
+    notifyEktaPrepaidReturnRefund: vi.fn().mockResolvedValue({ success: true }),
+    notifyEktaPrepaidRtoRefund: vi.fn().mockResolvedValue({ success: true }),
+    notifyEktaCodReturnReceived: vi.fn().mockResolvedValue({ success: true }),
+    notifyEktaCodRtoReceived: vi.fn().mockResolvedValue({ success: true }),
+    sendTextMessage: vi.fn().mockResolvedValue({ success: true }),
+    ping: vi.fn().mockResolvedValue({ success: true, status: 'CONNECTED' }),
+  },
   pgQueryStub: vi.fn(),
 }));
 
 vi.mock('../src/database/prisma', () => ({ default: prismaStub }));
 vi.mock('../src/modules/shopify/shopify.service', () => ({ default: shopifyStub }));
 vi.mock('../src/modules/orders/order.service', () => ({ default: orderStub }));
+vi.mock('../src/modules/returns/return.service', () => ({ default: returnStub }));
 vi.mock('../src/modules/email/resend.service', () => ({ default: resendStub }));
+vi.mock('../src/modules/whatsapp/whatsapp-gateway.service', () => ({ default: whatsappStub }));
 vi.mock('pg', () => {
   return {
     Pool: vi.fn().mockImplementation(() => ({
@@ -258,6 +270,140 @@ describe('ReturnScanService.syncReturnScans', () => {
           returnStatus: 'RECEIVED',
           qcStatus: 'APPROVED',
         }),
+      })
+    );
+  });
+
+  it('creates return record with matched orderItem for Customer Return scan and calls returnService.processRefund for partial prepaid order', async () => {
+    const mockScans = [
+      {
+        id: 105,
+        scanned_at: new Date('2026-10-18T10:00:00Z'),
+        outcome: 'clear',
+        issue_label: 'No issue',
+        tracking_id_snapshot: 'VELR0857391623',
+        order_number_snapshot: '#26YOU6166',
+        marketplace_snapshot: 'Shopify',
+        scanned_tracking: 'VELR0857391623',
+        return_type: 'Customer Return',
+        product_title: 'SKD241-Apple-Gold_M',
+      },
+    ];
+
+    pgQueryStub.mockResolvedValueOnce({ rows: mockScans });
+
+    const orderItem1 = { id: 1001, title: 'SKD241-Apple-Gold', sku: 'SKD241-Apple-Gold_M', quantity: 1, price: 850 };
+    const orderItem2 = { id: 1002, title: 'SKD999-Blue-Kurta', sku: 'SKD999-Blue_L', quantity: 1, price: 950 };
+
+    prismaStub.order.findFirst.mockResolvedValueOnce({
+      id: 6166,
+      shopifyOrderId: 'gid://shopify/Order/6166',
+      shopifyOrderName: '#26YOU6166',
+      status: 'DELIVERED',
+      paymentMethod: 'Prepaid',
+      financialStatus: 'paid',
+      totalAmount: 1800,
+      items: [orderItem1, orderItem2],
+      returns: [],
+    });
+
+    const createdReturnRecord = {
+      id: 777,
+      orderId: 6166,
+      returnWaybillNumber: 'VELR0857391623',
+      returnStatus: 'RECEIVED',
+      refundStatus: 'NONE',
+      items: [{ id: 99, orderItemId: 1001, orderItem: orderItem1, quantity: 1 }],
+      order: { id: 6166, shopifyOrderId: 'gid://shopify/Order/6166', shopifyOrderName: '#26YOU6166', totalAmount: 1800 },
+    };
+
+    prismaStub.return.create.mockResolvedValueOnce(createdReturnRecord);
+    prismaStub.order.update.mockResolvedValueOnce({});
+    prismaStub.accountTrailEvent.create.mockResolvedValueOnce({});
+    returnStub.processRefund.mockResolvedValueOnce({ success: true, refundAmount: 850, shopifyRefundId: 'ref_6166' });
+
+    const result = await returnScanService.syncReturnScans(30);
+
+    expect(result.scansChecked).toBe(1);
+    expect(result.matchedOrders).toBe(1);
+    expect(result.prepaidRefunded).toBe(1);
+
+    // Verifies return was created with matched item
+    expect(prismaStub.return.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          orderId: 6166,
+          returnWaybillNumber: 'VELR0857391623',
+          items: expect.objectContaining({
+            create: [
+              expect.objectContaining({
+                orderItemId: 1001,
+                quantity: 1,
+              }),
+            ],
+          }),
+        }),
+      })
+    );
+
+    // Verifies processRefund was called for the itemized return, NOT processRtoRefund
+    expect(returnStub.processRefund).toHaveBeenCalledWith(777, false, expect.anything(), true);
+    expect(orderStub.processRtoRefund).not.toHaveBeenCalled();
+  });
+
+  it('notifies Ekta with customer details when a Customer Return is scanned on a COD order', async () => {
+    const mockScans = [
+      {
+        id: 106,
+        scanned_at: new Date('2026-10-18T10:00:00Z'),
+        outcome: 'clear',
+        issue_label: 'No issue',
+        tracking_id_snapshot: 'VELR0857399999',
+        order_number_snapshot: '#26YOU6199',
+        marketplace_snapshot: 'Shopify',
+        scanned_tracking: 'VELR0857399999',
+        return_type: 'Customer Return',
+        product_title: 'SKD241-Apple-Gold_M',
+      },
+    ];
+
+    pgQueryStub.mockResolvedValueOnce({ rows: mockScans });
+
+    const orderItem = { id: 1001, title: 'SKD241-Apple-Gold', sku: 'SKD241-Apple-Gold_M', quantity: 1, price: 850 };
+    const codOrder = {
+      id: 6199,
+      shopifyOrderId: 'gid://shopify/Order/6199',
+      shopifyOrderName: '#26YOU6199',
+      customerName: 'Ekta Customer',
+      customerPhone: '+918866077404',
+      status: 'DELIVERED',
+      paymentMethod: 'COD',
+      financialStatus: 'pending',
+      totalAmount: 850,
+      items: [orderItem],
+      returns: [],
+    };
+
+    prismaStub.order.findFirst.mockResolvedValueOnce(codOrder);
+    prismaStub.return.create.mockResolvedValueOnce({
+      id: 888,
+      orderId: 6199,
+      returnWaybillNumber: 'VELR0857399999',
+      returnStatus: 'RECEIVED',
+      items: [{ id: 100, orderItemId: 1001, orderItem, quantity: 1 }],
+      order: codOrder,
+    });
+    prismaStub.order.update.mockResolvedValueOnce({});
+    prismaStub.accountTrailEvent.create.mockResolvedValueOnce({});
+
+    const result = await returnScanService.syncReturnScans(30);
+
+    expect(result.scansChecked).toBe(1);
+    expect(result.codQueued).toBe(1);
+    expect(whatsappStub.notifyEktaCodReturnReceived).toHaveBeenCalledWith(
+      expect.objectContaining({
+        order: codOrder,
+        qcStatus: 'APPROVED',
       })
     );
   });

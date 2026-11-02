@@ -6,6 +6,7 @@ import shopifyService from '../shopify/shopify.service';
 import orderService from '../orders/order.service';
 import returnService from './return.service';
 import resendService from '../email/resend.service';
+import whatsappGatewayService from '../whatsapp/whatsapp-gateway.service';
 import { recordAccountTrailEvent } from '../accounts/account-trail.service';
 import { isPrepaidOrder } from '../orders/order-tabs';
 
@@ -28,6 +29,8 @@ export interface ReturnScanRow {
   shopify_return_id?: string | null;
   shopify_order_name?: string | null;
   return_type?: string | null;
+  product_title?: string | null;
+  return_reason?: string | null;
   er_tracking_id?: string | null;
   er_forward_tracking_id?: string | null;
   er_alt_tracking_id?: string | null;
@@ -211,6 +214,8 @@ class ReturnScanService {
           er.shopify_return_id,
           er.shopify_order_name,
           er.return_type,
+          er.product_title,
+          er.return_reason,
           er.tracking_id as er_tracking_id,
           er.forward_tracking_id as er_forward_tracking_id,
           er.alt_tracking_id as er_alt_tracking_id
@@ -274,7 +279,17 @@ class ReturnScanService {
                 ] : []),
               ],
             },
-            include: { shipment: true, returns: true },
+            include: {
+              shipment: true,
+              items: true,
+              returns: {
+                include: {
+                  items: {
+                    include: { orderItem: true },
+                  },
+                },
+              },
+            },
           });
 
           if (!order) {
@@ -348,19 +363,47 @@ class ReturnScanService {
             } else if (scan.return_type === 'Customer Return') {
               // Create Return record in OMS if customer return scanned
               try {
-                await prisma.return.create({
+                // Match order item by product title or SKU
+                const matchingItem = (order.items || []).find((item: any) => {
+                  if (!scan.product_title) return false;
+                  const sTitle = scan.product_title.toLowerCase();
+                  const iTitle = (item.title || '').toLowerCase();
+                  const iSku = (item.sku || '').toLowerCase();
+                  return sTitle.includes(iTitle) || iTitle.includes(sTitle) || (iSku && sTitle.includes(iSku));
+                }) || order.items?.[0];
+
+                const createdReturn = await prisma.return.create({
                   data: {
                     orderId: order.id,
                     returnWaybillNumber: tracking,
                     carrier: 'Delhivery',
-                    returnReason: scan.notes || scan.issue_label || 'Customer Return',
+                    returnReason: scan.notes || scan.issue_label || scan.return_reason || 'Customer Return',
                     returnStatus: 'RECEIVED',
                     qcStatus: 'APPROVED',
                     qcRemark: scan.issue_label || 'Verified without issue (Warehouse scan)',
                     receivedAt: scan.scanned_at || new Date(),
                     shopifyReturnId: scan.shopify_return_id || null,
+                    items: matchingItem
+                      ? {
+                          create: [
+                            {
+                              orderItemId: matchingItem.id,
+                              quantity: 1,
+                              qcStatus: 'APPROVED',
+                              qcRemark: scan.issue_label || 'Verified without issue (Warehouse scan)',
+                            },
+                          ],
+                        }
+                      : undefined,
+                  },
+                  include: {
+                    items: {
+                      include: { orderItem: true },
+                    },
+                    order: true,
                   },
                 });
+                order.returns = [createdReturn as any];
               } catch (createRetErr: any) {
                 logger.warn('Failed to create Return record in OMS', { orderId: order.id, error: createRetErr.message });
               }
@@ -467,6 +510,7 @@ class ReturnScanService {
             // 3. COD Manual Refund Queue
             result.codQueued++;
             // Tag order as requiring manual refund
+            const hadTag = (order.tags || '').includes('COD_MANUAL_REFUND_DUE');
             try {
               const existingTags = (order.tags || '').split(',').map((t) => t.trim()).filter(Boolean);
               if (!existingTags.includes('COD_MANUAL_REFUND_DUE')) {
@@ -479,6 +523,33 @@ class ReturnScanService {
               }
             } catch (tErr: any) {
               logger.warn('Failed to add COD_MANUAL_REFUND_DUE tag', { error: tErr.message });
+            }
+
+            // Notify Ekta on WhatsApp for newly received COD returns / RTOs
+            if (!isAlreadyDelivered || !hadTag) {
+              if (scan.return_type === 'Customer Return' || (order.returns && order.returns.length > 0)) {
+                const activeRet = order.returns?.[0];
+                Promise.resolve(
+                  whatsappGatewayService.notifyEktaCodReturnReceived({
+                    order,
+                    returnRecord: activeRet,
+                    qcStatus: 'APPROVED',
+                    qcRemark: scan.issue_label || 'Verified without issue (Warehouse scan)',
+                  })
+                ).catch((waErr) =>
+                  logger.warn('Failed to dispatch Ekta WhatsApp notification for COD return scan', { error: waErr.message })
+                );
+              } else {
+                Promise.resolve(
+                  whatsappGatewayService.notifyEktaCodRtoReceived({
+                    order,
+                    waybill: tracking,
+                    qcStatus: 'APPROVED',
+                  })
+                ).catch((waErr) =>
+                  logger.warn('Failed to dispatch Ekta WhatsApp notification for COD RTO scan', { error: waErr.message })
+                );
+              }
             }
           }
         } catch (itemErr: any) {

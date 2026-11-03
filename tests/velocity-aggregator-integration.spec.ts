@@ -276,15 +276,15 @@ describe('Velocity Aggregator Integration & Business Rules', () => {
       });
 
       expect(rates.map((r: any) => r.carrierName)).toEqual([
-        'Amazon Transportation',
+        'Bluedart Standard',
         'Ekart Standard',
         'Delhivery Standard',
         'Shadowfax Standard',
-        'Bluedart Standard',
+        'Amazon Transportation',
       ]);
     });
 
-    it('automatically fails forward to Ekart when Amazon Transportation is unserviceable for destination address', async () => {
+    it('automatically fails forward to Bluedart when Amazon Transportation is unserviceable for destination address', async () => {
       (velocityService as any).client.post = vi
         .fn()
         .mockRejectedValueOnce({
@@ -308,8 +308,8 @@ describe('Velocity Aggregator Integration & Business Rules', () => {
             payload: {
               order_id: '#26YOU6156',
               awb_code: 'VELP1504737675',
-              courier_name: 'Ekart Standard',
-              courier_company_id: 'CARR5H4WQY3PM',
+              courier_name: 'Bluedart Standard',
+              courier_company_id: 'CAR2FZNOLGJ2X',
               label_url: 'https://velocity-labels.s3.amazonaws.com/VELP1504737675.pdf',
             },
           },
@@ -343,7 +343,7 @@ describe('Velocity Aggregator Integration & Business Rules', () => {
       expect((velocityService as any).client.post).toHaveBeenNthCalledWith(
         2,
         '/custom/api/v1/forward-order-orchestration',
-        expect.objectContaining({ carrier_id: 'CARR5H4WQY3PM' })
+        expect.objectContaining({ carrier_id: 'CAR2FZNOLGJ2X' })
       );
       expect(result.awbCode).toBe('VELP1504737675');
       expect(result.courierName).toBe('Velocity');

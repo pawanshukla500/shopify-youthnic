@@ -7,11 +7,14 @@ import { Order, OrderItem, ShipmentStatus } from '@prisma/client';
 import { isPrepaidOrder } from '../orders/order-tabs';
 
 export const VELOCITY_CARRIER_PRIORITY: Record<string, number> = {
-  ats: 1,
-  amazon: 1,
+  bluedart: 1,
   ekart: 2,
   delhivery: 3,
-  shadowfax: 4,
+  xpressbees: 4,
+  dtdc: 5,
+  shadowfax: 6,
+  ats: 90,
+  amazon: 90,
 };
 
 export function getVelocityCarrierRank(carrierNameOrCode?: string): number {
@@ -23,10 +26,13 @@ export function getVelocityCarrierRank(carrierNameOrCode?: string): number {
 }
 
 export const VELOCITY_PRIORITY_CARRIERS = [
-  { id: 'CARPGK29DN9ZW', name: 'Amazon Transportation', code: 'ats' },
+  { id: 'CAR2FZNOLGJ2X', name: 'Bluedart Standard', code: 'bluedart' },
   { id: 'CARR5H4WQY3PM', name: 'Ekart Standard', code: 'ekart' },
   { id: 'CARO0ZZQH1H6U', name: 'Delhivery Standard', code: 'delhivery' },
+  { id: 'CARADCBTZMQMM', name: 'Xpressbees Standard', code: 'xpressbees' },
+  { id: 'CAR0EPDPJXXL4', name: 'DTDC Standard', code: 'dtdc' },
   { id: 'CAR7RFCSBPAV7', name: 'Shadowfax Standard', code: 'shadowfax' },
+  { id: 'CARISGEX1QMVB', name: 'Bluedart Air', code: 'bluedart' },
 ];
 
 /**
@@ -577,7 +583,7 @@ export class VelocityService {
     }
     const orderId = hasCancelledShipment ? `${baseOrderId}-R1` : baseOrderId;
 
-    // Carrier priority list: 1. Amazon Transportation, 2. Ekart Standard, 3. Delhivery Standard, 4. Shadowfax Standard
+    // Carrier priority list: 1. Bluedart Standard, 2. Ekart Standard, 3. Delhivery Standard, 4. Xpressbees Standard, 5. DTDC Standard, 6. Shadowfax Standard
     let carriersToTry: string[] = [];
     if (options?.carrierId) {
       carriersToTry.push(options.carrierId);

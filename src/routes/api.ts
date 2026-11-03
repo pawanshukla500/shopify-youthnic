@@ -112,8 +112,19 @@ router.get('/health', (_req: Request, res: Response) => {
 });
 
 // ─── Dashboard Stats & Analytics ─────────────────────────
-router.get('/dashboard/stats', async (_req: Request, res: Response): Promise<void> => {
+let cachedDashboardStats: { data: any; expiresAt: number } | null = null;
+const DASHBOARD_STATS_TTL_MS = 30_000;
+
+export function invalidateDashboardStatsCache(): void {
+  cachedDashboardStats = null;
+}
+
+router.get('/dashboard/stats', async (req: Request, res: Response): Promise<void> => {
   try {
+    if (cachedDashboardStats && Date.now() < cachedDashboardStats.expiresAt && req.query.fresh !== 'true') {
+      res.json(cachedDashboardStats.data);
+      return;
+    }
     const [allOrders, shipments, returns] = await Promise.all([
       prisma.order.findMany({
         include: { items: true, shipment: true, returns: true },
@@ -578,6 +589,21 @@ router.get('/orders/tab-counts', async (_req: Request, res: Response): Promise<v
   try {
     const counts = await orderService.getOrderTabCounts();
     res.json({ success: true, counts });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Lightweight count endpoint for badge indicators (Layout.tsx, sidebar)
+router.get('/orders/count', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const status = req.query.status as string | undefined;
+    const where: any = {};
+    if (status) {
+      where.status = status;
+    }
+    const count = await prisma.order.count({ where });
+    res.json({ count });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

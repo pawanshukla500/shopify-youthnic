@@ -121,6 +121,13 @@ export async function getOrders(paramsOrStatus?: OrderStatus | '' | GetOrdersPar
   return response.data.orders
 }
 
+export async function getOrdersCount(params?: { status?: string }): Promise<number> {
+  const response = await api.get<{ count: number }>('/api/orders/count', {
+    params,
+  })
+  return response.data.count
+}
+
 export async function getOrderTabCounts(): Promise<Record<string, number> & { byStatus?: Record<string, number> }> {
   const response = await api.get<{ success: boolean; counts: Record<string, number> }>('/api/orders/tab-counts')
   return response.data.counts

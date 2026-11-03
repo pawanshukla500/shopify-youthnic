@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { getHealth, getOrders, apiError } from '../api'
+import { getHealth, getOrdersCount, apiError } from '../api'
 import { useAuth } from '../context/AuthContext'
 import { useTheme } from '../context/ThemeContext'
 import { Icon, ErrorBox, type IconName } from './UI'
@@ -46,12 +46,12 @@ export function Layout() {
   const health = useQuery({ queryKey: ['health'], queryFn: getHealth, retry: false, refetchInterval: 60_000 })
   const pendingOrdersQuery = useQuery({
     queryKey: ['pending-count'],
-    queryFn: () => getOrders({ status: 'NEW' }),
+    queryFn: () => getOrdersCount({ status: 'NEW' }),
     refetchInterval: 60_000,
     retry: false,
   })
 
-  const pendingCount = pendingOrdersQuery.data?.length ?? 0
+  const pendingCount = pendingOrdersQuery.data ?? 0
 
   const handleQuickSearch = (e: FormEvent) => {
     e.preventDefault()

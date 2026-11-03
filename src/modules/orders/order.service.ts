@@ -125,6 +125,12 @@ export function resolveOrderTabFilter(tab?: string): {
   return { statuses: resolveOrderTabStatuses(tab), hasWaybill: resolveOrderTabWaybill(tab) };
 }
 class OrderService {
+  private tabCountsCache: { data: Record<OrderTab, number> & { byStatus: Record<string, number> }; expiresAt: number } | null = null;
+
+  public clearTabCountsCache(): void {
+    this.tabCountsCache = null;
+  }
+
   /**
    * Sync new/updated orders from Shopify into our DB.
    * Called by the cron job and also by webhooks.
@@ -1613,7 +1619,10 @@ class OrderService {
    * Counts per operational tab. Each order is placed with classifyOrderTab so
    * the badge matches the list (Shopify tags + Delhivery live tracking).
    */
-  async getOrderTabCounts(): Promise<Record<OrderTab, number> & { byStatus: Record<string, number> }> {
+  async getOrderTabCounts(forceRefresh = false): Promise<Record<OrderTab, number> & { byStatus: Record<string, number> }> {
+    if (!forceRefresh && this.tabCountsCache && Date.now() < this.tabCountsCache.expiresAt) {
+      return this.tabCountsCache.data;
+    }
     const rows = await prisma.order.findMany({
       select: {
         status: true,
@@ -1653,7 +1662,9 @@ class OrderService {
       byStatus[row.status] = (byStatus[row.status] || 0) + 1;
       counts[classifyOrderTab(row)] += 1;
     }
-    return { ...counts, byStatus };
+    const result = { ...counts, byStatus };
+    this.tabCountsCache = { data: result, expiresAt: Date.now() + 15_000 };
+    return result;
   }
 
   /**

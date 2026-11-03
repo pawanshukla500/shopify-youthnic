@@ -1572,7 +1572,7 @@ export class VelocityService {
     if (!cleanWaybill) return null;
 
     const candidates: string[] = [];
-    if (directUrl && directUrl.startsWith('http')) candidates.push(directUrl);
+    if (directUrl && directUrl.startsWith('http') && !directUrl.includes('/track/')) candidates.push(directUrl);
 
     // 1. Probe live order tracking which returns fresh presigned S3 label_url
     try {
@@ -1584,7 +1584,7 @@ export class VelocityService {
         trackRaw?.payload?.label_url,
         trackRaw?.shipment_track?.[0]?.label_url,
         (track as any)?.labelUrl,
-      ].filter((u): u is string => Boolean(u && typeof u === 'string' && u.startsWith('http')));
+      ].filter((u): u is string => Boolean(u && typeof u === 'string' && u.startsWith('http') && !u.includes('/track/')));
 
       for (const u of urlsFromTrack) {
         if (!candidates.includes(u)) candidates.push(u);

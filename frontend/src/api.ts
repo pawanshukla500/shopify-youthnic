@@ -1119,7 +1119,7 @@ export async function downloadBulkLabelsDirectFile(orderIds: number[]): Promise<
     (typeof rawDisposition === 'string' && /.pdf/i.test(rawDisposition))
   const filename = filenameFromDisposition(
     typeof rawDisposition === 'string' ? rawDisposition : undefined,
-    `Bulk-Labels-${orderIds.length}-Orders.${isPdf ? 'pdf' : 'html'}`
+    `Bulk-Labels-${orderIds.length}-Orders.pdf`
   )
   const blob = new Blob([response.data], {
     type: isPdf ? 'application/pdf' : 'text/html;charset=utf-8',

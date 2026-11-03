@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { isVelocityCourier, isDelhiveryCourier, normalizeCourierName } from '../src/utils/courier';
 import shippingLabelService from '../src/modules/delhivery/shipping-label.service';
-import { mergePdfBuffers, create4x6FallbackPdf } from '../src/utils/pdf-merger';
+import { mergePdfBuffers, create4x6FallbackPdf, create4x6InvoicePdf } from '../src/utils/pdf-merger';
 import { PDFDocument } from 'pdf-lib';
 
 describe('Velocity & Amazon Shipping Bulk Label Verification', () => {
@@ -212,6 +212,34 @@ describe('Velocity & Amazon Shipping Bulk Label Verification', () => {
       const size = page.getSize();
       expect(size.width).toBe(288);
       expect(size.height).toBe(432);
+    });
+    it('creates a valid 4x6 GST invoice PDF with exact dimensions', async () => {
+      const invoicePdf = await create4x6InvoicePdf(dummyAmazonVelocityOrder, '374645218626', 'Velocity');
+      expect(invoicePdf).toBeInstanceOf(Buffer);
+      expect(invoicePdf.length).toBeGreaterThan(1000);
+
+      const parsed = await PDFDocument.load(invoicePdf);
+      expect(parsed.getPageCount()).toBe(1);
+      const page = parsed.getPages()[0];
+      const size = page.getSize();
+      expect(size.width).toBe(288);
+      expect(size.height).toBe(432);
+    });
+
+    it('collates strictly alternating Label then Invoice PDF sequence for bulk orders', async () => {
+      const order1Label = await create4x6FallbackPdf(dummyAmazonVelocityOrder, '374645218626', 'Velocity');
+      const order1Invoice = await create4x6InvoicePdf(dummyAmazonVelocityOrder, '374645218626', 'Velocity');
+      const order2Label = await create4x6FallbackPdf(dummyDelhiveryOrder, '30100810013086', 'Delhivery');
+      const order2Invoice = await create4x6InvoicePdf(dummyDelhiveryOrder, '30100810013086', 'Delhivery');
+
+      const merged = await mergePdfBuffers([order1Label, order1Invoice, order2Label, order2Invoice]);
+      expect(merged).toBeInstanceOf(Buffer);
+      const parsed = await PDFDocument.load(merged);
+      expect(parsed.getPageCount()).toBe(4);
+      expect(parsed.getPage(0).getSize().width).toBe(288);
+      expect(parsed.getPage(1).getSize().width).toBe(288);
+      expect(parsed.getPage(2).getSize().width).toBe(288);
+      expect(parsed.getPage(3).getSize().width).toBe(288);
     });
   });
 });

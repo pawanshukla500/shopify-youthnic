@@ -948,7 +948,7 @@ export function Orders() {
     setIsBulkDownloadingLabelsDirect(true)
     try {
       await downloadBulkLabelsDirectFile(ids)
-      toast.toast('success', `Downloaded consolidated shipping labels for ${ids.length} orders!`)
+      toast.toast('success', `Downloaded consolidated shipping labels & invoices PDF for ${ids.length} orders!`)
     } catch (err: any) {
       toast.toast('error', err.message || 'Failed to download bulk shipping labels')
     } finally {
@@ -1708,24 +1708,10 @@ export function Orders() {
             className="bulk-btn bulk-btn-secondary"
             onClick={handleBulkDownloadLabelsDirect}
             disabled={isBulkDownloadingLabelsDirect}
-            title="Directly download consolidated shipping labels as a file"
+            title="Directly download consolidated shipping labels and GST invoices as a PDF file (Label then Invoice)"
           >
             <Icon name="download" size={15} />
             <span className="bulk-btn-label">{isBulkDownloadingLabelsDirect ? 'Downloading…' : 'DL Labels'}</span>
-          </button>
-
-          {/* Direct File Download Combined Labels + Invoices */}
-          <button
-            type="button"
-            className="bulk-btn bulk-btn-secondary"
-            onClick={handleBulkDownloadLabelsAndInvoicesDirect}
-            disabled={isBulkDownloadingLabelsAndInvoicesDirect}
-            title="Directly download combined shipping labels and GST invoices (strictly sequenced: Order 1 Label -> Order 1 Invoice -> Order 2 Label -> Order 2 Invoice...) without opening a new tab"
-            style={{ background: 'rgba(124, 58, 237, 0.28)', borderColor: 'rgba(196, 181, 253, 0.4)' }}
-          >
-            <Icon name="download" size={15} />
-            <span className="bulk-btn-label">{isBulkDownloadingLabelsAndInvoicesDirect ? 'Downloading…' : 'DL Labels+ Invoice'}</span>
-            <span className="bulk-btn-meta">Seq</span>
           </button>
 
           {/* Direct Bulk Invoices Download (Single combined file) */}

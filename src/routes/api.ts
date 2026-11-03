@@ -37,7 +37,7 @@ import returnScanService from '../modules/returns/return-scan.service';
 import shippingRouterService, { CarrierPriority, CourierChoice } from '../modules/shipping/shipping-router.service';
 import velocityService from '../modules/velocity/velocity.service';
 import { isVelocityCourier, getTrackingUrl } from '../utils/courier';
-import { mergePdfBuffers, create4x6FallbackPdf } from '../utils/pdf-merger';
+import { mergePdfBuffers, create4x6FallbackPdf, create4x6InvoicePdf } from '../utils/pdf-merger';
 import { analyticsService } from '../modules/analytics/analytics.service';
 
 const router = Router();
@@ -1281,37 +1281,29 @@ router.post('/orders/bulk-labels/download', async (req: Request, res: Response):
       })
     );
 
-    const wantsHtml = req.query.format === 'html';
+    // Build complete PDF list for every order in the batch:
+    // Strictly sequenced: Order 1 Label -> Order 1 Invoice -> Order 2 Label -> Order 2 Invoice...
+    const completePdfBuffers: Buffer[] = [];
+    for (const item of orderListWithPdfs) {
+      let labelPdf: Buffer;
+      if (item.pdfBuffer && item.pdfBuffer.length > 50) {
+        labelPdf = item.pdfBuffer;
+      } else {
+        labelPdf = await create4x6FallbackPdf(item.order, item.waybillNumber, item.order.shipment?.courier);
+      }
+      completePdfBuffers.push(labelPdf);
 
-    if (!wantsHtml) {
-      // Build complete PDF list for every order in the batch.
-      // If an upstream carrier download was missing/failed, generate an authentic 4x6" PDF fallback.
-      const completePdfBuffers = await Promise.all(
-        orderListWithPdfs.map(async (item) => {
-          if (item.pdfBuffer && item.pdfBuffer.length > 50) {
-            return item.pdfBuffer;
-          }
-          return create4x6FallbackPdf(item.order, item.waybillNumber, item.order.shipment?.courier);
-        })
-      );
-
-      const mergedPdf = await mergePdfBuffers(completePdfBuffers);
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader(
-        'Content-Disposition',
-        `attachment; filename="Bulk-Labels-${orders.length}-Orders.pdf"`
-      );
-      res.send(mergedPdf);
-      return;
+      const invoicePdf = await create4x6InvoicePdf(item.order, item.waybillNumber, item.order.shipment?.courier);
+      completePdfBuffers.push(invoicePdf);
     }
 
-    const html = shippingLabelService.generateBulkPrintableLabelsPage(orderListWithPdfs);
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    const mergedPdf = await mergePdfBuffers(completePdfBuffers);
+    res.setHeader('Content-Type', 'application/pdf');
     res.setHeader(
       'Content-Disposition',
-      `attachment; filename="Bulk-Labels-${orders.length}-Orders.html"`
+      `attachment; filename="Bulk-Labels-${orders.length}-Orders.pdf"`
     );
-    res.send(html);
+    res.send(mergedPdf);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -1385,11 +1377,18 @@ router.get('/orders/:id/label-and-invoice/download', async (req: Request, res: R
         logger.warn('Could not load shipping label PDF for single label+invoice download', { waybill, error: err.message });
       }
     }
-    const html = shippingLabelService.generateLabelAndInvoiceHtml(order as any, waybill, pdfBuffer);
-    const filename = `Label-Invoice-${order.shopifyOrderName.replace('#', '')}.html`;
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    let labelPdf: Buffer;
+    if (pdfBuffer && pdfBuffer.length > 50) {
+      labelPdf = pdfBuffer;
+    } else {
+      labelPdf = await create4x6FallbackPdf(order, waybill, order.shipment?.courier);
+    }
+    const invoicePdf = await create4x6InvoicePdf(order, waybill, order.shipment?.courier);
+    const merged = await mergePdfBuffers([labelPdf, invoicePdf]);
+    const filename = `Label-Invoice-${order.shopifyOrderName.replace('#', '')}.pdf`;
+    res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.send(html);
+    res.send(merged);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -1489,13 +1488,27 @@ router.post('/orders/bulk-labels-and-invoices/download', async (req: Request, re
       })
     );
 
-    const html = shippingLabelService.generateBulkLabelsAndInvoicesHtml(orderList);
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    const completePdfBuffers: Buffer[] = [];
+    for (const item of orderList) {
+      let labelPdf: Buffer;
+      if (item.pdfBuffer && item.pdfBuffer.length > 50) {
+        labelPdf = item.pdfBuffer;
+      } else {
+        labelPdf = await create4x6FallbackPdf(item.order, item.waybillNumber, item.order.shipment?.courier);
+      }
+      completePdfBuffers.push(labelPdf);
+
+      const invoicePdf = await create4x6InvoicePdf(item.order, item.waybillNumber, item.order.shipment?.courier);
+      completePdfBuffers.push(invoicePdf);
+    }
+
+    const mergedPdf = await mergePdfBuffers(completePdfBuffers);
+    res.setHeader('Content-Type', 'application/pdf');
     res.setHeader(
       'Content-Disposition',
-      `attachment; filename="Bulk-Labels-And-Invoices-${orders.length}-Orders.html"`
+      `attachment; filename="Bulk-Labels-And-Invoices-${orders.length}-Orders.pdf"`
     );
-    res.send(html);
+    res.send(mergedPdf);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

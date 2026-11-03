@@ -74,6 +74,23 @@ export interface ImportResult {
     hasAnomalies: boolean;
     status: 'HEALTHY' | 'WARNING' | 'CRITICAL';
   };
+  walletSummary?: {
+    openingBalance: number;
+    totalDeductions: number;
+    totalRefunds: number;
+    totalRecharges: number;
+    closingBalance: number;
+    netFreightBilled: number;
+  };
+  walletRecharges?: Array<{
+    date: string;
+    amount: number;
+    miles: number;
+    txnId: string;
+    bankTxnId: string;
+    status: string;
+    walletId: string;
+  }>;
 }
 
 export interface RemittanceDefaults {
@@ -193,6 +210,8 @@ async function saveImport(result: ImportResult, uploadedBy?: string): Promise<Im
           state: result.state || (result.bankTransactionId ? 'Completed' : 'Pending'),
           totalRemittance: result.totalRemittance ?? null,
           matchedOrders: (result.matchedOrders || []).slice(0, 500),
+          walletSummary: (result as any).walletSummary || null,
+          walletRecharges: (result as any).walletRecharges || null,
           ...evidence,
         } as any,
         uploadedBy: uploadedBy || null,
@@ -518,6 +537,71 @@ export async function importDelhiveryCharges(
   uploadedBy?: string,
   actor?: AccountTrailActor
 ): Promise<ImportResult> {
+  // Parse Summary sheet if present
+  const summarySheet = sheets.find((s) => /^summary$/i.test(s.name.trim()));
+  let walletSummary: {
+    openingBalance: number;
+    totalDeductions: number;
+    totalRefunds: number;
+    totalRecharges: number;
+    closingBalance: number;
+    netFreightBilled: number;
+  } | undefined;
+
+  if (summarySheet && summarySheet.headers.length >= 2) {
+    const k0 = summarySheet.headers[0];
+    const v0 = summarySheet.headers[1];
+    const map: Record<string, number> = {};
+    if (/deduction/i.test(k0)) {
+      map['totalDeductions'] = parseAmount(v0) ?? 0;
+    }
+    for (const r of summarySheet.rows) {
+      const key = (r[k0] || '').toLowerCase();
+      const val = parseAmount(r[v0]) ?? 0;
+      if (/deduction/i.test(key)) map['totalDeductions'] = val;
+      if (/refund/i.test(key)) map['totalRefunds'] = val;
+      if (/recharge/i.test(key)) map['totalRecharges'] = val;
+      if (/opening/i.test(key)) map['openingBalance'] = val;
+    }
+    const opening = map['openingBalance'] ?? 0;
+    const deductions = map['totalDeductions'] ?? 0;
+    const refunds = map['totalRefunds'] ?? 0;
+    const recharges = map['totalRecharges'] ?? 0;
+    const closing = Math.round((opening + recharges - deductions + refunds) * 100) / 100;
+    walletSummary = {
+      openingBalance: opening,
+      totalDeductions: deductions,
+      totalRefunds: refunds,
+      totalRecharges: recharges,
+      closingBalance: closing,
+      netFreightBilled: Math.round((deductions - refunds) * 100) / 100,
+    };
+  }
+
+  // Parse Recharges sheet if present
+  const rechargeSheet = sheets.find((s) => /^recharges?$/i.test(s.name.trim()));
+  let walletRecharges: Array<{
+    date: string;
+    amount: number;
+    miles: number;
+    txnId: string;
+    bankTxnId: string;
+    status: string;
+    walletId: string;
+  }> = [];
+
+  if (rechargeSheet) {
+    walletRecharges = rechargeSheet.rows.map((r) => ({
+      date: r['Date & Time'] || r['date'] || '',
+      amount: parseAmount(r['Miles'] || r['amount']) ?? 0,
+      miles: parseAmount(r['Miles']) ?? 0,
+      txnId: r['Txn ID'] || r['txn id'] || '',
+      bankTxnId: r['Bank Txn ID'] || r['bank txn id'] || '',
+      status: r['Status'] || r['status'] || 'success',
+      walletId: r['Wallet ID'] || r['wallet id'] || '',
+    }));
+  }
+
   const hasDeductions = sheets.some((s) => /^deductions$/i.test(s.name.trim()));
   const hasRefunds = sheets.some((s) => /^refunds$/i.test(s.name.trim()));
 
@@ -859,6 +943,29 @@ export async function importDelhiveryCharges(
     if (!matchedAwbs.has(awb)) unmatched.push(awb);
   }
 
+  if (walletSummary && (prisma as any).setting?.upsert) {
+    await prisma.setting.upsert({
+      where: { key: 'delhivery_wallet_summary' },
+      create: {
+        key: 'delhivery_wallet_summary',
+        value: JSON.stringify({
+          ...walletSummary,
+          rechargesCount: walletRecharges.length,
+          reconciledAt: new Date().toISOString(),
+          status: 'CLOSING_RECONCILED',
+        }),
+      },
+      update: {
+        value: JSON.stringify({
+          ...walletSummary,
+          rechargesCount: walletRecharges.length,
+          reconciledAt: new Date().toISOString(),
+          status: 'CLOSING_RECONCILED',
+        }),
+      },
+    });
+  }
+
   const cleanFileName = fileName.replace(/\.[^/.]+$/, '');
   return saveImport(
     {
@@ -877,6 +984,8 @@ export async function importDelhiveryCharges(
       extractedFiles: getExtractedFiles(sheets),
       storageMode: 'POSTGRESQL_RELATIONAL_DATA',
       zipStoredOnDisk: false,
+      walletSummary,
+      walletRecharges,
     },
     uploadedBy
   );

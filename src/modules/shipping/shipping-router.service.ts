@@ -27,7 +27,7 @@ export class ShippingRouterService {
         error: err.message,
       });
     }
-    return config.shipping.defaultPriority || 'DELHIVERY_FIRST';
+    return config.shipping.defaultPriority || 'VELOCITY_FIRST';
   }
 
   /**

@@ -157,7 +157,7 @@ export const config = {
 
   // Multi-carrier Shipping Configuration & Priority
   shipping: {
-    defaultPriority: (optional('SHIPPING_CARRIER_PRIORITY', 'DELHIVERY_FIRST') as
+    defaultPriority: (optional('SHIPPING_CARRIER_PRIORITY', 'VELOCITY_FIRST') as
       | 'DELHIVERY_FIRST'
       | 'VELOCITY_FIRST'),
   },

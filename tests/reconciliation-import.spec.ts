@@ -14,6 +14,7 @@ const { prismaStub } = vi.hoisted(() => ({
     return: { findFirst: vi.fn(), update: vi.fn() },
     reconciliationImport: { create: vi.fn() },
     accountTrailEvent: { create: vi.fn(), findFirst: vi.fn() },
+    setting: { upsert: vi.fn(), findUnique: vi.fn() },
   },
 }));
 vi.mock('../src/database/prisma', () => ({ default: { ...prismaStub, $transaction: vi.fn(async (fn: any) => fn(prismaStub)) } }));

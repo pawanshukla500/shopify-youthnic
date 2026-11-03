@@ -145,55 +145,55 @@ export function Workflows() {
         </div>
 
         <div className="wf-ribbon-card" onClick={() => navigate('/orders?tab=dispatch')}>
-          <div className="wf-ribbon-header" style={{ color: '#d97706' }}>
+          <div className="wf-ribbon-header" style={{ color: 'var(--amber)' }}>
             <span>Dispatch Pending</span>
             <Icon name="clock" size={15} />
           </div>
-          <strong className="wf-ribbon-val" style={{ color: '#d97706' }}>
+          <strong className="wf-ribbon-val" style={{ color: 'var(--amber)' }}>
             {counts.dispatch ?? 0}
           </strong>
           <span className="wf-ribbon-sub">Locked or queuing for manifest</span>
         </div>
 
         <div className="wf-ribbon-card" onClick={() => navigate('/orders?tab=ready')}>
-          <div className="wf-ribbon-header" style={{ color: '#2563eb' }}>
+          <div className="wf-ribbon-header" style={{ color: 'var(--blue)' }}>
             <span>Dispatched / In-Flight</span>
             <Icon name="truck" size={15} />
           </div>
-          <strong className="wf-ribbon-val" style={{ color: '#2563eb' }}>
+          <strong className="wf-ribbon-val" style={{ color: 'var(--blue)' }}>
             {(counts.ready ?? 0) + (counts.transit ?? 0)}
           </strong>
           <span className="wf-ribbon-sub">AWB assigned & with courier</span>
         </div>
 
         <div className="wf-ribbon-card" onClick={() => navigate('/returns?tab=EXCHANGES')}>
-          <div className="wf-ribbon-header" style={{ color: '#7c3aed' }}>
+          <div className="wf-ribbon-header" style={{ color: 'var(--purple)' }}>
             <span>Active Exchanges</span>
             <Icon name="refresh" size={15} />
           </div>
-          <strong className="wf-ribbon-val" style={{ color: '#7c3aed' }}>
+          <strong className="wf-ribbon-val" style={{ color: 'var(--purple)' }}>
             {returnMetrics.exchanges}
           </strong>
           <span className="wf-ribbon-sub">Reverse + forward replacement</span>
         </div>
 
         <div className="wf-ribbon-card" onClick={() => navigate('/returns?tab=QC_PASSED_UNREFUNDED')}>
-          <div className="wf-ribbon-header" style={{ color: '#dc2626' }}>
+          <div className="wf-ribbon-header" style={{ color: 'var(--red)' }}>
             <span>QC Passed (Unrefunded)</span>
             <Icon name="alert" size={15} />
           </div>
-          <strong className="wf-ribbon-val" style={{ color: '#dc2626' }}>
+          <strong className="wf-ribbon-val" style={{ color: 'var(--red)' }}>
             {returnMetrics.qcPassedUnrefunded}
           </strong>
           <span className="wf-ribbon-sub">Action required to settle</span>
         </div>
 
         <div className="wf-ribbon-card" onClick={() => navigate('/remittance')}>
-          <div className="wf-ribbon-header" style={{ color: '#16a34a' }}>
+          <div className="wf-ribbon-header" style={{ color: 'var(--green)' }}>
             <span>Delivered & Closed</span>
             <Icon name="check" size={15} />
           </div>
-          <strong className="wf-ribbon-val" style={{ color: '#16a34a' }}>
+          <strong className="wf-ribbon-val" style={{ color: 'var(--green)' }}>
             {(counts.delivered ?? 0) + (counts.closed ?? 0)}
           </strong>
           <span className="wf-ribbon-sub">Settled in ledger</span>
@@ -307,7 +307,7 @@ export function Workflows() {
         {(activeStage === 'ALL' || activeStage === 'DISPATCH') && (
           <div className="wf-tree-section">
             <div className="wf-tree-header">
-              <div className="wf-section-badge s1">Stage 1</div>
+              <span className="wf-stage-index" aria-hidden="true">1</span>
               <div className="wf-section-title">
                 <h3>Order Ingestion & Forward Dispatch Pipeline</h3>
                 <p>Shopify webhook deduplication, GoKwik RTO risk gating, mutex locking, and carrier routing</p>
@@ -360,8 +360,7 @@ export function Workflows() {
                 <p>Orders ready for warehouse packing. Prioritized by delivery SLA and stock availability.</p>
                 <div className="wf-node-action">
                   <Link to="/orders?tab=new" className="wf-action-link">
-                    Open New Orders ({counts.new ?? 0}) →
-                  </Link>
+                    Open New Orders ({counts.new ?? 0})</Link>
                 </div>
               </div>
 
@@ -411,8 +410,7 @@ export function Workflows() {
                 <p>AWB assigned, thermal packing slip generated with <code>youthnic2024</code>, and Shopify order fulfilled.</p>
                 <div className="wf-node-action">
                   <Link to="/orders?tab=ready" className="wf-action-link">
-                    View Dispatched ({counts.ready ?? 0}) →
-                  </Link>
+                    View Dispatched ({counts.ready ?? 0})</Link>
                 </div>
               </div>
             </div>
@@ -425,7 +423,7 @@ export function Workflows() {
         {(activeStage === 'ALL' || activeStage === 'TRACKING') && (
           <div className="wf-tree-section">
             <div className="wf-tree-header">
-              <div className="wf-section-badge s2">Stage 2</div>
+              <span className="wf-stage-index" aria-hidden="true">2</span>
               <div className="wf-section-title">
                 <h3>Delivery & Logistics Tracking State Machine</h3>
                 <p>Real-time courier webhooks, 30-minute background pollers, NDR resolution, and terminal states</p>
@@ -443,8 +441,7 @@ export function Workflows() {
                 <p>Package picked up from warehouse hub. Tracked via Velocity & Delhivery push webhooks and periodic cron pollers.</p>
                 <div className="wf-node-action">
                   <Link to="/orders?tab=transit" className="wf-action-link">
-                    View In Transit ({counts.transit ?? 0}) →
-                  </Link>
+                    View In Transit ({counts.transit ?? 0})</Link>
                 </div>
               </div>
 
@@ -492,8 +489,7 @@ export function Workflows() {
                 <p>Courier collects COD payment. Marked delivered, closes 7-day customer window, feeds Accounts remittance ledger.</p>
                 <div className="wf-node-action">
                   <Link to="/orders?tab=delivered" className="wf-action-link">
-                    View Delivered ({counts.delivered ?? 0}) →
-                  </Link>
+                    View Delivered ({counts.delivered ?? 0})</Link>
                 </div>
               </div>
 
@@ -507,8 +503,7 @@ export function Workflows() {
                 <p>Failed delivery / NDR exhausted. Reverse parcel routes back to warehouse hub for intake and restocking.</p>
                 <div className="wf-node-action">
                   <Link to="/orders?tab=cancel" className="wf-action-link">
-                    View Cancel/RTO →
-                  </Link>
+                    View Cancel/RTO</Link>
                 </div>
               </div>
             </div>
@@ -521,7 +516,7 @@ export function Workflows() {
         {(activeStage === 'ALL' || activeStage === 'RETURNS') && (
           <div className="wf-tree-section">
             <div className="wf-tree-header">
-              <div className="wf-section-badge s3">Stage 3</div>
+              <span className="wf-stage-index" aria-hidden="true">3</span>
               <div className="wf-section-title">
                 <h3>Customer Returns & Size Exchanges Lifecycle</h3>
                 <p>Reverse pickup dispatching, dual-AWB replacement workflows, and warehouse hub transit</p>
@@ -539,8 +534,7 @@ export function Workflows() {
                 <p>Customer initiates return within 7-day window. Desk operator checks eligibility and inspects photos.</p>
                 <div className="wf-node-action">
                   <Link to="/support" className="wf-action-link">
-                    Support Desk →
-                  </Link>
+                    Support Desk</Link>
                 </div>
               </div>
 
@@ -580,8 +574,7 @@ export function Workflows() {
                 </p>
                 <div className="wf-node-action">
                   <Link to="/returns?tab=EXCHANGES" className="wf-action-link">
-                    Active Exchanges ({returnMetrics.exchanges}) →
-                  </Link>
+                    Active Exchanges ({returnMetrics.exchanges})</Link>
                 </div>
               </div>
 
@@ -612,8 +605,7 @@ export function Workflows() {
                 <p>Reverse parcel arrives at warehouse loading dock. Ready for operator barcode scan and QC check.</p>
                 <div className="wf-node-action">
                   <Link to="/returns?tab=PENDING_QC" className="wf-action-link">
-                    Scan Intake Queue ({returnMetrics.pendingQc}) →
-                  </Link>
+                    Scan Intake Queue ({returnMetrics.pendingQc})</Link>
                 </div>
               </div>
             </div>
@@ -626,7 +618,7 @@ export function Workflows() {
         {(activeStage === 'ALL' || activeStage === 'QC_REFUND') && (
           <div className="wf-tree-section">
             <div className="wf-tree-header">
-              <div className="wf-section-badge s4">Stage 4</div>
+              <span className="wf-stage-index" aria-hidden="true">4</span>
               <div className="wf-section-title">
                 <h3>Warehouse QC Verification & Refund Settlement Tree</h3>
                 <p>Barcode gun intake, exchange refund suppression, Shopify API auto-refund, and COD manual payout verification</p>
@@ -644,8 +636,7 @@ export function Workflows() {
                 <p>Operator scans return AWB via <code>POST /api/returns/scan</code>. Verifies parcel contents and records condition.</p>
                 <div className="wf-node-action">
                   <Link to="/returns" className="wf-action-link">
-                    Open Returns Scanner →
-                  </Link>
+                    Open Returns Scanner</Link>
                 </div>
               </div>
 
@@ -701,8 +692,7 @@ export function Workflows() {
                 </p>
                 <div className="wf-node-action">
                   <Link to="/returns?tab=REFUNDED" className="wf-action-link">
-                    Settled Returns ({returnMetrics.refunded}) →
-                  </Link>
+                    Settled Returns ({returnMetrics.refunded})</Link>
                 </div>
               </div>
 
@@ -718,8 +708,7 @@ export function Workflows() {
                 </p>
                 <div className="wf-node-action">
                   <Link to="/returns?tab=COD_DUE" className="wf-action-link">
-                    COD Due Queue ({returnMetrics.codDue}) →
-                  </Link>
+                    COD Due Queue ({returnMetrics.codDue})</Link>
                 </div>
               </div>
 
@@ -737,8 +726,7 @@ export function Workflows() {
                 </p>
                 <div className="wf-node-action">
                   <Link to="/remittance" className="wf-action-link">
-                    Open Accounts & Remittance →
-                  </Link>
+                    Open Accounts & Remittance</Link>
                 </div>
               </div>
             </div>

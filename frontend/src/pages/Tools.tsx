@@ -295,7 +295,7 @@ export function Tools() {
                   )}
                 </strong>
                 <small>
-                  {labelize(costRun?.mode)} · {costRun?.weight}g · {costRun?.paymentType} · {costRun?.origin} ➔ {costRun?.destination}
+                  {labelize(costRun?.mode)} / {costRun?.weight}g / {costRun?.paymentType} / {costRun?.origin} to {costRun?.destination}
                 </small>
               </div>
             )

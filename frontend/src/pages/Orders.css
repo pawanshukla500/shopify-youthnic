@@ -1,3 +1,4 @@
+/* Hallmark · polish · orders page */
 /* ==========================================================================
    Orders page redesign — scoped under .orders-page.
    Owns: KPI stat strip, slim SLA strip, the orders data-table (sticky
@@ -43,6 +44,7 @@
   flex-direction: column;
   gap: 1px;
   min-width: 0;
+  white-space: nowrap;
   cursor: pointer;
   transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
 }
@@ -914,5 +916,4 @@
 /* Bulk bar spacer under the table */
 .orders-page .bulk-spacer {
   height: 90px;
-  transition: height 0.2s ease;
-}
+  }

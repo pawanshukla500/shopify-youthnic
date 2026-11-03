@@ -43,13 +43,13 @@ export function renderRtoRiskBadge(order: Order) {
   if (level === 'HIGH') {
     return (
       <span className="micro-badge micro-badge-red" title={order.rtoRiskReason || 'High risk COD order'}>
-        ⛔ High RTO
+        High RTO
       </span>
     )
   }
   return (
     <span className="micro-badge micro-badge-amber" title={order.rtoRiskReason || 'Medium risk · Unconfirmed COD'}>
-      ⚡ Med RTO
+      Med RTO
     </span>
   )
 }
@@ -1220,7 +1220,7 @@ export function Orders() {
           </span>
           <span className="sla-strip-text">
             <strong>{metrics.delayedDispatchCount} order{metrics.delayedDispatchCount > 1 ? 's' : ''} overdue for dispatch</strong>
-            {' '}— past the 24h SLA without AWB generation. Expedite to protect delivery timelines.
+            {' '}: past the 24h SLA without AWB generation. Expedite to protect delivery timelines.
           </span>
           <button
             type="button"
@@ -1258,14 +1258,14 @@ export function Orders() {
               style={isActive ? { borderColor: tab.color, color: tab.color } : undefined}
             >
               <span>{tab.label}</span>
-              <span className="tab-badge" style={isActive ? { background: tab.color, color: '#fff' } : undefined}>
+              <span className="tab-badge" style={isActive ? { background: tab.color, color: 'var(--panel)' } : undefined}>
                 {count ?? '…'}
               </span>
             </button>
           )
         })}
       </div>
-      <p style={{ margin: '-8px 0 16px', color: '#64748b', fontSize: '13px' }}>
+      <p style={{ margin: '-8px 0 16px', color: 'var(--muted)', fontSize: '13px' }}>
         {ORDER_TABS.find((tab) => tab.key === activeTab)?.hint}
       </p>
 
@@ -1326,7 +1326,7 @@ export function Orders() {
           <button
             type="button"
             className="btn-export"
-            style={{ background: '#2563eb', color: '#ffffff', borderColor: '#1d4ed8' }}
+            style={{ background: 'var(--blue)', color: 'var(--panel)', borderColor: 'var(--blue-hover)' }}
             onClick={handleSyncShopify}
             disabled={isSyncingShopify}
             title="Fetch new and historical orders directly from Shopify"
@@ -1339,20 +1339,20 @@ export function Orders() {
           <button
             type="button"
             className="btn-export"
-            style={{ background: '#059669', color: '#ffffff', borderColor: '#047857' }}
+            style={{ background: 'var(--green)', color: 'var(--panel)', borderColor: 'var(--green)' }}
             onClick={handleSyncChannel}
             disabled={isSyncingChannel}
             title="Synchronize all unfulfilled orders with Delhivery One Shopify channel"
           >
             <Icon name="truck" size={15} />
-            <span>{isSyncingChannel ? 'Syncing Channel…' : '🛍️ Sync Delhivery Channel'}</span>
+            <span>{isSyncingChannel ? 'Syncing Channel…' : 'Sync Delhivery Channel'}</span>
           </button>
 
           {/* Fetch External Fulfillment / Delhivery ONE AWBs Button */}
           <button
             type="button"
             className="btn-export"
-            style={{ background: '#7c3aed', color: '#ffffff', borderColor: '#6d28d9' }}
+            style={{ background: 'var(--purple)', color: 'var(--panel)', borderColor: 'var(--purple)' }}
             onClick={handleSyncExternalFulfillments}
             disabled={isSyncingExternal}
             title="Automatically check and fetch fulfillment tracking & carrier for orders manifested via OMS Guru, external apps, or directly in Delhivery ONE panel"
@@ -1646,7 +1646,7 @@ export function Orders() {
             gap: '8px',
             minWidth: '320px',
             backdropFilter: 'blur(8px)',
-            color: '#f8fafc',
+            color: 'var(--canvas)',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
@@ -1654,7 +1654,7 @@ export function Orders() {
               <span className="kpi-dot is-amber" style={{ width: 8, height: 8 }} />
               Dispatching: {bulkDispatchProgress.orderName}
             </span>
-            <span style={{ fontSize: '12px', color: '#a78bfa', fontWeight: 600 }}>
+            <span style={{ fontSize: '12px', color: 'var(--purple)', fontWeight: 600 }}>
               {bulkDispatchProgress.current} / {bulkDispatchProgress.total}
             </span>
           </div>
@@ -1663,12 +1663,12 @@ export function Orders() {
               style={{
                 width: `${Math.round((bulkDispatchProgress.current / bulkDispatchProgress.total) * 100)}%`,
                 height: '100%',
-                background: 'linear-gradient(90deg, #8b5cf6 0%, #ec4899 100%)',
+                background: 'var(--purple)',
                 transition: 'width 0.3s ease',
               }}
             />
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#94a3b8' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--muted-light)' }}>
             <span>Processing real-time &rarr; Ready to Ship</span>
             <span>{bulkDispatchProgress.completed} ready{bulkDispatchProgress.failed > 0 ? ` · ${bulkDispatchProgress.failed} failed` : ''}</span>
           </div>
@@ -1788,7 +1788,7 @@ export function Orders() {
           <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '500px' }}>
             <div className="modal-header">
               <div className="modal-header-left">
-                <div className="modal-icon-badge primary" style={{ background: '#e0f2fe', color: '#0284c7' }}>
+                <div className="modal-icon-badge primary" style={{ background: 'rgba(37, 99, 235, 0.08)', color: 'var(--blue)' }}>
                   <Icon name="truck" size={20} />
                 </div>
                 <div>
@@ -1825,8 +1825,8 @@ export function Orders() {
                 type="button"
                 className="modal-btn-primary"
                 style={{
-                  background: '#0284c7',
-                  color: '#fff',
+                  background: 'var(--blue)',
+                  color: 'var(--panel)',
                   border: 'none',
                   borderRadius: '6px',
                   padding: '8px 16px',
@@ -1892,7 +1892,7 @@ export function Orders() {
                 </div>
               )}
 
-              <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '10px 12px', fontSize: '11px', color: '#166534', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ background: 'rgba(16, 185, 129, 0.08)', border: '1px solid var(--line)', borderRadius: '8px', padding: '10px 12px', fontSize: '11px', color: 'var(--green)', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <Icon name="check" size={16} />
                 <span>Shopify order will be marked cancelled and tagged with CANCELLED.</span>
               </div>
@@ -2040,16 +2040,16 @@ export function Orders() {
               </div>
 
               {orderForNdr.shipment && (
-                <div style={{ background: '#fff1f2', border: '1px solid #fecdd3', borderRadius: '8px', padding: '12px', fontSize: '12px' }}>
+                <div style={{ background: 'rgba(239, 68, 68, 0.08)', border: '1px solid var(--line)', borderRadius: '8px', padding: '12px', fontSize: '12px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                    <span style={{ fontWeight: 700, color: '#9f1239' }}>
+                    <span style={{ fontWeight: 700, color: 'var(--red)' }}>
                       Courier Status: {orderForNdr.shipment.courier || 'Delhivery'} (AWB: {orderForNdr.shipment.waybillNumber})
                     </span>
-                    <span style={{ fontWeight: 700, color: '#be123c' }}>
+                    <span style={{ fontWeight: 700, color: 'var(--red)' }}>
                       {orderForNdr.shipment.trackingStatus || 'Failed Delivery Attempt'}
                     </span>
                   </div>
-                  <div style={{ color: '#881337', fontSize: '11.5px' }}>
+                  <div style={{ color: 'var(--red)', fontSize: '11.5px' }}>
                     Location: {orderForNdr.shipment.trackingLocation || 'Destination Delivery Center'}
                   </div>
                 </div>
@@ -2059,8 +2059,8 @@ export function Orders() {
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '6px' }}>
                   <label
                     style={{
-                      border: ndrActionType === 'RE-ATTEMPT' ? '2px solid #2563eb' : '1px solid #cbd5e1',
-                      background: ndrActionType === 'RE-ATTEMPT' ? '#eff6ff' : '#ffffff',
+                      border: ndrActionType === 'RE-ATTEMPT' ? '2px solid var(--blue)' : '1px solid var(--line)',
+                      background: ndrActionType === 'RE-ATTEMPT' ? 'var(--line-subtle)' : 'var(--panel)',
                       borderRadius: '8px',
                       padding: '12px',
                       cursor: 'pointer',
@@ -2074,16 +2074,16 @@ export function Orders() {
                       onChange={() => setNdrActionType('RE-ATTEMPT')}
                       style={{ marginRight: '8px' }}
                     />
-                    <strong>🔄 Re-attempt Delivery</strong>
-                    <p style={{ margin: '4px 0 0 0', fontSize: '11px', color: '#475569' }}>
+                    <strong>Re-attempt Delivery</strong>
+                    <p style={{ margin: '4px 0 0 0', fontSize: '11px', color: 'var(--ink-secondary)' }}>
                       Request Delhivery to re-attempt delivery tomorrow and trigger WhatsApp alert to customer.
                     </p>
                   </label>
 
                   <label
                     style={{
-                      border: ndrActionType === 'DEFER_DLV' ? '2px solid #7c3aed' : '1px solid #cbd5e1',
-                      background: ndrActionType === 'DEFER_DLV' ? '#f5f3ff' : '#ffffff',
+                      border: ndrActionType === 'DEFER_DLV' ? '2px solid var(--purple)' : '1px solid var(--line)',
+                      background: ndrActionType === 'DEFER_DLV' ? 'var(--line-subtle)' : 'var(--panel)',
                       borderRadius: '8px',
                       padding: '12px',
                       cursor: 'pointer',
@@ -2097,16 +2097,16 @@ export function Orders() {
                       onChange={() => setNdrActionType('DEFER_DLV')}
                       style={{ marginRight: '8px' }}
                     />
-                    <strong>📅 Defer Delivery Date</strong>
-                    <p style={{ margin: '4px 0 0 0', fontSize: '11px', color: '#475569' }}>
-                      Delhivery async NDR API — deferred date max 6 days out. Returns UPL id.
+                    <strong>Defer Delivery Date</strong>
+                    <p style={{ margin: '4px 0 0 0', fontSize: '11px', color: 'var(--ink-secondary)' }}>
+                      Delhivery async NDR API: deferred date max 6 days out. Returns UPL id.
                     </p>
                   </label>
 
                   <label
                     style={{
-                      border: ndrActionType === 'EDIT_DETAILS' ? '2px solid #059669' : '1px solid #cbd5e1',
-                      background: ndrActionType === 'EDIT_DETAILS' ? '#ecfdf5' : '#ffffff',
+                      border: ndrActionType === 'EDIT_DETAILS' ? '2px solid var(--green)' : '1px solid var(--line)',
+                      background: ndrActionType === 'EDIT_DETAILS' ? 'var(--line-subtle)' : 'var(--panel)',
                       borderRadius: '8px',
                       padding: '12px',
                       cursor: 'pointer',
@@ -2120,16 +2120,16 @@ export function Orders() {
                       onChange={() => setNdrActionType('EDIT_DETAILS')}
                       style={{ marginRight: '8px' }}
                     />
-                    <strong>✏️ Correct Phone / Address</strong>
-                    <p style={{ margin: '4px 0 0 0', fontSize: '11px', color: '#475569' }}>
+                    <strong>Correct Phone / Address</strong>
+                    <p style={{ margin: '4px 0 0 0', fontSize: '11px', color: 'var(--ink-secondary)' }}>
                       Push corrected consignee details to Delhivery while package is pending.
                     </p>
                   </label>
 
                   <label
                     style={{
-                      border: ndrActionType === 'RTO' ? '2px solid #dc2626' : '1px solid #cbd5e1',
-                      background: ndrActionType === 'RTO' ? '#fef2f2' : '#ffffff',
+                      border: ndrActionType === 'RTO' ? '2px solid var(--red)' : '1px solid var(--line)',
+                      background: ndrActionType === 'RTO' ? 'var(--line-subtle)' : 'var(--panel)',
                       borderRadius: '8px',
                       padding: '12px',
                       cursor: 'pointer',
@@ -2143,8 +2143,8 @@ export function Orders() {
                       onChange={() => setNdrActionType('RTO')}
                       style={{ marginRight: '8px' }}
                     />
-                    <strong>↩️ Return to Origin (RTO)</strong>
-                    <p style={{ margin: '4px 0 0 0', fontSize: '11px', color: '#475569' }}>
+                    <strong>Return to Origin (RTO)</strong>
+                    <p style={{ margin: '4px 0 0 0', fontSize: '11px', color: 'var(--ink-secondary)' }}>
                       Cancel delivery and return package to Surat warehouse.
                     </p>
                   </label>
@@ -2217,13 +2217,13 @@ export function Orders() {
                 style={{
                   background:
                     ndrActionType === 'RE-ATTEMPT'
-                      ? '#2563eb'
+                      ? 'var(--blue)'
                       : ndrActionType === 'DEFER_DLV'
-                        ? '#7c3aed'
+                        ? 'var(--purple)'
                         : ndrActionType === 'EDIT_DETAILS'
-                          ? '#059669'
-                          : '#dc2626',
-                  color: '#fff',
+                          ? 'var(--green)'
+                          : 'var(--red)',
+                  color: 'var(--panel)',
                   border: 'none',
                   borderRadius: '6px',
                   padding: '8px 16px',

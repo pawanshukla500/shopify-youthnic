@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { config } from '../../config';
 import logger from '../../utils/logger';
+import prisma from '../../database/prisma';
 
 export interface WhatsAppSendResult {
   success: boolean;
@@ -9,6 +10,8 @@ export interface WhatsAppSendResult {
 }
 
 export class WhatsAppGatewayService {
+  private dispatchedKeys = new Set<string>();
+
   private getAuthHeader(): string {
     const raw = config.whatsappGateway.auth || 'returnorders@vbexports.co.in:Xchange4WA$';
     return `Basic ${Buffer.from(raw).toString('base64')}`;
@@ -23,13 +26,109 @@ export class WhatsAppGatewayService {
     return `${digits}@s.whatsapp.net`;
   }
 
-  async sendTextMessage(recipient: string, message: string): Promise<WhatsAppSendResult> {
-    if (!config.whatsappGateway.enabled) {
-      logger.debug('WhatsApp gateway disabled, skipping send', { recipient });
-      return { success: true, messageId: 'GATEWAY_DISABLED' };
+  /**
+   * Helper to deduplicate notifications per order/action.
+   * Checks both in-memory set and database AccountTrailEvent table.
+   */
+  private async checkDedup(orderId?: number, dedupKey?: string): Promise<boolean> {
+    if (!dedupKey) return false;
+
+    if (this.dispatchedKeys.has(dedupKey)) {
+      logger.info('Ekta WhatsApp notification already dispatched in memory, skipping duplicate', { dedupKey });
+      return true;
     }
 
-    const jid = this.normalizeJid(recipient);
+    if (orderId && prisma?.accountTrailEvent?.findFirst) {
+      try {
+        const existing = await prisma.accountTrailEvent.findFirst({
+          where: {
+            orderId,
+            eventType: 'EKTA_WHATSAPP_NOTIFIED',
+            externalReference: dedupKey,
+          },
+        });
+        if (existing) {
+          this.dispatchedKeys.add(dedupKey);
+          logger.info('Ekta WhatsApp notification already recorded in DB, skipping duplicate', { dedupKey, orderId });
+          return true;
+        }
+      } catch (err: any) {
+        logger.warn('Failed to query AccountTrailEvent for deduplication check', { dedupKey, error: err.message });
+      }
+    }
+
+    // Add to in-memory set to lock concurrent calls
+    if (this.dispatchedKeys.size > 5000) {
+      const toDelete = Array.from(this.dispatchedKeys).slice(0, 2000);
+      for (const k of toDelete) this.dispatchedKeys.delete(k);
+    }
+    this.dispatchedKeys.add(dedupKey);
+
+    return false;
+  }
+
+  /**
+   * Records notification dispatch in database. If dispatch failed, releases in-memory lock.
+   */
+  private async recordDedup(params: {
+    orderId?: number;
+    returnId?: number;
+    dedupKey: string;
+    recipient: string;
+    result: WhatsAppSendResult;
+  }): Promise<void> {
+    const { orderId, returnId, dedupKey, recipient, result } = params;
+
+    if (!result.success) {
+      this.dispatchedKeys.delete(dedupKey);
+      return;
+    }
+
+    if (orderId && prisma?.accountTrailEvent?.create) {
+      try {
+        await prisma.accountTrailEvent.create({
+          data: {
+            orderId,
+            returnId: returnId ?? null,
+            eventType: 'EKTA_WHATSAPP_NOTIFIED',
+            actorType: 'SYSTEM',
+            source: 'WHATSAPP_GATEWAY',
+            status: 'COMPLETED',
+            externalReference: dedupKey,
+            note: `Ekta notified via WhatsApp: ${dedupKey}`,
+            metadata: {
+              recipient,
+              messageId: result.messageId,
+              timestamp: new Date().toISOString(),
+            },
+          },
+        });
+      } catch (err: any) {
+        logger.warn('Failed to create AccountTrailEvent for Ekta notification', { dedupKey, error: err.message });
+      }
+    }
+  }
+
+  clearDedupCacheForTests(): void {
+    this.dispatchedKeys.clear();
+  }
+
+  async sendTextMessage(recipient: string, message: string): Promise<WhatsAppSendResult> {
+    const cleanRecipient = recipient?.trim();
+    if (!cleanRecipient) {
+      return { success: false, error: 'Recipient is required' };
+    }
+
+    if (
+      process.env.NODE_ENV === 'test' ||
+      Boolean(process.env.VITEST) ||
+      !config.whatsappGateway.enabled
+    ) {
+      logger.debug('WhatsApp gateway skipping send (test env or disabled)', { recipient: cleanRecipient });
+      return { success: true, messageId: 'TEST_ENV_SKIPPED' };
+    }
+
+    const jid = this.normalizeJid(cleanRecipient);
     const url = `${config.whatsappGateway.apiUrl.replace(/\/+$/, '')}/send/message`;
 
     try {
@@ -98,6 +197,13 @@ export class WhatsAppGatewayService {
   }): Promise<WhatsAppSendResult> {
     const { order, returnRecord, refundAmount, shopifyRefundId, isPartialReturn, scan } = params;
     const recipient = config.whatsappGateway.ektaJid;
+    const orderId = typeof order?.id === 'number' ? order.id : undefined;
+    const returnId = typeof returnRecord?.id === 'number' ? returnRecord.id : undefined;
+    const dedupKey = `EKTA_WA:PREPAID_RETURN:${orderId || order?.shopifyOrderId || 'unknown'}:${returnId || 'order'}`;
+
+    if (await this.checkDedup(orderId, dedupKey)) {
+      return { success: true, messageId: 'DEDUPLICATED' };
+    }
 
     const orderName = order.shopifyOrderName || `#${order.shopifyOrderNumber}`;
     const customer = `${order.customerName || 'Customer'} (${order.customerPhone || 'No phone'})`;
@@ -143,7 +249,9 @@ export class WhatsAppGatewayService {
       note,
     ].join('\n');
 
-    return this.sendTextMessage(recipient, message);
+    const result = await this.sendTextMessage(recipient, message);
+    await this.recordDedup({ orderId, returnId, dedupKey, recipient, result });
+    return result;
   }
 
   /**
@@ -157,6 +265,12 @@ export class WhatsAppGatewayService {
   }): Promise<WhatsAppSendResult> {
     const { order, refundAmount, shopifyRefundId, scan } = params;
     const recipient = config.whatsappGateway.ektaJid;
+    const orderId = typeof order?.id === 'number' ? order.id : undefined;
+    const dedupKey = `EKTA_WA:PREPAID_RTO:${orderId || order?.shopifyOrderId || 'unknown'}`;
+
+    if (await this.checkDedup(orderId, dedupKey)) {
+      return { success: true, messageId: 'DEDUPLICATED' };
+    }
 
     const orderName = order.shopifyOrderName || `#${order.shopifyOrderNumber}`;
     const customer = `${order.customerName || 'Customer'} (${order.customerPhone || 'No phone'})`;
@@ -179,7 +293,9 @@ export class WhatsAppGatewayService {
       `✅ *Note:* Prepaid RTO parcel received back. Full refund auto-processed to customer's original payment method.`,
     ].join('\n');
 
-    return this.sendTextMessage(recipient, message);
+    const result = await this.sendTextMessage(recipient, message);
+    await this.recordDedup({ orderId, dedupKey, recipient, result });
+    return result;
   }
 
   /**
@@ -194,6 +310,13 @@ export class WhatsAppGatewayService {
   }): Promise<WhatsAppSendResult> {
     const { order, returnRecord, qcStatus, qcRemark, scan } = params;
     const recipient = config.whatsappGateway.ektaJid;
+    const orderId = typeof order?.id === 'number' ? order.id : undefined;
+    const returnId = typeof returnRecord?.id === 'number' ? returnRecord.id : undefined;
+    const dedupKey = `EKTA_WA:COD_RETURN:${orderId || order?.shopifyOrderId || 'unknown'}:${returnId || 'order'}`;
+
+    if (await this.checkDedup(orderId, dedupKey)) {
+      return { success: true, messageId: 'DEDUPLICATED' };
+    }
 
     const orderName = order.shopifyOrderName || `#${order.shopifyOrderNumber}`;
     const customerName = order.customerName || 'Customer';
@@ -230,7 +353,9 @@ export class WhatsAppGatewayService {
       `👉 *Action for Ekta:* This was a Cash on Delivery (COD) order. Please contact the customer at ${customerPhone} to collect their Bank/UPI details and manually process the refund of ₹${amountToRefund.toFixed(2)}.`,
     ].join('\n');
 
-    return this.sendTextMessage(recipient, message);
+    const result = await this.sendTextMessage(recipient, message);
+    await this.recordDedup({ orderId, returnId, dedupKey, recipient, result });
+    return result;
   }
 
   /**
@@ -244,6 +369,12 @@ export class WhatsAppGatewayService {
   }): Promise<WhatsAppSendResult> {
     const { order, scan, waybill: inputWaybill } = params;
     const recipient = config.whatsappGateway.ektaJid;
+    const orderId = typeof order?.id === 'number' ? order.id : undefined;
+    const dedupKey = `EKTA_WA:COD_RTO:${orderId || order?.shopifyOrderId || 'unknown'}`;
+
+    if (await this.checkDedup(orderId, dedupKey)) {
+      return { success: true, messageId: 'DEDUPLICATED' };
+    }
 
     const orderName = order.shopifyOrderName || `#${order.shopifyOrderNumber}`;
     const customer = `${order.customerName || 'Customer'} (${order.customerPhone || 'No phone'})`;
@@ -263,7 +394,9 @@ export class WhatsAppGatewayService {
       `ℹ️ *Note:* No refund required as customer did not pay for this order.`,
     ].join('\n');
 
-    return this.sendTextMessage(recipient, message);
+    const result = await this.sendTextMessage(recipient, message);
+    await this.recordDedup({ orderId, dedupKey, recipient, result });
+    return result;
   }
 }
 

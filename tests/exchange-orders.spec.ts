@@ -4,7 +4,7 @@ import returnService from '../src/modules/returns/return.service';
 import velocityService from '../src/modules/velocity/velocity.service';
 import shopifyService from '../src/modules/shopify/shopify.service';
 
-const { prismaStub, delhiveryStub, notificationStub } = vi.hoisted(() => ({
+const { prismaStub, delhiveryStub, notificationStub, whatsappStub } = vi.hoisted(() => ({
   prismaStub: {
     order: {
       findUnique: vi.fn(),
@@ -38,6 +38,7 @@ const { prismaStub, delhiveryStub, notificationStub } = vi.hoisted(() => ({
     },
     accountTrailEvent: {
       create: vi.fn().mockResolvedValue({}),
+      findFirst: vi.fn().mockResolvedValue(null),
     },
   },
   delhiveryStub: {
@@ -49,11 +50,20 @@ const { prismaStub, delhiveryStub, notificationStub } = vi.hoisted(() => ({
     notifyReturnReceived: vi.fn().mockResolvedValue(true),
     notifyRefundProcessed: vi.fn().mockResolvedValue(true),
   },
+  whatsappStub: {
+    notifyEktaPrepaidReturnRefund: vi.fn().mockResolvedValue({ success: true }),
+    notifyEktaPrepaidRtoRefund: vi.fn().mockResolvedValue({ success: true }),
+    notifyEktaCodReturnReceived: vi.fn().mockResolvedValue({ success: true }),
+    notifyEktaCodRtoReceived: vi.fn().mockResolvedValue({ success: true }),
+    sendTextMessage: vi.fn().mockResolvedValue({ success: true }),
+    ping: vi.fn().mockResolvedValue({ success: true, status: 'CONNECTED' }),
+  },
 }));
 
 vi.mock('../src/database/prisma', () => ({ default: prismaStub }));
 vi.mock('../src/modules/delhivery/delhivery.service', () => ({ default: delhiveryStub }));
 vi.mock('../src/modules/notifications/notification.service', () => ({ default: notificationStub }));
+vi.mock('../src/modules/whatsapp/whatsapp-gateway.service', () => ({ default: whatsappStub }));
 vi.mock('../src/utils/logger', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));

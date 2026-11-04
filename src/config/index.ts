@@ -140,7 +140,21 @@ export const config = {
       state: optional('DELHIVERY_SELLER_STATE', 'Maharashtra'),
       pincode: optional('DELHIVERY_SELLER_PINCODE', '400001'),
       phone: optional('DELHIVERY_SELLER_PHONE', '9999999999'),
+      gstin: optional('DELHIVERY_SELLER_GSTIN', optional('COMPANY_GSTIN', '24AERPB8666E1ZB')),
     },
+  },
+
+  // Company & Invoicing details (Legal entity, brand, and GSTIN)
+  company: {
+    legalName: optional('COMPANY_LEGAL_NAME', 'VB EXPORTS'),
+    brandName: optional('COMPANY_BRAND_NAME', 'YOUTHNIC'),
+    address: optional('COMPANY_ADDRESS', '7004, HTC Market-1, Surat, Gujarat - 395002'),
+    city: optional('COMPANY_CITY', 'Surat'),
+    state: optional('COMPANY_STATE', 'Gujarat'),
+    stateCode: optional('COMPANY_STATE_CODE', '24'),
+    pincode: optional('COMPANY_PINCODE', '395002'),
+    gstin: optional('COMPANY_GSTIN', optional('SELLER_GSTIN', '24AERPB8666E1ZB')),
+    phone: optional('COMPANY_PHONE', '+91 7984984563'),
   },
 
   // Velocity Shipping (Aggregator / Secondary Shipping Partner)

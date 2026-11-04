@@ -1,4 +1,5 @@
 import invoiceService from '../modules/invoice/invoice.service';
+import { config } from '../config';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import logger from './logger';
 
@@ -171,7 +172,9 @@ export async function create4x6InvoicePdf(
   page.drawText('TAX INVOICE', { x: 195, y: 410, size: 10, font: fontBold, color: black });
   page.drawText('YOUTHNIC (VB EXPORTS)', { x: 14, y: 410, size: 9, font: fontBold, color: black });
   page.drawText('7004, HTC Market-1, Surat, Gujarat - 395002', { x: 14, y: 400, size: 6.5, font: fontRegular, color: gray });
-  page.drawText('GSTIN: 24AAFFV1234P1Z8 (State 24) · +91 7984984563', { x: 14, y: 391, size: 6.5, font: fontRegular, color: gray });
+  const gstin = config.company?.gstin || config.delhivery?.seller?.gstin || '24AERPB8666E1ZB';
+  const sellerPhone = config.company?.phone || config.delhivery?.seller?.phone || '+91 7984984563';
+  page.drawText(`GSTIN: ${gstin} (State 24) · ${sellerPhone}`, { x: 14, y: 391, size: 6.5, font: fontRegular, color: gray });
 
   page.drawLine({ start: { x: 8, y: 384 }, end: { x: 280, y: 384 }, thickness: 1, color: black });
 

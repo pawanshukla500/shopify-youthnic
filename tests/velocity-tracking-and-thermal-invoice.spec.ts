@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { getTrackingUrl, isVelocityCourier, normalizeCourierName } from '../src/utils/courier';
 import invoiceService from '../src/modules/invoice/invoice.service';
+import { create4x6InvoicePdf } from '../src/utils/pdf-merger';
+import { PDFDocument } from 'pdf-lib';
 import shippingLabelService from '../src/modules/delhivery/shipping-label.service';
 import kwikengageService from '../src/modules/whatsapp/kwikengage.service';
 import { renderTransitDelayEmail, renderInTransitEmail, renderNdrEmail } from '../src/modules/email/email-templates';
@@ -130,7 +132,7 @@ describe('4x6" Thermal GST Tax Invoice Layout & Print Standard', () => {
     // Branding & GST
     expect(html).toContain('YOUTHNIC');
     expect(html).toContain('VB EXPORTS');
-    expect(html).toContain('24AAFFV1234P1Z8');
+    expect(html).toContain('24AERPB8666E1ZB');
     expect(html).toContain('TAX INVOICE');
     expect(html).toContain('INV-2026-6001');
     expect(html).toContain('#26YOU6001');
@@ -180,5 +182,15 @@ describe('4x6" Thermal GST Tax Invoice Layout & Print Standard', () => {
     expect(combinedStyles).toContain('.label-wrapper');
     expect(combinedStyles).toContain('width: 100mm !important');
     expect(combinedStyles).toContain('height: 150mm !important');
+  });
+  it('generates 4x6" PDF invoice with corrected registered GSTIN and standard thermal dimensions', async () => {
+    const pdfBuf = await create4x6InvoicePdf(dummyOrder, 'VEHR1122334455', 'Velocity');
+    expect(pdfBuf).toBeInstanceOf(Buffer);
+    expect(pdfBuf.length).toBeGreaterThan(1000);
+    const doc = await PDFDocument.load(pdfBuf);
+    expect(doc.getPageCount()).toBe(1);
+    const page = doc.getPage(0);
+    expect(page.getWidth()).toBe(288);
+    expect(page.getHeight()).toBe(432);
   });
 });

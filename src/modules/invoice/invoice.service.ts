@@ -171,7 +171,7 @@ export class InvoiceService {
             <div class="legal-name">VB EXPORTS</div>
             <div class="company-details">
               7004, HTC Market-1, Ring Rd, Surat - 395002<br>
-              <strong>GSTIN:</strong> 24AAFFV1234P1Z8 (State: 24)<br>
+              <strong>GSTIN:</strong> ${config.company?.gstin || config.delhivery?.seller?.gstin || "24AERPB8666E1ZB"} (State: 24)<br>
               <strong>Support:</strong> +91 7984984563
             </div>
           </div>

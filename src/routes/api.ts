@@ -2566,6 +2566,7 @@ router.post('/returns/:id/refund', async (req: AuthenticatedRequest, res: Respon
       success: result.success,
       refundAmount: result.refundAmount,
       moneyMoved: result.moneyMoved,
+      shopifyRefundId: result.shopifyRefundId,
       emailDispatched,
       emailResult,
     });

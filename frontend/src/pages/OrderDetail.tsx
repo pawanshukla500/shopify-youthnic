@@ -890,6 +890,13 @@ export function OrderDetail() {
     <div className="detail-grid">
       <div className="detail-main">
         <section className="order-section" id="order-section-overview" role="tabpanel" aria-labelledby="order-tab-overview" tabIndex={-1} hidden={section !== 'overview'}>
+        {(order.returns || []).length > 0 && (
+          <OrderReturnRefundOverviewCard
+            order={order}
+            onOpenReturns={() => openSection('returns')}
+            onOpenPayments={() => openSection('payments')}
+          />
+        )}
         <Panel className="shopify-card" style={{ padding: 0 }}>
           <div className="shopify-card-head">
             <h2>Order items <span className="order-item-count">{itemCount}</span></h2>
@@ -2756,6 +2763,308 @@ function AccountTrailPanel({
 
 const RETURN_REASONS = ['Damaged product', 'Quality is not good', 'Changed mind', 'Size mismatch', 'Wrong item', 'Others']
 
+
+function OrderReturnRefundOverviewCard({
+  order,
+  onOpenReturns,
+  onOpenPayments,
+}: {
+  order: Order
+  onOpenReturns: () => void
+  onOpenPayments: () => void
+}) {
+  const queryClient = useQueryClient()
+  const toast = useToast()
+  const returns = (order.returns || []).filter((r: any) => r.returnStatus !== 'CANCELLED')
+  if (!returns.length) return null
+
+  const isCod = order.paymentMethod === 'COD' || /cash/i.test(order.paymentGateway || '')
+  const [processingId, setProcessingId] = useState<number | null>(null)
+
+  const handleProcessRefund = async (ret: ReturnRecord) => {
+    if (isCod) {
+      onOpenPayments()
+      return
+    }
+    const confirmed = window.confirm(
+      `Approve warehouse QC and issue Shopify automatic refund for Return AWB ${ret.returnWaybillNumber || '#' + ret.id}?\n\nThis will trigger the refund directly on Shopify to customer's original payment method via ${order.paymentAggregator || 'Easebuzz/GoKwik'}.`
+    )
+    if (!confirmed) return
+
+    setProcessingId(ret.id)
+    try {
+      const res = await api.post(`/api/returns/${ret.id}/refund`, { approveQc: true })
+      if (res.data.success) {
+        toast.toast(
+          'success',
+          `Refund of ₹${res.data.refundAmount} issued successfully on Shopify! (Refund ID: ${res.data.shopifyRefundId || 'Confirmed'})`
+        )
+        await queryClient.invalidateQueries({ queryKey: ['order', String(order.id)] })
+        await queryClient.invalidateQueries({ queryKey: ['orders'] })
+        await queryClient.invalidateQueries({ queryKey: ['returns'] })
+      } else {
+        toast.toast('error', res.data.error || 'Refund could not be processed')
+      }
+    } catch (err: any) {
+      toast.toast('error', apiError(err))
+    } finally {
+      setProcessingId(null)
+    }
+  }
+
+  return (
+    <div
+      className="order-return-refund-overview"
+      style={{
+        marginBottom: '18px',
+        borderRadius: '12px',
+        border: '1px solid #c7d2fe',
+        background: 'linear-gradient(to bottom, #f8faff, #ffffff)',
+        boxShadow: '0 2px 10px rgba(99, 102, 241, 0.06)',
+        overflow: 'hidden',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '14px 18px',
+          background: '#eef2ff',
+          borderBottom: '1px solid #e0e7ff',
+          flexWrap: 'wrap',
+          gap: '8px',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div
+            style={{
+              width: '32px',
+              height: '32px',
+              borderRadius: '8px',
+              background: '#4f46e5',
+              color: '#fff',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Icon name="return" size={18} />
+          </div>
+          <div>
+            <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: '#1e1b4b' }}>
+              Reverse Logistics & Refund Details
+            </h3>
+            <span style={{ fontSize: '11px', color: '#4338ca' }}>
+              {returns.length === 1 ? '1 Return Record linked to this order' : `${returns.length} Return Records linked`}
+            </span>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onOpenReturns}
+          style={{
+            fontSize: '11.5px',
+            fontWeight: 600,
+            color: '#4f46e5',
+            background: '#fff',
+            border: '1px solid #c7d2fe',
+            padding: '4px 10px',
+            borderRadius: '6px',
+            cursor: 'pointer',
+          }}
+        >
+          View in Returns Tab →
+        </button>
+      </div>
+
+      <div style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        {returns.map((ret) => {
+          const isReceived = ret.returnStatus === 'RECEIVED' || ret.returnStatus === 'QC_APPROVED' || Boolean(ret.receivedAt)
+          const isRefunded = ret.refundStatus === 'PROCESSED' || ret.returnStatus === 'REFUNDED'
+          const returnedItems = ret.items || []
+          const carrier = ret.carrier || (ret.isExchange ? 'Velocity' : 'Delhivery')
+
+          return (
+            <div
+              key={ret.id}
+              style={{
+                border: '1px solid #e2e8f0',
+                borderRadius: '9px',
+                padding: '14px',
+                background: '#ffffff',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px', marginBottom: '12px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '10.5px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: '#64748b' }}>
+                      Reverse AWB ({carrier}):
+                    </span>
+                    {ret.returnWaybillNumber ? (
+                      <a
+                        href={carrierTrackingUrl(carrier, ret.returnWaybillNumber)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mono"
+                        style={{ fontSize: '13px', fontWeight: 700, color: '#4f46e5', textDecoration: 'underline' }}
+                        title="Track reverse shipment with carrier"
+                      >
+                        {ret.returnWaybillNumber}
+                      </a>
+                    ) : (
+                      <span className="mono" style={{ fontSize: '12px', color: '#94a3b8' }}>Waybill pending</span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#64748b' }}>
+                    Reason: <strong>{ret.returnReason || 'Customer return'}</strong>
+                    {ret.receivedAt && ` · Arrived at Surat warehouse: ${formatDate(ret.receivedAt)}`}
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span
+                    style={{
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      padding: '3px 8px',
+                      borderRadius: '5px',
+                      background: isCod ? '#fef3c7' : '#ecfdf5',
+                      color: isCod ? '#92400e' : '#065f46',
+                      border: `1px solid ${isCod ? '#fde68a' : '#a7f3d0'}`,
+                    }}
+                  >
+                    {isCod ? 'Cash on Delivery (COD)' : `Prepaid (${order.paymentProvider || order.paymentGateway || 'Easebuzz'})`}
+                  </span>
+                  <StatusBadge status={ret.returnStatus} />
+                </div>
+              </div>
+
+              {returnedItems.length > 0 && (
+                <div style={{ marginBottom: '12px', background: '#f8fafc', border: '1px solid #f1f5f9', borderRadius: '7px', padding: '10px 12px' }}>
+                  <div style={{ fontSize: '10.5px', fontWeight: 700, textTransform: 'uppercase', color: '#475569', marginBottom: '8px' }}>
+                    Returned Item(s)
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {returnedItems.map((item) => {
+                      const orderItem = item.orderItem || (order.items || []).find((i) => i.id === item.orderItemId)
+                      return (
+                        <div key={item.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            {orderItem?.imageUrl && (
+                              <img
+                                src={orderItem.imageUrl}
+                                alt={orderItem.title}
+                                style={{ width: '36px', height: '36px', objectFit: 'cover', borderRadius: '4px', border: '1px solid #e2e8f0' }}
+                              />
+                            )}
+                            <div>
+                              <div style={{ fontSize: '12px', fontWeight: 600, color: '#1e293b' }}>
+                                {orderItem?.title || 'Returned Item'}
+                              </div>
+                              <div style={{ fontSize: '11px', color: '#64748b' }}>
+                                SKU: <span className="mono">{orderItem?.sku || 'N/A'}</span>
+                                {orderItem?.variantTitle && ` · Size: ${orderItem.variantTitle}`}
+                              </div>
+                            </div>
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <div style={{ fontSize: '12px', fontWeight: 700, color: '#0f172a' }}>
+                              {item.quantity} pc{item.quantity > 1 ? 's' : ''}
+                            </div>
+                            <div style={{ fontSize: '11px', color: '#64748b' }}>
+                              {orderItem?.price ? formatMoney(orderItem.price, order.currency) : ''}
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <div
+                style={{
+                  background: isRefunded ? '#f0fdf4' : isReceived ? '#fffbeb' : '#f8fafc',
+                  border: `1px solid ${isRefunded ? '#bbf7d0' : isReceived ? '#fde68a' : '#e2e8f0'}`,
+                  borderRadius: '8px',
+                  padding: '12px 14px',
+                }}
+              >
+                {isRefunded ? (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#15803d', fontWeight: 700, fontSize: '13px' }}>
+                        <Icon name="check" size={16} />
+                        <span>Refund Processed: {formatMoney(ret.refundAmount || order.totalAmount, order.currency)}</span>
+                      </div>
+                      <div style={{ fontSize: '11px', color: '#166534', marginTop: '3px' }}>
+                        {ret.shopifyRefundId && <span>Shopify Refund ID: <strong className="mono">{ret.shopifyRefundId}</strong> · </span>}
+                        {ret.refundProcessedAt && <span>Date: {formatDate(ret.refundProcessedAt)}</span>}
+                      </div>
+                    </div>
+                    <span style={{ fontSize: '11px', color: '#166534', fontWeight: 600 }}>
+                      ✓ Credited to customer payment source
+                    </span>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
+                    <div>
+                      <div style={{ fontSize: '12.5px', fontWeight: 700, color: isReceived ? '#92400e' : '#475569' }}>
+                        {isReceived ? '📦 Return Received at Warehouse · Refund Pending' : '🚚 Return in Transit'}
+                      </div>
+                      <div style={{ fontSize: '11px', color: isReceived ? '#b45309' : '#64748b', marginTop: '2px' }}>
+                        {isCod
+                          ? 'Cash on Delivery order: Collect customer bank/UPI details and transfer refund manually.'
+                          : 'Prepaid order: When QC passes, refund is processed automatically via Shopify to customer’s original payment method.'}
+                      </div>
+                    </div>
+
+                    {isReceived && (
+                      <div>
+                        {isCod ? (
+                          <button
+                            type="button"
+                            className="button button-secondary"
+                            onClick={onOpenPayments}
+                            style={{ fontSize: '11.5px', padding: '6px 12px', background: '#fff' }}
+                          >
+                            Record Manual Bank Transfer
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="button button-primary"
+                            disabled={processingId === ret.id}
+                            onClick={() => handleProcessRefund(ret)}
+                            style={{
+                              fontSize: '12px',
+                              padding: '6px 14px',
+                              background: '#16a34a',
+                              borderColor: '#15803d',
+                              color: '#fff',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            {processingId === ret.id ? 'Processing Refund…' : '⚡ Approve QC & Issue Shopify Refund'}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function ReturnForm({
   order,
   items,
@@ -2807,7 +3116,7 @@ function ReturnForm({
         active.isExchange ? (
           <ActiveExchangeCard record={active} orderName={order.shopifyOrderName} />
         ) : (
-          <ActiveReturnCard record={active} />
+          <ActiveReturnCard record={active} order={order} />
         )
       ) : (
         <>
@@ -2973,12 +3282,44 @@ function ReturnForm({
   )
 }
 
-function ActiveReturnCard({ record }: { record: ReturnRecord }) {
+function ActiveReturnCard({ record, order }: { record: ReturnRecord; order?: Order }) {
   const queryClient = useQueryClient()
   const toast = useToast()
   const [reason, setReason] = useState(record.returnReason || 'Others')
   const [saving, setSaving] = useState(false)
+  const [refunding, setRefunding] = useState(false)
   const editable = ['INITIATED', 'PICKUP_SCHEDULED'].includes(record.returnStatus)
+
+  const isReceived = record.returnStatus === 'RECEIVED' || record.returnStatus === 'QC_APPROVED' || Boolean(record.receivedAt)
+  const isRefunded = record.refundStatus === 'PROCESSED' || record.returnStatus === 'REFUNDED'
+  const isCod = order ? (order.paymentMethod === 'COD' || /cash/i.test(order.paymentGateway || '')) : false
+  const returnedItems = record.items || []
+
+  const handleProcessRefund = async () => {
+    if (isCod) {
+      toast.toast('error', 'COD orders require manual bank transfer. Please record details under Financial Audit.')
+      return
+    }
+    const confirmed = window.confirm(
+      `Approve QC and issue Shopify automatic refund for Return AWB ${record.returnWaybillNumber || '#' + record.id}?`
+    )
+    if (!confirmed) return
+    setRefunding(true)
+    try {
+      const res = await api.post(`/api/returns/${record.id}/refund`, { approveQc: true })
+      if (res.data.success) {
+        toast.toast('success', `Refund of ₹${res.data.refundAmount} issued successfully on Shopify! (ID: ${res.data.shopifyRefundId || 'Confirmed'})`)
+        await queryClient.invalidateQueries({ queryKey: ['order', String(record.orderId)] })
+        await queryClient.invalidateQueries({ queryKey: ['returns'] })
+      } else {
+        toast.toast('error', res.data.error || 'Refund failed')
+      }
+    } catch (err: any) {
+      toast.toast('error', apiError(err))
+    } finally {
+      setRefunding(false)
+    }
+  }
 
   const saveReason = async () => {
     setSaving(true)
@@ -3000,37 +3341,116 @@ function ActiveReturnCard({ record }: { record: ReturnRecord }) {
   }
 
   return (
-    <div className="active-return-card">
-      <div>
-        <span className="eyebrow">Reverse in progress</span>
-        <strong className="mono">{record.returnWaybillNumber || 'Waybill pending'}</strong>
-        <p>
-          {record.pickupAutomatic
-            ? `Customer pickup was scheduled by ${record.carrier || 'the carrier'}. Status follows carrier scans.`
-            : 'This return is linked to an existing waybill.'}
-          {record.forwardWaybill ? ` Forward AWB ${record.forwardWaybill}.` : ''}
-          {record.shopifyReturnId ? ` Shopify return ${record.shopifyReturnId.split('/').pop()}.` : ''}
-        </p>
-        <p className="cell-muted">Reason: {record.returnReason}</p>
-        {editable ? (
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '8px' }}>
-            <select value={reason} onChange={(event) => setReason(event.target.value)} aria-label="Update return reason">
-              {(RETURN_REASONS.includes(record.returnReason) ? RETURN_REASONS : [record.returnReason, ...RETURN_REASONS]).map((preset) => (
-                <option key={preset} value={preset}>{preset}</option>
-              ))}
-            </select>
-            <button type="button" className="btn-pack" disabled={saving || reason === record.returnReason} onClick={saveReason}>
-              {saving ? 'Saving…' : 'Update reason'}
-            </button>
-          </div>
-        ) : null}
+    <div className="active-return-card" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '10px' }}>
+        <div>
+          <span className="eyebrow">Reverse in progress</span>
+          <strong className="mono" style={{ fontSize: '14px' }}>{record.returnWaybillNumber || 'Waybill pending'}</strong>
+          <p style={{ margin: '4px 0', fontSize: '12px' }}>
+            {record.pickupAutomatic
+              ? `Customer pickup was scheduled by ${record.carrier || 'the carrier'}. Status follows carrier scans.`
+              : 'This return is linked to an existing waybill.'}
+            {record.forwardWaybill ? ` Forward AWB ${record.forwardWaybill}.` : ''}
+            {record.shopifyReturnId ? ` Shopify return ${record.shopifyReturnId.split('/').pop()}.` : ''}
+          </p>
+          <p className="cell-muted" style={{ margin: 0, fontSize: '11.5px' }}>
+            Reason: <strong>{record.returnReason}</strong>
+            {record.receivedAt && ` · Received at warehouse: ${formatDate(record.receivedAt)}`}
+          </p>
+          {editable ? (
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '8px' }}>
+              <select value={reason} onChange={(event) => setReason(event.target.value)} aria-label="Update return reason">
+                {(RETURN_REASONS.includes(record.returnReason) ? RETURN_REASONS : [record.returnReason, ...RETURN_REASONS]).map((preset) => (
+                  <option key={preset} value={preset}>{preset}</option>
+                ))}
+              </select>
+              <button type="button" className="btn-pack" disabled={saving || reason === record.returnReason} onClick={saveReason}>
+                {saving ? 'Saving…' : 'Update reason'}
+              </button>
+            </div>
+          ) : null}
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+          <StatusBadge status={record.returnStatus} />
+          {record.trackingStatus ? <span className="cell-muted" style={{ fontSize: '11px' }}>{record.trackingStatus}{record.trackingLocation ? ` · ${record.trackingLocation}` : ''}</span> : null}
+        </div>
       </div>
-      <StatusBadge status={record.returnStatus} />
-      {record.trackingStatus ? <span className="cell-muted">{record.trackingStatus}{record.trackingLocation ? ` · ${record.trackingLocation}` : ''}</span> : null}
+
+      {returnedItems.length > 0 && (
+        <div style={{ background: '#f8fafc', border: '1px solid #f1f5f9', borderRadius: '6px', padding: '10px' }}>
+          <div style={{ fontSize: '10.5px', fontWeight: 700, textTransform: 'uppercase', color: '#475569', marginBottom: '6px' }}>
+            Returned Items ({returnedItems.length})
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {returnedItems.map((item) => {
+              const orderItem = item.orderItem || (order?.items || []).find((i) => i.id === item.orderItemId)
+              return (
+                <div key={item.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    {orderItem?.imageUrl && (
+                      <img src={orderItem.imageUrl} alt="" style={{ width: '28px', height: '28px', objectFit: 'cover', borderRadius: '4px' }} />
+                    )}
+                    <span>{orderItem?.title || 'Returned Item'} {orderItem?.variantTitle && `(${orderItem.variantTitle})`}</span>
+                  </div>
+                  <span className="mono" style={{ fontWeight: 600 }}>{item.quantity} pc{item.quantity > 1 ? 's' : ''}</span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      <div style={{
+        background: isRefunded ? '#f0fdf4' : isReceived ? '#fffbeb' : '#f8fafc',
+        border: `1px solid ${isRefunded ? '#bbf7d0' : isReceived ? '#fde68a' : '#e2e8f0'}`,
+        borderRadius: '6px',
+        padding: '10px 12px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: '8px',
+      }}>
+        {isRefunded ? (
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#15803d', fontWeight: 700, fontSize: '12.5px' }}>
+              <Icon name="check" size={15} />
+              <span>Refund Processed: {formatMoney(record.refundAmount || order?.totalAmount || 0)}</span>
+            </div>
+            <div style={{ fontSize: '11px', color: '#166534', marginTop: '2px' }}>
+              {record.shopifyRefundId && <span>Shopify Refund ID: <strong className="mono">{record.shopifyRefundId}</strong> · </span>}
+              {record.refundProcessedAt && <span>Date: {formatDate(record.refundProcessedAt)}</span>}
+            </div>
+          </div>
+        ) : (
+          <>
+            <div>
+              <div style={{ fontSize: '12px', fontWeight: 700, color: isReceived ? '#92400e' : '#475569' }}>
+                {isReceived ? 'Return Received at Warehouse · Refund Pending' : 'Return in Transit'}
+              </div>
+              <div style={{ fontSize: '11px', color: isReceived ? '#b45309' : '#64748b' }}>
+                {isCod
+                  ? 'COD Order: Transfer refund manually to customer UPI/Bank.'
+                  : 'Prepaid Order: Automatic refund will credit customer payment source.'}
+              </div>
+            </div>
+            {isReceived && !isCod && (
+              <button
+                type="button"
+                className="button button-primary"
+                disabled={refunding}
+                onClick={handleProcessRefund}
+                style={{ fontSize: '11.5px', padding: '5px 12px', background: '#16a34a', borderColor: '#15803d', color: '#fff', cursor: 'pointer' }}
+              >
+                {refunding ? 'Refunding…' : '⚡ Approve QC & Issue Refund'}
+              </button>
+            )}
+          </>
+        )}
+      </div>
     </div>
   )
 }
-
 
 function ExchangeModal({
   order,

@@ -469,37 +469,37 @@ class ReturnScanService {
             }
           }
 
-          // 2. Prepaid Refund Automation
+          // 2. Exchange guard: Exchange orders receive a replacement size parcel, never a monetary refund (Prepaid or COD)
+          const isExchangeReturn = (order.returns || []).some(
+            (r: any) =>
+              (r.isExchange || /exchange/i.test(r.returnReason || '') || /exchange/i.test(order.shopifyNote || '')) &&
+              (r.returnWaybillNumber === tracking || order.returns.length === 1)
+          );
+          const isOrderExchange =
+            isExchangeReturn ||
+            order.paymentMethod === 'EXCHANGE' ||
+            (order.tags || '').includes('EXCHANGE') ||
+            /exchange/i.test(order.shopifyNote || '');
+
+          if (isOrderExchange) {
+            logger.info('Skipping automatic refund for exchange order return scan (replacement item dispatched)', {
+              orderId: order.id,
+              orderName: order.shopifyOrderName,
+              tracking,
+            });
+            for (const r of order.returns || []) {
+              if (!r.isExchange) {
+                await prisma.return.update({ where: { id: r.id }, data: { isExchange: true } });
+                r.isExchange = true;
+              }
+            }
+            continue;
+          }
+
+          // 3. Prepaid Refund Automation
           if (isPrepaid) {
             if (order.financialStatus === 'refunded' || order.status === 'REFUNDED') {
               result.alreadyProcessed++;
-              continue;
-            }
-
-            // Exchange guard: Exchange orders receive a replacement size parcel, never a monetary refund
-            const isExchangeReturn = (order.returns || []).some(
-              (r: any) =>
-                (r.isExchange || /exchange/i.test(r.returnReason || '') || /exchange/i.test(order.shopifyNote || '')) &&
-                (r.returnWaybillNumber === tracking || order.returns.length === 1)
-            );
-            const isOrderExchange =
-              isExchangeReturn ||
-              order.paymentMethod === 'EXCHANGE' ||
-              (order.tags || '').includes('EXCHANGE') ||
-              /exchange/i.test(order.shopifyNote || '');
-
-            if (isOrderExchange) {
-              logger.info('Skipping automatic refund for exchange order return scan (replacement item dispatched)', {
-                orderId: order.id,
-                orderName: order.shopifyOrderName,
-                tracking,
-              });
-              for (const r of order.returns || []) {
-                if (!r.isExchange) {
-                  await prisma.return.update({ where: { id: r.id }, data: { isExchange: true } });
-                  r.isExchange = true;
-                }
-              }
               continue;
             }
 

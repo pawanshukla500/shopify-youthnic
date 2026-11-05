@@ -192,8 +192,31 @@ class ReturnScanService {
     }
 
     try {
-      // Query recent scans for Shopify / YOU orders or scans with tracking, joined with expected_returns
+      // Fetch active tracking numbers from OMS to accurately identify scans without querying unrelated marketplace rows
+      let trackingList: string[] = [];
+      try {
+        if (typeof (prisma as any)?.$queryRaw === 'function') {
+          const activeTrackingRows = await (prisma as any).$queryRaw<Array<{ waybill: string }>>`
+            SELECT DISTINCT "waybillNumber" as waybill FROM "Shipment" WHERE "waybillNumber" IS NOT NULL
+            UNION
+            SELECT DISTINCT "returnWaybillNumber" as waybill FROM "Return" WHERE "returnWaybillNumber" IS NOT NULL
+            UNION
+            SELECT DISTINCT "forwardWaybill" as waybill FROM "Return" WHERE "forwardWaybill" IS NOT NULL
+          `;
+          if (Array.isArray(activeTrackingRows)) {
+            trackingList = activeTrackingRows.map((r) => r.waybill).filter(Boolean);
+          }
+        }
+      } catch {
+        trackingList = [];
+      }
+
+      // Query recent scans for Shopify / YOU orders or scans matching active tracking
       const cutoff = new Date(Date.now() - lookbackDays * 24 * 3600 * 1000);
+      const trackingFilter = trackingList.length > 0
+        ? 'OR rs.scanned_tracking = ANY($2::text[]) OR rs.tracking_id_snapshot = ANY($2::text[]) OR rs.forward_tracking_snapshot = ANY($2::text[])'
+        : '';
+
       const query = `
         SELECT 
           rs.id,
@@ -226,13 +249,15 @@ class ReturnScanService {
           OR er.marketplace_id = 465
           OR rs.order_number_snapshot ILIKE '%YOU%' 
           OR rs.order_number_snapshot ILIKE '#%'
-          OR (rs.scanned_tracking IS NOT NULL AND rs.scanned_tracking != '')
+          OR er.shopify_order_name IS NOT NULL
+          ${trackingFilter}
         )
         AND rs.scanned_at >= $1
-        ORDER BY rs.id ASC
+        ORDER BY rs.scanned_at ASC
       `;
 
-      const scansRes = await pool.query(query, [cutoff]);
+      const queryParams = trackingList.length > 0 ? [cutoff, trackingList] : [cutoff];
+      const scansRes = await pool.query(query, queryParams);
       const scans: ReturnScanRow[] = scansRes.rows;
       result.scansChecked = scans.length;
 
@@ -342,73 +367,6 @@ class ReturnScanService {
               });
             }
 
-            // Update associated return record if customer return
-            if (order.returns?.length) {
-              const matchingReturns = order.returns.filter(
-                (ret: any) => ret.returnWaybillNumber === tracking || order.returns.length === 1
-              );
-              for (const ret of matchingReturns) {
-                if (ret.returnStatus !== 'RECEIVED' && ret.returnStatus !== 'REFUNDED') {
-                  await prisma.return.update({
-                    where: { id: ret.id },
-                    data: {
-                      returnStatus: 'RECEIVED',
-                      qcStatus: 'APPROVED',
-                      qcRemark: scan.issue_label || 'Verified without issue (Warehouse scan)',
-                      receivedAt: scan.scanned_at || new Date(),
-                    },
-                  });
-                }
-              }
-            } else if (scan.return_type === 'Customer Return') {
-              // Create Return record in OMS if customer return scanned
-              try {
-                // Match order item by product title or SKU
-                const matchingItem = (order.items || []).find((item: any) => {
-                  if (!scan.product_title) return false;
-                  const sTitle = scan.product_title.toLowerCase();
-                  const iTitle = (item.title || '').toLowerCase();
-                  const iSku = (item.sku || '').toLowerCase();
-                  return sTitle.includes(iTitle) || iTitle.includes(sTitle) || (iSku && sTitle.includes(iSku));
-                }) || order.items?.[0];
-
-                const createdReturn = await prisma.return.create({
-                  data: {
-                    orderId: order.id,
-                    returnWaybillNumber: tracking,
-                    carrier: 'Delhivery',
-                    returnReason: scan.notes || scan.issue_label || scan.return_reason || 'Customer Return',
-                    returnStatus: 'RECEIVED',
-                    qcStatus: 'APPROVED',
-                    qcRemark: scan.issue_label || 'Verified without issue (Warehouse scan)',
-                    receivedAt: scan.scanned_at || new Date(),
-                    shopifyReturnId: scan.shopify_return_id || null,
-                    items: matchingItem
-                      ? {
-                          create: [
-                            {
-                              orderItemId: matchingItem.id,
-                              quantity: 1,
-                              qcStatus: 'APPROVED',
-                              qcRemark: scan.issue_label || 'Verified without issue (Warehouse scan)',
-                            },
-                          ],
-                        }
-                      : undefined,
-                  },
-                  include: {
-                    items: {
-                      include: { orderItem: true },
-                    },
-                    order: true,
-                  },
-                });
-                order.returns = [createdReturn as any];
-              } catch (createRetErr: any) {
-                logger.warn('Failed to create Return record in OMS', { orderId: order.id, error: createRetErr.message });
-              }
-            }
-
             // Record audit trail event
             await recordAccountTrailEvent({
               orderId: order.id,
@@ -429,6 +387,88 @@ class ReturnScanService {
             }).catch((err) => logger.warn('Failed to record return delivery trail', { error: err.message }));
           }
 
+          // Unconditionally update Return record QC and status whenever clear scan is verified
+          if (order.returns?.length) {
+            const matchingReturns = order.returns.filter(
+              (ret: any) => ret.returnWaybillNumber === tracking || order.returns.length === 1
+            );
+            for (const ret of matchingReturns) {
+              const isExchange = ret.isExchange ||
+                /exchange/i.test(ret.returnReason || '') ||
+                /exchange/i.test(order.shopifyNote || '') ||
+                (order.tags || '').includes('EXCHANGE') ||
+                order.paymentMethod === 'EXCHANGE';
+
+              if (ret.returnStatus !== 'REFUNDED') {
+                await prisma.return.update({
+                  where: { id: ret.id },
+                  data: {
+                    returnStatus: 'RECEIVED',
+                    qcStatus: 'APPROVED',
+                    qcRemark: scan.issue_label || 'Verified without issue (Warehouse scan)',
+                    receivedAt: ret.receivedAt || scan.scanned_at || new Date(),
+                    ...(isExchange && !ret.isExchange ? { isExchange: true } : {}),
+                  },
+                });
+                ret.returnStatus = 'RECEIVED';
+                ret.qcStatus = 'APPROVED';
+                if (isExchange) ret.isExchange = true;
+
+                await prisma.returnItem.updateMany({
+                  where: { returnId: ret.id },
+                  data: { qcStatus: 'APPROVED' },
+                });
+              }
+            }
+          } else if (scan.return_type === 'Customer Return') {
+            // Create Return record in OMS if customer return scanned
+            try {
+              // Match order item by product title or SKU
+              const matchingItem = (order.items || []).find((item: any) => {
+                if (!scan.product_title) return false;
+                const sTitle = scan.product_title.toLowerCase();
+                const iTitle = (item.title || '').toLowerCase();
+                const iSku = (item.sku || '').toLowerCase();
+                return sTitle.includes(iTitle) || iTitle.includes(sTitle) || (iSku && sTitle.includes(iSku));
+              }) || order.items?.[0];
+
+              const createdReturn = await prisma.return.create({
+                data: {
+                  orderId: order.id,
+                  returnWaybillNumber: tracking,
+                  carrier: 'Delhivery',
+                  returnReason: scan.notes || scan.issue_label || scan.return_reason || 'Customer Return',
+                  returnStatus: 'RECEIVED',
+                  qcStatus: 'APPROVED',
+                  qcRemark: scan.issue_label || 'Verified without issue (Warehouse scan)',
+                  receivedAt: scan.scanned_at || new Date(),
+                  shopifyReturnId: scan.shopify_return_id || null,
+                  items: matchingItem
+                    ? {
+                        create: [
+                          {
+                            orderItemId: matchingItem.id,
+                            quantity: 1,
+                            qcStatus: 'APPROVED',
+                            qcRemark: scan.issue_label || 'Verified without issue (Warehouse scan)',
+                          },
+                        ],
+                      }
+                    : undefined,
+                },
+                include: {
+                  items: {
+                    include: { orderItem: true },
+                  },
+                  order: true,
+                },
+              });
+              order.returns = [createdReturn as any];
+            } catch (createRetErr: any) {
+              logger.warn('Failed to create Return record in OMS', { orderId: order.id, error: createRetErr.message });
+            }
+          }
+
           // 2. Prepaid Refund Automation
           if (isPrepaid) {
             if (order.financialStatus === 'refunded' || order.status === 'REFUNDED') {
@@ -438,14 +478,28 @@ class ReturnScanService {
 
             // Exchange guard: Exchange orders receive a replacement size parcel, never a monetary refund
             const isExchangeReturn = (order.returns || []).some(
-              (r: any) => r.isExchange && (r.returnWaybillNumber === tracking || order.returns.length === 1)
+              (r: any) =>
+                (r.isExchange || /exchange/i.test(r.returnReason || '') || /exchange/i.test(order.shopifyNote || '')) &&
+                (r.returnWaybillNumber === tracking || order.returns.length === 1)
             );
-            if (isExchangeReturn || order.paymentMethod === 'EXCHANGE' || (order.tags || '').includes('EXCHANGE_FORWARD')) {
+            const isOrderExchange =
+              isExchangeReturn ||
+              order.paymentMethod === 'EXCHANGE' ||
+              (order.tags || '').includes('EXCHANGE') ||
+              /exchange/i.test(order.shopifyNote || '');
+
+            if (isOrderExchange) {
               logger.info('Skipping automatic refund for exchange order return scan (replacement item dispatched)', {
                 orderId: order.id,
                 orderName: order.shopifyOrderName,
                 tracking,
               });
+              for (const r of order.returns || []) {
+                if (!r.isExchange) {
+                  await prisma.return.update({ where: { id: r.id }, data: { isExchange: true } });
+                  r.isExchange = true;
+                }
+              }
               continue;
             }
 

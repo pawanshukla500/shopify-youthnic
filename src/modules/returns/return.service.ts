@@ -1353,7 +1353,16 @@ class ReturnService {
     }
 
     // Exchange guard
-    if (returnRecord.isExchange) {
+    const isExchange = returnRecord.isExchange ||
+      /exchange/i.test(returnRecord.returnReason || '') ||
+      /exchange/i.test(returnRecord.order.shopifyNote || '') ||
+      (returnRecord.order.tags || '').includes('EXCHANGE') ||
+      returnRecord.order.paymentMethod === 'EXCHANGE';
+
+    if (isExchange) {
+      if (!returnRecord.isExchange) {
+        await prisma.return.update({ where: { id: returnId }, data: { isExchange: true } });
+      }
       return {
         success: false,
         refundAmount: 0,

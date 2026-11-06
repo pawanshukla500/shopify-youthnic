@@ -268,6 +268,7 @@ export class FreightEngineService {
         awb,
         carrier: 'DELHIVERY' as const,
         leg: (isRto ? 'RTO' : (isReverse ? 'REVERSE' : 'FORWARD')) as 'FORWARD' | 'RTO' | 'REVERSE',
+        chargeType: isWeight ? 'WEIGHT' : isCod ? 'COD' : 'FREIGHT',
         baseFreight: isWeight || isCod ? 0 : taxBreakdown.taxableFreight,
         weightSurcharge: isWeight ? taxBreakdown.taxableFreight : 0,
         codFee: isCod ? taxBreakdown.taxableFreight : 0,
@@ -286,42 +287,55 @@ export class FreightEngineService {
    */
   public parseVelocityChargesRows(rows: any[], invoiceNumber: string, invoiceDate: Date): FreightChargeRecord[] {
     const period = ledgerService.toPeriod(invoiceDate);
-    return rows.map((r) => {
+    const money = (v: unknown): number => {
+      const parsed = Number(String(v ?? 0).replace(/,/g, ''));
+      if (!Number.isFinite(parsed)) throw new Error(`Invalid Velocity charge in invoice ${invoiceNumber}`);
+      return Math.round(parsed * 100) / 100;
+    };
+    return rows.flatMap((r, index): FreightChargeRecord[] => {
       const awb = String(r['AWB'] || r['Waybill'] || r['Tracking No'] || r['waybill_number'] || '').trim();
+      if (!awb) return [];
       const orderRef = String(r['Order ID'] || r['Order Number'] || r['Reference'] || '').trim();
-      const carrier = 'VELOCITY' as const;
       const underlyingCourier = String(r['Courier'] || r['Partner'] || r['Carrier'] || 'Velocity').trim();
-
-      const forwardFreight = parseFloat(r['Forward Charges'] || r['Freight Charges'] || r['Base Freight'] || '0') || 0;
-      const rtoFreight = parseFloat(r['RTO Charges'] || r['rto_charges'] || '0') || 0;
-      const reverseFreight = parseFloat(r['Reverse Charges'] || r['qc_reverse_charges'] || '0') || 0;
-      const weightSurcharge = parseFloat(r['Weight Charges'] || r['weight_surcharge'] || '0') || 0;
-      const codFee = parseFloat(r['COD Charges'] || r['cod_handling'] || '0') || 0;
-      const gst = parseFloat(r['GST'] || r['Tax'] || '0') || 0;
-      const totalBilled = parseFloat(r['Total Amount'] || r['Total Billed'] || r['Net Billed'] || '0') ||
-        Math.round((forwardFreight + rtoFreight + reverseFreight + weightSurcharge + codFee + gst) * 100) / 100;
-
-      let leg: 'FORWARD' | 'RTO' | 'REVERSE' = 'FORWARD';
-      if (rtoFreight > 0) leg = 'RTO';
-      else if (reverseFreight > 0) leg = 'REVERSE';
-
-      return {
-        awb,
-        orderReference: orderRef || undefined,
-        carrier,
-        underlyingCourier,
-        leg,
-        baseFreight: forwardFreight || rtoFreight || reverseFreight,
-        weightSurcharge,
-        codFee,
-        gstAmount: gst,
-        totalBilled,
-        invoiceNumber,
-        invoiceDate,
-        period,
-        isWalletDeducted: true,
-      };
-    }).filter((r) => r.totalBilled !== 0 && Boolean(r.awb));
+      const components: Array<{ leg: FreightChargeRecord['leg']; type: string; value: number }> = [
+        { leg: 'FORWARD', type: 'FREIGHT', value: money(r['Forward Charges'] ?? r['Freight Charges'] ?? r['Base Freight']) },
+        { leg: 'RTO', type: 'FREIGHT', value: money(r['RTO Charges'] ?? r['rto_charges']) },
+        { leg: 'REVERSE', type: 'FREIGHT', value: money(r['Reverse Charges'] ?? r['qc_reverse_charges']) },
+        { leg: 'FORWARD', type: 'WEIGHT', value: money(r['Weight Charges'] ?? r['weight_surcharge']) },
+        { leg: 'FORWARD', type: 'COD', value: money(r['COD Charges'] ?? r['cod_handling']) },
+      ];
+      const gst = money(r['GST'] ?? r['Tax']);
+      const chargeSum = money(components.reduce((sum, component) => sum + component.value, 0) + gst);
+      const rawTotal = r['Total Amount'] ?? r['Total Billed'] ?? r['Net Billed'];
+      const total = rawTotal === undefined || rawTotal === '' ? chargeSum : money(rawTotal);
+      if (Math.abs(chargeSum - total) > 0.05) {
+        throw new Error(`Velocity invoice ${invoiceNumber}, AWB ${awb}: components ₹${chargeSum} do not reconcile with reported total ₹${total}`);
+      }
+      const nonzero = components.filter((part) => part.value !== 0);
+      if (!nonzero.length && gst !== 0) nonzero.push({ leg: 'FORWARD', type: 'TAX', value: 0 });
+      const sourceTxnId = String(r['Transaction ID'] || r['Charge ID'] || r['Txn ID'] || '').trim();
+      return nonzero.map((part, partIndex): FreightChargeRecord => {
+        const tax = partIndex === 0 ? gst : 0;
+        return {
+          awb,
+          orderReference: orderRef || undefined,
+          carrier: 'VELOCITY',
+          underlyingCourier,
+          leg: part.leg,
+          // A single row may contain several separately chargeable components.
+          chargeType: `${part.type}${sourceTxnId ? ':' + sourceTxnId : ':' + index}`,
+          baseFreight: part.type === 'FREIGHT' ? part.value : 0,
+          weightSurcharge: part.type === 'WEIGHT' ? part.value : 0,
+          codFee: part.type === 'COD' ? part.value : 0,
+          gstAmount: tax,
+          totalBilled: money(part.value + tax),
+          invoiceNumber,
+          invoiceDate,
+          period,
+          isWalletDeducted: true,
+        };
+      });
+    });
   }
 }
 

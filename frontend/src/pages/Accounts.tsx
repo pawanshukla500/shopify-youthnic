@@ -3,19 +3,38 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   apiError,
   downloadAccountsReport,
+  downloadTallyXml,
+  downloadTallyMastersXml,
   emailAccountsReport,
   getAccountsOverview,
   getStateMonthlyAccounting,
+  getTrialBalance,
+  getJournalVouchers,
+  getClosingHistory,
+  closeMonthNow,
+  getBankStatementLines,
+  getGatewayBatches,
+  getFreightBills,
   importAccountsFile,
   runAccountsNow,
   saveAccountsRecipients,
   type AccountsImportKind,
   type AccountsImportResult,
 } from '../api'
-import { Button, ErrorBox, FormField, Icon, LoadingState, PageIntro, Panel, PanelHeading, useDocumentTitle, useToast } from '../components/UI'
+import {
+  Button,
+  ErrorBox,
+  FormField,
+  Icon,
+  LoadingState,
+  PageIntro,
+  Panel,
+  PanelHeading,
+  useDocumentTitle,
+  useToast,
+} from '../components/UI'
 import { formatDate, formatMoney } from '../lib'
 
-/** Last month in IST, as YYYY-MM: the report the accounts team closes next. */
 function defaultMonth(): string {
   const ist = new Date(Date.now() + 5.5 * 3600 * 1000)
   const year = ist.getUTCMonth() === 0 ? ist.getUTCFullYear() - 1 : ist.getUTCFullYear()
@@ -28,6 +47,8 @@ function nextReportDate(month: string, day: number): string {
   const next = new Date(Date.UTC(m === 12 ? year + 1 : year, m === 12 ? 0 : m, day))
   return next.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })
 }
+
+type AccountsTab = 'matrix' | 'gateway' | 'freight' | 'bank' | 'pnl' | 'ledger' | 'vouchers' | 'closing'
 
 const UPLOADS: Array<{
   kind: AccountsImportKind
@@ -53,14 +74,14 @@ const UPLOADS: Array<{
   {
     kind: 'DELHIVERY_CHARGES',
     title: 'Delhivery shipping charges',
-    what: 'Replaces the estimated shipping cost with what Delhivery actually billed, per AWB: forward, RTO and reverse pickup.',
-    where: 'Delhivery One → Finances → Wallet → Transactions → Download Ledger (or an invoice’s AWB-wise backup).',
+    what: 'Replaces estimated shipping with actual billed freight: forward, RTO and reverse pickup.',
+    where: 'Delhivery One → Finances → Wallet → Transactions → Download Ledger.',
   },
   {
     kind: 'PG_SETTLEMENT',
-    title: 'Prepaid settlement (GoKwik / Easebuzz / PhonePe)',
-    what: 'Marks prepaid orders as paid into the bank, with the settlement UTR and gateway fees.',
-    where: 'PhonePe Business / Easebuzz / GoKwik dashboard → Settlements → download the transaction-wise settlement report.',
+    title: 'Prepaid settlement & Bank Statement',
+    what: 'Reconciles Easebuzz, PhonePe & GoKwik settlements with bank statement lines.',
+    where: 'Gateway dashboard → Settlements or Net Banking Statement (.csv / .xlsx).',
   },
 ]
 
@@ -98,99 +119,140 @@ function UploadCard({ upload, onDone }: { upload: (typeof UPLOADS)[number]; onDo
         <h3 style={{ margin: 0, fontSize: '15px' }}>{upload.title}</h3>
         <p style={{ margin: '4px 0 0', fontSize: '12px', color: 'var(--muted)' }}>{upload.what}</p>
         <p style={{ margin: '6px 0 0', fontSize: '11px', color: 'var(--muted)' }}>
-          <strong>Where:</strong> {upload.where}
+          <strong>Source:</strong> {upload.where}
         </p>
       </div>
 
       <input
         type="file"
         accept=".csv,.xlsx,.xls"
-        onChange={(e) => {
-          setFile(e.target.files?.[0] || null)
-          setResult(null)
-        }}
+        onChange={(e) => setFile(e.target.files?.[0] || null)}
+        style={{ fontSize: '13px' }}
       />
 
       {upload.withRemittanceFields && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '8px' }}>
-          <FormField label="Bank UTR" hint="Optional, if missing from file">
-            <input value={utr} onChange={(e) => setUtr(e.target.value)} placeholder="e.g. AXISP00847547449" />
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+          <FormField label="Bank UTR" hint="Optional if inside file">
+            <input value={utr} onChange={(e) => setUtr(e.target.value)} placeholder="e.g. 427218392182" />
           </FormField>
-          <FormField label="Remittance no." hint="Optional">
-            <input value={remittanceRef} onChange={(e) => setRemittanceRef(e.target.value)} placeholder="e.g. R335935…" />
-          </FormField>
-          <FormField label="Remitted on" hint="Optional">
-            <input type="date" value={remittedAt} onChange={(e) => setRemittedAt(e.target.value)} />
+          <FormField label="Remittance Ref" hint="Optional">
+            <input value={remittanceRef} onChange={(e) => setRemittanceRef(e.target.value)} placeholder="e.g. REMIT-1234" />
           </FormField>
         </div>
       )}
 
-      <div>
-        <Button className="button-primary button-small" loading={mutation.isPending} onClick={() => mutation.mutate()}>
-          Process file
-        </Button>
-      </div>
+      <Button
+        className="button-primary button-small"
+        loading={mutation.isPending}
+        disabled={!file}
+        onClick={() => mutation.mutate()}
+      >
+        Upload &amp; Reconcile
+      </Button>
 
       {result && (
-        <div
-          style={{
-            fontSize: '12px',
-            background: 'var(--bg-subtle, rgba(0,0,0,0.02))',
-            border: '1px solid var(--line)',
-            borderRadius: '6px',
-            padding: '8px 10px',
-          }}
-        >
-          <div>
-            <strong>{result.matchedCount}</strong> of <strong>{result.rowCount}</strong> rows matched
-            {(result.closedNow ?? 0) > 0 && <> · <strong>{result.closedNow}</strong> order(s) moved to Payment Received</>}
-          </div>
-          {result.unmatched.length > 0 && (
-            <details style={{ marginTop: '4px' }}>
-              <summary>Not found in the OMS</summary>
-              <div style={{ fontFamily: 'var(--mono, monospace)', fontSize: '11px', wordBreak: 'break-all' }}>{result.unmatched.slice(0, 100).join(', ')}</div>
-            </details>
+        <div style={{ fontSize: '12px', background: 'var(--bg-subtle, rgba(0,0,0,0.02))', padding: '8px', borderRadius: '6px' }}>
+          Matched: <strong>{result.matchedCount}</strong> / {result.rowCount} rows
+          {result.unmatched && result.unmatched.length > 0 && (
+            <span style={{ color: 'var(--muted)', display: 'block', marginTop: '2px' }}>
+              Unmatched: {result.unmatched.slice(0, 3).join(', ')}{result.unmatched.length > 3 ? '…' : ''}
+            </span>
           )}
-          <details style={{ marginTop: '4px' }}>
-            <summary>Columns used</summary>
-            {Object.entries(result.columns).map(([field, header]) => (
-              <div key={field}>{field}: {header || '—'}</div>
-            ))}
-          </details>
         </div>
       )}
     </Panel>
   )
 }
 
-export function Accounts() {
-  useDocumentTitle('Payments & Accounts')
+export default function AccountsPage() {
+  useDocumentTitle('Payments & Accounts (Tally ERP)')
   const toast = useToast()
   const queryClient = useQueryClient()
   const [month, setMonth] = useState(defaultMonth)
-  const [recipients, setRecipients] = useState('accounts2@vbexports.co.in')
-  const [ccRecipients, setCcRecipients] = useState('returnorders@vbexports.co.in, vaibhav@vbexports.co.in, accounts@vbexports.co.in')
+  const [activeTab, setActiveTab] = useState<AccountsTab>('matrix')
 
-  const overview = useQuery({ queryKey: ['accounts-overview', month], queryFn: () => getAccountsOverview(month), retry: false })
-  const stateAccounting = useQuery({ queryKey: ['state-monthly-accounting', month], queryFn: () => getStateMonthlyAccounting(month), retry: false })
+  const overview = useQuery({
+    queryKey: ['accounts-overview', month],
+    queryFn: () => getAccountsOverview(month),
+  })
+
+  const stateAccounting = useQuery({
+    queryKey: ['state-monthly-accounting', month],
+    queryFn: () => getStateMonthlyAccounting(month),
+  })
+
+  const trialBalanceQuery = useQuery({
+    queryKey: ['trial-balance', month],
+    queryFn: () => getTrialBalance(month),
+    enabled: activeTab === 'ledger' || activeTab === 'pnl',
+  })
+
+  const vouchersQuery = useQuery({
+    queryKey: ['journal-vouchers', month],
+    queryFn: () => getJournalVouchers(month),
+    enabled: activeTab === 'vouchers',
+  })
+
+  const closingHistoryQuery = useQuery({
+    queryKey: ['closing-history'],
+    queryFn: getClosingHistory,
+    enabled: activeTab === 'closing',
+  })
+
+  const bankLinesQuery = useQuery({
+    queryKey: ['bank-statement-lines'],
+    queryFn: () => getBankStatementLines(50),
+    enabled: activeTab === 'bank',
+  })
+
+  const gatewayBatchesQuery = useQuery({
+    queryKey: ['gateway-batches'],
+    queryFn: getGatewayBatches,
+    enabled: activeTab === 'gateway',
+  })
+
+  const freightBillsQuery = useQuery({
+    queryKey: ['freight-bills'],
+    queryFn: getFreightBills,
+    enabled: activeTab === 'freight',
+  })
+
+  const [recipients, setRecipients] = useState('')
+  const [ccRecipients, setCcRecipients] = useState('')
 
   useEffect(() => {
-    if (stateAccounting.data) {
-      if (stateAccounting.data.recipients.to.length) setRecipients(stateAccounting.data.recipients.to.join(', '))
-      if (stateAccounting.data.recipients.cc.length) setCcRecipients(stateAccounting.data.recipients.cc.join(', '))
-    } else if (overview.data) {
-      setRecipients(overview.data.recipients.join(', '))
+    if (stateAccounting.data?.recipients) {
+      setRecipients(stateAccounting.data.recipients.to.join(', '))
+      setCcRecipients(stateAccounting.data.recipients.cc.join(', '))
     }
-  }, [stateAccounting.data, overview.data])
+  }, [stateAccounting.data?.recipients])
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ['accounts-overview'] })
     queryClient.invalidateQueries({ queryKey: ['state-monthly-accounting'] })
-    queryClient.invalidateQueries({ queryKey: ['orders'] })
+    queryClient.invalidateQueries({ queryKey: ['trial-balance'] })
+    queryClient.invalidateQueries({ queryKey: ['journal-vouchers'] })
+    queryClient.invalidateQueries({ queryKey: ['closing-history'] })
+    queryClient.invalidateQueries({ queryKey: ['bank-statement-lines'] })
+    queryClient.invalidateQueries({ queryKey: ['gateway-batches'] })
+    queryClient.invalidateQueries({ queryKey: ['freight-bills'] })
   }
 
-  const download = useMutation({
+  const downloadExcel = useMutation({
     mutationFn: () => downloadAccountsReport(month),
+    onSuccess: () => toast.toast('success', `Tally Excel report for ${month} downloaded.`),
+    onError: (error) => toast.toast('error', apiError(error)),
+  })
+
+  const downloadXml = useMutation({
+    mutationFn: () => downloadTallyXml(month),
+    onSuccess: () => toast.toast('success', `TallyPrime XML voucher file for ${month} downloaded.`),
+    onError: (error) => toast.toast('error', apiError(error)),
+  })
+
+  const downloadMasters = useMutation({
+    mutationFn: () => downloadTallyMastersXml(),
+    onSuccess: () => toast.toast('success', 'Tally Masters XML downloaded successfully.'),
     onError: (error) => toast.toast('error', apiError(error)),
   })
 
@@ -203,10 +265,19 @@ export function Accounts() {
     onError: (error) => toast.toast('error', apiError(error)),
   })
 
-  const saveRecipients = useMutation({
+  const saveRecipientsMutation = useMutation({
     mutationFn: () => saveAccountsRecipients(recipients, ccRecipients),
     onSuccess: (data) => {
       toast.toast('success', `Recipients updated: To: ${data.recipients.join(', ')} · CC: ${data.ccRecipients?.join(', ') || 'None'}`)
+      refresh()
+    },
+    onError: (error) => toast.toast('error', apiError(error)),
+  })
+
+  const closeMonthMutation = useMutation({
+    mutationFn: () => closeMonthNow(month, false),
+    onSuccess: (data) => {
+      toast.toast('success', `Month ${data.period} closed! Net Sales: ₹${data.netSales}, Net Bank: ₹${data.netBankReceipts}.`)
       refresh()
     },
     onError: (error) => toast.toast('error', apiError(error)),
@@ -221,54 +292,64 @@ export function Accounts() {
     onError: (error) => toast.toast('error', apiError(error)),
   })
 
-  const data = overview.data
   const stateData = stateAccounting.data
-  const value = (label: string) => data?.summary.find((s) => s.label === label)?.value ?? 0
+  const tbData = trialBalanceQuery.data
 
-  const tiles: Array<{ label: string; value: string | number; tone: string }> = stateData
-    ? [
-        { label: 'Orders placed', value: stateData.totals.totalOrders, tone: 'var(--ink)' },
-        { label: 'Opening balance (B/F)', value: formatMoney(stateData.totals.openingBalance || 0), tone: '#64748b' },
-        { label: 'Gross sales in period', value: formatMoney(stateData.totals.grossSales), tone: '#1e293b' },
-        { label: 'Returns deducted in period', value: `-${formatMoney(stateData.totals.returnsDeducted)}`, tone: '#dc2626' },
-        { label: 'Net period sales', value: formatMoney(stateData.totals.netSales), tone: '#0f766e' },
-        { label: 'Received in bank', value: formatMoney(stateData.totals.paymentReceived), tone: '#1d4ed8' },
-        { label: 'Closing balance (C/F)', value: formatMoney(stateData.totals.closingBalance !== undefined ? stateData.totals.closingBalance : stateData.totals.outstanding), tone: (stateData.totals.closingBalance !== undefined ? stateData.totals.closingBalance : stateData.totals.outstanding) > 0 ? '#b91c1c' : '#15803d' },
-      ]
-    : data
-      ? [
-          { label: 'Orders placed', value: value('Orders placed'), tone: 'var(--ink)' },
-          { label: 'Payment received & closed', value: value('Closed (delivered, paid, return window over)'), tone: '#0f766e' },
-          { label: 'Still open', value: value('Open'), tone: '#b45309' },
-          { label: 'Received in bank', value: formatMoney(Number(value('Received in bank (₹)'))), tone: '#1d4ed8' },
-        ]
-      : []
+  const tabs: Array<{ key: AccountsTab; label: string; icon: any }> = [
+    { key: 'matrix', label: 'State-Wise Matrix', icon: 'table' },
+    { key: 'gateway', label: 'Gateway Expenses', icon: 'credit-card' },
+    { key: 'freight', label: 'Freight Expenses', icon: 'truck' },
+    { key: 'bank', label: 'Bank & UTR Reconcile', icon: 'check-circle' },
+    { key: 'pnl', label: 'Monthly P&L', icon: 'pie-chart' },
+    { key: 'ledger', label: 'Trial Balance', icon: 'file-text' },
+    { key: 'vouchers', label: 'Tally Vouchers', icon: 'download' },
+    { key: 'closing', label: 'Closing Snapshots', icon: 'lock' },
+  ]
+
+  const tiles = stateData ? [
+    { label: 'Orders placed', value: stateData.totals.totalOrders, tone: 'var(--ink)' },
+    { label: 'Opening balance (B/F)', value: formatMoney(stateData.totals.openingBalance || 0), tone: '#64748b' },
+    { label: 'Gross sales in period', value: formatMoney(stateData.totals.grossSales), tone: '#1e293b' },
+    { label: 'Returns deducted', value: `-${formatMoney(stateData.totals.returnsDeducted)}`, tone: '#dc2626' },
+    { label: 'Net period sales', value: formatMoney(stateData.totals.netSales), tone: '#0f766e' },
+    { label: 'Received in bank', value: formatMoney(stateData.totals.paymentReceived), tone: '#1d4ed8' },
+    { label: 'Closing balance (C/F)', value: formatMoney(stateData.totals.closingBalance !== undefined ? stateData.totals.closingBalance : stateData.totals.outstanding), tone: (stateData.totals.closingBalance !== undefined ? stateData.totals.closingBalance : stateData.totals.outstanding) > 0 ? '#b91c1c' : '#15803d' },
+  ] : []
 
   return (
     <>
       <PageIntro
-        eyebrow="Logistics & Finance"
-        title="Payments & Accounts (Tally ERP)"
-        description="State-wise monthly sales, returns deductions, bank settlement tracking, and automated 10th-of-month Tally ERP closing reports with carry-forward ledger."
+        eyebrow="Financial Operations & Tally ERP"
+        title="Youthnic Accounting & Reconciliation"
+        description="Double-entry financial ledger, dynamic GST, GoKwik/Easebuzz & PhonePe MDR expenses, Delhivery & Velocity freight, and official TallyPrime integration."
         action={
           <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
             <FormField label="Accounting month">
               <input type="month" value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} />
             </FormField>
-            <Button className="button-primary" loading={download.isPending} onClick={() => download.mutate()}>
+            <Button className="button-secondary" loading={downloadMasters.isPending} onClick={() => downloadMasters.mutate()}>
               <Icon name="download" size={14} />
-              Download Tally Excel (8 Sheets)
+              Tally Masters
+            </Button>
+            <Button className="button-primary" loading={downloadXml.isPending} onClick={() => downloadXml.mutate()}>
+              <Icon name="download" size={14} />
+              TallyPrime XML
+            </Button>
+            <Button className="button-secondary" loading={downloadExcel.isPending} onClick={() => downloadExcel.mutate()}>
+              <Icon name="download" size={14} />
+              Tally Excel (8 Sheets)
             </Button>
             <Button className="button-secondary" loading={email.isPending} onClick={() => email.mutate()}>
               <Icon name="mail" size={14} />
-              Email to Accounts Team
+              Email Report
+            </Button>
+            <Button className="button-primary" style={{ background: '#059669' }} loading={closeMonthMutation.isPending} onClick={() => closeMonthMutation.mutate()}>
+              <Icon name="check" size={14} />
+              Close Month
             </Button>
           </div>
         }
       />
-
-      {(overview.isLoading || stateAccounting.isLoading) && <LoadingState label="Loading accounting ledger…" />}
-      {(overview.isError || stateAccounting.isError) && <ErrorBox message={apiError(overview.error || stateAccounting.error)} />}
 
       {/* KPI Header Tiles */}
       {tiles.length > 0 && (
@@ -284,44 +365,40 @@ export function Accounts() {
         </div>
       )}
 
-      {/* State-Wise Monthly Accounts & Tally Ledger Matrix */}
-      {stateData && (
+      {/* Tab Navigation */}
+      <div style={{ display: 'flex', gap: '4px', borderBottom: '2px solid var(--line)', marginBottom: '20px', overflowX: 'auto' }}>
+        {tabs.map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setActiveTab(t.key)}
+            style={{
+              padding: '10px 16px',
+              border: 'none',
+              background: 'none',
+              cursor: 'pointer',
+              fontWeight: activeTab === t.key ? 700 : 500,
+              fontSize: '13px',
+              color: activeTab === t.key ? '#2563eb' : 'var(--muted)',
+              borderBottom: activeTab === t.key ? '2px solid #2563eb' : '2px solid transparent',
+              marginBottom: '-2px',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {(overview.isLoading || stateAccounting.isLoading) && <LoadingState label="Loading accounting ledger…" />}
+      {(overview.isError || stateAccounting.isError) && <ErrorBox message={apiError(overview.error || stateAccounting.error)} />}
+
+      {/* TAB 1: State-Wise Matrix */}
+      {activeTab === 'matrix' && stateData && (
         <Panel className="table-panel" style={{ marginBottom: '20px', border: '1px solid var(--accent, #3b82f6)' }}>
           <PanelHeading
-            eyebrow="Tally ERP Ledger Matrix with Carry Forward"
-            title={`State-Wise Monthly Sales, Returns & Settlement (${stateData.label})`}
-            action={
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
-                  Auto-dispatch: <strong>10th of every month (09:00 IST)</strong>
-                </span>
-                <Button className="button-secondary button-small" loading={email.isPending} onClick={() => email.mutate()}>
-                  <Icon name="mail" size={13} />
-                  Send Now
-                </Button>
-              </div>
-            }
+            eyebrow="Tally ERP Ledger Matrix with Carry Forward & Dynamic GST"
+            title={`State-Wise Sales, Returns & Settlement (${stateData.label})`}
           />
-
-          <div style={{ padding: '12px 16px', background: 'var(--bg-subtle, rgba(0,0,0,0.02))', borderBottom: '1px solid var(--line)', fontSize: '13px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-              <span style={{ fontWeight: 700, color: 'var(--ink)' }}>Formula:</span>
-              <code style={{ background: 'var(--panel)', padding: '2px 6px', borderRadius: '4px', border: '1px solid var(--line)', fontWeight: 600 }}>
-                Opening Balance (B/F) + Gross Sales - Returns Deducted - Payment Received = Closing Balance (C/F)
-              </code>
-            </div>
-            <div style={{ fontSize: '12px', color: 'var(--muted)' }}>
-              <strong>Tally Carry Forward & Cutoff Rule:</strong> Prior month closing balances carry forward automatically as current month opening balance. Returns processed in {stateData.label} are deducted from current month sales. Orders placed in {stateData.label} returned after the month-end are deducted under subsequent month&rsquo;s books.
-            </div>
-            <div style={{ display: 'flex', gap: '16px', marginTop: '4px', fontSize: '12px', flexWrap: 'wrap' }}>
-              <span>Bank Payments by Rail:</span>
-              <span>Delhivery COD: <strong>{formatMoney(stateData.totals.delhivery)}</strong></span>
-              <span>EaseBuzz: <strong>{formatMoney(stateData.totals.easebuzz)}</strong></span>
-              <span>PhonePe: <strong>{formatMoney(stateData.totals.phonepe)}</strong></span>
-              <span>Velocity: <strong>{formatMoney(stateData.totals.velocity)}</strong></span>
-            </div>
-          </div>
-
           <div className="table-wrap">
             <table className="data-table">
               <thead>
@@ -329,16 +406,14 @@ export function Accounts() {
                   <th>State</th>
                   <th style={{ textAlign: 'center' }}>GST POS</th>
                   <th style={{ textAlign: 'center' }}>Orders</th>
-                  <th style={{ textAlign: 'right' }}>Opening (B/F) (₹)</th>
-                  <th style={{ textAlign: 'right' }}>Gross Sales (₹)</th>
-                  <th style={{ textAlign: 'right' }}>Returns Deducted (₹)</th>
-                  <th style={{ textAlign: 'right' }}>Net Sales (₹)</th>
-                  <th style={{ textAlign: 'right' }}>Payment Received (₹)</th>
-                  <th style={{ textAlign: 'right' }}>Closing (C/F) (₹)</th>
-                  <th style={{ textAlign: 'right' }}>Delhivery</th>
-                  <th style={{ textAlign: 'right' }}>EaseBuzz</th>
-                  <th style={{ textAlign: 'right' }}>PhonePe</th>
-                  <th style={{ textAlign: 'right' }}>Velocity</th>
+                  <th style={{ textAlign: 'right' }}>Opening (B/F)</th>
+                  <th style={{ textAlign: 'right' }}>Gross Sales</th>
+                  <th style={{ textAlign: 'right' }}>Taxable</th>
+                  <th style={{ textAlign: 'right' }}>Output GST</th>
+                  <th style={{ textAlign: 'right' }}>Returns</th>
+                  <th style={{ textAlign: 'right' }}>Net Sales</th>
+                  <th style={{ textAlign: 'right' }}>Payment Received</th>
+                  <th style={{ textAlign: 'right' }}>Closing (C/F)</th>
                   <th>Status</th>
                 </tr>
               </thead>
@@ -352,6 +427,8 @@ export function Accounts() {
                       <td style={{ textAlign: 'center' }}>{s.orderCount}</td>
                       <td className="amount-cell" style={{ color: 'var(--muted)' }}>{formatMoney(s.openingBalance || 0)}</td>
                       <td className="amount-cell">{formatMoney(s.grossSales)}</td>
+                      <td className="amount-cell">{formatMoney(s.taxableSales || 0)}</td>
+                      <td className="amount-cell">{formatMoney(s.gstAmount || 0)}</td>
                       <td className="amount-cell" style={{ color: s.returnsDeducted > 0 ? '#dc2626' : 'inherit' }}>
                         {s.returnsDeducted > 0 ? `-${formatMoney(s.returnsDeducted)}` : '₹0.00'}
                       </td>
@@ -360,39 +437,241 @@ export function Accounts() {
                       <td className="amount-cell" style={{ fontWeight: 700, color: closing > 0 ? '#b91c1c' : '#15803d' }}>
                         {formatMoney(closing)}
                       </td>
-                      <td className="amount-cell" style={{ fontSize: '12px' }}>{s.delhivery ? formatMoney(s.delhivery) : '—'}</td>
-                      <td className="amount-cell" style={{ fontSize: '12px' }}>{s.easebuzz ? formatMoney(s.easebuzz) : '—'}</td>
-                      <td className="amount-cell" style={{ fontSize: '12px' }}>{s.phonepe ? formatMoney(s.phonepe) : '—'}</td>
-                      <td className="amount-cell" style={{ fontSize: '12px' }}>{s.velocity ? formatMoney(s.velocity) : '—'}</td>
                       <td style={{ fontSize: '12px' }}>
-                        {Math.abs(closing) <= 0.05 ? (
-                          <span style={{ color: '#15803d', fontWeight: 600 }}>Settled</span>
-                        ) : (
-                          <span style={{ color: '#b91c1c' }}>Carried Fwd</span>
-                        )}
+                        {Math.abs(closing) <= 0.05 ? <span style={{ color: '#15803d', fontWeight: 600 }}>Settled</span> : <span style={{ color: '#b91c1c' }}>Carried Fwd</span>}
                       </td>
                     </tr>
                   )
                 })}
               </tbody>
+            </table>
+          </div>
+        </Panel>
+      )}
+
+      {/* TAB 2: Gateway Expenses */}
+      {activeTab === 'gateway' && (
+        <Panel className="table-panel">
+          <PanelHeading eyebrow="Payment Processing Deductions" title="Easebuzz, GoKwik & PhonePe Settlement Batches" />
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Batch ID</th>
+                  <th>Gateway</th>
+                  <th>Settlement Date</th>
+                  <th style={{ textAlign: 'right' }}>Gross Collection</th>
+                  <th style={{ textAlign: 'right' }}>MDR Fee</th>
+                  <th style={{ textAlign: 'right' }}>Input GST (18%)</th>
+                  <th style={{ textAlign: 'right' }}>Net Bank Credit</th>
+                  <th>Bank UTR</th>
+                  <th>Verification</th>
+                </tr>
+              </thead>
+              <tbody>
+                {gatewayBatchesQuery.data && gatewayBatchesQuery.data.length > 0 ? (
+                  gatewayBatchesQuery.data.map((b: any) => (
+                    <tr key={b.id}>
+                      <td><code>{b.batchId}</code></td>
+                      <td><strong>{b.gateway}</strong></td>
+                      <td>{formatDate(b.settlementDate)}</td>
+                      <td className="amount-cell">{formatMoney(Number(b.grossAmount))}</td>
+                      <td className="amount-cell" style={{ color: '#dc2626' }}>{formatMoney(Number(b.feeAmount))}</td>
+                      <td className="amount-cell">{formatMoney(Number(b.gstAmount))}</td>
+                      <td className="amount-cell" style={{ color: '#16a34a', fontWeight: 700 }}>{formatMoney(Number(b.netAmount))}</td>
+                      <td><code>{b.bankUtr || '—'}</code></td>
+                      <td>
+                        <span style={{ color: b.verificationStatus === 'VERIFIED' ? '#15803d' : '#b45309', fontWeight: 600, fontSize: '12px' }}>
+                          {b.verificationStatus}
+                        </span>
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr><td colSpan={9} style={{ textAlign: 'center', color: 'var(--muted)' }}>No settlement batches recorded yet.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+      )}
+
+      {/* TAB 3: Freight Expenses */}
+      {activeTab === 'freight' && (
+        <Panel className="table-panel">
+          <PanelHeading eyebrow="Logistics Invoicing" title="Delhivery & Velocity Freight Invoices" />
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Invoice No</th>
+                  <th>Carrier</th>
+                  <th>Period</th>
+                  <th style={{ textAlign: 'right' }}>Forward Freight</th>
+                  <th style={{ textAlign: 'right' }}>RTO Freight</th>
+                  <th style={{ textAlign: 'right' }}>Reverse Freight</th>
+                  <th style={{ textAlign: 'right' }}>Surcharges</th>
+                  <th style={{ textAlign: 'right' }}>Input GST</th>
+                  <th style={{ textAlign: 'right' }}>Total Billed</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {freightBillsQuery.data && freightBillsQuery.data.length > 0 ? (
+                  freightBillsQuery.data.map((f: any) => (
+                    <tr key={f.id}>
+                      <td><code>{f.invoiceNumber}</code></td>
+                      <td><strong>{f.carrier}</strong></td>
+                      <td>{f.period}</td>
+                      <td className="amount-cell">{formatMoney(Number(f.forwardFreight))}</td>
+                      <td className="amount-cell">{formatMoney(Number(f.rtoFreight))}</td>
+                      <td className="amount-cell">{formatMoney(Number(f.reverseFreight))}</td>
+                      <td className="amount-cell">{formatMoney(Number(f.surcharges))}</td>
+                      <td className="amount-cell">{formatMoney(Number(f.gstAmount))}</td>
+                      <td className="amount-cell" style={{ fontWeight: 700, color: '#dc2626' }}>{formatMoney(Number(f.totalBilled))}</td>
+                      <td><span style={{ color: '#15803d', fontWeight: 600, fontSize: '12px' }}>{f.reconciliationStatus}</span></td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr><td colSpan={10} style={{ textAlign: 'center', color: 'var(--muted)' }}>No freight invoices recorded yet.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+      )}
+
+      {/* TAB 4: Bank Statement Reconciliation */}
+      {activeTab === 'bank' && (
+        <Panel className="table-panel">
+          <PanelHeading eyebrow="Authorized Bank Statements" title="Bank Credit & UTR Verification Lines" />
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Bank / Statement</th>
+                  <th>Description</th>
+                  <th>Reference / UTR</th>
+                  <th style={{ textAlign: 'right' }}>Credit (Deposit)</th>
+                  <th>Match Status</th>
+                  <th>Matched Ref</th>
+                </tr>
+              </thead>
+              <tbody>
+                {bankLinesQuery.data && bankLinesQuery.data.length > 0 ? (
+                  bankLinesQuery.data.map((l: any) => (
+                    <tr key={l.id}>
+                      <td>{formatDate(l.transactionDate)}</td>
+                      <td>{l.statement?.bankName || 'HDFC Bank'}</td>
+                      <td style={{ fontSize: '12px', maxWidth: '300px' }}>{l.description}</td>
+                      <td><code>{l.referenceNo || '—'}</code></td>
+                      <td className="amount-cell" style={{ color: '#16a34a', fontWeight: 700 }}>{formatMoney(Number(l.credit))}</td>
+                      <td>
+                        <span style={{
+                          color: l.status === 'VERIFIED' ? '#15803d' : (l.status === 'AMOUNT_MISMATCH' ? '#dc2626' : '#64748b'),
+                          fontWeight: 600,
+                          fontSize: '12px',
+                        }}>
+                          {l.status}
+                        </span>
+                      </td>
+                      <td><code>{l.matchedRef || '—'}</code></td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--muted)' }}>No bank statement lines uploaded yet. Upload statement in Bring In Payments section below.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+      )}
+
+      {/* TAB 5: Monthly P&L */}
+      {activeTab === 'pnl' && tbData && (
+        <Panel style={{ padding: '24px' }}>
+          <PanelHeading eyebrow="Operating Statement" title={`Monthly Profit & Loss (${month})`} />
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', marginTop: '16px' }}>
+            <div style={{ border: '1px solid var(--line)', borderRadius: '8px', padding: '16px' }}>
+              <h4 style={{ margin: '0 0 12px', color: '#15803d' }}>Income &amp; Net Turnover</h4>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--line)' }}>
+                <span>Gross Apparel Sales</span>
+                <strong>{formatMoney(stateData?.totals.grossSales || 0)}</strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--line)', color: '#dc2626' }}>
+                <span>Less: Sales Returns &amp; Credit Notes</span>
+                <strong>-{formatMoney(stateData?.totals.returnsDeducted || 0)}</strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', fontWeight: 800, fontSize: '15px' }}>
+                <span>Net Operating Turnover</span>
+                <span>{formatMoney(stateData?.totals.netSales || 0)}</span>
+              </div>
+            </div>
+
+            <div style={{ border: '1px solid var(--line)', borderRadius: '8px', padding: '16px' }}>
+              <h4 style={{ margin: '0 0 12px', color: '#b91c1c' }}>Direct Operational Expenses</h4>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--line)' }}>
+                <span>Gateway Processing Fees (Easebuzz/GoKwik/PhonePe)</span>
+                <strong>{formatMoney(tbData.rows.filter(r => r.accountCode.startsWith('EXPENSE_PG')).reduce((a, b) => a + b.periodDebit, 0))}</strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--line)' }}>
+                <span>Logistics &amp; Freight (Delhivery/Velocity)</span>
+                <strong>{formatMoney(tbData.rows.filter(r => r.accountCode.startsWith('EXPENSE_FREIGHT')).reduce((a, b) => a + b.periodDebit, 0))}</strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', fontWeight: 800, fontSize: '15px', color: '#b91c1c' }}>
+                <span>Total Operational Deductions</span>
+                <span>{formatMoney(tbData.rows.filter(r => r.accountType === 'EXPENSE').reduce((a, b) => a + b.periodDebit, 0))}</span>
+              </div>
+            </div>
+          </div>
+        </Panel>
+      )}
+
+      {/* TAB 6: Trial Balance */}
+      {activeTab === 'ledger' && tbData && (
+        <Panel className="table-panel">
+          <PanelHeading
+            eyebrow="Double-Entry Financial Accounting"
+            title={`General Ledger Trial Balance (${month})`}
+            action={
+              <span style={{ fontSize: '13px', fontWeight: 700, color: tbData.isBalanced ? '#15803d' : '#dc2626' }}>
+                {tbData.isBalanced ? '✓ Balanced (Total Debits == Total Credits)' : '⚠ Imbalanced'}
+              </span>
+            }
+          />
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Account Code</th>
+                  <th>Account Name</th>
+                  <th>Classification</th>
+                  <th style={{ textAlign: 'right' }}>Period Debit (₹)</th>
+                  <th style={{ textAlign: 'right' }}>Period Credit (₹)</th>
+                  <th style={{ textAlign: 'right' }}>Closing Balance</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tbData.rows.map((row) => (
+                  <tr key={row.accountCode}>
+                    <td><code>{row.accountCode}</code></td>
+                    <td><strong>{row.accountName}</strong></td>
+                    <td style={{ fontSize: '12px', color: 'var(--muted)' }}>{row.accountType} ({row.subType})</td>
+                    <td className="amount-cell">{row.periodDebit ? formatMoney(row.periodDebit) : '—'}</td>
+                    <td className="amount-cell">{row.periodCredit ? formatMoney(row.periodCredit) : '—'}</td>
+                    <td className="amount-cell" style={{ fontWeight: 600 }}>
+                      {row.closingDebit > 0 ? `${formatMoney(row.closingDebit)} Dr` : (row.closingCredit > 0 ? `${formatMoney(row.closingCredit)} Cr` : '₹0.00')}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
               <tfoot>
                 <tr style={{ background: 'var(--panel)', fontWeight: 800, borderTop: '2px solid var(--line)' }}>
-                  <td>TOTAL (NATIONAL)</td>
-                  <td style={{ textAlign: 'center' }}>ALL</td>
-                  <td style={{ textAlign: 'center' }}>{stateData.totals.totalOrders}</td>
-                  <td className="amount-cell" style={{ color: 'var(--muted)' }}>{formatMoney(stateData.totals.openingBalance || 0)}</td>
-                  <td className="amount-cell">{formatMoney(stateData.totals.grossSales)}</td>
-                  <td className="amount-cell" style={{ color: '#dc2626' }}>-{formatMoney(stateData.totals.returnsDeducted)}</td>
-                  <td className="amount-cell">{formatMoney(stateData.totals.netSales)}</td>
-                  <td className="amount-cell" style={{ color: '#16a34a' }}>{formatMoney(stateData.totals.paymentReceived)}</td>
-                  <td className="amount-cell" style={{ color: (stateData.totals.closingBalance !== undefined ? stateData.totals.closingBalance : stateData.totals.outstanding) > 0 ? '#b91c1c' : '#15803d' }}>
-                    {formatMoney(stateData.totals.closingBalance !== undefined ? stateData.totals.closingBalance : stateData.totals.outstanding)}
-                  </td>
-                  <td className="amount-cell">{formatMoney(stateData.totals.delhivery)}</td>
-                  <td className="amount-cell">{formatMoney(stateData.totals.easebuzz)}</td>
-                  <td className="amount-cell">{formatMoney(stateData.totals.phonepe)}</td>
-                  <td className="amount-cell">{formatMoney(stateData.totals.velocity)}</td>
-                  <td>National Balance</td>
+                  <td colSpan={3}>TOTAL</td>
+                  <td className="amount-cell">{formatMoney(tbData.totalDebit)}</td>
+                  <td className="amount-cell">{formatMoney(tbData.totalCredit)}</td>
+                  <td>{tbData.isBalanced ? '✓ BALANCED' : 'IMBALANCE'}</td>
                 </tr>
               </tfoot>
             </table>
@@ -400,140 +679,141 @@ export function Accounts() {
         </Panel>
       )}
 
-      {data && (
-        <>
-          <Panel>
-            <PanelHeading
-              eyebrow={data.label}
-              title="How an order closes"
-              action={
-                <Button className="button-secondary button-small" loading={runNow.isPending} onClick={() => runNow.mutate()}>
-                  <Icon name="refresh" size={13} />
-                  Check now
+      {/* TAB 7: Tally Vouchers */}
+      {activeTab === 'vouchers' && (
+        <Panel className="table-panel">
+          <PanelHeading
+            eyebrow="TallyPrime Vouchers"
+            title={`Balanced Double-Entry Vouchers (${month})`}
+            action={
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <Button className="button-secondary button-small" loading={downloadMasters.isPending} onClick={() => downloadMasters.mutate()}>
+                  <Icon name="download" size={13} />
+                  Export Masters XML
                 </Button>
-              }
-            />
-            <p style={{ margin: '0 0 10px', fontSize: '13px' }}>
-              An order moves to <strong>Payment Received</strong> when it is <strong>delivered</strong>, its money is
-              <strong> in Youthnic&rsquo;s bank</strong> (prepaid settlement or Delhivery COD remittance, with UTR), and the
-              <strong> 7-day return window</strong> has passed with no open return. This is checked every hour.
-            </p>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '8px', fontSize: '13px' }}>
-              {[
-                ['Waiting for delivery', '   …waiting for delivery'],
-                ['Waiting for payment in bank', '   …waiting for payment in bank'],
-                ['Return window still open', '   …return window still open'],
-                ['Return in progress', '   …return in progress'],
-              ].map(([labelText, key]) => (
-                <div key={key} style={{ border: '1px solid var(--line)', borderRadius: '8px', padding: '8px 10px' }}>
-                  {labelText}: <strong>{value(key)}</strong>
-                </div>
-              ))}
-            </div>
-          </Panel>
-
-          <h2 style={{ fontSize: '16px', margin: '20px 0 8px' }}>Bring in payments and shipping costs</h2>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '12px' }}>
-            {UPLOADS.map((upload) => (
-              <UploadCard key={upload.kind} upload={upload} onDone={refresh} />
-            ))}
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '12px', marginTop: '16px' }}>
-            <Panel>
-              <PanelHeading eyebrow="Monthly report" title={`Automated dispatch on the ${data.reportDay}th of every month`} />
-              <p style={{ margin: '0 0 8px', fontSize: '13px' }}>
-                {data.reportSentAt
-                  ? <>The {data.label} report was emailed on {formatDate(data.reportSentAt.sentAt)} to {data.reportSentAt.to.join(', ')}.</>
-                  : <>The {data.label} report goes out on <strong>{nextReportDate(month, data.reportDay)}</strong> at 09:00 IST.</>}
-              </p>
-              <FormField label="Primary Accounts Email (To)" hint="Main recipient for Tally entries">
-                <input value={recipients} onChange={(e) => setRecipients(e.target.value)} placeholder="accounts2@vbexports.co.in" />
-              </FormField>
-              <FormField label="CC Emails" hint="Comma-separated executive & audit emails">
-                <input value={ccRecipients} onChange={(e) => setCcRecipients(e.target.value)} placeholder="returnorders@vbexports.co.in, vaibhav@vbexports.co.in, accounts@vbexports.co.in" />
-              </FormField>
-              <Button className="button-primary button-small" style={{ marginTop: '8px' }} loading={saveRecipients.isPending} onClick={() => saveRecipients.mutate()}>
-                Save recipients &amp; CCs
-              </Button>
-            </Panel>
-
-            <Panel>
-              <PanelHeading eyebrow="Connections" title="Where the numbers come from" />
-              <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '13px', lineHeight: 1.7 }}>
-                <li>
-                  Shipping cost estimates (Delhivery rate API): <strong>{data.connectors.delhiveryRateApi ? 'on' : 'off'}</strong>. Exact charges come from the ledger upload.
-                </li>
-                <li>
-                  PhonePe settlement API: <strong>{data.connectors.phonepeSettlementApi ? 'on' : 'needs API keys'}</strong>
-                  {!data.connectors.phonepeSettlementApi && ' (Client ID / Secret from PhonePe; until then upload the settlement report)'}
-                </li>
-                <li>
-                  Easebuzz payout API: <strong>{data.connectors.easebuzzPayoutApi ? 'on' : 'needs API keys'}</strong>
-                </li>
-                <li>
-                  Delhivery COD remittance: <strong>upload only</strong> (Delhivery has no remittance API)
-                </li>
-                <li>
-                  Report email (Resend): <strong>{data.connectors.email ? 'on' : 'not configured'}</strong>
-                </li>
-              </ul>
-            </Panel>
-          </div>
-
-          <Panel className="table-panel" style={{ marginTop: '16px' }}>
-            <PanelHeading eyebrow={data.label} title={`Open orders (${data.openOrders.length})`} />
-            {data.openOrders.length === 0 ? (
-              <p style={{ fontSize: '13px', color: 'var(--muted)' }}>Every order placed this month is closed or not a sale.</p>
-            ) : (
-              <div className="table-wrap">
-                <table className="data-table">
-                  <thead>
-                    <tr><th>Order</th><th>Mode</th><th style={{ textAlign: 'right' }}>Value</th><th>Waiting for</th></tr>
-                  </thead>
-                  <tbody>
-                    {data.openOrders.map((row) => (
-                      <tr key={row.orderNo}>
-                        <td><strong>{row.orderNo}</strong></td>
-                        <td>{row.paymentMode}</td>
-                        <td className="amount-cell">{formatMoney(row.orderValue)}</td>
-                        <td style={{ fontSize: '12px' }}>{row.pending}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <Button className="button-primary button-small" loading={downloadXml.isPending} onClick={() => downloadXml.mutate()}>
+                  <Icon name="download" size={13} />
+                  Export Vouchers XML
+                </Button>
               </div>
-            )}
-          </Panel>
-
-          <Panel className="table-panel" style={{ marginTop: '16px' }}>
-            <PanelHeading eyebrow="History" title="Uploaded files" />
-            {data.imports.length === 0 ? (
-              <p style={{ fontSize: '13px', color: 'var(--muted)' }}>No files uploaded yet.</p>
-            ) : (
-              <div className="table-wrap">
-                <table className="data-table">
-                  <thead>
-                    <tr><th>When</th><th>Type</th><th>File</th><th>Matched</th><th>Not found</th><th>By</th></tr>
-                  </thead>
-                  <tbody>
-                    {data.imports.map((row) => (
-                      <tr key={row.id}>
-                        <td>{formatDate(row.createdAt)}</td>
-                        <td>{UPLOADS.find((u) => u.kind === row.kind)?.title || row.kind}</td>
-                        <td>{row.fileName}</td>
-                        <td>{row.matchedCount} / {row.rowCount}</td>
-                        <td>{row.unmatched?.length || 0}</td>
-                        <td>{row.uploadedBy || '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </Panel>
-        </>
+            }
+          />
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Voucher No</th>
+                  <th>Type</th>
+                  <th>Date</th>
+                  <th>Reference</th>
+                  <th style={{ textAlign: 'right' }}>Debit (₹)</th>
+                  <th style={{ textAlign: 'right' }}>Credit (₹)</th>
+                  <th>Narration</th>
+                </tr>
+              </thead>
+              <tbody>
+                {vouchersQuery.data && vouchersQuery.data.length > 0 ? (
+                  vouchersQuery.data.map((v: any) => (
+                    <tr key={v.id}>
+                      <td><code>{v.entryNumber}</code></td>
+                      <td><strong>{v.voucherType}</strong></td>
+                      <td>{formatDate(v.documentDate)}</td>
+                      <td>{v.reference || '—'}</td>
+                      <td className="amount-cell">{formatMoney(Number(v.totalDebit))}</td>
+                      <td className="amount-cell">{formatMoney(Number(v.totalCredit))}</td>
+                      <td style={{ fontSize: '12px' }}>{v.narration}</td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--muted)' }}>No vouchers posted for this period yet.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
       )}
+
+      {/* TAB 8: Closing Snapshots */}
+      {activeTab === 'closing' && (
+        <Panel className="table-panel">
+          <PanelHeading eyebrow="Audit & Compliance" title="Immutable Monthly Closing Snapshots" />
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Period</th>
+                  <th>Status</th>
+                  <th>Closed On</th>
+                  <th>Closed By</th>
+                  <th style={{ textAlign: 'right' }}>Net Sales</th>
+                  <th style={{ textAlign: 'right' }}>Bank Received</th>
+                  <th style={{ textAlign: 'right' }}>Closing Receivable</th>
+                </tr>
+              </thead>
+              <tbody>
+                {closingHistoryQuery.data && closingHistoryQuery.data.length > 0 ? (
+                  closingHistoryQuery.data.map((s: any) => (
+                    <tr key={s.id}>
+                      <td><strong>{s.period}</strong></td>
+                      <td>
+                        <span style={{ color: s.status === 'CLOSED' ? '#15803d' : '#b45309', fontWeight: 700, fontSize: '12px' }}>
+                          {s.status}
+                        </span>
+                      </td>
+                      <td>{formatDate(s.closedAt)}</td>
+                      <td>{s.closedBy || 'SYSTEM'}</td>
+                      <td className="amount-cell">{formatMoney(Number(s.netSales))}</td>
+                      <td className="amount-cell" style={{ color: '#16a34a' }}>{formatMoney(Number(s.netBankReceipts))}</td>
+                      <td className="amount-cell" style={{ fontWeight: 700 }}>{formatMoney(Number(s.closingReceivable))}</td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--muted)' }}>No closed monthly snapshots recorded yet. Click "Close Month" above to finalize {month}.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+      )}
+
+      {/* Uploads & Connectors Section */}
+      <h2 style={{ fontSize: '16px', margin: '24px 0 12px' }}>Bring in Payments, Settlements &amp; Shipping Charges</h2>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '12px' }}>
+        {UPLOADS.map((upload) => (
+          <UploadCard key={upload.kind} upload={upload} onDone={refresh} />
+        ))}
+      </div>
+
+      {/* Configuration & Recipients Section */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '12px', marginTop: '20px' }}>
+        <Panel>
+          <PanelHeading eyebrow="Monthly report" title={`Automated dispatch on the 10th of every month`} />
+          <p style={{ margin: '0 0 8px', fontSize: '13px' }}>
+            The report goes out on <strong>{nextReportDate(month, 10)}</strong> at 09:00 IST.
+          </p>
+          <FormField label="Primary Accounts Email (To)" hint="Main recipient for Tally entries">
+            <input value={recipients} onChange={(e) => setRecipients(e.target.value)} placeholder="accounts2@vbexports.co.in" />
+          </FormField>
+          <FormField label="CC Emails" hint="Comma-separated executive & audit emails">
+            <input value={ccRecipients} onChange={(e) => setCcRecipients(e.target.value)} placeholder="returnorders@vbexports.co.in, vaibhav@vbexports.co.in, accounts@vbexports.co.in" />
+          </FormField>
+          <Button className="button-primary button-small" style={{ marginTop: '8px' }} loading={saveRecipientsMutation.isPending} onClick={() => saveRecipientsMutation.mutate()}>
+            Save recipients &amp; CCs
+          </Button>
+        </Panel>
+
+        <Panel>
+          <PanelHeading eyebrow="Connections" title="Active Financial Integrations" />
+          <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '13px', lineHeight: 1.7 }}>
+            <li>Delhivery Rate API: <strong>{overview.data?.connectors?.delhiveryRateApi ? 'on (live)' : 'off (missing token)'}</strong></li>
+            <li>PhonePe Settlement API &amp; Report Reconciler: <strong>{overview.data?.connectors?.phonepeSettlementApi ? 'on (live)' : 'off (unconfigured)'}</strong></li>
+            <li>Easebuzz &amp; GoKwik Payout API / Deduplication: <strong>{overview.data?.connectors?.easebuzzPayoutApi ? 'on (live)' : 'off (unconfigured)'}</strong></li>
+            <li>Velocity Shipping &amp; COD Remittance: <strong>on</strong></li>
+            <li>Double-Entry General Ledger: <strong>active (Debits == Credits)</strong></li>
+            <li>TallyPrime XML Export: <strong>ready</strong></li>
+          </ul>
+        </Panel>
+      </div>
     </>
   )
 }

@@ -1691,6 +1691,104 @@ export async function updateRemittanceUtr(
   return response.data
 }
 
+// ─── Double-Entry Ledger, Bank Reconciliation & Tally Exports ───
+
+export async function getTrialBalance(period?: string): Promise<{
+  rows: Array<{
+    accountCode: string
+    accountName: string
+    accountType: string
+    subType: string | null
+    openingDebit: number
+    openingCredit: number
+    periodDebit: number
+    periodCredit: number
+    closingDebit: number
+    closingCredit: number
+  }>
+  totalDebit: number
+  totalCredit: number
+  isBalanced: boolean
+}> {
+  const response = await api.get('/api/accounts/ledger/trial-balance', { params: { period } })
+  return response.data
+}
+
+export async function getJournalVouchers(period?: string, limit: number = 50): Promise<any[]> {
+  const response = await api.get('/api/accounts/ledger/vouchers', { params: { period, limit } })
+  return response.data
+}
+
+export async function downloadTallyXml(period?: string, includeMasters?: boolean): Promise<void> {
+  const response = await api.get('/api/accounts/tally/xml', {
+    params: { period, includeMasters: includeMasters ? 'true' : undefined },
+    responseType: 'blob',
+  })
+  const blob = new Blob([response.data], { type: 'application/xml' })
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.setAttribute('download', `Youthnic-Tally-${period || 'latest'}${includeMasters ? '-with-masters' : ''}.xml`)
+  document.body.appendChild(link)
+  link.click()
+  link.parentNode?.removeChild(link)
+  window.URL.revokeObjectURL(url)
+}
+
+export async function downloadTallyMastersXml(): Promise<void> {
+  const response = await api.get('/api/accounts/tally/masters', {
+    responseType: 'blob',
+  })
+  const blob = new Blob([response.data], { type: 'application/xml' })
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.setAttribute('download', 'Youthnic-Tally-Masters.xml')
+  document.body.appendChild(link)
+  link.click()
+  link.parentNode?.removeChild(link)
+  window.URL.revokeObjectURL(url)
+}
+
+export async function getClosingHistory(): Promise<any[]> {
+  const response = await api.get('/api/accounts/closing/history')
+  return response.data
+}
+
+export async function closeMonthNow(period: string, isProvisional: boolean = false): Promise<any> {
+  const response = await api.post('/api/accounts/closing/close', { period, isProvisional })
+  return response.data
+}
+
+export async function getBankStatementLines(arg?: { status?: string; limit?: number } | number): Promise<any[]> {
+  const status = typeof arg === 'object' ? arg?.status : undefined
+  const limit = typeof arg === 'number' ? arg : (typeof arg === 'object' ? arg?.limit : 50)
+  const response = await api.get('/api/accounts/bank-statement/lines', { params: { status, limit } })
+  return response.data
+}
+
+export async function uploadFreightBill(payload: {
+  carrier: 'DELHIVERY' | 'VELOCITY'
+  invoiceNumber?: string
+  invoiceDate?: string
+  fileName?: string
+  contentBase64?: string
+  rows?: any[]
+}): Promise<any> {
+  const response = await api.post('/api/accounts/freight/upload', payload)
+  return response.data
+}
+
+export async function getGatewayBatches(): Promise<any[]> {
+  const response = await api.get('/api/accounts/gateway/batches')
+  return response.data
+}
+
+export async function getFreightBills(): Promise<any[]> {
+  const response = await api.get('/api/accounts/freight/bills')
+  return response.data
+}
+
 export async function getReturnScanStatus(): Promise<{
   configured: boolean
   connected: boolean

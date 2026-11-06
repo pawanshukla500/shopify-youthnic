@@ -1,0 +1,366 @@
+/**
+ * Delhivery & Velocity Freight Expense Engine
+ *
+ * Implements precise freight cost accounting, separate expense sub-accounts,
+ * input GST capture, and courier deduplication.
+ *
+ * Critical Invariants:
+ * 1. Double-booking prevention: If an order is shipped via Velocity (which aggregates
+ *    Delhivery/Ekart/Bluedart), only the actual Velocity invoice is booked as a financial
+ *    expense. Underlying courier charges are retained for operational audit only.
+ * 2. Courier wallet top-ups are Asset-to-Asset prepayment transfers, NEVER freight expenses.
+ * 3. COD remittances settle customer receivables; they are NEVER revenue.
+ * 4. Freight reversals & weight credit notes reduce expenses/payables.
+ * 5. Estimated freight is segregated from actual ledger charges.
+ */
+
+import prisma from '../../database/prisma';
+import logger from '../../utils/logger';
+import { ledgerService } from './ledger.service';
+import { gstService } from './gst.service';
+
+export interface FreightChargeRecord {
+  awb: string;
+  orderReference?: string;
+  carrier: 'DELHIVERY' | 'VELOCITY';
+  underlyingCourier?: string; // e.g. "Delhivery", "Ekart", "Bluedart"
+  leg: 'FORWARD' | 'RTO' | 'REVERSE';
+  chargeType?: string;
+  baseFreight: number;
+  codFee?: number;
+  weightSurcharge?: number;
+  otherSurcharges?: number;
+  gstAmount: number;
+  totalBilled: number;
+  invoiceNumber: string;
+  invoiceDate: Date;
+  period: string; // "YYYY-MM"
+  isWalletDeducted?: boolean;
+}
+
+export interface FreightAuditSummary {
+  carrier: 'DELHIVERY' | 'VELOCITY';
+  invoiceNumber: string;
+  period: string;
+  totalAwbs: number;
+  totalForwardFreight: number;
+  totalRtoFreight: number;
+  totalReverseFreight: number;
+  totalWeightSurcharges: number;
+  totalCodFees: number;
+  totalGst: number;
+  totalBilled: number;
+  deduplicatedCount: number;
+  journalEntryId?: number;
+}
+
+export class FreightEngineService {
+  /**
+   * Process and book a carrier freight invoice into the double-entry general ledger.
+   * Enforces deduplication between aggregator (Velocity) and underlying courier (Delhivery).
+   */
+  public async processFreightInvoice(
+    carrier: 'DELHIVERY' | 'VELOCITY',
+    invoiceNumber: string,
+    invoiceDate: Date,
+    records: FreightChargeRecord[],
+    isWalletDeducted: boolean = true
+  ): Promise<FreightAuditSummary> {
+    if (!records.length) {
+      throw new Error(`Cannot process empty freight invoice ${invoiceNumber}`);
+    }
+
+    const period = ledgerService.toPeriod(invoiceDate);
+    const closedPeriod = await prisma.monthlyClosingSnapshot.findUnique({ where: { period } });
+    if (closedPeriod?.status === 'CLOSED') {
+      throw new Error(`Cannot book freight invoice ${invoiceNumber}: accounting period ${period} is CLOSED.`);
+    }
+    if (!invoiceNumber.trim() || Number.isNaN(invoiceDate.getTime())) {
+      throw new Error('A valid freight invoice number and date are required.');
+    }
+    const existingBill = await prisma.freightBill.findUnique({ where: { invoiceNumber } });
+    if (existingBill) throw new Error(`Freight invoice ${invoiceNumber} was already recorded. Use a separate supplier credit note or adjustment.`);
+
+    let totalForwardFreight = 0;
+    let totalRtoFreight = 0;
+    let totalReverseFreight = 0;
+    let totalWeightSurcharges = 0;
+    let totalCodFees = 0;
+    let totalGst = 0;
+    let totalBilled = 0;
+    let deduplicatedCount = 0;
+
+    const seenChargeKeys = new Set<string>();
+    const shipmentAmounts = new Map<number, {
+      shipment: any;
+      total: number;
+      forward: number;
+      rto: number;
+    }>();
+
+    for (const rec of records) {
+      // 1. Deduplicate by unique charge key (AWB + Leg + ChargeType), not bare AWB
+      // A single shipment legitimately has separate billing rows for Forward, RTO, and Weight adjustments.
+      const chargeKey = `${rec.awb}_${rec.leg}_${rec.chargeType || 'FREIGHT'}`;
+      if (seenChargeKeys.has(chargeKey)) {
+        deduplicatedCount++;
+        continue;
+      }
+      seenChargeKeys.add(chargeKey);
+
+      // 2. Cross-Carrier Deduplication Check:
+      // If carrier is Delhivery, check if this shipment was manifested under Velocity.
+      // If manifested under Velocity, Velocity is the contracting billing party.
+      // Booking Delhivery direct freight would double-count the expense!
+      const shipment = await prisma.shipment.findFirst({
+        where: { waybillNumber: rec.awb },
+        include: { order: true },
+      });
+
+      if (shipment) {
+        const orderCouriers = `${shipment.courier || ''} ${shipment.order?.tags || ''}`.toLowerCase();
+        if (carrier === 'DELHIVERY' && orderCouriers.includes('velocity')) {
+          logger.warn('Skipping direct Delhivery freight booking for Velocity-managed order (double-freight guard)', {
+            awb: rec.awb,
+            order: shipment.order?.shopifyOrderName,
+            carrier,
+          });
+          deduplicatedCount++;
+          continue;
+        }
+
+        // Stage the per-AWB movement. Never overwrite shipment totals with the last fee row.
+        const staged = shipmentAmounts.get(shipment.id) || { shipment, total: 0, forward: 0, rto: 0 };
+        staged.total += rec.totalBilled;
+        if (rec.leg === 'FORWARD') staged.forward += rec.totalBilled;
+        if (rec.leg === 'RTO') staged.rto += rec.totalBilled;
+        shipmentAmounts.set(shipment.id, staged);
+      }
+
+      totalForwardFreight += rec.leg === 'FORWARD' ? rec.baseFreight : 0;
+      totalRtoFreight += rec.leg === 'RTO' ? rec.baseFreight : 0;
+      totalReverseFreight += rec.leg === 'REVERSE' ? rec.baseFreight : 0;
+      totalWeightSurcharges += rec.weightSurcharge || 0;
+      totalCodFees += rec.codFee || 0;
+      totalGst += rec.gstAmount;
+      totalBilled += rec.totalBilled;
+    }
+
+    // Round amounts to 2 decimals
+    totalForwardFreight = Math.round(totalForwardFreight * 100) / 100;
+    totalRtoFreight = Math.round(totalRtoFreight * 100) / 100;
+    totalReverseFreight = Math.round(totalReverseFreight * 100) / 100;
+    totalWeightSurcharges = Math.round(totalWeightSurcharges * 100) / 100;
+    totalCodFees = Math.round(totalCodFees * 100) / 100;
+    totalGst = Math.round(totalGst * 100) / 100;
+    totalBilled = Math.round(totalBilled * 100) / 100;
+
+    // Verify mathematical balance: Billed = Freight + Surcharges + Fees + GST
+    const calculatedTotal = Math.round(
+      (totalForwardFreight + totalRtoFreight + totalReverseFreight + totalWeightSurcharges + totalCodFees + totalGst) * 100
+    ) / 100;
+
+    if (Math.abs(calculatedTotal - totalBilled) > 0.05) {
+      throw new Error(`Freight invoice ${invoiceNumber}: charge components ₹${calculatedTotal} do not equal reported bill ₹${totalBilled}.`);
+    }
+
+    // Post balanced voucher before persisting the invoice; the stable entry number makes retries idempotent.
+    // Post double-entry freight purchase voucher in General Ledger
+    const journalEntry = await ledgerService.postFreightBill({
+      carrier,
+      invoiceNumber,
+      invoiceDate,
+      period,
+      forwardFreight: totalForwardFreight,
+      rtoFreight: totalRtoFreight,
+      reverseFreight: totalReverseFreight,
+      weightSurcharges: totalWeightSurcharges,
+      codHandlingFee: totalCodFees,
+      freightGst: totalGst,
+      totalBilled,
+      isWalletDeducted,
+    });
+
+
+    // Upsert FreightBill record
+    await prisma.freightBill.upsert({
+      where: { invoiceNumber },
+      create: {
+        carrier,
+        invoiceNumber,
+        invoiceDate,
+        period,
+        forwardFreight: totalForwardFreight,
+        rtoFreight: totalRtoFreight,
+        reverseFreight: totalReverseFreight,
+        codHandlingFee: totalCodFees,
+        surcharges: totalWeightSurcharges,
+        gstAmount: totalGst,
+        totalBilled,
+        walletDeducted: isWalletDeducted ? totalBilled : null,
+        reconciliationStatus: 'RECONCILED',
+        details: {
+          totalAwbs: records.length,
+          deduplicatedCount,
+        },
+      },
+      update: {
+        forwardFreight: totalForwardFreight,
+        rtoFreight: totalRtoFreight,
+        reverseFreight: totalReverseFreight,
+        codHandlingFee: totalCodFees,
+        surcharges: totalWeightSurcharges,
+        gstAmount: totalGst,
+        totalBilled,
+        walletDeducted: isWalletDeducted ? totalBilled : null,
+      },
+    });
+
+
+    // Update operational costs only after the invoice has been reconciled and booked.
+    for (const { shipment, total, forward, rto } of shipmentAmounts.values()) {
+      const adjusted = (current: number | null | undefined, movement: number) =>
+        Math.max(0, Math.round(((current || 0) + movement) * 100) / 100);
+      await prisma.shipment.update({
+        where: { id: shipment.id },
+        data: {
+          netBilledCost: adjusted(shipment.netBilledCost, total),
+          forwardCharge: adjusted(shipment.forwardCharge, forward),
+          rtoCharge: adjusted(shipment.rtoCharge, rto),
+          billingStatus: 'BILLED',
+          shippingCostSource: 'ACTUAL',
+          shippingCostUpdatedAt: new Date(),
+        },
+      });
+      if (shipment.order) {
+        await prisma.order.update({
+          where: { id: shipment.order.id },
+          data: {
+            actualShippingCost: adjusted(shipment.order.actualShippingCost, total),
+            shippingAudited: true,
+          },
+        });
+      }
+    }
+
+    logger.info('Freight invoice booked to ledger', {
+      carrier,
+      invoiceNumber,
+      totalBilled,
+      voucherId: journalEntry.id,
+      deduplicatedCount,
+    });
+
+    return {
+      carrier,
+      invoiceNumber,
+      period,
+      totalAwbs: records.length - deduplicatedCount,
+      totalForwardFreight,
+      totalRtoFreight,
+      totalReverseFreight,
+      totalWeightSurcharges,
+      totalCodFees,
+      totalGst,
+      totalBilled,
+      deduplicatedCount,
+      journalEntryId: journalEntry.id,
+    };
+  }
+
+  /**
+   * Helper to parse Delhivery Wallet / Charges Report.
+   */
+  public parseDelhiveryChargesRows(rows: any[], invoiceNumber: string, invoiceDate: Date): FreightChargeRecord[] {
+    const period = ledgerService.toPeriod(invoiceDate);
+    return rows.map((r) => {
+      const awb = String(r['Waybill'] || r['AWB'] || r['waybill_number'] || '').trim();
+      const debit = parseFloat(r['Debit'] || r['Amount'] || r['total_amount'] || '0');
+      const credit = parseFloat(r['Credit'] || '0');
+      const netBilled = debit - credit;
+      const desc = String(r['Description'] || r['Remarks'] || r['txn_type'] || '').toLowerCase();
+
+      const isRto = desc.includes('rto') || desc.includes('return to origin');
+      const isReverse = desc.includes('reverse') || desc.includes('pickup');
+      const isWeight = desc.includes('weight') || desc.includes('re-weigh');
+      const isCod = desc.includes('cod') || desc.includes('handling');
+
+      // Separate 18% GST: netBilled = base * 1.18
+      const taxBreakdown = gstService.calculateFreightTax(netBilled, 18);
+
+      return {
+        awb,
+        carrier: 'DELHIVERY' as const,
+        leg: (isRto ? 'RTO' : (isReverse ? 'REVERSE' : 'FORWARD')) as 'FORWARD' | 'RTO' | 'REVERSE',
+        chargeType: isWeight ? 'WEIGHT' : isCod ? 'COD' : 'FREIGHT',
+        baseFreight: isWeight || isCod ? 0 : taxBreakdown.taxableFreight,
+        weightSurcharge: isWeight ? taxBreakdown.taxableFreight : 0,
+        codFee: isCod ? taxBreakdown.taxableFreight : 0,
+        gstAmount: taxBreakdown.freightGst,
+        totalBilled: netBilled,
+        invoiceNumber,
+        invoiceDate,
+        period,
+        isWalletDeducted: true,
+      };
+    }).filter((r) => r.totalBilled !== 0 && Boolean(r.awb));
+  }
+
+  /**
+   * Helper to parse Velocity Multi-Carrier Shipping & Freight Report.
+   */
+  public parseVelocityChargesRows(rows: any[], invoiceNumber: string, invoiceDate: Date): FreightChargeRecord[] {
+    const period = ledgerService.toPeriod(invoiceDate);
+    const money = (v: unknown): number => {
+      const parsed = Number(String(v ?? 0).replace(/,/g, ''));
+      if (!Number.isFinite(parsed)) throw new Error(`Invalid Velocity charge in invoice ${invoiceNumber}`);
+      return Math.round(parsed * 100) / 100;
+    };
+    return rows.flatMap((r, index): FreightChargeRecord[] => {
+      const awb = String(r['AWB'] || r['Waybill'] || r['Tracking No'] || r['waybill_number'] || '').trim();
+      if (!awb) return [];
+      const orderRef = String(r['Order ID'] || r['Order Number'] || r['Reference'] || '').trim();
+      const underlyingCourier = String(r['Courier'] || r['Partner'] || r['Carrier'] || 'Velocity').trim();
+      const components: Array<{ leg: FreightChargeRecord['leg']; type: string; value: number }> = [
+        { leg: 'FORWARD', type: 'FREIGHT', value: money(r['Forward Charges'] ?? r['Freight Charges'] ?? r['Base Freight']) },
+        { leg: 'RTO', type: 'FREIGHT', value: money(r['RTO Charges'] ?? r['rto_charges']) },
+        { leg: 'REVERSE', type: 'FREIGHT', value: money(r['Reverse Charges'] ?? r['qc_reverse_charges']) },
+        { leg: 'FORWARD', type: 'WEIGHT', value: money(r['Weight Charges'] ?? r['weight_surcharge']) },
+        { leg: 'FORWARD', type: 'COD', value: money(r['COD Charges'] ?? r['cod_handling']) },
+      ];
+      const gst = money(r['GST'] ?? r['Tax']);
+      const chargeSum = money(components.reduce((sum, component) => sum + component.value, 0) + gst);
+      const rawTotal = r['Total Amount'] ?? r['Total Billed'] ?? r['Net Billed'];
+      const total = rawTotal === undefined || rawTotal === '' ? chargeSum : money(rawTotal);
+      if (Math.abs(chargeSum - total) > 0.05) {
+        throw new Error(`Velocity invoice ${invoiceNumber}, AWB ${awb}: components ₹${chargeSum} do not reconcile with reported total ₹${total}`);
+      }
+      const nonzero = components.filter((part) => part.value !== 0);
+      if (!nonzero.length && gst !== 0) nonzero.push({ leg: 'FORWARD', type: 'TAX', value: 0 });
+      const sourceTxnId = String(r['Transaction ID'] || r['Charge ID'] || r['Txn ID'] || '').trim();
+      return nonzero.map((part, partIndex): FreightChargeRecord => {
+        const tax = partIndex === 0 ? gst : 0;
+        return {
+          awb,
+          orderReference: orderRef || undefined,
+          carrier: 'VELOCITY',
+          underlyingCourier,
+          leg: part.leg,
+          // A single row may contain several separately chargeable components.
+          chargeType: `${part.type}${sourceTxnId ? ':' + sourceTxnId : ':' + index}`,
+          baseFreight: part.type === 'FREIGHT' ? part.value : 0,
+          weightSurcharge: part.type === 'WEIGHT' ? part.value : 0,
+          codFee: part.type === 'COD' ? part.value : 0,
+          gstAmount: tax,
+          totalBilled: money(part.value + tax),
+          invoiceNumber,
+          invoiceDate,
+          period,
+          isWalletDeducted: true,
+        };
+      });
+    });
+  }
+}
+
+export const freightEngineService = new FreightEngineService();

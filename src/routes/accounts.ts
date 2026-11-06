@@ -10,6 +10,7 @@
  *   POST /run                      run closing + cost estimates + gateway sync now
  */
 import { Router, Response } from 'express';
+import { BankReconciliationStatus } from '@prisma/client';
 import prisma from '../database/prisma';
 import { config } from '../config';
 import logger from '../utils/logger';
@@ -397,6 +398,13 @@ router.patch('/remittance/:importId/utr', async (req: AuthenticatedRequest, res:
   }
 });
 
+import { ledgerService } from '../modules/accounts/ledger.service';
+import { tallyIntegrationService } from '../modules/accounts/tally-integration.service';
+import { monthlyClosingService } from '../modules/accounts/monthly-closing.service';
+import { bankReconciliationService } from '../modules/accounts/bank-reconciliation.service';
+import { freightEngineService } from '../modules/accounts/freight-engine.service';
+import { gatewayExpenseService } from '../modules/accounts/gateway-expense.service';
+
 router.post('/orders/:id/payment-received', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const orderId = parsePositiveInt(req.params.id);
@@ -460,6 +468,219 @@ router.post('/run', async (req: AuthenticatedRequest, res: Response): Promise<vo
     res.json({ ...maintenance, settlements, shippingEstimates: estimated });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// ─── Phase 2 & 5: Double-Entry Ledger & Trial Balance ─────────
+router.get('/ledger/trial-balance', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const period = typeof req.query.period === 'string' ? req.query.period : undefined;
+    const tb = await ledgerService.getTrialBalance(period);
+    res.json(tb);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/ledger/vouchers', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const period = typeof req.query.period === 'string' ? req.query.period : undefined;
+    const limit = parseInt(String(req.query.limit || '50'), 10);
+    const vouchers = await prisma.journalEntry.findMany({
+      where: period ? { accountingPeriod: period } : undefined,
+      include: {
+        lines: { include: { account: true } },
+      },
+      orderBy: { documentDate: 'desc' },
+      take: Math.min(limit, 200),
+    });
+    res.json(vouchers);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─── Phase 8: TallyPrime XML Export ───────────────────────────
+router.get('/tally/xml', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const period = typeof req.query.period === 'string' ? req.query.period : previousMonth();
+    const includeMasters = req.query.includeMasters === 'true';
+    const xml = await tallyIntegrationService.generateTallyXml({ period, includeMasters });
+    res.setHeader('Content-Type', 'application/xml');
+    res.setHeader('Content-Disposition', `attachment; filename="Youthnic-Tally-${period}.xml"`);
+    res.send(xml);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/tally/masters', async (_req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const xml = tallyIntegrationService.generateTallyMastersXml();
+    res.setHeader('Content-Type', 'application/xml');
+    res.setHeader('Content-Disposition', 'attachment; filename="Youthnic-Tally-Masters.xml"');
+    res.send(xml);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─── Phase 11: Monthly Closing & Snapshots ────────────────────
+router.get('/closing/history', async (_req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const snapshots = await prisma.monthlyClosingSnapshot.findMany({
+      orderBy: { period: 'desc' },
+      take: 24,
+    });
+    res.json(snapshots);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/closing/close', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const period = String(req.body?.period || previousMonth()).trim();
+    const isProvisional = Boolean(req.body?.isProvisional);
+    const result = await monthlyClosingService.closeMonth(period, req.user?.email || 'SYSTEM', isProvisional);
+    res.json(result);
+  } catch (error: any) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// ─── Phase 7: Bank Statement Upload & Reconciliation ──────────
+router.post('/bank-statement/upload', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const file = (req as any).file;
+    const { fileName: bodyFileName, contentBase64 } = req.body || {};
+    const hasBase64File = typeof bodyFileName === 'string' && bodyFileName.trim().length > 0 &&
+      typeof contentBase64 === 'string' && contentBase64.length > 0;
+    if (!file && !hasBase64File && !Array.isArray(req.body?.rows)) {
+      res.status(400).json({ error: 'Please upload a bank statement file (CSV or Excel), base64 file, or JSON rows.' });
+      return;
+    }
+    const bankName = String(req.body?.bankName || 'HDFC Bank').trim();
+    let rows: any[] = [];
+    let fileName = 'bank_statement_upload.csv';
+
+    if (file) {
+      fileName = file.originalname || 'statement.xlsx';
+      const parsed = await readSpreadsheet(fileName, file.buffer);
+      rows = bankReconciliationService.parseBankCsv(parsed[0]?.rows || []);
+    } else if (hasBase64File) {
+      fileName = bodyFileName.trim();
+      const parsed = await readSpreadsheet(fileName, Buffer.from(contentBase64, 'base64'));
+      rows = bankReconciliationService.parseBankCsv(parsed[0]?.rows || []);
+    } else if (Array.isArray(req.body.rows)) {
+      rows = bankReconciliationService.parseBankCsv(req.body.rows);
+    }
+
+    const summary = await bankReconciliationService.ingestAndReconcileStatement({
+      fileName,
+      bankName,
+      statementPeriod: req.body?.period,
+      rows,
+      uploadedBy: req.user?.email,
+    });
+    res.json(summary);
+  } catch (error: any) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+router.get('/bank-statement/lines', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const limit = parseInt(String(req.query.limit || '50'), 10);
+    const status = req.query.status;
+    if (status !== undefined && (typeof status !== 'string' ||
+      !Object.values(BankReconciliationStatus).includes(status as BankReconciliationStatus))) {
+      res.status(400).json({ error: 'Invalid bank reconciliation status.' });
+      return;
+    }
+    const where = status ? { status: status as BankReconciliationStatus } : {};
+    const lines = await prisma.bankStatementLine.findMany({
+      where,
+      include: { statement: true },
+      orderBy: { transactionDate: 'desc' },
+      take: Math.min(limit, 200),
+    });
+    res.json(lines);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─── Phase 3: Payment Gateway Batches ─────────────────────────
+router.get('/gateway/batches', async (_req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const batches = await prisma.gatewaySettlementBatch.findMany({
+      orderBy: { settlementDate: 'desc' },
+      take: 50,
+    });
+    res.json(batches);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─── Phase 4: Freight Bills (Delhivery & Velocity) ────────────
+router.get('/freight/bills', async (_req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const bills = await prisma.freightBill.findMany({
+      orderBy: { invoiceDate: 'desc' },
+      take: 50,
+    });
+    res.json(bills);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/freight/upload', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const file = (req as any).file;
+    const { carrier, invoiceNumber, invoiceDate: rawDate, contentBase64, fileName: bodyFileName } = req.body || {};
+    const parsedCarrier = carrier === 'VELOCITY' ? 'VELOCITY' : 'DELHIVERY';
+    // Billing identifiers and dates must be supplied by the original carrier invoice.
+    if (typeof invoiceNumber !== 'string' || !invoiceNumber.trim()) {
+      res.status(400).json({ error: 'A stable carrier invoiceNumber is required to prevent duplicate freight postings.' });
+      return;
+    }
+    const invNum = invoiceNumber.trim();
+    if (typeof rawDate !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(rawDate)) {
+      res.status(400).json({ error: 'invoiceDate must use YYYY-MM-DD.' });
+      return;
+    }
+    const invDate = new Date(rawDate + 'T12:00:00+05:30');
+    if (Number.isNaN(invDate.getTime()) ||
+      new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(invDate) !== rawDate) {
+      res.status(400).json({ error: 'invoiceDate is not a valid calendar date.' });
+      return;
+    }
+
+    let rows: any[] = [];
+    if (file) {
+      const parsed = await readSpreadsheet(file.originalname, file.buffer);
+      rows = parsed[0]?.rows || [];
+    } else if (contentBase64 && bodyFileName) {
+      const parsed = await readSpreadsheet(bodyFileName, Buffer.from(contentBase64, 'base64'));
+      rows = parsed[0]?.rows || [];
+    } else if (Array.isArray(req.body?.rows)) {
+      rows = req.body.rows;
+    } else {
+      res.status(400).json({ error: 'Please upload a freight billing file (CSV or Excel) or JSON rows.' });
+      return;
+    }
+
+    const records = parsedCarrier === 'VELOCITY'
+      ? freightEngineService.parseVelocityChargesRows(rows, invNum, invDate)
+      : freightEngineService.parseDelhiveryChargesRows(rows, invNum, invDate);
+
+    const summary = await freightEngineService.processFreightInvoice(parsedCarrier, invNum, invDate, records);
+    res.json(summary);
+  } catch (error: any) {
+    res.status(400).json({ error: error.message });
   }
 });
 

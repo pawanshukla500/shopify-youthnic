@@ -208,8 +208,8 @@ export interface StateAccountingRow {
   orderCount: number;
   openingBalance: number;        // Balance brought forward from prior months (B/F)
   grossSales: number;            // Orders placed in month M
-  taxableSales: number;          // Gross sales excluding GST (Taxable value = grossSales / 1.18)
-  gstAmount: number;             // GST component (18%)
+  taxableSales: number;          // Gross sales excluding GST (Verified taxable value; excludes unresolved GST)
+  gstAmount: number;             // Verified GST; unresolved orders require review
   returnsDeducted: number;       // Returns occurring in month M (timing cutoff rule)
   netSales: number;              // grossSales - returnsDeducted
   paymentReceived: number;       // Settlements / Remittances in bank
@@ -221,6 +221,7 @@ export interface StateAccountingRow {
   phonepe: number;               // PhonePe
   velocity: number;              // Velocity
   notes?: string;
+  gstPendingCount?: number; // Source tax evidence unavailable: manual GST validation required
 }
 
 export interface StateAccountingTotals {
@@ -245,6 +246,7 @@ export interface ReportOrderRow {
   orderNo: string;
   orderDate: Date | null;
   customer: string;
+  gstRate?: number;
   city: string;
   state: string;
   pincode: string;
@@ -380,9 +382,15 @@ export function buildStateAccountingSummary(
     row.grossSales += gross;
 
     // Dynamic GST calculation (replacing hardcoded 18%)
-    const tax = gstService.calculateSalesTax(gross, order.customerState, undefined, order);
-    row.taxableSales += tax.taxableAmount;
-    row.gstAmount += tax.totalGst;
+    try {
+      const tax = gstService.calculateSalesTax(gross, order.customerState, undefined, order);
+      row.taxableSales += tax.taxableAmount;
+      row.gstAmount += tax.totalGst;
+    } catch (err: any) {
+      // Read-only reports remain available but must not fabricate a GST rate.
+      row.gstPendingCount = (row.gstPendingCount || 0) + 1;
+      row.notes = `GST verification required for ${row.gstPendingCount} order(s): ${err.message}`;
+    }
 
     // Check payment cutoff timing: only count payment if received within this period [start, end)
     let isSettledInPeriod = true;
@@ -604,6 +612,7 @@ export function buildReportData(
             : (order.paymentGateway || order.paymentProvider || paymentRail)),
       paymentRail,
       orderValue: orderGross,
+      gstRate: (() => { try { return gstService.determineOrderGstRate(order); } catch { return undefined; } })(),
       orderStatus: STATUS_LABELS[order.status] || order.status,
       deliveredOn: istDay(order.deliveredAt),
       returnWindowClosesOn: istDay(status.returnWindowClosesAt),
@@ -719,7 +728,8 @@ export function buildReportData(
       refundDate: istDay(r.refundProcessedAt),
       returnStatus: r.returnStatus,
       refundStatus: r.refundStatus,
-      refundAmount: money(r.refundAmount || origOrder?.totalAmount) || 0,
+      refundAmount: money(r.refundAmount) || 0,
+      gstRate: (() => { try { return origOrder ? gstService.determineOrderGstRate(origOrder) : undefined; } catch { return undefined; } })(),
       paymentRail: rail,
       tallyVoucherType: 'Credit Note / Sales Return',
       reason: r.returnReason,
@@ -908,8 +918,8 @@ export async function renderWorkbook(data: ReportData): Promise<Buffer> {
       row.orderCount,
       row.openingBalance || 0,
       row.grossSales,
-      row.taxableSales || money(row.grossSales / 1.18) || 0,
-      row.gstAmount || money(row.grossSales - (row.taxableSales || (row.grossSales / 1.18))) || 0,
+      row.taxableSales || 0,
+      row.gstAmount || 0,
       row.returnsDeducted,
       row.netSales,
       row.paymentReceived,
@@ -1143,9 +1153,9 @@ export async function renderWorkbook(data: ReportData): Promise<Buffer> {
     { header: 'Particulars / Revenue Ledger', key: 'particulars', width: 34 },
     { header: 'GST POS', key: 'gstPos', width: 18 },
     { header: 'Taxable Amount (₹)', key: 'taxableAmount', width: 16, type: 'money' },
-    { header: 'IGST 18% (₹)', key: 'igst', width: 14, type: 'money' },
-    { header: 'CGST 9% (₹)', key: 'cgst', width: 14, type: 'money' },
-    { header: 'SGST 9% (₹)', key: 'sgst', width: 14, type: 'money' },
+    { header: 'IGST (₹)', key: 'igst', width: 14, type: 'money' },
+    { header: 'CGST (₹)', key: 'cgst', width: 14, type: 'money' },
+    { header: 'SGST (₹)', key: 'sgst', width: 14, type: 'money' },
     { header: 'Total Amount (₹)', key: 'totalAmount', width: 16, type: 'money' },
     { header: 'Dr / Cr', key: 'drCr', width: 8 },
     { header: 'Payment Rail', key: 'paymentRail', width: 14 },
@@ -1164,7 +1174,15 @@ export async function renderWorkbook(data: ReportData): Promise<Buffer> {
   // 1. Sales & Receipt vouchers for orders in period
   for (const o of data.orders) {
     if (o.accountsStatus === 'Not a sale') continue;
-    const orderRate = (o as any).gstRate;
+    const orderRate = o.gstRate;
+    if (orderRate === undefined) {
+      tallyVoucherRows.push({
+        voucherDate: o.orderDate, voucherType: 'GST REVIEW REQUIRED', voucherNo: o.orderNo,
+        partyLedger: `Sundry Debtors - ${o.state}`, particulars: 'Tax evidence missing — do not import',
+        totalAmount: o.orderValue, narration: `Do not post ${o.orderNo} until GST is verified`,
+      });
+      continue;
+    }
     const tax = gstService.calculateSalesTax(o.orderValue, o.state, orderRate);
     tallyVoucherRows.push({
       voucherDate: o.orderDate,
@@ -1210,6 +1228,14 @@ export async function renderWorkbook(data: ReportData): Promise<Buffer> {
     const retAmt = ret.refundAmount > 0 ? ret.refundAmount : 0;
     if (retAmt <= 0) continue;
     const returnRate = (ret as any).gstRate;
+    if (returnRate === undefined) {
+      tallyVoucherRows.push({
+        voucherDate: ret.returnDate, voucherType: 'GST REVIEW REQUIRED', voucherNo: `CN-${ret.returnId}`,
+        particulars: 'Original invoice GST rate missing — do not import',
+        totalAmount: retAmt, narration: `Verify original tax for return ${ret.returnId}`,
+      });
+      continue;
+    }
     const tax = gstService.calculateReturnTax(retAmt, ret.state, returnRate);
     tallyVoucherRows.push({
       voucherDate: ret.refundDate || ret.returnDate,

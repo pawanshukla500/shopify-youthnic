@@ -64,12 +64,9 @@ export class BankReconciliationService {
       throw new Error(`Empty bank statement: ${params.fileName}`);
     }
 
+    // Header totals describe only newly ingested bank transactions, not re-uploaded copies.
     let totalCredits = 0;
     let totalDebits = 0;
-    for (const r of params.rows) {
-      totalCredits += r.credit;
-      totalDebits += r.debit;
-    }
 
     // 1. Create BankStatement Header
     const statement = await prisma.bankStatement.create({
@@ -97,7 +94,13 @@ export class BankReconciliationService {
             where: {
               referenceNo: row.referenceNo,
               credit: new Prisma.Decimal(Math.round(row.credit * 100) / 100),
+              debit: new Prisma.Decimal(Math.round(row.debit * 100) / 100),
               transactionDate: row.transactionDate,
+              status: { not: BankReconciliationStatus.DUPLICATE },
+              statement: {
+                bankName: params.bankName,
+                ...(params.accountNumber ? { accountNumber: params.accountNumber } : {}),
+              },
             },
           })
         : null;
@@ -120,15 +123,24 @@ export class BankReconciliationService {
       });
 
       if (isDuplicate) {
+        // Keep the original as the source of truth. A later upload can trigger
+        // reconciliation against a batch imported after the first statement.
+        if (row.credit > 0 && existingLine?.status !== BankReconciliationStatus.VERIFIED) {
+          const retryMatch = await this.matchCreditLine(existingLine!.id, row);
+          if (retryMatch.status === BankReconciliationStatus.VERIFIED) matchedCount++;
+          else if (retryMatch.status === BankReconciliationStatus.AMOUNT_MISMATCH) mismatchCount++;
+        }
         matchResults.push({
           statementLineId: line.id,
           status: BankReconciliationStatus.DUPLICATE,
-          notes: 'Duplicate transaction line already reconciled',
+          notes: `Duplicate of bank line ${existingLine!.id}; original retained for settlement matching`,
           affectedOrdersCount: 0,
         });
         continue;
       }
 
+      totalCredits += row.credit;
+      totalDebits += row.debit;
       // Only attempt to match credit lines (incoming cash settlements)
       if (row.credit <= 0) {
         matchResults.push({
@@ -156,6 +168,14 @@ export class BankReconciliationService {
         unmatchedCount++;
       }
     }
+
+    await prisma.bankStatement.update({
+      where: { id: statement.id },
+      data: {
+        totalCredits: new Prisma.Decimal(Math.round(totalCredits * 100) / 100),
+        totalDebits: new Prisma.Decimal(Math.round(totalDebits * 100) / 100),
+      },
+    });
 
     logger.info('Bank statement reconciliation completed', {
       statementId: statement.id,
@@ -201,6 +221,25 @@ export class BankReconciliationService {
       });
 
       if (batch) {
+        if (batch.verificationStatus === BankReconciliationStatus.VERIFIED) {
+          await prisma.bankStatementLine.update({
+            where: { id: lineId },
+            data: {
+              status: BankReconciliationStatus.NEEDS_REVIEW,
+              matchedType: 'GATEWAY_SETTLEMENT',
+              matchedRef: batch.batchId,
+              notes: 'Settlement batch already bank-verified; investigate repeated UTR before matching again',
+            },
+          });
+          return {
+            statementLineId: lineId,
+            status: BankReconciliationStatus.NEEDS_REVIEW,
+            matchedType: 'GATEWAY_SETTLEMENT',
+            matchedRef: batch.batchId,
+            affectedOrdersCount: 0,
+            notes: 'A previously verified UTR appears in another bank credit',
+          };
+        }
         const batchNet = batch.netAmount.toNumber();
         const diff = Math.abs(batchNet - creditAmt);
 

@@ -75,6 +75,11 @@ export class FreightEngineService {
     if (closedPeriod?.status === 'CLOSED') {
       throw new Error(`Cannot book freight invoice ${invoiceNumber}: accounting period ${period} is CLOSED.`);
     }
+    if (!invoiceNumber.trim() || Number.isNaN(invoiceDate.getTime())) {
+      throw new Error('A valid freight invoice number and date are required.');
+    }
+    const existingBill = await prisma.freightBill.findUnique({ where: { invoiceNumber } });
+    if (existingBill) throw new Error(`Freight invoice ${invoiceNumber} was already recorded. Use a separate supplier credit note or adjustment.`);
 
     let totalForwardFreight = 0;
     let totalRtoFreight = 0;
@@ -86,6 +91,12 @@ export class FreightEngineService {
     let deduplicatedCount = 0;
 
     const seenChargeKeys = new Set<string>();
+    const shipmentAmounts = new Map<number, {
+      shipment: any;
+      total: number;
+      forward: number;
+      rto: number;
+    }>();
 
     for (const rec of records) {
       // 1. Deduplicate by unique charge key (AWB + Leg + ChargeType), not bare AWB
@@ -118,28 +129,12 @@ export class FreightEngineService {
           continue;
         }
 
-        // Update Shipment actual shipping cost & audit flags
-        await prisma.shipment.update({
-          where: { id: shipment.id },
-          data: {
-            netBilledCost: rec.totalBilled,
-            billingStatus: 'BILLED',
-            shippingCostSource: 'ACTUAL',
-            forwardCharge: rec.leg === 'FORWARD' ? rec.totalBilled : shipment.forwardCharge,
-            rtoCharge: rec.leg === 'RTO' ? rec.totalBilled : shipment.rtoCharge,
-            shippingCostUpdatedAt: new Date(),
-          },
-        });
-
-        if (shipment.order) {
-          await prisma.order.update({
-            where: { id: shipment.order.id },
-            data: {
-              actualShippingCost: rec.totalBilled,
-              shippingAudited: true,
-            },
-          });
-        }
+        // Stage the per-AWB movement. Never overwrite shipment totals with the last fee row.
+        const staged = shipmentAmounts.get(shipment.id) || { shipment, total: 0, forward: 0, rto: 0 };
+        staged.total += rec.totalBilled;
+        if (rec.leg === 'FORWARD') staged.forward += rec.totalBilled;
+        if (rec.leg === 'RTO') staged.rto += rec.totalBilled;
+        shipmentAmounts.set(shipment.id, staged);
       }
 
       totalForwardFreight += rec.leg === 'FORWARD' ? rec.baseFreight : 0;
@@ -166,8 +161,26 @@ export class FreightEngineService {
     ) / 100;
 
     if (Math.abs(calculatedTotal - totalBilled) > 0.05) {
-      totalBilled = calculatedTotal;
+      throw new Error(`Freight invoice ${invoiceNumber}: charge components ₹${calculatedTotal} do not equal reported bill ₹${totalBilled}.`);
     }
+
+    // Post balanced voucher before persisting the invoice; the stable entry number makes retries idempotent.
+    // Post double-entry freight purchase voucher in General Ledger
+    const journalEntry = await ledgerService.postFreightBill({
+      carrier,
+      invoiceNumber,
+      invoiceDate,
+      period,
+      forwardFreight: totalForwardFreight,
+      rtoFreight: totalRtoFreight,
+      reverseFreight: totalReverseFreight,
+      weightSurcharges: totalWeightSurcharges,
+      codHandlingFee: totalCodFees,
+      freightGst: totalGst,
+      totalBilled,
+      isWalletDeducted,
+    });
+
 
     // Upsert FreightBill record
     await prisma.freightBill.upsert({
@@ -203,21 +216,32 @@ export class FreightEngineService {
       },
     });
 
-    // Post double-entry freight purchase voucher in General Ledger
-    const journalEntry = await ledgerService.postFreightBill({
-      carrier,
-      invoiceNumber,
-      invoiceDate,
-      period,
-      forwardFreight: totalForwardFreight,
-      rtoFreight: totalRtoFreight,
-      reverseFreight: totalReverseFreight,
-      weightSurcharges: totalWeightSurcharges,
-      codHandlingFee: totalCodFees,
-      freightGst: totalGst,
-      totalBilled,
-      isWalletDeducted,
-    });
+
+    // Update operational costs only after the invoice has been reconciled and booked.
+    for (const { shipment, total, forward, rto } of shipmentAmounts.values()) {
+      const adjusted = (current: number | null | undefined, movement: number) =>
+        Math.max(0, Math.round(((current || 0) + movement) * 100) / 100);
+      await prisma.shipment.update({
+        where: { id: shipment.id },
+        data: {
+          netBilledCost: adjusted(shipment.netBilledCost, total),
+          forwardCharge: adjusted(shipment.forwardCharge, forward),
+          rtoCharge: adjusted(shipment.rtoCharge, rto),
+          billingStatus: 'BILLED',
+          shippingCostSource: 'ACTUAL',
+          shippingCostUpdatedAt: new Date(),
+        },
+      });
+      if (shipment.order) {
+        await prisma.order.update({
+          where: { id: shipment.order.id },
+          data: {
+            actualShippingCost: adjusted(shipment.order.actualShippingCost, total),
+            shippingAudited: true,
+          },
+        });
+      }
+    }
 
     logger.info('Freight invoice booked to ledger', {
       carrier,

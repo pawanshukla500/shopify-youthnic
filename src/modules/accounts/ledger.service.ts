@@ -192,8 +192,9 @@ export class LedgerService {
    * Helper to format accounting period "YYYY-MM" from a Date.
    */
   public toPeriod(d: Date): string {
-    const yr = d.getFullYear();
-    const mo = String(d.getMonth() + 1).padStart(2, '0');
+    const ist = new Date(d.getTime() + 5.5 * 3600 * 1000);
+    const yr = ist.getUTCFullYear();
+    const mo = String(ist.getUTCMonth() + 1).padStart(2, '0');
     return `${yr}-${mo}`;
   }
 
@@ -441,7 +442,7 @@ export class LedgerService {
   public async postCustomerReturnCreditNote(params: PostReturnParams): Promise<any> {
     const returnRecord = await prisma.return.findUnique({
       where: { id: params.returnId },
-      include: { order: true },
+      include: { order: { include: { items: true } } },
     });
     if (!returnRecord) throw new Error(`Return ${params.returnId} not found`);
 
@@ -454,7 +455,21 @@ export class LedgerService {
       ? returnRecord.refundAmount
       : order.totalAmount;
 
-    const originalGstRate = gstService.determineOrderGstRate(order);
+    // Check if original sales invoice entry recorded the exact GST rate
+    let originalGstRate: number | undefined;
+    const invoiceEntry = await prisma.journalEntry.findFirst({
+      where: { orderId: order.id, voucherType: VoucherType.SALES },
+      select: { metadata: true },
+    });
+    if (invoiceEntry?.metadata && typeof invoiceEntry.metadata === 'object') {
+      const meta = invoiceEntry.metadata as any;
+      if (typeof meta.gstBreakdown?.gstRate === 'number') {
+        originalGstRate = meta.gstBreakdown.gstRate;
+      }
+    }
+    if (originalGstRate === undefined) {
+      originalGstRate = gstService.determineOrderGstRate(order);
+    }
     const tax = gstService.calculateReturnTax(refundAmt, order.customerState, originalGstRate);
 
     const isCod = order.paymentMethod === 'COD';
@@ -585,12 +600,13 @@ export class LedgerService {
       });
     }
 
-    // 4. Credit Gateway Clearing Account for Gross Collection
+    // 4. Credit Sundry Debtors (clearing customer receivables) or Gateway Clearing
+    const creditAccount = params.orderIds && params.orderIds.length > 0 ? 'SUNDRY_DEBTORS_PREPAID' : clearingAccount;
     lines.push({
-      accountCode: clearingAccount,
+      accountCode: creditAccount,
       debit: 0,
       credit: params.grossAmount,
-      narration: `Gross settlement batch ${params.batchId} from ${params.gateway}`,
+      narration: `Gross settlement batch ${params.batchId} from ${params.gateway} clearing receivables`,
     });
 
     return await this.createBalancedEntry({
@@ -653,12 +669,13 @@ export class LedgerService {
       });
     }
 
-    // 4. Credit Courier COD Clearing for gross collected cash
+    // 4. Credit Sundry Debtors COD (clearing customer receivables) or Clearing
+    const creditAccount = params.orderIds && params.orderIds.length > 0 ? 'SUNDRY_DEBTORS_COD' : clearingAccount;
     lines.push({
-      accountCode: clearingAccount,
+      accountCode: creditAccount,
       debit: 0,
       credit: params.grossAmount,
-      narration: `Gross COD collected by ${params.carrier} (Ref: ${params.remittanceRef})`,
+      narration: `Gross COD collected by ${params.carrier} (Ref: ${params.remittanceRef}) clearing receivables`,
     });
 
     return await this.createBalancedEntry({

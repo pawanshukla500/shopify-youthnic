@@ -126,7 +126,12 @@ export class MonthlyClosingService {
     const igstAmount = igstRow?.periodCredit || 0;
     const grossSales = Math.round((taxableSales + cgstAmount + sgstAmount + igstAmount) * 100) / 100;
 
-    const returnsAmount = returnsRow?.periodDebit || 0;
+    // Returns taxable reversal + GST reversals debited on credit notes
+    const returnTaxable = returnsRow?.periodDebit || 0;
+    const returnCgstReversed = cgstRow?.periodDebit || 0;
+    const returnSgstReversed = sgstRow?.periodDebit || 0;
+    const returnIgstReversed = igstRow?.periodDebit || 0;
+    const returnsAmount = Math.round((returnTaxable + returnCgstReversed + returnSgstReversed + returnIgstReversed) * 100) / 100;
     const netSales = Math.round((grossSales - returnsAmount) * 100) / 100;
 
     const gatewayFees = Math.round(
@@ -159,6 +164,12 @@ export class MonthlyClosingService {
 
     // 5. Generate Tally XML
     const tallyXml = await tallyIntegrationService.generateTallyXml({ period });
+
+    // Guard: Prevent overwriting finalized CLOSED snapshot without explicit reopen
+    const existing = await prisma.monthlyClosingSnapshot.findUnique({ where: { period } });
+    if (existing && existing.status === 'CLOSED') {
+      throw new Error(`Period ${period} is already CLOSED and finalized. Cannot overwrite closed month.`);
+    }
 
     // 6. Save Immutable Snapshot
     const snapshot = await prisma.monthlyClosingSnapshot.upsert({

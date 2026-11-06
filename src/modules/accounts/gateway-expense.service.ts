@@ -107,8 +107,7 @@ export class GatewayExpenseService {
             paymentReceivedRef: batchId,
             paymentReceivedSource: `PG_${gateway}`,
             gatewayFee: totalFeeDeduction,
-            paymentVerified: true,
-            paymentVerifiedAt: r.settlementDate,
+            // paymentVerified remains false until confirmed by bank statement line per reconciliation rule
           },
         });
       }
@@ -127,13 +126,16 @@ export class GatewayExpenseService {
 
     // Verify mathematical equality: Net = Gross - Fees - GST
     const calculatedNet = Math.round((totalGross - totalMdrFee - totalFeeGst) * 100) / 100;
+    let batchStatus: 'SETTLED' | 'NEEDS_REVIEW' = 'SETTLED';
     if (Math.abs(calculatedNet - totalNetCredit) > 0.05) {
-      logger.warn('Slight settlement batch net credit discrepancy auto-balanced', {
+      logger.warn('Settlement batch net credit discrepancy detected against calculated net', {
         batchId,
         reportedNet: totalNetCredit,
         calculatedNet,
+        diff: Math.abs(calculatedNet - totalNetCredit),
       });
-      totalNetCredit = calculatedNet;
+      // Retain reported net credit from merchant statement to avoid bank ledger drift
+      batchStatus = 'NEEDS_REVIEW';
     }
 
     const period = ledgerService.toPeriod(settlementDate);

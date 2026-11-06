@@ -540,8 +540,11 @@ router.post('/closing/close', async (req: AuthenticatedRequest, res: Response): 
 router.post('/bank-statement/upload', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const file = (req as any).file;
-    if (!file && (!req.body || !req.body.rows)) {
-      res.status(400).json({ error: 'Please upload a bank statement file (CSV or Excel) or JSON rows.' });
+    const { fileName: bodyFileName, contentBase64 } = req.body || {};
+    const hasBase64File = typeof bodyFileName === 'string' && bodyFileName.trim().length > 0 &&
+      typeof contentBase64 === 'string' && contentBase64.length > 0;
+    if (!file && !hasBase64File && !Array.isArray(req.body?.rows)) {
+      res.status(400).json({ error: 'Please upload a bank statement file (CSV or Excel), base64 file, or JSON rows.' });
       return;
     }
     const bankName = String(req.body?.bankName || 'HDFC Bank').trim();
@@ -549,8 +552,12 @@ router.post('/bank-statement/upload', async (req: AuthenticatedRequest, res: Res
     let fileName = 'bank_statement_upload.csv';
 
     if (file) {
-      fileName = file.originalname;
-      const parsed = await readSpreadsheet(file.buffer, file.mimetype);
+      fileName = file.originalname || 'statement.xlsx';
+      const parsed = await readSpreadsheet(fileName, file.buffer);
+      rows = bankReconciliationService.parseBankCsv(parsed[0]?.rows || []);
+    } else if (hasBase64File) {
+      fileName = bodyFileName.trim();
+      const parsed = await readSpreadsheet(fileName, Buffer.from(contentBase64, 'base64'));
       rows = bankReconciliationService.parseBankCsv(parsed[0]?.rows || []);
     } else if (Array.isArray(req.body.rows)) {
       rows = bankReconciliationService.parseBankCsv(req.body.rows);

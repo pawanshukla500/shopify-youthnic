@@ -476,7 +476,8 @@ export function buildReportData(
   orders: any[],
   periodReturnsOrNow?: any[] | Date,
   maybeNowOrOpening?: Date | Map<string, number> | Record<string, number>,
-  maybeOpeningBalances?: Map<string, number> | Record<string, number>
+  maybeOpeningBalances?: Map<string, number> | Record<string, number>,
+  maybePriorSettledOrders?: any[]
 ): ReportData {
   let periodReturns: any[] = [];
   let now: Date = new Date();
@@ -515,7 +516,8 @@ export function buildReportData(
     periodReturns,
     periodStart,
     periodEnd,
-    openingBalances
+    openingBalances,
+    maybePriorSettledOrders
   );
 
   const rows: ReportOrderRow[] = [];
@@ -1161,7 +1163,8 @@ export async function renderWorkbook(data: ReportData): Promise<Buffer> {
   // 1. Sales & Receipt vouchers for orders in period
   for (const o of data.orders) {
     if (o.accountsStatus === 'Not a sale') continue;
-    const tax = gstService.calculateSalesTax(o.orderValue, o.state);
+    const orderRate = (o as any).gstRate;
+    const tax = gstService.calculateSalesTax(o.orderValue, o.state, orderRate);
     tallyVoucherRows.push({
       voucherDate: o.orderDate,
       voucherType: 'Sales',
@@ -1205,7 +1208,8 @@ export async function renderWorkbook(data: ReportData): Promise<Buffer> {
   for (const ret of data.returnsInPeriod) {
     const retAmt = ret.refundAmount > 0 ? ret.refundAmount : 0;
     if (retAmt <= 0) continue;
-    const tax = gstService.calculateReturnTax(retAmt, ret.state);
+    const returnRate = (ret as any).gstRate;
+    const tax = gstService.calculateReturnTax(retAmt, ret.state, returnRate);
     tallyVoucherRows.push({
       voucherDate: ret.refundDate || ret.returnDate,
       voucherType: 'Credit Note',
@@ -1300,7 +1304,7 @@ export async function generateMonthlyReport(
 ): Promise<{ data: ReportData; buffer: Buffer; fileName: string }> {
   const { start, end } = monthRange(month);
 
-  const [orders, periodReturns, openingBalances] = await Promise.all([
+  const [orders, periodReturns, openingBalances, priorSettledOrders] = await Promise.all([
     prisma.order.findMany({
       where: { shopifyCreatedAt: { gte: start, lt: end } },
       include: { shipment: true, returns: true },
@@ -1321,9 +1325,17 @@ export async function generateMonthlyReport(
       orderBy: { createdAt: 'asc' },
     }),
     computeOpeningBalances(start),
+    prisma.order.findMany({
+      where: {
+        shopifyCreatedAt: { lt: start },
+        paymentReceivedAt: { gte: start, lt: end },
+        paymentReceivedAmount: { gt: 0 },
+      },
+      include: { shipment: true },
+    }),
   ]);
 
-  const data = buildReportData(month, orders, periodReturns, now, openingBalances);
+  const data = buildReportData(month, orders, periodReturns, now, openingBalances, priorSettledOrders);
   const buffer = await renderWorkbook(data);
   return { data, buffer, fileName: `Youthnic-Accounts-${month}.xlsx` };
 }
@@ -1337,7 +1349,7 @@ export async function generateDateRangeReport(
   const { start, end } = istDateRange(startDateStr, endDateStr);
   const label = `${startDateStr} to ${endDateStr}`;
 
-  const [orders, periodReturns, openingBalances] = await Promise.all([
+  const [orders, periodReturns, openingBalances, priorSettledOrders] = await Promise.all([
     prisma.order.findMany({
       where: { shopifyCreatedAt: { gte: start, lt: end } },
       include: { shipment: true, returns: true },
@@ -1358,9 +1370,17 @@ export async function generateDateRangeReport(
       orderBy: { createdAt: 'asc' },
     }),
     computeOpeningBalances(start),
+    prisma.order.findMany({
+      where: {
+        shopifyCreatedAt: { lt: start },
+        paymentReceivedAt: { gte: start, lt: end },
+        paymentReceivedAmount: { gt: 0 },
+      },
+      include: { shipment: true },
+    }),
   ]);
 
-  const data = buildReportData(label, orders, periodReturns, now, openingBalances);
+  const data = buildReportData(label, orders, periodReturns, now, openingBalances, priorSettledOrders);
   data.label = label;
   const buffer = await renderWorkbook(data);
   return { data, buffer, fileName: `Youthnic-Accounts-${startDateStr}_to_${endDateStr}.xlsx` };

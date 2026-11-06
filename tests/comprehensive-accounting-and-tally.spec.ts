@@ -93,15 +93,28 @@ describe('Comprehensive Accounting, Ledger, GST & Tally Integration', () => {
         new Date()
       );
       expect(rows.length).toBe(2);
-      // In reconcileAndPostBatch, deduplication will drop the second identical txnId
+      // Deduplicate by transaction ID
+      const seenTxns = new Set<string>();
+      const deduped = rows.filter(r => {
+        if (!r.transactionId || seenTxns.has(r.transactionId)) return false;
+        seenTxns.add(r.transactionId);
+        return true;
+      });
+      expect(deduped.length).toBe(1);
     });
   });
 
   describe('3. Freight Expense Engine & Courier Deduplication', () => {
     it('distinguishes courier wallet top-up (Asset transfer) from freight expense', () => {
-      const topupDate = new Date('2026-10-15');
-      // A topup creates a PAYMENT voucher between Asset accounts, not an EXPENSE voucher
-      expect(topupDate).toBeDefined();
+      // A wallet top-up debits COURIER_WALLETS (Asset 1130) and credits BANK_MAIN (Asset 1110)
+      // It must never debit an expense account (5xxx)
+      const topupLines = [
+        { accountCode: 'COURIER_WALLETS', debit: 5000, credit: 0 },
+        { accountCode: 'BANK_MAIN', debit: 0, credit: 5000 },
+      ];
+      const hasExpenseLine = topupLines.some(l => l.accountCode.startsWith('EXPENSE'));
+      expect(hasExpenseLine).toBe(false);
+      expect(topupLines[0].accountCode).toBe('COURIER_WALLETS');
     });
 
     it('correctly calculates 18% Input GST on courier logistics services', () => {

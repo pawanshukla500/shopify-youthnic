@@ -751,7 +751,7 @@ export default function AccountsPage() {
                     </tr>
                   ))
                 ) : (
-                  <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--muted)' }}>No closed monthly snapshots recorded yet. Click "Close Month" above to finalize ${month}.</td></tr>
+                  <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--muted)' }}>No closed monthly snapshots recorded yet. Click "Close Month" above to finalize {month}.</td></tr>
                 )}
               </tbody>
             </table>
@@ -788,9 +788,9 @@ export default function AccountsPage() {
         <Panel>
           <PanelHeading eyebrow="Connections" title="Active Financial Integrations" />
           <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '13px', lineHeight: 1.7 }}>
-            <li>Delhivery Rate API: <strong>on</strong> (exact charges from charges ledger)</li>
-            <li>PhonePe Settlement API &amp; Report Reconciler: <strong>on</strong></li>
-            <li>Easebuzz &amp; GoKwik Payout API / Deduplication: <strong>on</strong></li>
+            <li>Delhivery Rate API: <strong>{overview.data?.connectors?.delhiveryRateApi ? 'on (live)' : 'off (missing token)'}</strong></li>
+            <li>PhonePe Settlement API &amp; Report Reconciler: <strong>{overview.data?.connectors?.phonepeSettlementApi ? 'on (live)' : 'off (unconfigured)'}</strong></li>
+            <li>Easebuzz &amp; GoKwik Payout API / Deduplication: <strong>{overview.data?.connectors?.easebuzzPayoutApi ? 'on (live)' : 'off (unconfigured)'}</strong></li>
             <li>Velocity Shipping &amp; COD Remittance: <strong>on</strong></li>
             <li>Double-Entry General Ledger: <strong>active (Debits == Credits)</strong></li>
             <li>TallyPrime XML Export: <strong>ready</strong></li>

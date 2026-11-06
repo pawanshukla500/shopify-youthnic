@@ -25,6 +25,7 @@ export interface FreightChargeRecord {
   carrier: 'DELHIVERY' | 'VELOCITY';
   underlyingCourier?: string; // e.g. "Delhivery", "Ekart", "Bluedart"
   leg: 'FORWARD' | 'RTO' | 'REVERSE';
+  chargeType?: string;
   baseFreight: number;
   codFee?: number;
   weightSurcharge?: number;
@@ -80,15 +81,17 @@ export class FreightEngineService {
     let totalBilled = 0;
     let deduplicatedCount = 0;
 
-    const seenAwbs = new Set<string>();
+    const seenChargeKeys = new Set<string>();
 
     for (const rec of records) {
-      // 1. Deduplicate records within the file
-      if (seenAwbs.has(rec.awb)) {
+      // 1. Deduplicate by unique charge key (AWB + Leg + ChargeType), not bare AWB
+      // A single shipment legitimately has separate billing rows for Forward, RTO, and Weight adjustments.
+      const chargeKey = `${rec.awb}_${rec.leg}_${rec.chargeType || 'FREIGHT'}`;
+      if (seenChargeKeys.has(chargeKey)) {
         deduplicatedCount++;
         continue;
       }
-      seenAwbs.add(rec.awb);
+      seenChargeKeys.add(chargeKey);
 
       // 2. Cross-Carrier Deduplication Check:
       // If carrier is Delhivery, check if this shipment was manifested under Velocity.
@@ -271,7 +274,7 @@ export class FreightEngineService {
         period,
         isWalletDeducted: true,
       };
-    }).filter((r) => r.totalBilled > 0 && Boolean(r.awb));
+    }).filter((r) => r.totalBilled !== 0 && Boolean(r.awb));
   }
 }
 

@@ -90,6 +90,20 @@ export class BankReconciliationService {
 
     // 2. Process each statement transaction line
     for (const row of params.rows) {
+      // Check for duplicate statement line already recorded in database
+      const existingLine = row.referenceNo
+        ? await prisma.bankStatementLine.findFirst({
+            where: {
+              referenceNo: row.referenceNo,
+              credit: new Prisma.Decimal(Math.round(row.credit * 100) / 100),
+              transactionDate: row.transactionDate,
+            },
+          })
+        : null;
+
+      const isDuplicate = Boolean(existingLine);
+      const initialStatus = isDuplicate ? BankReconciliationStatus.DUPLICATE : BankReconciliationStatus.UNMATCHED;
+
       const line = await prisma.bankStatementLine.create({
         data: {
           statementId: statement.id,
@@ -100,9 +114,19 @@ export class BankReconciliationService {
           debit: new Prisma.Decimal(Math.round(row.debit * 100) / 100),
           credit: new Prisma.Decimal(Math.round(row.credit * 100) / 100),
           balance: row.balance !== undefined ? new Prisma.Decimal(Math.round(row.balance * 100) / 100) : null,
-          status: BankReconciliationStatus.UNMATCHED,
+          status: initialStatus,
         },
       });
+
+      if (isDuplicate) {
+        matchResults.push({
+          statementLineId: line.id,
+          status: BankReconciliationStatus.DUPLICATE,
+          notes: 'Duplicate transaction line already reconciled',
+          affectedOrdersCount: 0,
+        });
+        continue;
+      }
 
       // Only attempt to match credit lines (incoming cash settlements)
       if (row.credit <= 0) {
@@ -308,12 +332,26 @@ export class BankReconciliationService {
    */
   public parseBankCsv(rows: any[]): ParsedBankStatementRow[] {
     return rows.map((r) => {
-      // Date parsing
+      // Date parsing: support DD/MM/YYYY and DD-MM-YYYY Indian bank format
       const rawDate = r['Date'] || r['Txn Date'] || r['Transaction Date'] || r['Value Date'];
       let transactionDate = new Date();
       if (rawDate) {
-        const parsed = new Date(rawDate);
-        if (!isNaN(parsed.getTime())) transactionDate = parsed;
+        if (rawDate instanceof Date && !isNaN(rawDate.getTime())) {
+          transactionDate = rawDate;
+        } else {
+          const str = String(rawDate).trim();
+          const dmyMatch = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+          if (dmyMatch) {
+            const day = parseInt(dmyMatch[1], 10);
+            const month = parseInt(dmyMatch[2], 10) - 1;
+            const year = parseInt(dmyMatch[3], 10);
+            const d = new Date(Date.UTC(year, month, day, 12, 0, 0));
+            if (!isNaN(d.getTime())) transactionDate = d;
+          } else {
+            const fallback = new Date(str);
+            if (!isNaN(fallback.getTime())) transactionDate = fallback;
+          }
+        }
       }
 
       const desc = String(r['Description'] || r['Narration'] || r['Particulars'] || '').trim();

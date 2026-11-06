@@ -621,37 +621,51 @@ export default function AccountsPage() {
                 <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
                   <div style={{ fontSize: '12px', color: '#64748b' }}>MDR Payment Fees</div>
                   <div style={{ fontSize: '20px', fontWeight: 700, color: '#1e293b', marginTop: '4px' }}>
-                    {formatMoney(stateData.monthlyExpenses?.mdrFees || stateData.totals.gokwikEasebuzzFeeDeducted || 0)}
+                    {formatMoney(
+                      stateData.monthlyExpenses
+                        ? (stateData.monthlyExpenses.gokwikFees.mdr + stateData.monthlyExpenses.easebuzzFees.mdr + stateData.monthlyExpenses.phonepeFees.mdr)
+                        : (stateData.totals.gokwikEasebuzzFeeDeducted || 0)
+                    )}
                   </div>
                 </div>
                 <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
                   <div style={{ fontSize: '12px', color: '#64748b' }}>Platform Fees</div>
                   <div style={{ fontSize: '20px', fontWeight: 700, color: '#1e293b', marginTop: '4px' }}>
-                    {formatMoney(stateData.monthlyExpenses?.platformFees || 0)}
+                    {formatMoney(stateData.monthlyExpenses?.gokwikFees.platform ?? 0)}
                   </div>
                 </div>
                 <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
                   <div style={{ fontSize: '12px', color: '#64748b' }}>Forward Freight</div>
                   <div style={{ fontSize: '20px', fontWeight: 700, color: '#1e293b', marginTop: '4px' }}>
-                    {formatMoney(stateData.monthlyExpenses?.forwardFreight || stateData.totals.actualFreightExpenses || 0)}
+                    {formatMoney(
+                      stateData.monthlyExpenses
+                        ? (stateData.monthlyExpenses.delhiveryFreight.forward + stateData.monthlyExpenses.velocityFreight.forward)
+                        : (stateData.totals.actualFreightExpenses || 0)
+                    )}
                   </div>
                 </div>
                 <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
                   <div style={{ fontSize: '12px', color: '#64748b' }}>RTO Freight Expense</div>
                   <div style={{ fontSize: '20px', fontWeight: 700, color: '#dc2626', marginTop: '4px' }}>
-                    {formatMoney(stateData.monthlyExpenses?.rtoFreight || 0)}
+                    {formatMoney(
+                      stateData.monthlyExpenses
+                        ? (stateData.monthlyExpenses.delhiveryFreight.rto + stateData.monthlyExpenses.velocityFreight.rto)
+                        : 0
+                    )}
                   </div>
                 </div>
                 <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
                   <div style={{ fontSize: '12px', color: '#64748b' }}>Exchange Freight (Reverse + Forward)</div>
                   <div style={{ fontSize: '20px', fontWeight: 700, color: '#7c3aed', marginTop: '4px' }}>
-                    {formatMoney(stateData.monthlyExpenses?.exchangeFreight || stateData.totals.exchangeFreightExpenses || 0)}
+                    {formatMoney(
+                      stateData.monthlyExpenses?.exchangeFreight?.netFreightExpense ?? (stateData.totals.exchangeFreightExpenses || 0)
+                    )}
                   </div>
                 </div>
                 <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
                   <div style={{ fontSize: '12px', color: '#64748b' }}>Total Monthly Expenses</div>
                   <div style={{ fontSize: '20px', fontWeight: 700, color: '#0f172a', marginTop: '4px' }}>
-                    {formatMoney(stateData.monthlyExpenses?.totalExpenses || 0)}
+                    {formatMoney(stateData.monthlyExpenses?.totalOperatingExpenses ?? 0)}
                   </div>
                 </div>
               </div>
@@ -665,22 +679,22 @@ export default function AccountsPage() {
                 <div style={{ background: '#f0fdf4', padding: '16px', borderRadius: '8px', border: '1px solid #bbf7d0' }}>
                   <div style={{ fontSize: '12px', color: '#166534' }}>Net Sales (Gross − Returns)</div>
                   <div style={{ fontSize: '22px', fontWeight: 700, color: '#14532d', marginTop: '4px' }}>
-                    {formatMoney(stateData.monthlyContribution?.netSales || stateData.totals.netSales || 0)}
+                    {formatMoney(stateData.monthlyContribution?.netRecognizedRevenue ?? (stateData.totals.netSales || 0))}
                   </div>
                 </div>
                 <div style={{ background: '#fef2f2', padding: '16px', borderRadius: '8px', border: '1px solid #fecaca' }}>
                   <div style={{ fontSize: '12px', color: '#991b1b' }}>Total Logistics &amp; Gateway Costs</div>
                   <div style={{ fontSize: '22px', fontWeight: 700, color: '#7f1d1d', marginTop: '4px' }}>
-                    -{formatMoney((stateData.monthlyContribution?.totalGatewayDeductions || 0) + (stateData.monthlyContribution?.totalFreightExpenses || 0))}
+                    -{formatMoney(stateData.monthlyContribution?.totalVariableExpenses ?? 0)}
                   </div>
                 </div>
                 <div style={{ background: '#eff6ff', padding: '16px', borderRadius: '8px', border: '1px solid #bfdbfe' }}>
                   <div style={{ fontSize: '12px', color: '#1e40af' }}>Contribution Before COGS</div>
                   <div style={{ fontSize: '22px', fontWeight: 700, color: '#1e3a8a', marginTop: '4px' }}>
-                    {formatMoney(stateData.monthlyContribution?.contributionBeforeCogs || 0)}
+                    {formatMoney(stateData.monthlyContribution?.contributionBeforeCogs ?? 0)}
                   </div>
                   <div style={{ fontSize: '12px', color: '#3b82f6', marginTop: '4px' }}>
-                    Margin: {stateData.monthlyContribution?.contributionMarginPct || 0}%
+                    Margin: {stateData.monthlyContribution?.contributionMarginPercent ?? 0}%
                   </div>
                 </div>
               </div>

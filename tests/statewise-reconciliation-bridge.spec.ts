@@ -34,6 +34,7 @@ vi.mock('../src/modules/email/resend.service', () => ({ default: resendStub }));
 import {
   buildReportData,
   buildStateAccountingSummary,
+  computeOpeningBalances,
   getGstStateCode,
   monthRange,
   renderWorkbook,
@@ -189,6 +190,9 @@ describe('State-Wise Reconciliation Bridge & Multi-Period Invariants', () => {
     const gj = summary.states.find((s) => s.state === 'Gujarat')!;
     expect(gj.exchangeFreightExpenses).toBe(75.0);
     expect(gj.grossSales).toBe(1200.0);
+    expect(gj.returnsDeducted).toBe(0.0);
+    expect(gj.customerReturns).toBe(0.0);
+    expect(gj.netSales).toBe(1200.0);
   });
 
   // Scenario 5: GoKwik / Easebuzz ₹1,000 gross, ₹11.80 fee, ₹988.20 bank credit leaving ₹0 outstanding
@@ -281,8 +285,10 @@ describe('State-Wise Reconciliation Bridge & Multi-Period Invariants', () => {
   });
 
   // Scenario 9: Velocity underlying courier Delhivery without duplicate freight
-  it('Scenario 9: Velocity shipment with underlying Delhivery courier logs single freight billing', () => {
+  it('Scenario 9: Velocity shipment with underlying Delhivery courier logs single freight billing', async () => {
     const orderWithVelocity = mockOrder({
+      id: 901,
+      customerState: 'Haryana',
       shipment: {
         courier: 'Velocity',
         aggregator: 'VELOCITY',
@@ -290,18 +296,45 @@ describe('State-Wise Reconciliation Bridge & Multi-Period Invariants', () => {
         forwardCharge: 85.0,
       },
       actualShippingCost: 85.0,
+      shippingAudited: true,
     });
-    expect(orderWithVelocity.actualShippingCost).toBe(85.0);
+
+    const upsertEvents: any[] = [];
+    prismaStub.order.findMany.mockResolvedValueOnce([orderWithVelocity]);
+    prismaStub.financialEvent.upsert.mockImplementation(async (args: any) => {
+      upsertEvents.push(args.create);
+      return { createdAt: new Date(), updatedAt: new Date() };
+    });
+
+    const res = await financialEventService.syncFinancialEvents('2026-10');
+    expect(res).toBeDefined();
+
+    const freightEvents = upsertEvents.filter((e) => e.eventType === 'FREIGHT_EXPENSE_WALLET');
+    expect(freightEvents.length).toBe(1);
+    expect(Number(freightEvents[0].feeAmount)).toBe(85.0);
+    expect(freightEvents[0].provider).toBe('Velocity');
   });
 
   // Scenario 10: Multi-order UTR settlement matching
-  it('Scenario 10: Multiple orders covered by single bank UTR batch reconcile accurately', () => {
+  it('Scenario 10: Multiple orders covered by single bank UTR batch reconcile accurately', async () => {
     const utrBatch = 'UTRBATCH9999';
-    const order1 = mockOrder({ id: 1, shopifyOrderName: '#ORD-1', paymentReceivedUtr: utrBatch, paymentReceivedAmount: 500 });
-    const order2 = mockOrder({ id: 2, shopifyOrderName: '#ORD-2', paymentReceivedUtr: utrBatch, paymentReceivedAmount: 700 });
-    expect(order1.paymentReceivedUtr).toBe(utrBatch);
-    expect(order2.paymentReceivedUtr).toBe(utrBatch);
-    expect(order1.paymentReceivedAmount + order2.paymentReceivedAmount).toBe(1200);
+    const order1 = mockOrder({ id: 1001, shopifyOrderName: '#ORD-1', customerState: 'Delhi', paymentReceivedUtr: utrBatch, paymentReceivedAmount: 500, paymentVerified: true });
+    const order2 = mockOrder({ id: 1002, shopifyOrderName: '#ORD-2', customerState: 'Delhi', paymentReceivedUtr: utrBatch, paymentReceivedAmount: 700, paymentVerified: true });
+
+    const upsertEvents: any[] = [];
+    prismaStub.order.findMany.mockResolvedValueOnce([order1, order2]);
+    prismaStub.financialEvent.upsert.mockImplementation(async (args: any) => {
+      upsertEvents.push(args.create);
+      return { createdAt: new Date(), updatedAt: new Date() };
+    });
+
+    await financialEventService.syncFinancialEvents('2026-10');
+
+    const receiptEvents = upsertEvents.filter((e) => e.eventType === 'BANK_RECEIPT_VERIFIED');
+    expect(receiptEvents.length).toBe(2);
+    expect(receiptEvents.every((e) => e.reference === utrBatch)).toBe(true);
+    const totalCredited = receiptEvents.reduce((acc, e) => acc + Number(e.grossAmount), 0);
+    expect(totalCredited).toBe(1200);
   });
 
   // Scenario 11-13: State Settlement Bridge Math Invariants
@@ -364,33 +397,66 @@ describe('State-Wise Reconciliation Bridge & Multi-Period Invariants', () => {
   });
 
   // Scenario 17: Month-End Closing Immutability
-  it('Scenario 17: Month-end closing carried forward preserves prior month historical figures', () => {
-    const octClosing = 450.50;
-    const novOpening = octClosing;
-    expect(novOpening).toBe(450.50);
+  it('Scenario 17: Month-end closing carried forward preserves prior month historical figures and event deductions', async () => {
+    const cutoffDate = new Date('2026-11-01T00:00:00.000Z');
+    prismaStub.order.count.mockResolvedValueOnce(2);
+    prismaStub.financialEvent.count.mockResolvedValueOnce(3);
+    prismaStub.financialEvent.findMany.mockResolvedValueOnce([
+      { customerState: 'Maharashtra', grossAmount: 1000, netAmount: 1000, feeAmount: 0, eventType: 'BOOKING' },
+      { customerState: 'Maharashtra', grossAmount: 11.8, netAmount: 0, feeAmount: 11.8, eventType: 'GATEWAY_FEE_DEDUCTED' },
+      { customerState: 'Maharashtra', grossAmount: 988.2, netAmount: 988.2, feeAmount: 0, eventType: 'BANK_RECEIPT_VERIFIED' },
+    ]);
+
+    const openingMap = await computeOpeningBalances(cutoffDate);
+    // Opening balance with verified settlement: 1000 gross - 11.8 fee - 988.2 net = 0.0
+    expect(openingMap.get('Maharashtra')).toBe(0.0);
   });
 
   // Scenario 18: View B: Monthly Expense Report Breakdown
   it('Scenario 18: Builds View B Monthly Expense Report isolating MDR and logistics costs', async () => {
+    prismaStub.financialEvent.findMany.mockResolvedValueOnce([
+      { eventType: 'GATEWAY_FEE_DEDUCTED', provider: 'PHONEPE', grossAmount: 118, feeAmount: 118 },
+      { eventType: 'GATEWAY_FEE_DEDUCTED', provider: 'GOKWIK', grossAmount: 236, feeAmount: 236 },
+      { eventType: 'GATEWAY_FEE_DEDUCTED', provider: 'EASEBUZZ', grossAmount: 59, feeAmount: 59 },
+      { eventType: 'FREIGHT_EXPENSE_WALLET', provider: 'DELHIVERY', grossAmount: 500, feeAmount: 500 },
+      { eventType: 'FREIGHT_EXPENSE_WALLET', provider: 'VELOCITY', grossAmount: 400, feeAmount: 400 },
+      { eventType: 'EXCHANGE_FREIGHT', provider: 'VELOCITY', grossAmount: 150, feeAmount: 150 },
+    ]);
+
     const expenses = await financialEventService.buildMonthlyExpenseReport('2026-10');
-    expect(expenses).toHaveProperty('period', '2026-10');
-    expect(expenses).toHaveProperty('gokwikFees');
-    expect(expenses).toHaveProperty('easebuzzFees');
-    expect(expenses).toHaveProperty('phonepeFees');
-    expect(expenses).toHaveProperty('delhiveryFreight');
-    expect(expenses).toHaveProperty('velocityFreight');
-    expect(expenses).toHaveProperty('exchangeFreight');
-    expect(expenses).toHaveProperty('totalOperatingExpenses');
+    expect(expenses.period).toBe('2026-10');
+    expect(expenses.phonepeFees.total).toBe(118);
+    expect(expenses.gokwikFees.total).toBe(236);
+    expect(expenses.easebuzzFees.total).toBe(59);
+    expect(expenses.delhiveryFreight.forward).toBe(500);
+    expect(expenses.velocityFreight.forward).toBe(400);
+    expect(expenses.exchangeFreight.netFreightExpense).toBe(150);
+    expect(expenses.totalOperatingExpenses).toBe(118 + 236 + 59 + 500 + 400 + 150);
   });
 
   // Scenario 19: View C: Monthly Contribution / P&L
   it('Scenario 19: Builds View C Monthly Contribution before COGS report', async () => {
+    const mockEvents = [
+      { eventType: 'BOOKING', customerState: 'Gujarat', grossAmount: 10000, netAmount: 10000 },
+      { eventType: 'CANCELLATION', customerState: 'Gujarat', grossAmount: 1000, netAmount: -1000 },
+      { eventType: 'RETURN_CONFIRMED', customerState: 'Gujarat', grossAmount: 1000, netAmount: -1000 },
+      { eventType: 'GATEWAY_FEE_DEDUCTED', provider: 'EASEBUZZ', customerState: 'Gujarat', grossAmount: 118, feeAmount: 118 },
+      { eventType: 'FREIGHT_EXPENSE_WALLET', provider: 'DELHIVERY', customerState: 'Gujarat', grossAmount: 500, feeAmount: 500 },
+    ];
+    prismaStub.financialEvent.findMany.mockResolvedValue(mockEvents);
+    prismaStub.order.findMany.mockResolvedValue([]);
+
     const contribution = await financialEventService.buildMonthlyContributionReport('2026-10');
-    expect(contribution).toHaveProperty('period', '2026-10');
-    expect(contribution).toHaveProperty('grossBookings');
-    expect(contribution).toHaveProperty('netRecognizedRevenue');
-    expect(contribution).toHaveProperty('totalVariableExpenses');
-    expect(contribution).toHaveProperty('contributionBeforeCogs');
+    expect(contribution.period).toBe('2026-10');
+    expect(contribution.grossBookings).toBe(10000);
+    expect(contribution.cancelledOrders).toBe(1000);
+    expect(contribution.customerReturns).toBe(1000);
+    expect(contribution.netRecognizedRevenue).toBe(8000);
+    expect(contribution.gatewayExpenses).toBe(118);
+    expect(contribution.freightExpenses).toBe(500);
+    expect(contribution.totalVariableExpenses).toBe(618);
+    expect(contribution.contributionBeforeCogs).toBeCloseTo(contribution.taxableRevenue - 618, 2);
+    expect(contribution.contributionMarginPercent).toBeGreaterThan(0);
   });
 
   // Scenario 20-21: Excel workbook rendering with Settlement Bridge sheet and formula verification
@@ -423,10 +489,28 @@ describe('State-Wise Reconciliation Bridge & Multi-Period Invariants', () => {
   });
 
   // Scenario 22: Unverified receipts separation
-  it('Scenario 22: Separates verified vs unverified bank receipts with audit status', () => {
-    const verifiedOrder = mockOrder({ paymentReceivedUtr: 'AXIS1111', paymentReceivedAmount: 1000 });
-    const unverifiedOrder = mockOrder({ paymentReceivedUtr: '', paymentReceivedAmount: 1000 });
-    expect(Boolean(verifiedOrder.paymentReceivedUtr)).toBe(true);
-    expect(Boolean(unverifiedOrder.paymentReceivedUtr)).toBe(false);
+  it('Scenario 22: Separates verified vs unverified bank receipts with audit status', async () => {
+    const verifiedOrder = mockOrder({ id: 2201, paymentReceivedUtr: 'AXIS1111', paymentReceivedAmount: 1000, paymentVerified: true });
+    const unverifiedOrder = mockOrder({ id: 2202, paymentReceivedUtr: '', paymentReceivedAmount: 500, paymentVerified: false });
+
+    const createdEvents: any[] = [];
+    prismaStub.order.findMany.mockResolvedValueOnce([verifiedOrder, unverifiedOrder]);
+    prismaStub.financialEvent.upsert.mockImplementation(async (args: any) => {
+      createdEvents.push(args.create);
+      return { createdAt: new Date(), updatedAt: new Date() };
+    });
+
+    await financialEventService.syncFinancialEvents('2026-10');
+
+    const verifiedEv = createdEvents.find((e) => e.orderId === 2201 && e.eventType.startsWith('BANK_RECEIPT'));
+    const unverifiedEv = createdEvents.find((e) => e.orderId === 2202 && e.eventType.startsWith('BANK_RECEIPT'));
+
+    expect(verifiedEv).toBeDefined();
+    expect(verifiedEv.eventType).toBe('BANK_RECEIPT_VERIFIED');
+    expect(verifiedEv.verificationStatus).toBe('VERIFIED');
+
+    expect(unverifiedEv).toBeDefined();
+    expect(unverifiedEv.eventType).toBe('BANK_RECEIPT_UNVERIFIED');
+    expect(unverifiedEv.verificationStatus).toBe('UNVERIFIED');
   });
 });

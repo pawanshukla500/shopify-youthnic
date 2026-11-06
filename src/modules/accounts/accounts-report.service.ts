@@ -456,6 +456,7 @@ export function buildStateAccountingSummary(
 
     // Track cancelled orders separately
     if (order.status === 'CANCELLED' && !order.paymentReceivedAmount) {
+      row.grossOrderSales = (row.grossOrderSales || 0) + gross;
       row.cancelledOrders = (row.cancelledOrders || 0) + gross;
       continue;
     }
@@ -561,24 +562,26 @@ export function buildStateAccountingSummary(
   for (const ret of safeReturns) {
     const state = ret.order?.customerState || 'Unspecified';
     const row = getRow(state);
+    if (ret.isExchange) {
+      if (ret.shippingCharge) {
+        row.exchangeFreightExpenses = (row.exchangeFreightExpenses || 0) + ret.shippingCharge;
+        row.actualFreightExpenses = (row.actualFreightExpenses || 0) + ret.shippingCharge;
+      }
+      continue;
+    }
     const retAmt = (ret.refundAmount && ret.refundAmount > 0)
       ? ret.refundAmount
       : (ret.order?.totalAmount || 0);
 
     row.returnsDeducted += retAmt;
     row.customerReturns = (row.customerReturns || 0) + retAmt;
-
-    // Track exchange freight
-    if (ret.isExchange && ret.shippingCharge) {
-      row.exchangeFreightExpenses = (row.exchangeFreightExpenses || 0) + ret.shippingCharge;
-    }
   }
 
   // 3. Compute settlement bridge & classic closing balance per state
   const states: StateAccountingRow[] = [];
   for (const row of stateMap.values()) {
     row.grossSales = money(row.grossSales) || 0;
-    row.grossOrderSales = row.grossSales;
+    row.grossOrderSales = money(row.grossOrderSales ?? row.grossSales) || 0;
     row.taxableSales = money(row.taxableSales) || 0;
     row.gstAmount = money(row.gstAmount) || 0;
 
@@ -596,7 +599,7 @@ export function buildStateAccountingSummary(
     // Settlement Bridge Formula (Phase 2 & Phase 5)
     row.openingOutstanding = row.openingBalance;
     row.expectedGrossSettlement = money(
-      row.openingBalance + row.grossSales - row.cancelledOrders - row.rtoAdjustments - row.customerReturns
+      row.openingBalance + row.grossOrderSales - row.cancelledOrders - row.rtoAdjustments - row.customerReturns
     ) || 0;
 
     row.gokwikEasebuzzFeeDeducted = money(row.gokwikEasebuzzFeeDeducted || 0) || 0;
@@ -1707,24 +1710,43 @@ export async function computeOpeningBalances(beforeDate: Date): Promise<Map<stri
     map.set(clean, money((map.get(clean) || 0) + delta) || 0);
   }
 
-  const eventCount = prisma.financialEvent?.count
-    ? await prisma.financialEvent.count({
-        where: { effectiveDate: { lt: beforeDate } },
-      }).catch(() => 0)
-    : 0;
+  const [priorOrderCount, eventCount] = await Promise.all([
+    typeof prisma.order?.count === 'function'
+      ? prisma.order.count({ where: { shopifyCreatedAt: { lt: beforeDate } } }).catch(() => 0)
+      : Promise.resolve(0),
+    typeof prisma.financialEvent?.count === 'function'
+      ? prisma.financialEvent.count({
+          where: { effectiveDate: { lt: beforeDate } },
+        }).catch(() => 0)
+      : Promise.resolve(0),
+  ]);
 
-  if (eventCount > 0) {
+  // Use event-based opening ONLY when complete prior-event coverage is established and maintained
+  if (eventCount > 0 && eventCount >= priorOrderCount) {
     const events = await prisma.financialEvent.findMany({
       where: { effectiveDate: { lt: beforeDate } },
-      select: { customerState: true, grossAmount: true, netAmount: true, eventType: true },
+      select: { customerState: true, grossAmount: true, netAmount: true, feeAmount: true, eventType: true },
     });
     for (const e of events) {
       const gross = Number(e.grossAmount) || 0;
+      const fee = Number(e.feeAmount) || 0;
       const net = Number(e.netAmount) || 0;
       if (e.eventType === 'BOOKING') {
         add(e.customerState, gross);
-      } else if (e.eventType === 'CANCELLATION' || e.eventType === 'RTO_DELIVERED' || e.eventType === 'CUSTOMER_REFUND' || e.eventType === 'RETURN_CONFIRMED') {
+      } else if (
+        e.eventType === 'CANCELLATION' ||
+        e.eventType === 'RTO_DELIVERED' ||
+        e.eventType === 'RTO_INITIATED' ||
+        e.eventType === 'CUSTOMER_REFUND' ||
+        e.eventType === 'RETURN_CONFIRMED'
+      ) {
         add(e.customerState, -gross);
+      } else if (
+        e.eventType === 'GATEWAY_FEE_DEDUCTED' ||
+        e.eventType === 'COD_FEE_DEDUCTED' ||
+        e.eventType === 'FREIGHT_SETTLEMENT_DEDUCTED'
+      ) {
+        add(e.customerState, -(fee || gross));
       } else if (e.eventType === 'BANK_RECEIPT_VERIFIED') {
         add(e.customerState, -net);
       }
@@ -1746,6 +1768,7 @@ export async function computeOpeningBalances(beforeDate: Date): Promise<Map<stri
     prisma.return.findMany({
       where: {
         returnStatus: { not: 'CANCELLED' },
+        isExchange: { not: true },
         OR: [
           { refundProcessedAt: { lt: beforeDate } },
           { refundProcessedAt: null, createdAt: { lt: beforeDate } },
@@ -1932,11 +1955,18 @@ export async function getStateMonthlyAccounting(
   let monthlyExpenses: any = null;
   let monthlyContribution: any = null;
   try {
-    [settlementBridge, monthlyExpenses, monthlyContribution] = await Promise.all([
-      financialEventService.getStateSettlementBridge(month, openingBalances),
+    await financialEventService.syncFinancialEvents(month);
+    const [bridgeRes, expensesRes] = await Promise.all([
+      financialEventService.getStateSettlementBridge(month, openingBalances, false),
       financialEventService.buildMonthlyExpenseReport(month),
-      financialEventService.buildMonthlyContributionReport(month),
     ]);
+    settlementBridge = bridgeRes;
+    monthlyExpenses = expensesRes;
+    monthlyContribution = await financialEventService.buildMonthlyContributionReport(
+      month,
+      bridgeRes?.totals,
+      expensesRes
+    );
   } catch (err: any) {
     logger.warn('Error loading financial event reports', { month, error: err.message });
   }

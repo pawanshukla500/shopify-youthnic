@@ -26,6 +26,12 @@ import { getGstStateCode, monthRange, money, sum } from './accounts-report.servi
 
 export const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 
+/**
+ * Converts a UTC Date or ISO date string into an Asia/Kolkata (IST) YYYY-MM accounting period.
+ *
+ * @param date - Date object or ISO string representing the transaction timestamp
+ * @returns Formatted "YYYY-MM" accounting period string in IST timezone
+ */
 export function dateToIstPeriod(date: Date | string): string {
   const d = new Date(date);
   if (Number.isNaN(d.getTime())) return '';
@@ -413,6 +419,16 @@ export class FinancialEventService {
               verificationStatus: isConfirmed ? 'VERIFIED' : 'UNVERIFIED',
             },
           });
+
+          // A confirmed return supersedes any earlier initiated event in the same reporting period
+          if (isConfirmed) {
+            await prisma.financialEvent.deleteMany({
+              where: {
+                eventId: `RET-${ret.id}-INITIATED`,
+                period: retPeriod,
+              },
+            }).catch(() => {});
+          }
         }
       }
 
@@ -531,16 +547,24 @@ export class FinancialEventService {
    */
   async getStateSettlementBridge(
     period: string,
-    openingBalances?: Map<string, number> | Record<string, number>
+    openingBalances?: Map<string, number> | Record<string, number>,
+    doSync = true
   ): Promise<{ states: StateSettlementRow[]; totals: StateSettlementTotals; reconciliationBridge: any }> {
-    // 1. Ensure events are synchronized for this period
-    await this.syncFinancialEvents(period);
+    // 1. Ensure events are synchronized for this period (unless pre-synchronized)
+    if (doSync) {
+      await this.syncFinancialEvents(period);
+    }
 
     // 2. Fetch all financial events recognized in this period
     const events = await prisma.financialEvent.findMany({
       where: { period },
       orderBy: { effectiveDate: 'asc' },
     });
+
+    // Identify confirmed returns to avoid double-counting pending returns in the same period
+    const confirmedReturnIds = new Set(
+      events.filter((e) => e.eventType === 'RETURN_CONFIRMED' && e.returnId).map((e) => e.returnId)
+    );
 
     const stateMap = new Map<string, StateSettlementRow>();
 
@@ -616,7 +640,9 @@ export class FinancialEventService {
           break;
 
         case 'RETURN_INITIATED':
-          row.pendingReturns += gross;
+          if (!ev.returnId || !confirmedReturnIds.has(ev.returnId)) {
+            row.pendingReturns += gross;
+          }
           break;
 
         case 'GATEWAY_FEE_DEDUCTED': {
@@ -841,18 +867,61 @@ export class FinancialEventService {
   /**
    * Build the Monthly Contribution / P&L Report (View C).
    */
-  async buildMonthlyContributionReport(period: string): Promise<MonthlyContributionReport> {
-    const { totals } = await this.getStateSettlementBridge(period);
-    const expense = await this.buildMonthlyExpenseReport(period);
+  async buildMonthlyContributionReport(
+    period: string,
+    existingTotals?: StateSettlementTotals,
+    existingExpenses?: MonthlyExpenseReport
+  ): Promise<MonthlyContributionReport> {
+    const totals = existingTotals || (await this.getStateSettlementBridge(period)).totals;
+    const expense = existingExpenses || (await this.buildMonthlyExpenseReport(period));
 
     const netRecognizedRevenue = money(
       totals.grossOrderSales - totals.cancelledOrders - totals.rtoAdjustments - totals.customerReturns
     ) || 0;
 
-    // Approximate 12% GST embedded on domestic apparel
-    const tax = gstService.calculateSalesTax(netRecognizedRevenue, 'Gujarat');
-    const taxableRevenue = tax.taxableAmount;
-    const totalOutputGst = tax.totalGst;
+    // Calculate dynamic taxable revenue & GST using actual order evidence where possible
+    let taxableRevenue = 0;
+    let totalOutputGst = 0;
+    let missingEvidence = false;
+
+    try {
+      const { start, end } = monthRange(period);
+      const orders = await prisma.order.findMany({
+        where: { shopifyCreatedAt: { gte: start, lt: end } },
+        select: { totalAmount: true, customerState: true, totalTax: true, shopifyCreatedAt: true, totalDiscounts: true, status: true },
+      });
+
+      if (orders.length > 0) {
+        let grossTaxable = 0;
+        let grossGst = 0;
+        for (const ord of orders) {
+          if (ord.status === 'CANCELLED') continue;
+          try {
+            const tax = gstService.calculateSalesTax(ord.totalAmount, ord.customerState, undefined, ord);
+            grossTaxable += tax.taxableAmount;
+            grossGst += tax.totalGst;
+          } catch {
+            missingEvidence = true;
+          }
+        }
+
+        // Net ratio applied to reversals (returns + RTOs)
+        const grossBasis = totals.grossOrderSales || 1;
+        const netRatio = Math.max(0, netRecognizedRevenue / grossBasis);
+        taxableRevenue = money(grossTaxable * netRatio) || 0;
+        totalOutputGst = money(grossGst * netRatio) || 0;
+      } else {
+        missingEvidence = true;
+      }
+    } catch {
+      missingEvidence = true;
+    }
+
+    if (taxableRevenue === 0 && netRecognizedRevenue !== 0) {
+      const fallbackTax = gstService.calculateSalesTax(netRecognizedRevenue, 'Gujarat');
+      taxableRevenue = fallbackTax.taxableAmount;
+      totalOutputGst = fallbackTax.totalGst;
+    }
 
     const gatewayExpenses = money(expense.gokwikFees.total + expense.easebuzzFees.total + expense.phonepeFees.total) || 0;
     const freightExpenses = money(expense.delhiveryFreight.total + expense.velocityFreight.total) || 0;
@@ -863,6 +932,10 @@ export class FinancialEventService {
     const contributionMarginPercent = taxableRevenue > 0
       ? Math.round((contributionBeforeCogs / taxableRevenue) * 10000) / 100
       : 0;
+
+    const notes = missingEvidence
+      ? 'Contribution before COGS. Note: Some order GST evidence was missing or estimated.'
+      : 'Contribution before COGS derived from order-level GST evidence. COGS accounted off-OMS.';
 
     return {
       period,
@@ -880,7 +953,7 @@ export class FinancialEventService {
       contributionBeforeCogs,
       contributionMarginPercent,
       cogsAvailable: false,
-      notes: 'Contribution before COGS. Product manufacturing / purchase COGS is accounted off-OMS.',
+      notes,
     };
   }
 }

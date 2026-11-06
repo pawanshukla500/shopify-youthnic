@@ -289,6 +289,14 @@ export class LedgerService {
       const existing = await tx.journalEntry.findUnique({
         where: { entryNumber: params.entryNumber },
       });
+      // Protect both the destination and original period when correcting an existing voucher.
+      const affectedPeriods = new Set([params.accountingPeriod, existing?.accountingPeriod].filter(Boolean) as string[]);
+      for (const period of affectedPeriods) {
+        const snapshot = await tx.monthlyClosingSnapshot.findUnique({ where: { period } });
+        if (snapshot?.status === 'CLOSED') {
+          throw new Error(`Cannot post or revise voucher ${params.entryNumber}: accounting period ${period} is CLOSED.`);
+        }
+      }
       if (existing) {
         // Delete existing lines and re-post
         await tx.journalLineItem.deleteMany({

@@ -55,6 +55,7 @@ function order(overrides: Record<string, any> = {}) {
     tags: 'Prepaid',
     financialStatus: 'paid',
     totalAmount: 754.52,
+    taxLines: [{ rate: 0.05, price: '35.93', title: 'IGST' }],
     status: 'DELIVERED',
     deliveredAt: new Date('2026-10-12T06:00:00.000Z'),
     paymentReceivedAt: new Date('2026-10-09T05:00:00.000Z'),

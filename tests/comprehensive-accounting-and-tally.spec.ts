@@ -231,13 +231,13 @@ describe('Comprehensive Accounting, Ledger, GST & Tally Integration', () => {
       const mastersXml = tallyIntegrationService.generateTallyMastersXml();
       expect(mastersXml).toContain('<TALLYREQUEST>Import Data</TALLYREQUEST>');
       expect(mastersXml).toContain('<REPORTNAME>All Masters</REPORTNAME>');
-      expect(mastersXml).toContain('<LEDGER NAME="Sales Revenue" ACTION="Create">');
+      expect(mastersXml).toContain('<LEDGER NAME="Domestic Apparel Sales Revenue" ACTION="Create">');
       expect(mastersXml).toContain('<PARENT>Sales Accounts</PARENT>');
-      expect(mastersXml).toContain('<LEDGER NAME="Output IGST" ACTION="Create">');
+      expect(mastersXml).toContain('<LEDGER NAME="Output IGST (Integrated Goods &amp; Services Tax)" ACTION="Create">');
       expect(mastersXml).toContain('<PARENT>Duties &amp; Taxes</PARENT>');
       expect(mastersXml).toContain('<LEDGER NAME="HDFC Bank Current Account" ACTION="Create">');
       expect(mastersXml).toContain('<PARENT>Bank Accounts</PARENT>');
-      expect(mastersXml).toContain('<LEDGER NAME="Forward Freight Expense" ACTION="Create">');
+      expect(mastersXml).toContain('<LEDGER NAME="Freight Charges - Forward Shipments" ACTION="Create">');
       expect(mastersXml).toContain('<PARENT>Direct Expenses</PARENT>');
     });
   });
@@ -270,17 +270,21 @@ describe('Comprehensive Accounting, Ledger, GST & Tally Integration', () => {
       ];
 
       const records = freightEngineService.parseVelocityChargesRows(rows, 'INV-VEL-2026-11', new Date('2026-11-04'));
-      expect(records.length).toBe(2);
+      expect(records.length).toBe(3);
       expect(records[0].awb).toBe('VEL123456789');
       expect(records[0].carrier).toBe('VELOCITY');
       expect(records[0].underlyingCourier).toBe('Bluedart');
       expect(records[0].leg).toBe('FORWARD');
-      expect(records[0].totalBilled).toBe(94.40);
+      expect(records[0].totalBilled).toBe(79.40);
+      expect(records[1].chargeType).toContain('WEIGHT');
+      expect(records[1].weightSurcharge).toBe(15);
+      expect(records[1].totalBilled).toBe(15);
 
-      expect(records[1].awb).toBe('VEL987654321');
-      expect(records[1].leg).toBe('RTO');
-      expect(records[1].underlyingCourier).toBe('Ekart');
-      expect(records[1].totalBilled).toBe(106.20);
+      expect(records[2].awb).toBe('VEL987654321');
+      expect(records[2].leg).toBe('RTO');
+      expect(records[2].underlyingCourier).toBe('Ekart');
+      expect(records[2].totalBilled).toBe(106.20);
+      expect(records.reduce((sum, line) => sum + line.totalBilled, 0)).toBeCloseTo(200.60, 2);
     });
   });
 });

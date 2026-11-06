@@ -3095,10 +3095,26 @@ function ReturnForm({
   onSubmit: () => void
 }) {
   const [linkExisting, setLinkExisting] = useState(false)
-  const active = (order.returns || []).find((row) => !['REFUNDED', 'CANCELLED'].includes(row.returnStatus))
+  const allReturns = (order.returns || []).filter((row) => row.returnStatus !== 'CANCELLED')
+  const active = allReturns.find((row) => !['REFUNDED'].includes(row.returnStatus))
   const delivered = hasCustomerDelivery(order)
   const forwardAwb = order.shipment?.waybillNumber
-  if (!active && !delivered) return (
+
+  // Calculate remaining unreturned quantities
+  const returnedQtyByItem = new Map<number, number>()
+  for (const ret of allReturns) {
+    for (const item of ret.items || []) {
+      if (item.orderItemId) {
+        returnedQtyByItem.set(item.orderItemId, (returnedQtyByItem.get(item.orderItemId) || 0) + (item.quantity || 1))
+      }
+    }
+  }
+  const availableItems = items.filter((item) => {
+    const returnedCount = returnedQtyByItem.get(item.id) || 0
+    return item.quantity > returnedCount
+  })
+
+  if (!allReturns.length && !delivered) return (
     <Panel className="order-return-eligibility" id="return-panel">
       <PanelHeading title="Returns & reverse pickup" />
       <div className="order-eligibility-message"><Icon name="return" size={24} /><div>
@@ -3111,15 +3127,36 @@ function ReturnForm({
 
   return (
     <Panel className="return-form-panel" id="return-panel">
-      <PanelHeading eyebrow="Reverse logistics" title="Create reverse pickup" />
-      {active ? (
-        active.isExchange ? (
-          <ActiveExchangeCard record={active} orderName={order.shopifyOrderName} />
-        ) : (
-          <ActiveReturnCard record={active} order={order} />
-        )
-      ) : (
-        <>
+      <PanelHeading
+        eyebrow="Reverse logistics"
+        title={allReturns.length ? 'Returns & reverse pickups' : 'Create reverse pickup'}
+      />
+
+      {allReturns.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginBottom: !active && availableItems.length ? '20px' : 0 }}>
+          {allReturns.map((ret) =>
+            ret.isExchange ? (
+              <ActiveExchangeCard key={ret.id} record={ret} orderName={order.shopifyOrderName} />
+            ) : (
+              <ActiveReturnCard key={ret.id} record={ret} order={order} />
+            )
+          )}
+        </div>
+      )}
+
+      {active ? null : availableItems.length > 0 ? (
+        <div style={{ borderTop: allReturns.length ? '1px solid var(--line)' : 'none', paddingTop: allReturns.length ? '18px' : 0 }}>
+          {allReturns.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+              <h4 style={{ margin: 0, fontSize: '13.5px', fontWeight: 700, color: 'var(--ink)' }}>
+                Initiate Return for Remaining Item(s)
+              </h4>
+              <span style={{ fontSize: '11px', color: 'var(--ink-secondary)' }}>
+                {availableItems.length} item{availableItems.length > 1 ? 's' : ''} available to return
+              </span>
+            </div>
+          )}
+
           <p className="panel-description">
             This opens a Shopify return on the order and books the reverse pickup the way Delhivery ONE “Initiate Return” does: same sale order id, the delivered forward AWB as the reference, and the return location set to the Surat warehouse. Delhivery assigns the reverse waybill. Pickup and transit update from carrier scans.
           </p>
@@ -3150,9 +3187,10 @@ function ReturnForm({
             <p className="field-hint">This order has no forward Delhivery AWB yet, so a reverse pickup cannot be tied to it.</p>
           )}
 
-          {items.length ? (
+          {availableItems.length ? (
             <div className="return-items">
-              {items.map((item) => {
+              {availableItems.map((item) => {
+                const maxQty = item.quantity - (returnedQtyByItem.get(item.id) || 0)
                 const quantity = selected[item.id] ?? 0
                 return (
                   <div className={`return-item ${quantity ? 'selected' : ''}`} key={item.id}>
@@ -3166,7 +3204,7 @@ function ReturnForm({
                         {item.title}
                         <small>
                           <span className="sku-badge">{item.sku || 'No SKU'}</span>
-                          {' · '}{item.quantity} available
+                          {' · '}{maxQty} available
                         </small>
                       </span>
                     </label>
@@ -3176,12 +3214,12 @@ function ReturnForm({
                         aria-label={`Quantity for ${item.title}`}
                         type="number"
                         min={1}
-                        max={item.quantity}
+                        max={maxQty}
                         value={quantity}
                         onChange={(event) =>
                           setSelected({
                             ...selected,
-                            [item.id]: Math.max(1, Math.min(item.quantity, Number(event.target.value) || 1)),
+                            [item.id]: Math.max(1, Math.min(maxQty, Number(event.target.value) || 1)),
                           })
                         }
                       />
@@ -3191,7 +3229,7 @@ function ReturnForm({
               })}
             </div>
           ) : (
-            <p className="field-hint">No returnable items on this order.</p>
+            <p className="field-hint">No returnable items remaining on this order.</p>
           )}
 
           <div className="reason-chips" role="group" aria-label="Return reason">
@@ -3271,13 +3309,17 @@ function ReturnForm({
             </div>
           )}
 
-          <Button className="button-primary full-button" loading={loading} disabled={!items.length || !delivered} onClick={onSubmit}>
+          <Button className="button-primary full-button" loading={loading} disabled={!availableItems.length || !delivered} onClick={onSubmit}>
             <Icon name="return" size={16} />
             Create reverse pickup
           </Button>
           {!delivered ? <p className="field-hint">Available once the forward shipment is delivered.</p> : null}
-        </>
-      )}
+        </div>
+      ) : allReturns.length > 0 ? (
+        <div style={{ padding: '12px 14px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', fontSize: '12.5px', color: '#475569' }}>
+          ✓ All eligible items from this order have been returned and processed.
+        </div>
+      ) : null}
     </Panel>
   )
 }
@@ -3344,7 +3386,7 @@ function ActiveReturnCard({ record, order }: { record: ReturnRecord; order?: Ord
     <div className="active-return-card" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '10px' }}>
         <div>
-          <span className="eyebrow">Reverse in progress</span>
+          <span className="eyebrow">{isRefunded ? "Return Settled & Refunded" : "Reverse in progress"}</span>
           <strong className="mono" style={{ fontSize: '14px' }}>{record.returnWaybillNumber || 'Waybill pending'}</strong>
           <p style={{ margin: '4px 0', fontSize: '12px' }}>
             {record.pickupAutomatic

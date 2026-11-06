@@ -30,6 +30,7 @@ import { accountsStatus } from '../orders/order-tabs';
 import { istDateRange } from './settlement-summary';
 import { isDelhiveryCourier, isVelocityCourier } from '../../utils/courier';
 import { gstService } from './gst.service';
+import { tallyIntegrationService } from './tally-integration.service';
 
 const IST_OFFSET_MS = 5.5 * 3600 * 1000;
 
@@ -1562,6 +1563,17 @@ export async function emailMonthlyReport(
   }
 
   const { data, buffer, fileName } = await generateMonthlyReport(month);
+
+  let tallyXmlAttachment: { filename: string; content: Buffer } | null = null;
+  try {
+    const tallyXml = await tallyIntegrationService.generateTallyXml({ period: month, includeMasters: true });
+    tallyXmlAttachment = {
+      filename: `Youthnic-Tally-${month}.xml`,
+      content: Buffer.from(tallyXml, 'utf-8'),
+    };
+  } catch (xmlErr: any) {
+    logger.warn('Could not generate Tally XML for email attachment', { month, error: xmlErr.message });
+  }
   const inr = (value: number | string) =>
     typeof value === 'number'
       ? `₹${value.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -1715,7 +1727,10 @@ export async function emailMonthlyReport(
           </div>
         </div>
       </div>`,
-    attachments: [{ filename: fileName, content: buffer }],
+    attachments: [
+      { filename: fileName, content: buffer },
+      ...(tallyXmlAttachment ? [tallyXmlAttachment] : []),
+    ],
   });
 
   const stamp = JSON.stringify({ sentAt: new Date().toISOString(), to, cc });

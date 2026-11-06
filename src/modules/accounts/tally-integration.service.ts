@@ -7,6 +7,7 @@
  * - Receipt Vouchers (<VOUCHER VCHTYPE="Receipt">)
  * - Purchase / Expense Vouchers (<VOUCHER VCHTYPE="Purchase">)
  * - Journal Vouchers (<VOUCHER VCHTYPE="Journal">)
+ * - Ledger Masters (<LEDGER NAME="...">)
  *
  * Invariants:
  * 1. Debits == Credits (ALL_LEDGER_ENTRIES sum to 0 in Tally notation where Debit is negative or explicit ISDEEMEDPOSITIVE)
@@ -23,7 +24,57 @@ export interface TallyExportFilter {
   startDate?: Date;
   endDate?: Date;
   voucherTypes?: VoucherType[];
+  includeMasters?: boolean;
 }
+
+export interface TallyLedgerMasterDef {
+  name: string;
+  parent: string;
+  isGstApplicable?: boolean;
+  taxType?: string;
+  rate?: number;
+}
+
+export const TALLY_STANDARD_LEDGER_MASTERS: TallyLedgerMasterDef[] = [
+  // Revenue & Returns
+  { name: 'Sales Revenue', parent: 'Sales Accounts' },
+  { name: 'Sales Returns', parent: 'Sales Accounts' },
+
+  // GST Duties & Taxes
+  { name: 'Output IGST', parent: 'Duties & Taxes', isGstApplicable: true, taxType: 'Integrated Tax' },
+  { name: 'Output CGST', parent: 'Duties & Taxes', isGstApplicable: true, taxType: 'Central Tax' },
+  { name: 'Output SGST', parent: 'Duties & Taxes', isGstApplicable: true, taxType: 'State Tax' },
+  { name: 'Input GST (Eligible)', parent: 'Duties & Taxes', isGstApplicable: true, taxType: 'Input Tax Credit' },
+  { name: 'Input GST (Ineligible)', parent: 'Duties & Taxes', isGstApplicable: true },
+
+  // Debtors & Customers
+  { name: 'Sundry Debtors (Prepaid Orders)', parent: 'Sundry Debtors' },
+  { name: 'Sundry Debtors (COD Orders)', parent: 'Sundry Debtors' },
+
+  // Bank & Clearing Accounts
+  { name: 'HDFC Bank Current Account', parent: 'Bank Accounts' },
+  { name: 'Easebuzz Clearing Account', parent: 'Bank Accounts' },
+  { name: 'GoKwik Clearing Account', parent: 'Bank Accounts' },
+  { name: 'PhonePe Clearing Account', parent: 'Bank Accounts' },
+  { name: 'Courier Remittance Clearing', parent: 'Bank Accounts' },
+  { name: 'Courier Prepaid Wallets', parent: 'Current Assets' },
+
+  // Payment Gateway Expenses
+  { name: 'Payment Gateway Fees (Easebuzz)', parent: 'Indirect Expenses' },
+  { name: 'Payment Gateway Fees (GoKwik)', parent: 'Indirect Expenses' },
+  { name: 'Payment Gateway Fees (PhonePe)', parent: 'Indirect Expenses' },
+
+  // Freight & Courier Expenses
+  { name: 'Forward Freight Expense', parent: 'Direct Expenses' },
+  { name: 'RTO Freight Expense', parent: 'Direct Expenses' },
+  { name: 'Reverse Pickup Freight Expense', parent: 'Direct Expenses' },
+  { name: 'COD Handling Charges', parent: 'Direct Expenses' },
+  { name: 'Weight Discrepancy Charges', parent: 'Direct Expenses' },
+
+  // Courier Creditors
+  { name: 'Delhivery Logistics Payable', parent: 'Sundry Creditors' },
+  { name: 'Velocity Freight Payable', parent: 'Sundry Creditors' },
+];
 
 export class TallyIntegrationService {
   /**
@@ -50,7 +101,45 @@ export class TallyIntegrationService {
   }
 
   /**
-   * Generate complete Tally XML Envelope for import into TallyPrime.
+   * Generate official Tally Ledger Masters XML envelope.
+   */
+  public generateTallyMastersXml(): string {
+    const ledgersXml = TALLY_STANDARD_LEDGER_MASTERS.map((m) => {
+      return `        <TALLYMESSAGE xmlns:UDF="TallyUDF">
+          <LEDGER NAME="${this.escapeXml(m.name)}" ACTION="Create">
+            <NAME>${this.escapeXml(m.name)}</NAME>
+            <PARENT>${this.escapeXml(m.parent)}</PARENT>
+            <ISBILLWISEON>No</ISBILLWISEON>
+            <ISCOSTCENTRESON>No</ISCOSTCENTRESON>
+            ${m.isGstApplicable ? `<ISGSTAPPLICABLE>Yes</ISGSTAPPLICABLE>` : ''}
+            ${m.taxType ? `<TAXTYPE>${this.escapeXml(m.taxType)}</TAXTYPE>` : ''}
+          </LEDGER>
+        </TALLYMESSAGE>`;
+    }).join('\n');
+
+    return `<?xml version="1.0" encoding="utf-8"?>
+<ENVELOPE>
+  <HEADER>
+    <TALLYREQUEST>Import Data</TALLYREQUEST>
+  </HEADER>
+  <BODY>
+    <IMPORTDATA>
+      <REQUESTDESC>
+        <REPORTNAME>All Masters</REPORTNAME>
+        <STATICVARIABLES>
+          <SVCURRENTCOMPANY>YOUTHNIC (VB EXPORTS)</SVCURRENTCOMPANY>
+        </STATICVARIABLES>
+      </REQUESTDESC>
+      <REQUESTDATA>
+${ledgersXml}
+      </REQUESTDATA>
+    </IMPORTDATA>
+  </BODY>
+</ENVELOPE>`;
+  }
+
+  /**
+   * Generate complete Tally XML Envelope for import into TallyPrime or Tally ERP 9.
    */
   public async generateTallyXml(filter: TallyExportFilter): Promise<string> {
     const whereClause: any = {};
@@ -78,6 +167,37 @@ export class TallyIntegrationService {
       orderBy: { documentDate: 'asc' },
     });
 
+    // Validate that every voucher is strictly balanced before exporting
+    for (const entry of journalEntries) {
+      let sumDebits = 0;
+      let sumCredits = 0;
+      for (const line of entry.lines) {
+        sumDebits += line.debit.toNumber();
+        sumCredits += line.credit.toNumber();
+      }
+      if (Math.abs(sumDebits - sumCredits) > 0.05) {
+        throw new Error(
+          `Voucher ${entry.entryNumber} is unbalanced: Debits ₹${sumDebits.toFixed(2)} != Credits ₹${sumCredits.toFixed(2)}`
+        );
+      }
+    }
+
+    let mastersXml = '';
+    if (filter.includeMasters) {
+      mastersXml = TALLY_STANDARD_LEDGER_MASTERS.map((m) => {
+        return `        <TALLYMESSAGE xmlns:UDF="TallyUDF">
+          <LEDGER NAME="${this.escapeXml(m.name)}" ACTION="Create">
+            <NAME>${this.escapeXml(m.name)}</NAME>
+            <PARENT>${this.escapeXml(m.parent)}</PARENT>
+            <ISBILLWISEON>No</ISBILLWISEON>
+            <ISCOSTCENTRESON>No</ISCOSTCENTRESON>
+            ${m.isGstApplicable ? `<ISGSTAPPLICABLE>Yes</ISGSTAPPLICABLE>` : ''}
+            ${m.taxType ? `<TAXTYPE>${this.escapeXml(m.taxType)}</TAXTYPE>` : ''}
+          </LEDGER>
+        </TALLYMESSAGE>`;
+      }).join('\n') + '\n';
+    }
+
     const vouchersXml = journalEntries.map((entry) => this.renderTallyVoucher(entry)).join('\n');
 
     return `<?xml version="1.0" encoding="utf-8"?>
@@ -94,7 +214,7 @@ export class TallyIntegrationService {
         </STATICVARIABLES>
       </REQUESTDESC>
       <REQUESTDATA>
-${vouchersXml}
+${mastersXml}${vouchersXml}
       </REQUESTDATA>
     </IMPORTDATA>
   </BODY>

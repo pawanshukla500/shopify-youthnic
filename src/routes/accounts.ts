@@ -503,9 +503,21 @@ router.get('/ledger/vouchers', async (req: AuthenticatedRequest, res: Response):
 router.get('/tally/xml', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const period = typeof req.query.period === 'string' ? req.query.period : previousMonth();
-    const xml = await tallyIntegrationService.generateTallyXml({ period });
+    const includeMasters = req.query.includeMasters === 'true';
+    const xml = await tallyIntegrationService.generateTallyXml({ period, includeMasters });
     res.setHeader('Content-Type', 'application/xml');
     res.setHeader('Content-Disposition', `attachment; filename="Youthnic-Tally-${period}.xml"`);
+    res.send(xml);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/tally/masters', async (_req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const xml = tallyIntegrationService.generateTallyMastersXml();
+    res.setHeader('Content-Type', 'application/xml');
+    res.setHeader('Content-Disposition', 'attachment; filename="Youthnic-Tally-Masters.xml"');
     res.send(xml);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -579,7 +591,13 @@ router.post('/bank-statement/upload', async (req: AuthenticatedRequest, res: Res
 router.get('/bank-statement/lines', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const limit = parseInt(String(req.query.limit || '50'), 10);
+    const status = req.query.status as any;
+    const where: any = {};
+    if (status) {
+      where.status = status;
+    }
     const lines = await prisma.bankStatementLine.findMany({
+      where,
       include: { statement: true },
       orderBy: { transactionDate: 'desc' },
       take: Math.min(limit, 200),
@@ -613,6 +631,39 @@ router.get('/freight/bills', async (_req: AuthenticatedRequest, res: Response): 
     res.json(bills);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/freight/upload', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const file = (req as any).file;
+    const { carrier, invoiceNumber, invoiceDate: rawDate, contentBase64, fileName: bodyFileName } = req.body || {};
+    const parsedCarrier = carrier === 'VELOCITY' ? 'VELOCITY' : 'DELHIVERY';
+    const invNum = String(invoiceNumber || `INV-${parsedCarrier}-${Date.now()}`).trim();
+    const invDate = rawDate ? new Date(rawDate) : new Date();
+
+    let rows: any[] = [];
+    if (file) {
+      const parsed = await readSpreadsheet(file.originalname, file.buffer);
+      rows = parsed[0]?.rows || [];
+    } else if (contentBase64 && bodyFileName) {
+      const parsed = await readSpreadsheet(bodyFileName, Buffer.from(contentBase64, 'base64'));
+      rows = parsed[0]?.rows || [];
+    } else if (Array.isArray(req.body?.rows)) {
+      rows = req.body.rows;
+    } else {
+      res.status(400).json({ error: 'Please upload a freight billing file (CSV or Excel) or JSON rows.' });
+      return;
+    }
+
+    const records = parsedCarrier === 'VELOCITY'
+      ? freightEngineService.parseVelocityChargesRows(rows, invNum, invDate)
+      : freightEngineService.parseDelhiveryChargesRows(rows, invNum, invDate);
+
+    const summary = await freightEngineService.processFreightInvoice(parsedCarrier, invNum, invDate, records);
+    res.json(summary);
+  } catch (error: any) {
+    res.status(400).json({ error: error.message });
   }
 });
 

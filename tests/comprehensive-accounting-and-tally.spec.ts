@@ -226,5 +226,61 @@ describe('Comprehensive Accounting, Ledger, GST & Tally Integration', () => {
       const escaped = tallyIntegrationService.escapeXml('Youthnic & Co. <Test> "Order"');
       expect(escaped).toBe('Youthnic &amp; Co. &lt;Test&gt; &quot;Order&quot;');
     });
+
+    it('generates standard Tally Ledger Masters XML with correct groups', () => {
+      const mastersXml = tallyIntegrationService.generateTallyMastersXml();
+      expect(mastersXml).toContain('<TALLYREQUEST>Import Data</TALLYREQUEST>');
+      expect(mastersXml).toContain('<REPORTNAME>All Masters</REPORTNAME>');
+      expect(mastersXml).toContain('<LEDGER NAME="Sales Revenue" ACTION="Create">');
+      expect(mastersXml).toContain('<PARENT>Sales Accounts</PARENT>');
+      expect(mastersXml).toContain('<LEDGER NAME="Output IGST" ACTION="Create">');
+      expect(mastersXml).toContain('<PARENT>Duties &amp; Taxes</PARENT>');
+      expect(mastersXml).toContain('<LEDGER NAME="HDFC Bank Current Account" ACTION="Create">');
+      expect(mastersXml).toContain('<PARENT>Bank Accounts</PARENT>');
+      expect(mastersXml).toContain('<LEDGER NAME="Forward Freight Expense" ACTION="Create">');
+      expect(mastersXml).toContain('<PARENT>Direct Expenses</PARENT>');
+    });
+  });
+
+  describe('7. Velocity Multi-Carrier Logistics Parsing', () => {
+    it('parses Velocity freight billing rows and maps forward and RTO legs', () => {
+      const rows = [
+        {
+          AWB: 'VEL123456789',
+          'Order ID': '#26YOU6184',
+          Courier: 'Bluedart',
+          'Forward Charges': '65.00',
+          'RTO Charges': '0.00',
+          'Weight Charges': '15.00',
+          'COD Charges': '0.00',
+          GST: '14.40',
+          'Total Amount': '94.40',
+        },
+        {
+          AWB: 'VEL987654321',
+          'Order ID': '#26YOU6216',
+          Courier: 'Ekart',
+          'Forward Charges': '0.00',
+          'RTO Charges': '90.00',
+          'Weight Charges': '0.00',
+          'COD Charges': '0.00',
+          GST: '16.20',
+          'Total Amount': '106.20',
+        },
+      ];
+
+      const records = freightEngineService.parseVelocityChargesRows(rows, 'INV-VEL-2026-11', new Date('2026-11-04'));
+      expect(records.length).toBe(2);
+      expect(records[0].awb).toBe('VEL123456789');
+      expect(records[0].carrier).toBe('VELOCITY');
+      expect(records[0].underlyingCourier).toBe('Bluedart');
+      expect(records[0].leg).toBe('FORWARD');
+      expect(records[0].totalBilled).toBe(94.40);
+
+      expect(records[1].awb).toBe('VEL987654321');
+      expect(records[1].leg).toBe('RTO');
+      expect(records[1].underlyingCourier).toBe('Ekart');
+      expect(records[1].totalBilled).toBe(106.20);
+    });
   });
 });

@@ -4,6 +4,7 @@ import {
   apiError,
   downloadAccountsReport,
   downloadTallyXml,
+  downloadTallyMastersXml,
   emailAccountsReport,
   getAccountsOverview,
   getStateMonthlyAccounting,
@@ -249,6 +250,12 @@ export default function AccountsPage() {
     onError: (error) => toast.toast('error', apiError(error)),
   })
 
+  const downloadMasters = useMutation({
+    mutationFn: () => downloadTallyMastersXml(),
+    onSuccess: () => toast.toast('success', 'Tally Masters XML downloaded successfully.'),
+    onError: (error) => toast.toast('error', apiError(error)),
+  })
+
   const email = useMutation({
     mutationFn: () => emailAccountsReport(month, recipients, ccRecipients),
     onSuccess: (data) => {
@@ -320,6 +327,10 @@ export default function AccountsPage() {
             <FormField label="Accounting month">
               <input type="month" value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} />
             </FormField>
+            <Button className="button-secondary" loading={downloadMasters.isPending} onClick={() => downloadMasters.mutate()}>
+              <Icon name="download" size={14} />
+              Tally Masters
+            </Button>
             <Button className="button-primary" loading={downloadXml.isPending} onClick={() => downloadXml.mutate()}>
               <Icon name="download" size={14} />
               TallyPrime XML
@@ -675,10 +686,16 @@ export default function AccountsPage() {
             eyebrow="TallyPrime Vouchers"
             title={`Balanced Double-Entry Vouchers (${month})`}
             action={
-              <Button className="button-primary button-small" onClick={() => downloadXml.mutate()}>
-                <Icon name="download" size={13} />
-                Export XML
-              </Button>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <Button className="button-secondary button-small" loading={downloadMasters.isPending} onClick={() => downloadMasters.mutate()}>
+                  <Icon name="download" size={13} />
+                  Export Masters XML
+                </Button>
+                <Button className="button-primary button-small" loading={downloadXml.isPending} onClick={() => downloadXml.mutate()}>
+                  <Icon name="download" size={13} />
+                  Export Vouchers XML
+                </Button>
+              </div>
             }
           />
           <div className="table-wrap">

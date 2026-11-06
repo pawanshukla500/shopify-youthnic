@@ -280,6 +280,49 @@ export class FreightEngineService {
       };
     }).filter((r) => r.totalBilled !== 0 && Boolean(r.awb));
   }
+
+  /**
+   * Helper to parse Velocity Multi-Carrier Shipping & Freight Report.
+   */
+  public parseVelocityChargesRows(rows: any[], invoiceNumber: string, invoiceDate: Date): FreightChargeRecord[] {
+    const period = ledgerService.toPeriod(invoiceDate);
+    return rows.map((r) => {
+      const awb = String(r['AWB'] || r['Waybill'] || r['Tracking No'] || r['waybill_number'] || '').trim();
+      const orderRef = String(r['Order ID'] || r['Order Number'] || r['Reference'] || '').trim();
+      const carrier = 'VELOCITY' as const;
+      const underlyingCourier = String(r['Courier'] || r['Partner'] || r['Carrier'] || 'Velocity').trim();
+
+      const forwardFreight = parseFloat(r['Forward Charges'] || r['Freight Charges'] || r['Base Freight'] || '0') || 0;
+      const rtoFreight = parseFloat(r['RTO Charges'] || r['rto_charges'] || '0') || 0;
+      const reverseFreight = parseFloat(r['Reverse Charges'] || r['qc_reverse_charges'] || '0') || 0;
+      const weightSurcharge = parseFloat(r['Weight Charges'] || r['weight_surcharge'] || '0') || 0;
+      const codFee = parseFloat(r['COD Charges'] || r['cod_handling'] || '0') || 0;
+      const gst = parseFloat(r['GST'] || r['Tax'] || '0') || 0;
+      const totalBilled = parseFloat(r['Total Amount'] || r['Total Billed'] || r['Net Billed'] || '0') ||
+        Math.round((forwardFreight + rtoFreight + reverseFreight + weightSurcharge + codFee + gst) * 100) / 100;
+
+      let leg: 'FORWARD' | 'RTO' | 'REVERSE' = 'FORWARD';
+      if (rtoFreight > 0) leg = 'RTO';
+      else if (reverseFreight > 0) leg = 'REVERSE';
+
+      return {
+        awb,
+        orderReference: orderRef || undefined,
+        carrier,
+        underlyingCourier,
+        leg,
+        baseFreight: forwardFreight || rtoFreight || reverseFreight,
+        weightSurcharge,
+        codFee,
+        gstAmount: gst,
+        totalBilled,
+        invoiceNumber,
+        invoiceDate,
+        period,
+        isWalletDeducted: true,
+      };
+    }).filter((r) => r.totalBilled !== 0 && Boolean(r.awb));
+  }
 }
 
 export const freightEngineService = new FreightEngineService();

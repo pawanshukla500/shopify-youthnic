@@ -1719,16 +1719,31 @@ export async function getJournalVouchers(period?: string, limit: number = 50): P
   return response.data
 }
 
-export async function downloadTallyXml(period?: string): Promise<void> {
+export async function downloadTallyXml(period?: string, includeMasters?: boolean): Promise<void> {
   const response = await api.get('/api/accounts/tally/xml', {
-    params: { period },
+    params: { period, includeMasters: includeMasters ? 'true' : undefined },
     responseType: 'blob',
   })
   const blob = new Blob([response.data], { type: 'application/xml' })
   const url = window.URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.setAttribute('download', `Youthnic-Tally-${period || 'latest'}.xml`)
+  link.setAttribute('download', `Youthnic-Tally-${period || 'latest'}${includeMasters ? '-with-masters' : ''}.xml`)
+  document.body.appendChild(link)
+  link.click()
+  link.parentNode?.removeChild(link)
+  window.URL.revokeObjectURL(url)
+}
+
+export async function downloadTallyMastersXml(): Promise<void> {
+  const response = await api.get('/api/accounts/tally/masters', {
+    responseType: 'blob',
+  })
+  const blob = new Blob([response.data], { type: 'application/xml' })
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.setAttribute('download', 'Youthnic-Tally-Masters.xml')
   document.body.appendChild(link)
   link.click()
   link.parentNode?.removeChild(link)
@@ -1745,8 +1760,22 @@ export async function closeMonthNow(period: string, isProvisional: boolean = fal
   return response.data
 }
 
-export async function getBankStatementLines(limit: number = 50): Promise<any[]> {
-  const response = await api.get('/api/accounts/bank-statement/lines', { params: { limit } })
+export async function getBankStatementLines(arg?: { status?: string; limit?: number } | number): Promise<any[]> {
+  const status = typeof arg === 'object' ? arg?.status : undefined
+  const limit = typeof arg === 'number' ? arg : (typeof arg === 'object' ? arg?.limit : 50)
+  const response = await api.get('/api/accounts/bank-statement/lines', { params: { status, limit } })
+  return response.data
+}
+
+export async function uploadFreightBill(payload: {
+  carrier: 'DELHIVERY' | 'VELOCITY'
+  invoiceNumber?: string
+  invoiceDate?: string
+  fileName?: string
+  contentBase64?: string
+  rows?: any[]
+}): Promise<any> {
+  const response = await api.post('/api/accounts/freight/upload', payload)
   return response.data
 }
 

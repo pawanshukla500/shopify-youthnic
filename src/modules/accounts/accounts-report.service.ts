@@ -1434,7 +1434,7 @@ export async function getStateMonthlyAccounting(
   const month = typeof monthOrCurrent === 'string' && monthOrCurrent ? monthOrCurrent : previousMonth(now);
   const { start, end, label } = monthRange(month);
 
-  const [orders, periodReturns, openingBalances, toRecipients, ccRecipients, sentStatus] = await Promise.all([
+  const [orders, periodReturns, openingBalances, toRecipients, ccRecipients, sentStatus, priorSettledOrders] = await Promise.all([
     prisma.order.findMany({
       where: { shopifyCreatedAt: { gte: start, lt: end } },
       include: { shipment: true, returns: true },
@@ -1458,9 +1458,17 @@ export async function getStateMonthlyAccounting(
     getReportRecipients(),
     getReportCcRecipients(),
     reportSentAt(month),
+    prisma.order.findMany({
+      where: {
+        shopifyCreatedAt: { lt: start },
+        paymentReceivedAt: { gte: start, lt: end },
+        paymentReceivedAmount: { gt: 0 },
+      },
+      include: { shipment: true },
+    }),
   ]);
 
-  const { states, totals } = buildStateAccountingSummary(orders, periodReturns, start, end, openingBalances);
+  const { states, totals } = buildStateAccountingSummary(orders, periodReturns, start, end, openingBalances, priorSettledOrders);
   const crossMonthReturnsCount = periodReturns.filter(
     (r) => r.order?.shopifyCreatedAt && new Date(r.order.shopifyCreatedAt) < start
   ).length;

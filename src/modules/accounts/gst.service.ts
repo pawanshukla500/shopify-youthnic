@@ -73,15 +73,17 @@ export function resolvePosCode(stateName?: string | null): { code: string; state
 export class GstService {
   /**
    * Determine effective GST rate for an order from Shopify tax lines or line items.
-   * In Indian apparel:
-   * - Ready-made garments / kurtis under ₹1,000 per piece: 5% GST
-   * - Garments over ₹1,000 per piece: 12% GST (or 18% for specific accessories)
-   * Falls back to Shopify order.taxLines if present.
+   * Prefer actual Shopify tax evidence. For apparel fallback only:
+   * before 22 Sep 2025: 5% up to ₹1,000 per piece; otherwise 12%.
+   * from 22 Sep 2025: 5% up to ₹2,500 per piece; otherwise 18%.
+   * Mixed-rate orders, missing supply dates and discounted prices need manual review.
    */
   public determineOrderGstRate(order: {
     taxLines?: any;
     totalAmount: number;
     totalTax?: number | null;
+    shopifyCreatedAt?: Date | string | null;
+    totalDiscounts?: number | null;
     items?: Array<{ price: number; quantity: number }>;
   }): number {
     // 1. Inspect Shopify taxLines JSON if populated
@@ -106,15 +108,31 @@ export class GstService {
       if (Math.abs(calculatedRate - 18) <= 2) return 18;
     }
 
-    // 3. Fallback based on item unit prices (Standard textile rule in India)
+    // 3. Apparel-only fallback when source taxes are absent. Never infer a mixed order's GST rate.
     if (order.items && order.items.length > 0) {
-      const allUnder1000 = order.items.every((it) => (it.price || 0) <= 1000);
-      if (allUnder1000) return 5;
-      return 12;
+      const supplyDate = order.shopifyCreatedAt ? new Date(order.shopifyCreatedAt) : null;
+      if (!supplyDate || Number.isNaN(supplyDate.getTime())) {
+        throw new Error('Missing supply date: GST rate cannot be determined without invoice tax evidence.');
+      }
+      if (order.totalDiscounts && order.totalDiscounts > 0) {
+        throw new Error('Discounted order without item-level tax evidence requires GST review.');
+      }
+      const isNewSlab = supplyDate >= new Date('2025-09-22T00:00:00+05:30');
+      const limit = isNewSlab ? 2500 : 1000;
+      const rates = new Set(order.items.map((item) => {
+        if (!Number.isFinite(item.price) || item.price < 0) {
+          throw new Error('Invalid unit sale value for GST calculation.');
+        }
+        return item.price <= limit ? 5 : (isNewSlab ? 18 : 12);
+      }));
+      if (rates.size !== 1) {
+        throw new Error('Mixed GST rates require item-wise invoice/credit-note postings.');
+      }
+      return [...rates][0];
     }
 
-    // Default rate for ethnic apparel catalog
-    return 5;
+    // Never invent a tax rate for orders without item prices or primary tax evidence.
+    throw new Error('Missing Shopify tax and product line evidence: manual GST review required.');
   }
 
   /**

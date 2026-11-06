@@ -120,6 +120,7 @@ model Order {
   emailLogs          EmailLog[]
   inboundEmails      InboundEmail[]
   journalEntries     JournalEntry[]
+  financialEvents    FinancialEvent[]
 
   @@index([status])
   @@index([shopifyUpdatedAt])
@@ -257,7 +258,8 @@ model Shipment {
   updatedAt DateTime @updatedAt
 
   // Relations
-  trackingLogs TrackingLog[]
+  trackingLogs   TrackingLog[]
+  FinancialEvent FinancialEvent[]
 
   @@index([status])
   @@index([waybillNumber])
@@ -377,6 +379,7 @@ model Return {
   accountTrailEvents AccountTrailEvent[]
   notifications      Notification[]
   JournalEntry       JournalEntry[]
+  FinancialEvent     FinancialEvent[]
 
   @@index([returnStatus])
   @@index([refundStatus])
@@ -788,7 +791,8 @@ model JournalEntry {
   createdAt        DateTime    @default(now())
   updatedAt        DateTime    @updatedAt
 
-  lines JournalLineItem[]
+  lines           JournalLineItem[]
+  financialEvents FinancialEvent[]
 
   @@index([voucherType, accountingPeriod])
   @@index([postingDate])
@@ -970,4 +974,50 @@ enum ClosingStatus {
   PROVISIONAL
   CLOSED
   REOPENED
+}
+
+model FinancialEvent {
+  id             Int           @id @default(autoincrement())
+  eventId        String        @unique // e.g. "ORD-26YOU5754-BOOKING", "RET-6-CONFIRMED", "CANC-123", "GW-SETTLE-BATCH-99"
+  orderId        Int?
+  order          Order?        @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  returnId       Int?
+  returnObj      Return?       @relation(fields: [returnId], references: [id], onDelete: SetNull)
+  shipmentId     Int?
+  shipment       Shipment?     @relation(fields: [shipmentId], references: [id], onDelete: SetNull)
+  journalEntryId Int?
+  journalEntry   JournalEntry? @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
+
+  eventType     String // BOOKING, CANCELLATION, RTO_INITIATED, RTO_DELIVERED, RETURN_INITIATED, RETURN_CONFIRMED, CUSTOMER_REFUND, EXCHANGE_CREATED, GATEWAY_FEE_DEDUCTED, COD_FEE_DEDUCTED, FREIGHT_SETTLEMENT_DEDUCTED, FREIGHT_EXPENSE_WALLET, FREIGHT_EXPENSE_BILLED, EXCHANGE_FREIGHT, BANK_RECEIPT_VERIFIED, BANK_RECEIPT_UNVERIFIED
+  period        String // "YYYY-MM" e.g. "2026-11" (Asia/Kolkata boundary)
+  effectiveDate DateTime // Operational occurrence date
+  postingDate   DateTime  @default(now()) // Accounting ledger date
+  bankValueDate DateTime?
+
+  customerState String? // e.g. "Maharashtra"
+  gstStateCode  String? // e.g. "27"
+  provider      String? // EASEBUZZ, GOKWIK, PHONEPE, DELHIVERY, VELOCITY, DIRECT
+
+  grossAmount Decimal @default(0) @db.Decimal(15, 2)
+  feeAmount   Decimal @default(0) @db.Decimal(15, 2)
+  taxAmount   Decimal @default(0) @db.Decimal(15, 2)
+  netAmount   Decimal @default(0) @db.Decimal(15, 2)
+
+  isSettlementDeduction Boolean @default(false)
+  verificationStatus    String  @default("UNVERIFIED") // UNVERIFIED, VERIFIED, DISPUTED
+  reference             String? // AWB, UTR, Invoice, Shopify Order Name
+  source                String? // SHOPIFY_SYNC, RETURN_SCAN, GATEWAY_REPORT, COURIER_INVOICE, BANK_STATEMENT, MANUAL
+  supersededByEventId   String? // Reversal or superseded event reference
+  note                  String?
+  metadata              Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([period, eventType])
+  @@index([effectiveDate])
+  @@index([customerState, period])
+  @@index([orderId])
+  @@index([returnId])
+  @@index([reference])
 }

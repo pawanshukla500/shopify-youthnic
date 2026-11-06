@@ -48,6 +48,7 @@ import {
 import resendService from '../modules/email/resend.service';
 import { correctImportUtr } from '../modules/accounts/settlement-utr.service';
 import { istDateRange } from '../modules/accounts/settlement-summary';
+import { financialEventService } from '../modules/accounts/financial-event.service';
 
 const router = Router();
 
@@ -684,4 +685,46 @@ router.post('/freight/upload', async (req: AuthenticatedRequest, res: Response):
   }
 });
 
+
+router.get('/settlement-bridge', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const month = typeof req.query.month === 'string' && req.query.month ? req.query.month : previousMonth();
+    const data = await financialEventService.getStateSettlementBridge(month);
+    res.json(data);
+  } catch (error: any) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+router.get('/monthly-expenses', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const month = typeof req.query.month === 'string' && req.query.month ? req.query.month : previousMonth();
+    const data = await financialEventService.buildMonthlyExpenseReport(month);
+    res.json(data);
+  } catch (error: any) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+router.get('/monthly-contribution', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const month = typeof req.query.month === 'string' && req.query.month ? req.query.month : previousMonth();
+    const data = await financialEventService.buildMonthlyContributionReport(month);
+    res.json(data);
+  } catch (error: any) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+router.post('/events/sync', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const { period } = req.body || {};
+    const result = await financialEventService.syncFinancialEvents(period);
+    res.json(result);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 export default router;
+

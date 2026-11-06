@@ -32,7 +32,8 @@ import { isDelhiveryCourier, isVelocityCourier } from '../../utils/courier';
 import { gstService } from './gst.service';
 import { tallyIntegrationService } from './tally-integration.service';
 
-const IST_OFFSET_MS = 5.5 * 3600 * 1000;
+export const IST_OFFSET_MS = 5.5 * 3600 * 1000;
+import { financialEventService } from './financial-event.service';
 
 export type PaymentRailName = 'Delhivery' | 'EaseBuzz' | 'PhonePe' | 'Velocity';
 
@@ -222,6 +223,31 @@ export interface StateAccountingRow {
   velocity: number;              // Velocity
   notes?: string;
   gstPendingCount?: number; // Source tax evidence unavailable: manual GST validation required
+
+  // ─── Settlement Bridge (Phase 2 & Phase 5) ───
+  openingOutstanding?: number;
+  grossOrderSales?: number;
+  cancelledOrders?: number;
+  rtoAdjustments?: number;
+  customerReturns?: number;
+  expectedGrossSettlement?: number;
+  gokwikEasebuzzFeeDeducted?: number;
+  phonepeFeeDeducted?: number;
+  codSettlementDeductions?: number;
+  netExpectedBankSettlement?: number;
+  verifiedPaymentReceived?: number;
+  outstandingSettlement?: number;
+
+  // ─── Operational & Expense Side Columns ───
+  estimatedFreightNotBilled?: number;
+  actualFreightExpenses?: number;
+  exchangeFreightExpenses?: number;
+  gatewayExpensesNotDeducted?: number;
+  pendingReturns?: number;
+  unverifiedReceipts?: number;
+  disputedDeductions?: number;
+  customerRefundPayable?: number;
+  varianceOverpayment?: number;
 }
 
 export interface StateAccountingTotals {
@@ -240,6 +266,29 @@ export interface StateAccountingTotals {
   easebuzz: number;
   phonepe: number;
   velocity: number;
+
+  openingOutstanding?: number;
+  grossOrderSales?: number;
+  cancelledOrders?: number;
+  rtoAdjustments?: number;
+  customerReturns?: number;
+  expectedGrossSettlement?: number;
+  gokwikEasebuzzFeeDeducted?: number;
+  phonepeFeeDeducted?: number;
+  codSettlementDeductions?: number;
+  netExpectedBankSettlement?: number;
+  verifiedPaymentReceived?: number;
+  outstandingSettlement?: number;
+
+  estimatedFreightNotBilled?: number;
+  actualFreightExpenses?: number;
+  exchangeFreightExpenses?: number;
+  gatewayExpensesNotDeducted?: number;
+  pendingReturns?: number;
+  unverifiedReceipts?: number;
+  disputedDeductions?: number;
+  customerRefundPayable?: number;
+  varianceOverpayment?: number;
 }
 
 export interface ReportOrderRow {
@@ -313,6 +362,9 @@ export interface ReportData {
   shipping: Array<Record<string, any>>;
   returns: Array<Record<string, any>>;
   summary: Array<{ label: string; value: number | string; note?: string }>;
+  cancellationsAndRtos?: Array<Record<string, any>>;
+  exchanges?: Array<Record<string, any>>;
+  settlementBridge?: any;
 }
 
 /**
@@ -325,11 +377,13 @@ export interface ReportData {
  */
 export function buildStateAccountingSummary(
   orders: any[],
-  periodReturns: any[],
+  periodReturns?: any[],
   start?: Date,
   end?: Date,
   openingBalances?: Map<string, number> | Record<string, number>,
-  periodSettledOrders?: any[]
+  periodSettledOrders?: any[],
+  periodCancelledOrders?: any[],
+  periodRtoOrders?: any[]
 ): { states: StateAccountingRow[]; totals: StateAccountingTotals } {
   const safeReturns = Array.isArray(periodReturns) ? periodReturns : [];
   const stateMap = new Map<string, StateAccountingRow>();
@@ -359,6 +413,29 @@ export function buildStateAccountingSummary(
         easebuzz: 0,
         phonepe: 0,
         velocity: 0,
+
+        openingOutstanding: money(openBal) || 0,
+        grossOrderSales: 0,
+        cancelledOrders: 0,
+        rtoAdjustments: 0,
+        customerReturns: 0,
+        expectedGrossSettlement: 0,
+        gokwikEasebuzzFeeDeducted: 0,
+        phonepeFeeDeducted: 0,
+        codSettlementDeductions: 0,
+        netExpectedBankSettlement: 0,
+        verifiedPaymentReceived: 0,
+        outstandingSettlement: 0,
+
+        estimatedFreightNotBilled: 0,
+        actualFreightExpenses: 0,
+        exchangeFreightExpenses: 0,
+        gatewayExpensesNotDeducted: 0,
+        pendingReturns: 0,
+        unverifiedReceipts: 0,
+        disputedDeductions: 0,
+        customerRefundPayable: 0,
+        varianceOverpayment: 0,
       });
     }
     return stateMap.get(clean)!;
@@ -374,13 +451,23 @@ export function buildStateAccountingSummary(
 
   // 1. Tally gross sales, GST and payments received for orders placed in this month
   for (const order of orders) {
+    const row = getRow(order.customerState);
+    const gross = order.totalAmount || 0;
+
+    // Track cancelled orders separately
     if (order.status === 'CANCELLED' && !order.paymentReceivedAmount) {
+      row.cancelledOrders = (row.cancelledOrders || 0) + gross;
       continue;
     }
-    const row = getRow(order.customerState);
+
     row.orderCount += 1;
-    const gross = order.totalAmount || 0;
     row.grossSales += gross;
+    row.grossOrderSales = (row.grossOrderSales || 0) + gross;
+
+    // Freight expenses tracking
+    if (order.actualShippingCost) {
+      row.actualFreightExpenses = (row.actualFreightExpenses || 0) + order.actualShippingCost;
+    }
 
     // Dynamic GST calculation (replacing hardcoded 18%)
     try {
@@ -388,7 +475,6 @@ export function buildStateAccountingSummary(
       row.taxableSales += tax.taxableAmount;
       row.gstAmount += tax.totalGst;
     } catch (err: any) {
-      // Read-only reports remain available but must not fabricate a GST rate.
       row.gstPendingCount = (row.gstPendingCount || 0) + 1;
       row.notes = `GST verification required for ${row.gstPendingCount} order(s): ${err.message}`;
     }
@@ -404,10 +490,23 @@ export function buildStateAccountingSummary(
       const rail = resolvePaymentRailName(order);
       const rec = order.paymentReceivedAmount || 0;
       row.paymentReceived += rec;
+      row.verifiedPaymentReceived = (row.verifiedPaymentReceived || 0) + rec;
+
       if (rail === 'Delhivery') row.delhivery += rec;
       else if (rail === 'EaseBuzz') row.easebuzz += rec;
       else if (rail === 'PhonePe') row.phonepe += rec;
       else if (rail === 'Velocity') row.velocity += rec;
+
+      // Deduct gateway/COD fees for Settlement Bridge
+      if (order.gatewayFee && order.gatewayFee > 0) {
+        if (rail === 'PhonePe') {
+          row.phonepeFeeDeducted = (row.phonepeFeeDeducted || 0) + order.gatewayFee;
+        } else if (rail === 'EaseBuzz') {
+          row.gokwikEasebuzzFeeDeducted = (row.gokwikEasebuzzFeeDeducted || 0) + order.gatewayFee;
+        } else {
+          row.codSettlementDeductions = (row.codSettlementDeductions || 0) + order.gatewayFee;
+        }
+      }
     }
   }
 
@@ -419,10 +518,41 @@ export function buildStateAccountingSummary(
         const row = getRow(order.customerState);
         const rail = resolvePaymentRailName(order);
         row.paymentReceived += rec;
+        row.verifiedPaymentReceived = (row.verifiedPaymentReceived || 0) + rec;
+
         if (rail === 'Delhivery') row.delhivery += rec;
         else if (rail === 'EaseBuzz') row.easebuzz += rec;
         else if (rail === 'PhonePe') row.phonepe += rec;
         else if (rail === 'Velocity') row.velocity += rec;
+
+        if (order.gatewayFee && order.gatewayFee > 0) {
+          if (rail === 'PhonePe') {
+            row.phonepeFeeDeducted = (row.phonepeFeeDeducted || 0) + order.gatewayFee;
+          } else if (rail === 'EaseBuzz') {
+            row.gokwikEasebuzzFeeDeducted = (row.gokwikEasebuzzFeeDeducted || 0) + order.gatewayFee;
+          } else {
+            row.codSettlementDeductions = (row.codSettlementDeductions || 0) + order.gatewayFee;
+          }
+        }
+      }
+    }
+  }
+
+  // 1c. Tally cancellations occurring in this period from prior-period bookings
+  if (Array.isArray(periodCancelledOrders)) {
+    for (const order of periodCancelledOrders) {
+      const row = getRow(order.customerState);
+      row.cancelledOrders = (row.cancelledOrders || 0) + (order.totalAmount || 0);
+    }
+  }
+
+  // 1d. Tally RTO movements occurring in this period
+  if (Array.isArray(periodRtoOrders)) {
+    for (const shipmentOrOrder of periodRtoOrders) {
+      const order = shipmentOrOrder.order || shipmentOrOrder;
+      if (order.status !== 'CANCELLED') {
+        const row = getRow(order.customerState);
+        row.rtoAdjustments = (row.rtoAdjustments || 0) + (order.totalAmount || 0);
       }
     }
   }
@@ -434,25 +564,66 @@ export function buildStateAccountingSummary(
     const retAmt = (ret.refundAmount && ret.refundAmount > 0)
       ? ret.refundAmount
       : (ret.order?.totalAmount || 0);
+
     row.returnsDeducted += retAmt;
+    row.customerReturns = (row.customerReturns || 0) + retAmt;
+
+    // Track exchange freight
+    if (ret.isExchange && ret.shippingCharge) {
+      row.exchangeFreightExpenses = (row.exchangeFreightExpenses || 0) + ret.shippingCharge;
+    }
   }
 
-  // 3. Compute taxableSales, gstAmount, netSales, periodMovement, closingBalance (outstanding) per state
+  // 3. Compute settlement bridge & classic closing balance per state
   const states: StateAccountingRow[] = [];
   for (const row of stateMap.values()) {
     row.grossSales = money(row.grossSales) || 0;
+    row.grossOrderSales = row.grossSales;
     row.taxableSales = money(row.taxableSales) || 0;
     row.gstAmount = money(row.gstAmount) || 0;
-    row.returnsDeducted = money(row.returnsDeducted) || 0;
+
+    row.cancelledOrders = money(row.cancelledOrders || 0) || 0;
+    row.rtoAdjustments = money(row.rtoAdjustments || 0) || 0;
+    row.customerReturns = money(row.customerReturns || row.returnsDeducted || 0) || 0;
+    row.returnsDeducted = row.customerReturns;
     row.netSales = money(row.grossSales - row.returnsDeducted) || 0;
-    row.paymentReceived = money(row.paymentReceived) || 0;
+
+    // Classic Ledger formula (Opening + Gross - Returns - Received)
     row.periodMovement = money(row.grossSales - row.returnsDeducted - row.paymentReceived) || 0;
     row.closingBalance = money(row.openingBalance + row.periodMovement) || 0;
     row.outstanding = row.closingBalance;
+
+    // Settlement Bridge Formula (Phase 2 & Phase 5)
+    row.openingOutstanding = row.openingBalance;
+    row.expectedGrossSettlement = money(
+      row.openingBalance + row.grossSales - row.cancelledOrders - row.rtoAdjustments - row.customerReturns
+    ) || 0;
+
+    row.gokwikEasebuzzFeeDeducted = money(row.gokwikEasebuzzFeeDeducted || 0) || 0;
+    row.phonepeFeeDeducted = money(row.phonepeFeeDeducted || 0) || 0;
+    row.codSettlementDeductions = money(row.codSettlementDeductions || 0) || 0;
+
+    row.netExpectedBankSettlement = money(
+      row.expectedGrossSettlement -
+      row.gokwikEasebuzzFeeDeducted -
+      row.phonepeFeeDeducted -
+      row.codSettlementDeductions
+    ) || 0;
+
+    row.paymentReceived = money(row.paymentReceived) || 0;
+    row.verifiedPaymentReceived = row.paymentReceived;
+
+    row.outstandingSettlement = money(
+      row.netExpectedBankSettlement - row.verifiedPaymentReceived
+    ) || 0;
+
     row.delhivery = money(row.delhivery) || 0;
     row.easebuzz = money(row.easebuzz) || 0;
     row.phonepe = money(row.phonepe) || 0;
     row.velocity = money(row.velocity) || 0;
+    row.actualFreightExpenses = money(row.actualFreightExpenses || 0) || 0;
+    row.exchangeFreightExpenses = money(row.exchangeFreightExpenses || 0) || 0;
+
     states.push(row);
   }
 
@@ -475,10 +646,36 @@ export function buildStateAccountingSummary(
     easebuzz: sum(states.map((s) => s.easebuzz)),
     phonepe: sum(states.map((s) => s.phonepe)),
     velocity: sum(states.map((s) => s.velocity)),
+
+    openingOutstanding: sum(states.map((s) => s.openingOutstanding || 0)),
+    grossOrderSales: sum(states.map((s) => s.grossOrderSales || 0)),
+    cancelledOrders: sum(states.map((s) => s.cancelledOrders || 0)),
+    rtoAdjustments: sum(states.map((s) => s.rtoAdjustments || 0)),
+    customerReturns: sum(states.map((s) => s.customerReturns || 0)),
+    expectedGrossSettlement: sum(states.map((s) => s.expectedGrossSettlement || 0)),
+    gokwikEasebuzzFeeDeducted: sum(states.map((s) => s.gokwikEasebuzzFeeDeducted || 0)),
+    phonepeFeeDeducted: sum(states.map((s) => s.phonepeFeeDeducted || 0)),
+    codSettlementDeductions: sum(states.map((s) => s.codSettlementDeductions || 0)),
+    netExpectedBankSettlement: sum(states.map((s) => s.netExpectedBankSettlement || 0)),
+    verifiedPaymentReceived: sum(states.map((s) => s.verifiedPaymentReceived || 0)),
+    outstandingSettlement: sum(states.map((s) => s.outstandingSettlement || 0)),
+
+    estimatedFreightNotBilled: sum(states.map((s) => s.estimatedFreightNotBilled || 0)),
+    actualFreightExpenses: sum(states.map((s) => s.actualFreightExpenses || 0)),
+    exchangeFreightExpenses: sum(states.map((s) => s.exchangeFreightExpenses || 0)),
+    gatewayExpensesNotDeducted: sum(states.map((s) => s.gatewayExpensesNotDeducted || 0)),
+    pendingReturns: sum(states.map((s) => s.pendingReturns || 0)),
+    unverifiedReceipts: sum(states.map((s) => s.unverifiedReceipts || 0)),
+    disputedDeductions: sum(states.map((s) => s.disputedDeductions || 0)),
+    customerRefundPayable: sum(states.map((s) => s.customerRefundPayable || 0)),
+    varianceOverpayment: sum(states.map((s) => s.varianceOverpayment || 0)),
   };
 
   return { states, totals };
 }
+
+/** Alias for buildStateAccountingSummary for matrix callers */
+export const buildStateAccountingMatrix = buildStateAccountingSummary;
 
 /** Build every row of the report from orders and period returns. */
 export function buildReportData(
@@ -487,7 +684,10 @@ export function buildReportData(
   periodReturnsOrNow?: any[] | Date,
   maybeNowOrOpening?: Date | Map<string, number> | Record<string, number>,
   maybeOpeningBalances?: Map<string, number> | Record<string, number>,
-  maybePriorSettledOrders?: any[]
+  maybePriorSettledOrders?: any[],
+  periodCancelledOrders?: any[],
+  periodRtoOrders?: any[],
+  exchangesData?: any[]
 ): ReportData {
   let periodReturns: any[] = [];
   let now: Date = new Date();
@@ -527,7 +727,9 @@ export function buildReportData(
     periodStart,
     periodEnd,
     openingBalances,
-    maybePriorSettledOrders
+    maybePriorSettledOrders,
+    periodCancelledOrders,
+    periodRtoOrders
   );
 
   const rows: ReportOrderRow[] = [];
@@ -766,6 +968,59 @@ export function buildReportData(
     { label: 'Refunds (₹)', value: sum(rows.map((r) => r.refundAmount)) },
   ];
 
+  // Build cancellation & RTO details
+  const cancellationsAndRtos: Array<Record<string, any>> = [];
+  if (Array.isArray(periodCancelledOrders)) {
+    for (const o of periodCancelledOrders) {
+      cancellationsAndRtos.push({
+        orderNo: o.shopifyOrderName || `#Order-${o.id}`,
+        type: 'Cancellation',
+        eventDate: o.cancelledAt ? istDay(o.cancelledAt) : istDay(o.shopifyCreatedAt),
+        customer: o.customerName || 'Customer',
+        state: o.customerState || 'Unspecified',
+        amount: money(o.totalAmount) || 0,
+        rail: resolvePaymentRailName(o),
+        awb: o.shipment?.waybillNumber || '',
+        reason: o.cancelReason || 'Customer cancelled',
+      });
+    }
+  }
+  if (Array.isArray(periodRtoOrders)) {
+    for (const rto of periodRtoOrders) {
+      const o = rto.order || rto;
+      cancellationsAndRtos.push({
+        orderNo: o.shopifyOrderName || `#Order-${o.id}`,
+        type: 'RTO Adjustment',
+        eventDate: rto.rtoDeliveredAt ? istDay(rto.rtoDeliveredAt) : istDay(rto.updatedAt || o.shopifyCreatedAt),
+        customer: o.customerName || 'Customer',
+        state: o.customerState || 'Unspecified',
+        amount: money(o.totalAmount) || 0,
+        rail: resolvePaymentRailName(o),
+        awb: rto.waybillNumber || o.shipment?.waybillNumber || '',
+        reason: rto.rtoReason || 'Undelivered / Returned to Origin',
+      });
+    }
+  }
+
+  // Build exchange freight register
+  const exchanges: Array<Record<string, any>> = [];
+  const exchangeReturns = (Array.isArray(exchangesData) ? exchangesData : periodReturns).filter((r: any) => r.isExchange);
+  for (const ex of exchangeReturns) {
+    const origOrder = ex.order;
+    exchanges.push({
+      orderNo: origOrder?.shopifyOrderName || `#Order-${ex.orderId}`,
+      state: origOrder?.customerState || 'Unspecified',
+      returnAwb: ex.returnWaybillNumber || '',
+      reverseFreight: money(ex.shippingCharge) || 0,
+      replacementOrderNo: ex.exchangeOrderName || '',
+      replacementAwb: ex.exchangeWaybillNumber || '',
+      forwardFreight: money(ex.exchangeShippingCharge) || 0,
+      totalFreight: money((ex.shippingCharge || 0) + (ex.exchangeShippingCharge || 0)) || 0,
+      netNewSales: 0.00, // Exchange replacements are zero new sales
+      attributedState: origOrder?.customerState || 'Unspecified',
+    });
+  }
+
   return {
     month: monthOrLabel,
     label,
@@ -779,6 +1034,8 @@ export function buildReportData(
     shipping,
     returns: returnRows,
     summary,
+    cancellationsAndRtos,
+    exchanges,
   };
 }
 
@@ -1265,6 +1522,176 @@ export async function renderWorkbook(data: ReportData): Promise<Buffer> {
     'totalAmount',
   ]);
 
+  // ═════════════════════════════════════════════════════════════════════════════
+  // Sheet: State Settlement Bridge (Phase 2 & Phase 5)
+  // ═════════════════════════════════════════════════════════════════════════════
+  if (data.settlementBridge) {
+  const bridgeSheet = workbook.addWorksheet('State Settlement Bridge', {
+    views: [{ showGridLines: true, state: 'frozen', ySplit: 5 }],
+  });
+
+  bridgeSheet.columns = [
+    { width: 22 }, // A: State
+    { width: 12 }, // B: GST POS
+    { width: 14 }, // C: Orders Count
+    { width: 18 }, // D: Opening Outstanding (B/F) (₹)
+    { width: 18 }, // E: Gross Order Sales (₹)
+    { width: 18 }, // F: Cancelled Orders (₹)
+    { width: 18 }, // G: RTO Adjustments (₹)
+    { width: 18 }, // H: Customer Returns (₹)
+    { width: 20 }, // I: Expected Gross Settlement (₹)
+    { width: 18 }, // J: GoKwik/Easebuzz Fee (₹)
+    { width: 18 }, // K: PhonePe Fee (₹)
+    { width: 18 }, // L: COD Deductions (₹)
+    { width: 20 }, // M: Net Expected Settlement (₹)
+    { width: 20 }, // N: Verified Received (₹)
+    { width: 20 }, // O: Outstanding Settlement (C/F) (₹)
+    { width: 34 }, // P: Guidance
+  ];
+
+  const br1 = bridgeSheet.addRow(['Youthnic · State-Wise Settlement Bridge & Bank Reconciliation']);
+  br1.font = { bold: true, size: 14, color: { argb: 'FF0F172A' } };
+
+  const br2 = bridgeSheet.addRow([
+    `Reporting Month: ${data.label} (IST) · Generated: ${data.generatedAt.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`
+  ]);
+  br2.font = { italic: true, size: 11, color: { argb: 'FF475569' } };
+
+  const br3 = bridgeSheet.addRow([
+    'Bridge Formula: Expected Gross = Opening + Gross - Cancel - RTO - Returns | Net Expected = Expected Gross - Fees | Outstanding = Net Expected - Verified Receipts'
+  ]);
+  br3.font = { bold: true, size: 11, color: { argb: 'FF1E293B' } };
+
+  bridgeSheet.addRow([]);
+
+  const brHeader = bridgeSheet.addRow([
+    'State',
+    'GST POS',
+    'Orders Count',
+    'Opening Outstanding (B/F) (₹)',
+    'Gross Order Sales (₹)',
+    'Cancelled Orders (₹)',
+    'RTO Adjustments (₹)',
+    'Customer Returns (₹)',
+    'Expected Gross Settlement (₹)',
+    'GoKwik/Easebuzz Fee (₹)',
+    'PhonePe Fee (₹)',
+    'COD Deductions (₹)',
+    'Net Expected Settlement (₹)',
+    'Verified Received (₹)',
+    'Outstanding Settlement (C/F) (₹)',
+    'Reconciliation Guidance',
+  ]);
+  brHeader.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+  brHeader.fill = HEADER_FILL;
+  brHeader.height = 30;
+  brHeader.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+
+  const brStartRow = 6;
+  data.stateSummary.forEach((row) => {
+    const outSettlement = row.outstandingSettlement !== undefined ? row.outstandingSettlement : (row.closingBalance !== undefined ? row.closingBalance : row.outstanding);
+    const r = bridgeSheet.addRow([
+      row.state,
+      row.gstStateCode || getGstStateCode(row.state),
+      row.orderCount,
+      row.openingOutstanding || row.openingBalance || 0,
+      row.grossOrderSales || row.grossSales || 0,
+      row.cancelledOrders || 0,
+      row.rtoAdjustments || 0,
+      row.customerReturns || row.returnsDeducted || 0,
+      row.expectedGrossSettlement || 0,
+      row.gokwikEasebuzzFeeDeducted || 0,
+      row.phonepeFeeDeducted || 0,
+      row.codSettlementDeductions || 0,
+      row.netExpectedBankSettlement || 0,
+      row.verifiedPaymentReceived || row.paymentReceived || 0,
+      outSettlement,
+      Math.abs(outSettlement) <= 0.05 ? 'Fully Reconciled' : `₹${outSettlement.toFixed(2)} to reconcile`,
+    ]);
+    [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15].forEach((colIdx) => {
+      r.getCell(colIdx).numFmt = MONEY_FORMAT;
+    });
+    r.getCell(3).numFmt = '#,##0';
+    r.getCell(1).font = { bold: true };
+    r.getCell(2).alignment = { horizontal: 'center' };
+  });
+
+  const brHasRows = data.stateSummary.length > 0;
+  const brEndRow = brStartRow + data.stateSummary.length - 1;
+  const brTotRow = bridgeSheet.addRow([
+    'TOTAL (NATIONAL SETTLEMENT BRIDGE)',
+    'ALL',
+    brHasRows ? { formula: `SUM(C${brStartRow}:C${brEndRow})` } : 0,
+    brHasRows ? { formula: `SUM(D${brStartRow}:D${brEndRow})` } : 0,
+    brHasRows ? { formula: `SUM(E${brStartRow}:E${brEndRow})` } : 0,
+    brHasRows ? { formula: `SUM(F${brStartRow}:F${brEndRow})` } : 0,
+    brHasRows ? { formula: `SUM(G${brStartRow}:G${brEndRow})` } : 0,
+    brHasRows ? { formula: `SUM(H${brStartRow}:H${brEndRow})` } : 0,
+    brHasRows ? { formula: `SUM(I${brStartRow}:I${brEndRow})` } : 0,
+    brHasRows ? { formula: `SUM(J${brStartRow}:J${brEndRow})` } : 0,
+    brHasRows ? { formula: `SUM(K${brStartRow}:K${brEndRow})` } : 0,
+    brHasRows ? { formula: `SUM(L${brStartRow}:L${brEndRow})` } : 0,
+    brHasRows ? { formula: `SUM(M${brStartRow}:M${brEndRow})` } : 0,
+    brHasRows ? { formula: `SUM(N${brStartRow}:N${brEndRow})` } : 0,
+    brHasRows ? { formula: `SUM(O${brStartRow}:O${brEndRow})` } : 0,
+    'National Settlement Balance',
+  ]);
+  brTotRow.font = { bold: true, size: 11 };
+  brTotRow.fill = TOTAL_FILL;
+  brTotRow.border = { top: { style: 'thin' }, bottom: { style: 'double' } };
+  [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15].forEach((colIdx) => {
+    brTotRow.getCell(colIdx).numFmt = MONEY_FORMAT;
+  });
+  brTotRow.getCell(3).numFmt = '#,##0';
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════════
+  // Sheet: Cancellation & RTO Details
+  // ═════════════════════════════════════════════════════════════════════════════
+  if (data.cancellationsAndRtos && data.cancellationsAndRtos.length) {
+    addTable(
+      workbook,
+      'Cancellation & RTO Details',
+      [
+        { header: 'Order No', key: 'orderNo', width: 14 },
+        { header: 'Event Type', key: 'type', width: 16 },
+        { header: 'Effective Date', key: 'eventDate', width: 14, type: 'date' },
+        { header: 'Customer', key: 'customer', width: 22 },
+        { header: 'Customer State', key: 'state', width: 16 },
+        { header: 'Amount (₹)', key: 'amount', width: 14, type: 'money' },
+        { header: 'Courier Rail', key: 'rail', width: 14 },
+        { header: 'AWB', key: 'awb', width: 18 },
+        { header: 'Reason / Status', key: 'reason', width: 28 },
+      ],
+      data.cancellationsAndRtos,
+      ['amount']
+    );
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════════
+  // Sheet: Exchange Freight Register
+  // ═════════════════════════════════════════════════════════════════════════════
+  if (data.exchanges && data.exchanges.length) {
+    addTable(
+      workbook,
+      'Exchange Freight Register',
+      [
+        { header: 'Original Order No', key: 'orderNo', width: 16 },
+        { header: 'Original Customer State', key: 'state', width: 18 },
+        { header: 'Return AWB (Reverse Leg)', key: 'returnAwb', width: 18 },
+        { header: 'Reverse Shipping Cost (₹)', key: 'reverseFreight', width: 16, type: 'money' },
+        { header: 'Replacement Order No', key: 'replacementOrderNo', width: 18 },
+        { header: 'Replacement Forward AWB', key: 'replacementAwb', width: 18 },
+        { header: 'Replacement Forward Cost (₹)', key: 'forwardFreight', width: 16, type: 'money' },
+        { header: 'Total Exchange Shipping (₹)', key: 'totalFreight', width: 16, type: 'money' },
+        { header: 'Net New Sales (₹)', key: 'netNewSales', width: 14, type: 'money' },
+        { header: 'Attributed State', key: 'attributedState', width: 18 },
+      ],
+      data.exchanges,
+      ['reverseFreight', 'forwardFreight', 'totalFreight', 'netNewSales']
+    );
+  }
+
   return Buffer.from(await workbook.xlsx.writeBuffer());
 }
 
@@ -1278,6 +1705,31 @@ export async function computeOpeningBalances(beforeDate: Date): Promise<Map<stri
     const raw = (st || '').trim();
     const clean = raw.length > 0 ? raw : 'Unspecified';
     map.set(clean, money((map.get(clean) || 0) + delta) || 0);
+  }
+
+  const eventCount = prisma.financialEvent?.count
+    ? await prisma.financialEvent.count({
+        where: { effectiveDate: { lt: beforeDate } },
+      }).catch(() => 0)
+    : 0;
+
+  if (eventCount > 0) {
+    const events = await prisma.financialEvent.findMany({
+      where: { effectiveDate: { lt: beforeDate } },
+      select: { customerState: true, grossAmount: true, netAmount: true, eventType: true },
+    });
+    for (const e of events) {
+      const gross = Number(e.grossAmount) || 0;
+      const net = Number(e.netAmount) || 0;
+      if (e.eventType === 'BOOKING') {
+        add(e.customerState, gross);
+      } else if (e.eventType === 'CANCELLATION' || e.eventType === 'RTO_DELIVERED' || e.eventType === 'CUSTOMER_REFUND' || e.eventType === 'RETURN_CONFIRMED') {
+        add(e.customerState, -gross);
+      } else if (e.eventType === 'BANK_RECEIPT_VERIFIED') {
+        add(e.customerState, -net);
+      }
+    }
+    return map;
   }
 
   const [priorOrders, priorReturns] = await Promise.all([
@@ -1426,6 +1878,9 @@ export async function getStateMonthlyAccounting(
   carryForwardRule: string;
   totals: StateAccountingTotals;
   states: StateAccountingRow[];
+  settlementBridge?: any;
+  monthlyExpenses?: any;
+  monthlyContribution?: any;
   crossMonthReturnsCount: number;
   recipients: { to: string[]; cc: string[] };
   reportDay: number;
@@ -1473,6 +1928,19 @@ export async function getStateMonthlyAccounting(
     (r) => r.order?.shopifyCreatedAt && new Date(r.order.shopifyCreatedAt) < start
   ).length;
 
+  let settlementBridge: any = null;
+  let monthlyExpenses: any = null;
+  let monthlyContribution: any = null;
+  try {
+    [settlementBridge, monthlyExpenses, monthlyContribution] = await Promise.all([
+      financialEventService.getStateSettlementBridge(month, openingBalances),
+      financialEventService.buildMonthlyExpenseReport(month),
+      financialEventService.buildMonthlyContributionReport(month),
+    ]);
+  } catch (err: any) {
+    logger.warn('Error loading financial event reports', { month, error: err.message });
+  }
+
   return {
     month,
     label,
@@ -1483,6 +1951,9 @@ export async function getStateMonthlyAccounting(
       'Prior month closing balances automatically carry forward as current month opening balance for 100% error-free Tally ERP ledger alignment.',
     totals,
     states,
+    settlementBridge,
+    monthlyExpenses,
+    monthlyContribution,
     crossMonthReturnsCount,
     recipients: { to: toRecipients, cc: ccRecipients },
     reportDay: config.accounts.reportDayOfMonth,

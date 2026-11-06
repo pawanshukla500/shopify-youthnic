@@ -1605,6 +1605,22 @@ export interface StateAccountingRow {
   phonepe: number
   velocity: number
   notes?: string
+
+  openingOutstanding?: number
+  grossOrderSales?: number
+  cancelledOrders?: number
+  rtoAdjustments?: number
+  customerReturns?: number
+  expectedGrossSettlement?: number
+  gokwikEasebuzzFeeDeducted?: number
+  phonepeFeeDeducted?: number
+  codSettlementDeductions?: number
+  netExpectedBankSettlement?: number
+  verifiedPaymentReceived?: number
+  outstandingSettlement?: number
+  actualFreightExpenses?: number
+  exchangeFreightExpenses?: number
+  estimatedFreightNotBilled?: number
 }
 
 export interface StateAccountingTotals {
@@ -1623,6 +1639,22 @@ export interface StateAccountingTotals {
   easebuzz: number
   phonepe: number
   velocity: number
+
+  openingOutstanding?: number
+  grossOrderSales?: number
+  cancelledOrders?: number
+  rtoAdjustments?: number
+  customerReturns?: number
+  expectedGrossSettlement?: number
+  gokwikEasebuzzFeeDeducted?: number
+  phonepeFeeDeducted?: number
+  codSettlementDeductions?: number
+  netExpectedBankSettlement?: number
+  verifiedPaymentReceived?: number
+  outstandingSettlement?: number
+  actualFreightExpenses?: number
+  exchangeFreightExpenses?: number
+  estimatedFreightNotBilled?: number
 }
 
 export interface StateMonthlyAccountingData {
@@ -1633,10 +1665,34 @@ export interface StateMonthlyAccountingData {
   carryForwardRule?: string
   totals: StateAccountingTotals
   states: StateAccountingRow[]
+  settlementBridge?: any
+  monthlyExpenses?: any
+  monthlyContribution?: any
   crossMonthReturnsCount: number
   recipients: { to: string[]; cc: string[] }
   reportDay: number
   reportSentAt: { sentAt: string; to: string[] } | null
+}
+
+
+export async function getSettlementBridge(month?: string): Promise<any> {
+  const response = await api.get('/api/accounts/settlement-bridge', { params: { month } });
+  return response.data;
+}
+
+export async function getMonthlyExpenses(month?: string): Promise<any> {
+  const response = await api.get('/api/accounts/monthly-expenses', { params: { month } });
+  return response.data;
+}
+
+export async function getMonthlyContribution(month?: string): Promise<any> {
+  const response = await api.get('/api/accounts/monthly-contribution', { params: { month } });
+  return response.data;
+}
+
+export async function syncFinancialEvents(period?: string): Promise<any> {
+  const response = await api.post('/api/accounts/events/sync', { period });
+  return response.data;
 }
 
 export async function getStateMonthlyAccounting(month?: string): Promise<StateMonthlyAccountingData> {

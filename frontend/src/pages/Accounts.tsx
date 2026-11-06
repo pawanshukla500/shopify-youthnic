@@ -170,6 +170,8 @@ export default function AccountsPage() {
   const queryClient = useQueryClient()
   const [month, setMonth] = useState(defaultMonth)
   const [activeTab, setActiveTab] = useState<AccountsTab>('matrix')
+  const [matrixView, setMatrixView] = useState<'bridge' | 'ledger' | 'expenses' | 'contribution'>('bridge')
+  const [stateFilter, setStateFilter] = useState<string>('')
 
   const overview = useQuery({
     queryKey: ['accounts-overview', month],
@@ -392,60 +394,298 @@ export default function AccountsPage() {
       {(overview.isLoading || stateAccounting.isLoading) && <LoadingState label="Loading accounting ledger…" />}
       {(overview.isError || stateAccounting.isError) && <ErrorBox message={apiError(overview.error || stateAccounting.error)} />}
 
-      {/* TAB 1: State-Wise Matrix */}
+      {/* TAB 1: State-Wise Matrix & Settlement Bridge */}
       {activeTab === 'matrix' && stateData && (
         <Panel className="table-panel" style={{ marginBottom: '20px', border: '1px solid var(--accent, #3b82f6)' }}>
-          <PanelHeading
-            eyebrow="Tally ERP Ledger Matrix with Carry Forward & Dynamic GST"
-            title={`State-Wise Sales, Returns & Settlement (${stateData.label})`}
-          />
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>State</th>
-                  <th style={{ textAlign: 'center' }}>GST POS</th>
-                  <th style={{ textAlign: 'center' }}>Orders</th>
-                  <th style={{ textAlign: 'right' }}>Opening (B/F)</th>
-                  <th style={{ textAlign: 'right' }}>Gross Sales</th>
-                  <th style={{ textAlign: 'right' }}>Taxable</th>
-                  <th style={{ textAlign: 'right' }}>Output GST</th>
-                  <th style={{ textAlign: 'right' }}>Returns</th>
-                  <th style={{ textAlign: 'right' }}>Net Sales</th>
-                  <th style={{ textAlign: 'right' }}>Payment Received</th>
-                  <th style={{ textAlign: 'right' }}>Closing (C/F)</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {stateData.states.map((s) => {
-                  const closing = s.closingBalance !== undefined ? s.closingBalance : s.outstanding
-                  return (
-                    <tr key={s.state}>
-                      <td><strong>{s.state}</strong></td>
-                      <td style={{ textAlign: 'center', fontSize: '12px', color: 'var(--muted)' }}>{s.gstStateCode || '—'}</td>
-                      <td style={{ textAlign: 'center' }}>{s.orderCount}</td>
-                      <td className="amount-cell" style={{ color: 'var(--muted)' }}>{formatMoney(s.openingBalance || 0)}</td>
-                      <td className="amount-cell">{formatMoney(s.grossSales)}</td>
-                      <td className="amount-cell">{formatMoney(s.taxableSales || 0)}</td>
-                      <td className="amount-cell">{formatMoney(s.gstAmount || 0)}</td>
-                      <td className="amount-cell" style={{ color: s.returnsDeducted > 0 ? '#dc2626' : 'inherit' }}>
-                        {s.returnsDeducted > 0 ? `-${formatMoney(s.returnsDeducted)}` : '₹0.00'}
-                      </td>
-                      <td className="amount-cell" style={{ fontWeight: 700 }}>{formatMoney(s.netSales)}</td>
-                      <td className="amount-cell" style={{ color: '#16a34a' }}>{formatMoney(s.paymentReceived)}</td>
-                      <td className="amount-cell" style={{ fontWeight: 700, color: closing > 0 ? '#b91c1c' : '#15803d' }}>
-                        {formatMoney(closing)}
-                      </td>
-                      <td style={{ fontSize: '12px' }}>
-                        {Math.abs(closing) <= 0.05 ? <span style={{ color: '#15803d', fontWeight: 600 }}>Settled</span> : <span style={{ color: '#b91c1c' }}>Carried Fwd</span>}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderBottom: '1px solid var(--border)', flexWrap: 'wrap', gap: '12px' }}>
+            <div>
+              <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', fontWeight: 600 }}>
+                Reconciliation & Financial Operations ({stateData.label})
+              </div>
+              <h3 style={{ margin: '4px 0 0', fontSize: '18px', fontWeight: 700, color: 'var(--ink)' }}>
+                {matrixView === 'bridge' && 'State-Wise Settlement Bridge (Actual Bank & Payout Reconcile)'}
+                {matrixView === 'ledger' && 'State-Wise Tally Ledger Matrix (GST POS & Sales)'}
+                {matrixView === 'expenses' && 'Monthly Operational Expense Report (View B: Fees & Logistics)'}
+                {matrixView === 'contribution' && 'Monthly Contribution & Unit Economics (View C: Contribution before COGS)'}
+              </h3>
+            </div>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', background: 'var(--bg-subtle, #f1f5f9)', padding: '2px', borderRadius: '6px' }}>
+                <button
+                  type="button"
+                  onClick={() => setMatrixView('bridge')}
+                  style={{
+                    padding: '6px 12px',
+                    borderRadius: '4px',
+                    border: 'none',
+                    fontSize: '12px',
+                    fontWeight: matrixView === 'bridge' ? 700 : 500,
+                    background: matrixView === 'bridge' ? '#2563eb' : 'transparent',
+                    color: matrixView === 'bridge' ? '#ffffff' : 'var(--muted)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Settlement Bridge (View A)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMatrixView('ledger')}
+                  style={{
+                    padding: '6px 12px',
+                    borderRadius: '4px',
+                    border: 'none',
+                    fontSize: '12px',
+                    fontWeight: matrixView === 'ledger' ? 700 : 500,
+                    background: matrixView === 'ledger' ? '#2563eb' : 'transparent',
+                    color: matrixView === 'ledger' ? '#ffffff' : 'var(--muted)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Tally Ledger Matrix
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMatrixView('expenses')}
+                  style={{
+                    padding: '6px 12px',
+                    borderRadius: '4px',
+                    border: 'none',
+                    fontSize: '12px',
+                    fontWeight: matrixView === 'expenses' ? 700 : 500,
+                    background: matrixView === 'expenses' ? '#2563eb' : 'transparent',
+                    color: matrixView === 'expenses' ? '#ffffff' : 'var(--muted)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Expenses (View B)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMatrixView('contribution')}
+                  style={{
+                    padding: '6px 12px',
+                    borderRadius: '4px',
+                    border: 'none',
+                    fontSize: '12px',
+                    fontWeight: matrixView === 'contribution' ? 700 : 500,
+                    background: matrixView === 'contribution' ? '#2563eb' : 'transparent',
+                    color: matrixView === 'contribution' ? '#ffffff' : 'var(--muted)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Contribution (View C)
+                </button>
+              </div>
+              <input
+                type="text"
+                placeholder="Filter by state..."
+                value={stateFilter}
+                onChange={(e) => setStateFilter(e.target.value)}
+                style={{ padding: '6px 10px', fontSize: '12px', borderRadius: '4px', border: '1px solid var(--border)', width: '150px' }}
+              />
+            </div>
           </div>
+
+          {/* VIEW A: State Settlement Bridge */}
+          {matrixView === 'bridge' && (
+            <div className="table-wrap">
+              <div style={{ padding: '8px 16px', background: '#eff6ff', fontSize: '12px', color: '#1e40af', borderBottom: '1px solid #dbeafe' }}>
+                <strong>Formula:</strong> Expected Gross = Opening (B/F) + Gross Sales − Cancellations − RTO − Returns | Net Expected = Expected Gross − Gateway Fees − COD Deductions | Outstanding (C/F) = Net Expected − Verified Received
+              </div>
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>State</th>
+                    <th style={{ textAlign: 'center' }}>POS</th>
+                    <th style={{ textAlign: 'center' }}>Orders</th>
+                    <th style={{ textAlign: 'right' }}>Opening (B/F)</th>
+                    <th style={{ textAlign: 'right' }}>Gross Sales</th>
+                    <th style={{ textAlign: 'right' }}>Cancelled</th>
+                    <th style={{ textAlign: 'right' }}>RTO</th>
+                    <th style={{ textAlign: 'right' }}>Returns</th>
+                    <th style={{ textAlign: 'right' }}>Expected Gross</th>
+                    <th style={{ textAlign: 'right' }}>Gateway Fees</th>
+                    <th style={{ textAlign: 'right' }}>COD Deduct</th>
+                    <th style={{ textAlign: 'right' }}>Net Expected</th>
+                    <th style={{ textAlign: 'right' }}>Verified Bank</th>
+                    <th style={{ textAlign: 'right' }}>Outstanding (C/F)</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stateData.states
+                    .filter((s) => !stateFilter || s.state.toLowerCase().includes(stateFilter.toLowerCase()))
+                    .map((s) => {
+                      const out = s.outstandingSettlement !== undefined ? s.outstandingSettlement : (s.closingBalance !== undefined ? s.closingBalance : s.outstanding);
+                      const gwFees = (s.gokwikEasebuzzFeeDeducted || 0) + (s.phonepeFeeDeducted || 0);
+                      return (
+                        <tr key={s.state}>
+                          <td><strong>{s.state}</strong></td>
+                          <td style={{ textAlign: 'center', fontSize: '11px', color: 'var(--muted)' }}>{s.gstStateCode || '—'}</td>
+                          <td style={{ textAlign: 'center' }}>{s.orderCount}</td>
+                          <td className="amount-cell" style={{ color: 'var(--muted)' }}>{formatMoney(s.openingOutstanding || s.openingBalance || 0)}</td>
+                          <td className="amount-cell">{formatMoney(s.grossOrderSales || s.grossSales)}</td>
+                          <td className="amount-cell" style={{ color: (s.cancelledOrders || 0) > 0 ? '#b45309' : 'inherit' }}>
+                            {(s.cancelledOrders || 0) > 0 ? ('-' + formatMoney(s.cancelledOrders || 0)) : '₹0.00'}
+                          </td>
+                          <td className="amount-cell" style={{ color: (s.rtoAdjustments || 0) > 0 ? '#dc2626' : 'inherit' }}>
+                            {(s.rtoAdjustments || 0) > 0 ? ('-' + formatMoney(s.rtoAdjustments || 0)) : '₹0.00'}
+                          </td>
+                          <td className="amount-cell" style={{ color: (s.customerReturns || s.returnsDeducted) > 0 ? '#dc2626' : 'inherit' }}>
+                            {(s.customerReturns || s.returnsDeducted) > 0 ? ('-' + formatMoney(s.customerReturns || s.returnsDeducted)) : '₹0.00'}
+                          </td>
+                          <td className="amount-cell" style={{ fontWeight: 600 }}>{formatMoney(s.expectedGrossSettlement || 0)}</td>
+                          <td className="amount-cell" style={{ color: gwFees > 0 ? '#d97706' : 'inherit' }}>
+                            {gwFees > 0 ? ('-' + formatMoney(gwFees)) : '₹0.00'}
+                          </td>
+                          <td className="amount-cell" style={{ color: (s.codSettlementDeductions || 0) > 0 ? '#d97706' : 'inherit' }}>
+                            {(s.codSettlementDeductions || 0) > 0 ? ('-' + formatMoney(s.codSettlementDeductions || 0)) : '₹0.00'}
+                          </td>
+                          <td className="amount-cell" style={{ fontWeight: 700, color: '#0f766e' }}>{formatMoney(s.netExpectedBankSettlement || 0)}</td>
+                          <td className="amount-cell" style={{ color: '#16a34a', fontWeight: 600 }}>{formatMoney(s.verifiedPaymentReceived || s.paymentReceived)}</td>
+                          <td className="amount-cell" style={{ fontWeight: 700, color: out > 0 ? '#b91c1c' : '#15803d' }}>
+                            {formatMoney(out)}
+                          </td>
+                          <td style={{ fontSize: '12px' }}>
+                            {Math.abs(out) <= 0.05 ? (
+                              <span style={{ color: '#15803d', fontWeight: 600, background: '#dcfce7', padding: '2px 6px', borderRadius: '4px' }}>Settled</span>
+                            ) : (
+                              <span style={{ color: '#b91c1c', fontWeight: 600, background: '#fee2e2', padding: '2px 6px', borderRadius: '4px' }}>Pending</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* VIEW: Tally Ledger Matrix */}
+          {matrixView === 'ledger' && (
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>State</th>
+                    <th style={{ textAlign: 'center' }}>GST POS</th>
+                    <th style={{ textAlign: 'center' }}>Orders</th>
+                    <th style={{ textAlign: 'right' }}>Opening (B/F)</th>
+                    <th style={{ textAlign: 'right' }}>Gross Sales</th>
+                    <th style={{ textAlign: 'right' }}>Taxable</th>
+                    <th style={{ textAlign: 'right' }}>Output GST</th>
+                    <th style={{ textAlign: 'right' }}>Returns</th>
+                    <th style={{ textAlign: 'right' }}>Net Sales</th>
+                    <th style={{ textAlign: 'right' }}>Payment Received</th>
+                    <th style={{ textAlign: 'right' }}>Closing (C/F)</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stateData.states
+                    .filter((s) => !stateFilter || s.state.toLowerCase().includes(stateFilter.toLowerCase()))
+                    .map((s) => {
+                      const closing = s.closingBalance !== undefined ? s.closingBalance : s.outstanding;
+                      return (
+                        <tr key={s.state}>
+                          <td><strong>{s.state}</strong></td>
+                          <td style={{ textAlign: 'center', fontSize: '12px', color: 'var(--muted)' }}>{s.gstStateCode || '—'}</td>
+                          <td style={{ textAlign: 'center' }}>{s.orderCount}</td>
+                          <td className="amount-cell" style={{ color: 'var(--muted)' }}>{formatMoney(s.openingBalance || 0)}</td>
+                          <td className="amount-cell">{formatMoney(s.grossSales)}</td>
+                          <td className="amount-cell">{formatMoney(s.taxableSales || 0)}</td>
+                          <td className="amount-cell">{formatMoney(s.gstAmount || 0)}</td>
+                          <td className="amount-cell" style={{ color: s.returnsDeducted > 0 ? '#dc2626' : 'inherit' }}>
+                            {s.returnsDeducted > 0 ? ('-' + formatMoney(s.returnsDeducted)) : '₹0.00'}
+                          </td>
+                          <td className="amount-cell" style={{ fontWeight: 700 }}>{formatMoney(s.netSales)}</td>
+                          <td className="amount-cell" style={{ color: '#16a34a' }}>{formatMoney(s.paymentReceived)}</td>
+                          <td className="amount-cell" style={{ fontWeight: 700, color: closing > 0 ? '#b91c1c' : '#15803d' }}>
+                            {formatMoney(closing)}
+                          </td>
+                          <td style={{ fontSize: '12px' }}>
+                            {Math.abs(closing) <= 0.05 ? <span style={{ color: '#15803d', fontWeight: 600 }}>Settled</span> : <span style={{ color: '#b91c1c' }}>Carried Fwd</span>}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* VIEW B: Monthly Expenses Breakdown */}
+          {matrixView === 'expenses' && (
+            <div style={{ padding: '20px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '20px' }}>
+                <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                  <div style={{ fontSize: '12px', color: '#64748b' }}>MDR Payment Fees</div>
+                  <div style={{ fontSize: '20px', fontWeight: 700, color: '#1e293b', marginTop: '4px' }}>
+                    {formatMoney(stateData.monthlyExpenses?.mdrFees || stateData.totals.gokwikEasebuzzFeeDeducted || 0)}
+                  </div>
+                </div>
+                <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                  <div style={{ fontSize: '12px', color: '#64748b' }}>Platform Fees</div>
+                  <div style={{ fontSize: '20px', fontWeight: 700, color: '#1e293b', marginTop: '4px' }}>
+                    {formatMoney(stateData.monthlyExpenses?.platformFees || 0)}
+                  </div>
+                </div>
+                <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                  <div style={{ fontSize: '12px', color: '#64748b' }}>Forward Freight</div>
+                  <div style={{ fontSize: '20px', fontWeight: 700, color: '#1e293b', marginTop: '4px' }}>
+                    {formatMoney(stateData.monthlyExpenses?.forwardFreight || stateData.totals.actualFreightExpenses || 0)}
+                  </div>
+                </div>
+                <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                  <div style={{ fontSize: '12px', color: '#64748b' }}>RTO Freight Expense</div>
+                  <div style={{ fontSize: '20px', fontWeight: 700, color: '#dc2626', marginTop: '4px' }}>
+                    {formatMoney(stateData.monthlyExpenses?.rtoFreight || 0)}
+                  </div>
+                </div>
+                <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                  <div style={{ fontSize: '12px', color: '#64748b' }}>Exchange Freight (Reverse + Forward)</div>
+                  <div style={{ fontSize: '20px', fontWeight: 700, color: '#7c3aed', marginTop: '4px' }}>
+                    {formatMoney(stateData.monthlyExpenses?.exchangeFreight || stateData.totals.exchangeFreightExpenses || 0)}
+                  </div>
+                </div>
+                <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                  <div style={{ fontSize: '12px', color: '#64748b' }}>Total Monthly Expenses</div>
+                  <div style={{ fontSize: '20px', fontWeight: 700, color: '#0f172a', marginTop: '4px' }}>
+                    {formatMoney(stateData.monthlyExpenses?.totalExpenses || 0)}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* VIEW C: Monthly Contribution & Unit Economics */}
+          {matrixView === 'contribution' && (
+            <div style={{ padding: '20px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '20px' }}>
+                <div style={{ background: '#f0fdf4', padding: '16px', borderRadius: '8px', border: '1px solid #bbf7d0' }}>
+                  <div style={{ fontSize: '12px', color: '#166534' }}>Net Sales (Gross − Returns)</div>
+                  <div style={{ fontSize: '22px', fontWeight: 700, color: '#14532d', marginTop: '4px' }}>
+                    {formatMoney(stateData.monthlyContribution?.netSales || stateData.totals.netSales || 0)}
+                  </div>
+                </div>
+                <div style={{ background: '#fef2f2', padding: '16px', borderRadius: '8px', border: '1px solid #fecaca' }}>
+                  <div style={{ fontSize: '12px', color: '#991b1b' }}>Total Logistics &amp; Gateway Costs</div>
+                  <div style={{ fontSize: '22px', fontWeight: 700, color: '#7f1d1d', marginTop: '4px' }}>
+                    -{formatMoney((stateData.monthlyContribution?.totalGatewayDeductions || 0) + (stateData.monthlyContribution?.totalFreightExpenses || 0))}
+                  </div>
+                </div>
+                <div style={{ background: '#eff6ff', padding: '16px', borderRadius: '8px', border: '1px solid #bfdbfe' }}>
+                  <div style={{ fontSize: '12px', color: '#1e40af' }}>Contribution Before COGS</div>
+                  <div style={{ fontSize: '22px', fontWeight: 700, color: '#1e3a8a', marginTop: '4px' }}>
+                    {formatMoney(stateData.monthlyContribution?.contributionBeforeCogs || 0)}
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#3b82f6', marginTop: '4px' }}>
+                    Margin: {stateData.monthlyContribution?.contributionMarginPct || 0}%
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </Panel>
       )}
 

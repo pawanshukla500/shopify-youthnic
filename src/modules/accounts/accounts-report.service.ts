@@ -198,6 +198,10 @@ export const GST_STATE_CODES: Record<string, string> = {
   'ladakh': '38',
 };
 
+/**
+ * Maps an Indian state or union territory name to its two-digit GST state code.
+ * Defaults to '99' for unknown or unspecified states.
+ */
 export function getGstStateCode(stateName?: string | null): string {
   const norm = (stateName || '').toLowerCase().trim().replace(/[^a-z0-9 &]/g, '');
   return GST_STATE_CODES[norm] || '99';
@@ -549,11 +553,15 @@ export function buildStateAccountingSummary(
 
   // 1d. Tally RTO movements occurring in this period
   if (Array.isArray(periodRtoOrders)) {
+    const seenRtoOrderIds = new Set<number>();
     for (const shipmentOrOrder of periodRtoOrders) {
       const order = shipmentOrOrder.order || shipmentOrOrder;
-      if (order.status !== 'CANCELLED') {
-        const row = getRow(order.customerState);
-        row.rtoAdjustments = (row.rtoAdjustments || 0) + (order.totalAmount || 0);
+      if (order && order.id && !seenRtoOrderIds.has(order.id)) {
+        seenRtoOrderIds.add(order.id);
+        if (order.status !== 'CANCELLED') {
+          const row = getRow(order.customerState);
+          row.rtoAdjustments = (row.rtoAdjustments || 0) + (order.totalAmount || 0);
+        }
       }
     }
   }
@@ -1807,7 +1815,15 @@ export async function generateMonthlyReport(
 ): Promise<{ data: ReportData; buffer: Buffer; fileName: string }> {
   const { start, end } = monthRange(month);
 
-  const [orders, periodReturns, openingBalances, priorSettledOrders] = await Promise.all([
+  const [
+    orders,
+    periodReturns,
+    openingBalances,
+    priorSettledOrders,
+    periodCancelledOrders,
+    periodRtoOrders,
+    bridgeResult,
+  ] = await Promise.all([
     prisma.order.findMany({
       where: { shopifyCreatedAt: { gte: start, lt: end } },
       include: { shipment: true, returns: true },
@@ -1836,9 +1852,42 @@ export async function generateMonthlyReport(
       },
       include: { shipment: true },
     }),
+    typeof prisma.order?.findMany === 'function'
+      ? prisma.order.findMany({
+          where: {
+            shopifyCreatedAt: { lt: start },
+            cancelledAt: { gte: start, lt: end },
+            status: 'CANCELLED',
+          },
+        })
+      : Promise.resolve([]),
+    typeof prisma.shipment?.findMany === 'function'
+      ? prisma.shipment.findMany({
+          where: {
+            updatedAt: { gte: start, lt: end },
+            status: { in: ['RTO', 'RTO_DELIVERED'] },
+          },
+          include: { order: true },
+        })
+      : Promise.resolve([]),
+    financialEventService
+      .getStateSettlementBridge(month, undefined, false)
+      .catch(() => null),
   ]);
 
-  const data = buildReportData(month, orders, periodReturns, now, openingBalances, priorSettledOrders);
+  const data = buildReportData(
+    month,
+    orders,
+    periodReturns,
+    now,
+    openingBalances,
+    priorSettledOrders,
+    periodCancelledOrders,
+    periodRtoOrders
+  );
+  if (bridgeResult) {
+    data.settlementBridge = bridgeResult;
+  }
   const buffer = await renderWorkbook(data);
   return { data, buffer, fileName: `Youthnic-Accounts-${month}.xlsx` };
 }
@@ -1852,7 +1901,14 @@ export async function generateDateRangeReport(
   const { start, end } = istDateRange(startDateStr, endDateStr);
   const label = `${startDateStr} to ${endDateStr}`;
 
-  const [orders, periodReturns, openingBalances, priorSettledOrders] = await Promise.all([
+  const [
+    orders,
+    periodReturns,
+    openingBalances,
+    priorSettledOrders,
+    periodCancelledOrders,
+    periodRtoOrders,
+  ] = await Promise.all([
     prisma.order.findMany({
       where: { shopifyCreatedAt: { gte: start, lt: end } },
       include: { shipment: true, returns: true },
@@ -1881,9 +1937,36 @@ export async function generateDateRangeReport(
       },
       include: { shipment: true },
     }),
+    typeof prisma.order?.findMany === 'function'
+      ? prisma.order.findMany({
+          where: {
+            shopifyCreatedAt: { lt: start },
+            cancelledAt: { gte: start, lt: end },
+            status: 'CANCELLED',
+          },
+        })
+      : Promise.resolve([]),
+    typeof prisma.shipment?.findMany === 'function'
+      ? prisma.shipment.findMany({
+          where: {
+            updatedAt: { gte: start, lt: end },
+            status: { in: ['RTO', 'RTO_DELIVERED'] },
+          },
+          include: { order: true },
+        })
+      : Promise.resolve([]),
   ]);
 
-  const data = buildReportData(label, orders, periodReturns, now, openingBalances, priorSettledOrders);
+  const data = buildReportData(
+    label,
+    orders,
+    periodReturns,
+    now,
+    openingBalances,
+    priorSettledOrders,
+    periodCancelledOrders,
+    periodRtoOrders
+  );
   data.label = label;
   const buffer = await renderWorkbook(data);
   return { data, buffer, fileName: `Youthnic-Accounts-${startDateStr}_to_${endDateStr}.xlsx` };
@@ -1961,17 +2044,16 @@ export async function getStateMonthlyAccounting(
             cancelledAt: { gte: start, lt: end },
             status: 'CANCELLED',
           },
-        }).catch(() => [])
+        })
       : Promise.resolve([]),
     typeof prisma.shipment?.findMany === 'function'
       ? prisma.shipment.findMany({
           where: {
             updatedAt: { gte: start, lt: end },
             status: { in: ['RTO', 'RTO_DELIVERED'] },
-            order: { shopifyCreatedAt: { lt: start } },
           },
           include: { order: true },
-        }).catch(() => [])
+        })
       : Promise.resolve([]),
   ]);
 
@@ -2035,6 +2117,9 @@ const RECIPIENTS_KEY = 'accounts_report_recipients';
 const CC_RECIPIENTS_KEY = 'accounts_report_cc_recipients';
 const sentKey = (month: string) => `accounts_report_sent:${month}`;
 
+/**
+ * Splits a delimiter-separated email string into a deduplicated list of lowercase valid emails.
+ */
 export function parseRecipients(value?: string | null): string[] {
   return Array.from(
     new Set(
@@ -2046,18 +2131,27 @@ export function parseRecipients(value?: string | null): string[] {
   );
 }
 
+/**
+ * Retrieves the primary email recipients for monthly accounting reports from settings.
+ */
 export async function getReportRecipients(): Promise<string[]> {
   const stored = await prisma.setting.findUnique({ where: { key: RECIPIENTS_KEY } });
   const list = parseRecipients(stored?.value ?? config.accounts.reportRecipients);
   return list.length ? list : ['accounts2@vbexports.co.in'];
 }
 
+/**
+ * Retrieves the CC email recipients for monthly accounting reports from settings.
+ */
 export async function getReportCcRecipients(): Promise<string[]> {
   const stored = await prisma.setting.findUnique({ where: { key: CC_RECIPIENTS_KEY } });
   const list = parseRecipients(stored?.value ?? config.accounts.reportCcRecipients);
   return list.length ? list : ['returnorders@vbexports.co.in', 'vaibhav@vbexports.co.in', 'accounts@vbexports.co.in'];
 }
 
+/**
+ * Configures the primary and optional CC recipient email lists for monthly accounting reports.
+ */
 export async function setReportRecipients(value: string, ccValue?: string): Promise<{ to: string[]; cc: string[] }> {
   const recipients = parseRecipients(value);
   await prisma.setting.upsert({

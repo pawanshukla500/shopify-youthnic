@@ -772,7 +772,8 @@ export class FinancialEventService {
   }
 
   /**
-   * Build the Monthly Expense Report (View B).
+   * Build the Monthly Expense Report (View B) aggregating gateway MDR, platform fees,
+   * Delhivery and Velocity freight debits, and exchange freight.
    */
   async buildMonthlyExpenseReport(period: string): Promise<MonthlyExpenseReport> {
     const events = await prisma.financialEvent.findMany({

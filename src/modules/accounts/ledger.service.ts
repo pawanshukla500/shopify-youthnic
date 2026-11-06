@@ -45,6 +45,8 @@ export interface PostGatewaySettlementParams {
   postingDate?: Date;
   period: string;
   orderIds?: number[];
+  /** Gross collection attributable to matched customer orders; any remainder stays in clearing. */
+  matchedGrossAmount?: number;
 }
 
 export interface PostCodRemittanceParams {
@@ -59,6 +61,8 @@ export interface PostCodRemittanceParams {
   postingDate?: Date;
   period: string;
   orderIds?: number[];
+  /** Gross collection attributable to matched customer orders; any remainder stays in clearing. */
+  matchedGrossAmount?: number;
 }
 
 export interface PostFreightBillParams {
@@ -608,13 +612,23 @@ export class LedgerService {
       });
     }
 
-    // 4. Credit Sundry Debtors (clearing customer receivables) or Gateway Clearing
-    const creditAccount = params.orderIds && params.orderIds.length > 0 ? 'SUNDRY_DEBTORS_PREPAID' : clearingAccount;
-    lines.push({
-      accountCode: creditAccount,
+    // Match only the identified orders against debtor balances; preserve unmatched sums in clearing.
+    const matchedGross = Math.round((params.matchedGrossAmount ?? (params.orderIds?.length ? params.grossAmount : 0)) * 100) / 100;
+    if (!Number.isFinite(matchedGross) || matchedGross < 0 || matchedGross > params.grossAmount + 0.01) {
+      throw new Error(`Invalid matched customer gross for gateway batch ${params.batchId}`);
+    }
+    const unmatchedGross = Math.round((params.grossAmount - matchedGross) * 100) / 100;
+    if (matchedGross > 0) lines.push({
+      accountCode: 'SUNDRY_DEBTORS_PREPAID',
       debit: 0,
-      credit: params.grossAmount,
-      narration: `Gross settlement batch ${params.batchId} from ${params.gateway} clearing receivables`,
+      credit: matchedGross,
+      narration: `Matched customer collections for gateway batch ${params.batchId}`,
+    });
+    if (unmatchedGross > 0) lines.push({
+      accountCode: clearingAccount,
+      debit: 0,
+      credit: unmatchedGross,
+      narration: `Unmatched collections awaiting allocation for gateway batch ${params.batchId}`,
     });
 
     return await this.createBalancedEntry({
@@ -677,13 +691,19 @@ export class LedgerService {
       });
     }
 
-    // 4. Credit Sundry Debtors COD (clearing customer receivables) or Clearing
-    const creditAccount = params.orderIds && params.orderIds.length > 0 ? 'SUNDRY_DEBTORS_COD' : clearingAccount;
-    lines.push({
-      accountCode: creditAccount,
-      debit: 0,
-      credit: params.grossAmount,
-      narration: `Gross COD collected by ${params.carrier} (Ref: ${params.remittanceRef}) clearing receivables`,
+    // Match only identified COD collections to customer receivables.
+    const matchedGross = Math.round((params.matchedGrossAmount ?? (params.orderIds?.length ? params.grossAmount : 0)) * 100) / 100;
+    if (!Number.isFinite(matchedGross) || matchedGross < 0 || matchedGross > params.grossAmount + 0.01) {
+      throw new Error(`Invalid matched customer gross for COD remittance ${params.remittanceRef}`);
+    }
+    const unmatchedGross = Math.round((params.grossAmount - matchedGross) * 100) / 100;
+    if (matchedGross > 0) lines.push({
+      accountCode: 'SUNDRY_DEBTORS_COD', debit: 0, credit: matchedGross,
+      narration: `Matched COD collections for remittance ${params.remittanceRef}`,
+    });
+    if (unmatchedGross > 0) lines.push({
+      accountCode: clearingAccount, debit: 0, credit: unmatchedGross,
+      narration: `Unmatched COD collections awaiting allocation for remittance ${params.remittanceRef}`,
     });
 
     return await this.createBalancedEntry({

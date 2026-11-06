@@ -1912,7 +1912,17 @@ export async function getStateMonthlyAccounting(
   const month = typeof monthOrCurrent === 'string' && monthOrCurrent ? monthOrCurrent : previousMonth(now);
   const { start, end, label } = monthRange(month);
 
-  const [orders, periodReturns, openingBalances, toRecipients, ccRecipients, sentStatus, priorSettledOrders] = await Promise.all([
+  const [
+    orders,
+    periodReturns,
+    openingBalances,
+    toRecipients,
+    ccRecipients,
+    sentStatus,
+    priorSettledOrders,
+    periodCancelledOrders,
+    periodRtoOrders,
+  ] = await Promise.all([
     prisma.order.findMany({
       where: { shopifyCreatedAt: { gte: start, lt: end } },
       include: { shipment: true, returns: true },
@@ -1944,9 +1954,37 @@ export async function getStateMonthlyAccounting(
       },
       include: { shipment: true },
     }),
+    typeof prisma.order?.findMany === 'function'
+      ? prisma.order.findMany({
+          where: {
+            shopifyCreatedAt: { lt: start },
+            cancelledAt: { gte: start, lt: end },
+            status: 'CANCELLED',
+          },
+        }).catch(() => [])
+      : Promise.resolve([]),
+    typeof prisma.shipment?.findMany === 'function'
+      ? prisma.shipment.findMany({
+          where: {
+            updatedAt: { gte: start, lt: end },
+            status: { in: ['RTO', 'RTO_DELIVERED'] },
+            order: { shopifyCreatedAt: { lt: start } },
+          },
+          include: { order: true },
+        }).catch(() => [])
+      : Promise.resolve([]),
   ]);
 
-  const { states, totals } = buildStateAccountingSummary(orders, periodReturns, start, end, openingBalances, priorSettledOrders);
+  const { states, totals } = buildStateAccountingSummary(
+    orders,
+    periodReturns,
+    start,
+    end,
+    openingBalances,
+    priorSettledOrders,
+    periodCancelledOrders,
+    periodRtoOrders
+  );
   const crossMonthReturnsCount = periodReturns.filter(
     (r) => r.order?.shopifyCreatedAt && new Date(r.order.shopifyCreatedAt) < start
   ).length;

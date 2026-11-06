@@ -419,16 +419,6 @@ export class FinancialEventService {
               verificationStatus: isConfirmed ? 'VERIFIED' : 'UNVERIFIED',
             },
           });
-
-          // A confirmed return supersedes any earlier initiated event in the same reporting period
-          if (isConfirmed) {
-            await prisma.financialEvent.deleteMany({
-              where: {
-                eventId: `RET-${ret.id}-INITIATED`,
-                period: retPeriod,
-              },
-            }).catch(() => {});
-          }
         }
       }
 

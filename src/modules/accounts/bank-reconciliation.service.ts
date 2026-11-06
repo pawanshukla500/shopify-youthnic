@@ -332,14 +332,14 @@ export class BankReconciliationService {
    * Helper to parse generic bank statement CSV/Excel lines (HDFC, ICICI, SBI).
    */
   public parseBankCsv(rows: any[]): ParsedBankStatementRow[] {
-    return rows.map((r) => {
+    return rows.flatMap((r): ParsedBankStatementRow[] => {
       // Bank statements use Indian day-first dates, including two-digit years.
       // Never assign a fabricated current date to an unparseable transaction.
       const rawDate = r['Date'] || r['Txn Date'] || r['Transaction Date'] || r['Value Date'];
       const transactionDate = rawDate instanceof Date
         ? (Number.isNaN(rawDate.getTime()) ? null : rawDate)
         : parseDateLoose(rawDate == null ? null : String(rawDate));
-      if (!transactionDate) return null;
+      if (!transactionDate) return [];
 
       // Reject impossible dates such as 31/02/26 that JS would otherwise roll over.
       const dayFirst = String(rawDate).match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2}|\d{4})(?!\d)/);
@@ -349,7 +349,7 @@ export class BankReconciliationService {
         const inputYear = Number(dayFirst[3]);
         const year = inputYear < 100 ? 2000 + inputYear : inputYear;
         const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
-        if (month < 1 || month > 12 || day < 1 || day > daysInMonth) return null;
+        if (month < 1 || month > 12 || day < 1 || day > daysInMonth) return [];
       }
 
       const desc = String(r['Description'] || r['Narration'] || r['Particulars'] || '').trim();
@@ -366,15 +366,16 @@ export class BankReconciliationService {
       const credit = parseFloat(String(r['Credit'] || r['Deposit'] || '0').replace(/,/g, '')) || 0;
       const balance = parseFloat(String(r['Balance'] || r['Closing Balance'] || '0').replace(/,/g, ''));
 
-      return {
+      if (debit <= 0 && credit <= 0) return [];
+      return [{
         transactionDate,
         description: desc,
         referenceNo: utr || undefined,
         debit,
         credit,
         balance: isNaN(balance) ? undefined : balance,
-      };
-    }).filter((r): r is ParsedBankStatementRow => r !== null && (r.debit > 0 || r.credit > 0));
+      }];
+    });
   }
 }
 

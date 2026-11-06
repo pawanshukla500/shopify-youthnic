@@ -10,6 +10,7 @@
  *   POST /run                      run closing + cost estimates + gateway sync now
  */
 import { Router, Response } from 'express';
+import { BankReconciliationStatus } from '@prisma/client';
 import prisma from '../database/prisma';
 import { config } from '../config';
 import logger from '../utils/logger';
@@ -591,11 +592,13 @@ router.post('/bank-statement/upload', async (req: AuthenticatedRequest, res: Res
 router.get('/bank-statement/lines', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const limit = parseInt(String(req.query.limit || '50'), 10);
-    const status = req.query.status as any;
-    const where: any = {};
-    if (status) {
-      where.status = status;
+    const status = req.query.status;
+    if (status !== undefined && (typeof status !== 'string' ||
+      !Object.values(BankReconciliationStatus).includes(status as BankReconciliationStatus))) {
+      res.status(400).json({ error: 'Invalid bank reconciliation status.' });
+      return;
     }
+    const where = status ? { status: status as BankReconciliationStatus } : {};
     const lines = await prisma.bankStatementLine.findMany({
       where,
       include: { statement: true },
@@ -639,8 +642,22 @@ router.post('/freight/upload', async (req: AuthenticatedRequest, res: Response):
     const file = (req as any).file;
     const { carrier, invoiceNumber, invoiceDate: rawDate, contentBase64, fileName: bodyFileName } = req.body || {};
     const parsedCarrier = carrier === 'VELOCITY' ? 'VELOCITY' : 'DELHIVERY';
-    const invNum = String(invoiceNumber || `INV-${parsedCarrier}-${Date.now()}`).trim();
-    const invDate = rawDate ? new Date(rawDate) : new Date();
+    // Billing identifiers and dates must be supplied by the original carrier invoice.
+    if (typeof invoiceNumber !== 'string' || !invoiceNumber.trim()) {
+      res.status(400).json({ error: 'A stable carrier invoiceNumber is required to prevent duplicate freight postings.' });
+      return;
+    }
+    const invNum = invoiceNumber.trim();
+    if (typeof rawDate !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(rawDate)) {
+      res.status(400).json({ error: 'invoiceDate must use YYYY-MM-DD.' });
+      return;
+    }
+    const invDate = new Date(rawDate + 'T12:00:00+05:30');
+    if (Number.isNaN(invDate.getTime()) ||
+      new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(invDate) !== rawDate) {
+      res.status(400).json({ error: 'invoiceDate is not a valid calendar date.' });
+      return;
+    }
 
     let rows: any[] = [];
     if (file) {

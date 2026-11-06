@@ -739,75 +739,30 @@ export class LedgerService {
       narration?: string;
     }> = [];
 
-    // Forward freight
-    if (params.forwardFreight > 0) {
-      lines.push({
-        accountCode: 'EXPENSE_FREIGHT_FORWARD',
-        debit: params.forwardFreight,
-        credit: 0,
-        narration: `Forward logistics freight charges (${params.carrier})`,
+    // Positive billed components debit expenses; carrier credits reverse those expenses.
+    const addSignedAmount = (accountCode: string, amount: number, narration: string) => {
+      if (!Number.isFinite(amount)) throw new Error(`Invalid freight component for ${params.invoiceNumber}: ${accountCode}`);
+      const rounded = Math.round(Math.abs(amount) * 100) / 100;
+      if (rounded > 0) lines.push({
+        accountCode,
+        debit: amount > 0 ? rounded : 0,
+        credit: amount < 0 ? rounded : 0,
+        narration,
       });
-    }
+    };
 
-    // RTO freight
-    if (params.rtoFreight && params.rtoFreight > 0) {
-      lines.push({
-        accountCode: 'EXPENSE_FREIGHT_RTO',
-        debit: params.rtoFreight,
-        credit: 0,
-        narration: `Return to Origin freight charges (${params.carrier})`,
-      });
-    }
+    addSignedAmount('EXPENSE_FREIGHT_FORWARD', params.forwardFreight, `Forward freight (${params.carrier})`);
+    addSignedAmount('EXPENSE_FREIGHT_RTO', params.rtoFreight || 0, `RTO freight (${params.carrier})`);
+    addSignedAmount('EXPENSE_FREIGHT_REVERSE', params.reverseFreight || 0, `Reverse pickup freight (${params.carrier})`);
+    addSignedAmount('EXPENSE_WEIGHT_SURCHARGES', params.weightSurcharges || 0, `Weight adjustments (${params.carrier})`);
+    addSignedAmount('EXPENSE_COD_HANDLING', params.codHandlingFee || 0, `COD handling fees (${params.carrier})`);
+    addSignedAmount('INPUT_IGST', params.freightGst, `Freight input tax adjustment (${params.carrier})`);
 
-    // Reverse pickup freight
-    if (params.reverseFreight && params.reverseFreight > 0) {
-      lines.push({
-        accountCode: 'EXPENSE_FREIGHT_REVERSE',
-        debit: params.reverseFreight,
-        credit: 0,
-        narration: `Customer reverse pickup freight (${params.carrier})`,
-      });
-    }
-
-    // Weight discrepancy surcharges
-    if (params.weightSurcharges && params.weightSurcharges > 0) {
-      lines.push({
-        accountCode: 'EXPENSE_WEIGHT_SURCHARGES',
-        debit: params.weightSurcharges,
-        credit: 0,
-        narration: `Weight discrepancy re-billing surcharges (${params.carrier})`,
-      });
-    }
-
-    // COD handling fee
-    if (params.codHandlingFee && params.codHandlingFee > 0) {
-      lines.push({
-        accountCode: 'EXPENSE_COD_HANDLING',
-        debit: params.codHandlingFee,
-        credit: 0,
-        narration: `COD collection & service fee (${params.carrier})`,
-      });
-    }
-
-    // Input GST on freight (18%)
-    if (params.freightGst > 0) {
-      lines.push({
-        accountCode: 'INPUT_IGST',
-        debit: params.freightGst,
-        credit: 0,
-        narration: `Input IGST on freight invoice ${params.invoiceNumber}`,
-      });
-    }
-
-    // Credit Vendor Payable or Wallet Asset
-    lines.push({
-      accountCode: payableAccount,
-      debit: 0,
-      credit: params.totalBilled,
-      narration: params.isWalletDeducted
-        ? `Wallet debit deduction by ${params.carrier}`
-        : `Payable to ${params.carrier} for invoice ${params.invoiceNumber}`,
-    });
+    if (!Number.isFinite(params.totalBilled)) throw new Error(`Invalid total billed for freight invoice ${params.invoiceNumber}`);
+    // A credit note restores the wallet asset or reduces a vendor payable.
+    addSignedAmount(payableAccount, -params.totalBilled, params.isWalletDeducted
+      ? `Wallet charge or reversal by ${params.carrier}`
+      : `Carrier invoice or credit note ${params.invoiceNumber}`);
 
     return await this.createBalancedEntry({
       entryNumber,

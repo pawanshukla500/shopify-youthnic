@@ -11,7 +11,7 @@
  * 7. Dispatches report email to accounts and audit team via Resend.
  */
 
-import { ClosingStatus, Prisma } from '@prisma/client';
+import { ClosingStatus, Prisma, VoucherType } from '@prisma/client';
 import prisma from '../../database/prisma';
 import logger from '../../utils/logger';
 import { ledgerService } from './ledger.service';
@@ -98,6 +98,20 @@ export class MonthlyClosingService {
       }
     }
 
+    // A balanced trial balance does not imply settlements are independently verified.
+    const [unverifiedSettlements, bankStatementLines] = await Promise.all([
+      prisma.gatewaySettlementBatch.count({
+        where: { settlementDate: { gte: start, lt: end }, verificationStatus: { not: 'VERIFIED' } },
+      }),
+      prisma.bankStatementLine.count({ where: { transactionDate: { gte: start, lt: end } } }),
+    ]);
+    if (unverifiedSettlements > 0) {
+      exceptions.push(`${unverifiedSettlements} settlement batch(es) lack independent bank verification.`);
+    }
+    if (bankStatementLines === 0) {
+      exceptions.push('No bank statement lines available for this accounting period.');
+    }
+
     // 3. Compute Trial Balance & Verify Debits == Credits
     const tb = await ledgerService.getTrialBalance(period);
     if (!tb.isBalanced) {
@@ -131,12 +145,17 @@ export class MonthlyClosingService {
     const igstAmount = igstRow?.periodCredit || 0;
     const grossSales = Math.round((taxableSales + cgstAmount + sgstAmount + igstAmount) * 100) / 100;
 
-    // Returns taxable reversal + GST reversals debited on credit notes
+    // Only reverse output GST debited by actual posted CREDIT_NOTE vouchers.
+    // Other adjustments to output GST accounts are not sales returns.
+    const creditNotes = await prisma.journalEntry.findMany({
+      where: { accountingPeriod: period, voucherType: VoucherType.CREDIT_NOTE, status: 'POSTED' },
+      include: { lines: { include: { account: true } } },
+    });
     const returnTaxable = returnsRow?.periodDebit || 0;
-    const returnCgstReversed = cgstRow?.periodDebit || 0;
-    const returnSgstReversed = sgstRow?.periodDebit || 0;
-    const returnIgstReversed = igstRow?.periodDebit || 0;
-    const returnsAmount = Math.round((returnTaxable + returnCgstReversed + returnSgstReversed + returnIgstReversed) * 100) / 100;
+    const returnGst = creditNotes.flatMap((entry) => entry.lines)
+      .filter((line) => ['OUTPUT_CGST', 'OUTPUT_SGST', 'OUTPUT_IGST'].includes(line.account.code))
+      .reduce((sum, line) => sum + line.debit.toNumber(), 0);
+    const returnsAmount = Math.round((returnTaxable + returnGst) * 100) / 100;
     const netSales = Math.round((grossSales - returnsAmount) * 100) / 100;
 
     const gatewayFees = Math.round(

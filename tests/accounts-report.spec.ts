@@ -31,6 +31,7 @@ import {
   buildReportData,
   buildStateAccountingSummary,
   getGstStateCode,
+  getStateMonthlyAccounting,
   monthRange,
   parseRecipients,
   previousMonth,
@@ -371,6 +372,31 @@ describe('carry forward and opening balance', () => {
     expect(summary.totals.openingBalance).toBe(500);
     expect(summary.totals.grossSales).toBe(1000);
     expect(summary.totals.closingBalance).toBe(700);
+  });
+});
+
+describe('state-monthly settlements across periods', () => {
+  it('includes November receipts from October orders without duplicating November sales', async () => {
+    const priorSale = order({
+      shopifyCreatedAt: new Date('2026-10-15T12:00:00Z'),
+      paymentReceivedAt: new Date('2026-11-03T12:00:00Z'),
+      paymentReceivedAmount: 988.20,
+      customerState: 'Gujarat',
+      totalAmount: 1000,
+    });
+    prismaStub.order.findMany.mockImplementation(async ({ where }: any) => {
+      if (where.shopifyCreatedAt?.gte) return [];
+      return [priorSale];
+    });
+    prismaStub.return.findMany.mockResolvedValue([]);
+    prismaStub.setting.findUnique.mockResolvedValue(null);
+    prismaStub.setting.findMany.mockResolvedValue([]);
+    const summary = await getStateMonthlyAccounting('2026-11');
+    expect(summary.totals.grossSales).toBe(0);
+    expect(summary.totals.paymentReceived).toBe(988.20);
+    expect(summary.totals.openingBalance).toBe(1000);
+    expect(summary.totals.closingBalance).toBeCloseTo(11.80, 2);
+    expect(summary.states.find((row) => row.state === 'Gujarat')?.paymentReceived).toBe(988.20);
   });
 });
 

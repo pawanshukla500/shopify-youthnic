@@ -79,7 +79,11 @@ function Find-GraphifyPython {
     if (Get-Command uv -ErrorAction SilentlyContinue) {
         $uvDir = (uv tool dir 2>$null).Trim()
         if ($uvDir) {
-            $py = Join-Path $uvDir "graphifyy\Scripts\python.exe"
+            $py = if ([System.Environment]::OSVersion.Platform -eq 'Win32NT') {
+                Join-Path $uvDir "graphifyy/Scripts/python.exe"
+            } else {
+                Join-Path $uvDir "graphifyy/bin/python"
+            }
             if (Test-Path $py) {
                 & $py -c "import graphify" 2>$null
                 if ($LASTEXITCODE -eq 0) { return $py }
@@ -90,7 +94,11 @@ function Find-GraphifyPython {
     if (Get-Command pipx -ErrorAction SilentlyContinue) {
         $venvs = (pipx environment --value PIPX_LOCAL_VENVS 2>$null).Trim()
         if ($venvs) {
-            $py = Join-Path $venvs "graphifyy\Scripts\python.exe"
+            $py = if ([System.Environment]::OSVersion.Platform -eq 'Win32NT') {
+                Join-Path $venvs "graphifyy/Scripts/python.exe"
+            } else {
+                Join-Path $venvs "graphifyy/bin/python"
+            }
             if (Test-Path $py) {
                 & $py -c "import graphify" 2>$null
                 if ($LASTEXITCODE -eq 0) { return $py }
@@ -120,6 +128,7 @@ if (-not $GRAPHIFY_PYTHON) {
     }
     $GRAPHIFY_PYTHON = Find-GraphifyPython
 }
+if (-not $GRAPHIFY_PYTHON) { throw "Graphify Python interpreter could not be found after installation." }
 
 # Save interpreter path — all subsequent steps read this.
 # `Out-File -Encoding utf8` always writes a BOM on Windows PowerShell 5.1 (utf8NoBOM

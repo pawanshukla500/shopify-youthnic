@@ -342,7 +342,7 @@ export class BankReconciliationService {
       if (!transactionDate) return null;
 
       // Reject impossible dates such as 31/02/26 that JS would otherwise roll over.
-      const dayFirst = String(rawDate).match(/^(\\d{1,2})[\\/-](\\d{1,2})[\\/-](\\d{2}|\\d{4})(?!\\d)/);
+      const dayFirst = String(rawDate).match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2}|\d{4})(?!\d)/);
       if (dayFirst) {
         const day = Number(dayFirst[1]);
         const month = Number(dayFirst[2]);

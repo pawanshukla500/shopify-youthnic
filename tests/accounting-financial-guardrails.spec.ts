@@ -24,6 +24,10 @@ import { monthlyClosingService } from '../src/modules/accounts/monthly-closing.s
 import { ledgerService } from '../src/modules/accounts/ledger.service';
 import { gatewayExpenseService } from '../src/modules/accounts/gateway-expense.service';
 import { bankReconciliationService } from '../src/modules/accounts/bank-reconciliation.service';
+import { gstService } from '../src/modules/accounts/gst.service';
+import { freightEngineService } from '../src/modules/accounts/freight-engine.service';
+import { TALLY_STANDARD_LEDGER_MASTERS } from '../src/modules/accounts/tally-integration.service';
+import { DEFAULT_LEDGER_ACCOUNTS } from '../src/modules/accounts/ledger.service';
 
 describe('Financial accounting guardrails', () => {
   beforeEach(() => {
@@ -138,4 +142,44 @@ describe('Financial accounting guardrails', () => {
     expect(parsed[0].transactionDate.toISOString()).toBe('2026-11-04T18:30:00.000Z');
     expect(parsed[0].referenceNo).toBe('UTR001');
   });
+  it('splits one Velocity RTO row into separate forward, RTO, COD, weight and tax allocations', () => {
+    const rows = freightEngineService.parseVelocityChargesRows([{
+      AWB: 'VEL-MIX-101',
+      'Forward Charges': '60.00',
+      'RTO Charges': '90.00',
+      'Weight Charges': '10.00',
+      'COD Charges': '8.00',
+      GST: '30.24',
+      'Total Amount': '198.24',
+    }], 'VEL-BILL-MIXED', new Date('2026-11-05T12:00:00Z'));
+    expect(rows).toHaveLength(4);
+    expect(rows.filter((r) => r.leg === 'RTO').map((r) => r.baseFreight)).toEqual([90]);
+    expect(rows.reduce((sum, r) => sum + r.totalBilled, 0)).toBeCloseTo(198.24, 2);
+    expect(rows.reduce((sum, r) => sum + r.gstAmount, 0)).toBeCloseTo(30.24, 2);
+    expect(rows.reduce((sum, r) => sum + (r.codFee || 0), 0)).toBe(8);
+    expect(rows.reduce((sum, r) => sum + (r.weightSurcharge || 0), 0)).toBe(10);
+  });
+
+  it('rejects Velocity invoice source totals that do not match component charges', () => {
+    expect(() => freightEngineService.parseVelocityChargesRows([{
+      AWB: 'VEL-MISMATCH',
+      'Forward Charges': '100',
+      GST: '18',
+      'Total Amount': '150',
+    }], 'VEL-BAD', new Date('2026-11-05T12:00:00Z'))).toThrow(/do not reconcile/);
+  });
+
+  it('uses the tax rate effective at supply time and refuses mixed-rate orders', () => {
+    const base = { totalAmount: 1999, totalDiscounts: 0, items: [{ price: 1999, quantity: 1 }] };
+    expect(gstService.determineOrderGstRate({ ...base, shopifyCreatedAt: new Date('2025-09-20T12:00:00Z') })).toBe(12);
+    expect(gstService.determineOrderGstRate({ ...base, shopifyCreatedAt: new Date('2025-09-23T12:00:00Z') })).toBe(5);
+    expect(gstService.determineOrderGstRate({ ...base, shopifyCreatedAt: new Date('2026-10-20T12:00:00Z'), items: [{price: 2400, quantity: 1}, {price: 3000, quantity: 1}] }))
+      .toThrow(/Mixed GST rates/);
+  });
+
+  it('uses exactly the accounting chart names for Tally ledger masters', () => {
+    expect(TALLY_STANDARD_LEDGER_MASTERS.map((entry) => entry.name))
+      .toEqual(DEFAULT_LEDGER_ACCOUNTS.map((entry) => entry.name));
+  });
+
 });

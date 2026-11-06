@@ -1,11 +1,13 @@
 import json
-import sys
 import re
 import shutil
-import os
 from pathlib import Path
 
 root = Path('.').resolve()
+EXCLUDED_DIRS = {'.agents', 'node_modules', 'dist', 'temp'}
+
+def is_excluded(path: Path) -> bool:
+    return any(part in EXCLUDED_DIRS for part in path.resolve().relative_to(root).parts)
 out_dir = root / 'graphify-out'
 out_dir.mkdir(exist_ok=True)
 
@@ -31,7 +33,7 @@ code_files = []
 for f in detection.get('files', {}).get('code', []):
     p = Path(f)
     # Skip vendor scripts, bundled toolchains in .agents, dist, and huge bundles
-    if any(x in str(p) for x in ['.agents', 'node_modules', 'dist', 'temp']):
+    if is_excluded(p):
         continue
     if p.is_file() and p.stat().st_size > 300 * 1024:
         continue
@@ -60,16 +62,17 @@ print("\n=== Step 3: Document & Markdown Processing ===")
 doc_nodes = []
 doc_edges = []
 all_docs = list(detection.get('files', {}).get('document', []))
+all_docs = [str((root / path).resolve()) for path in all_docs]
 
 # Include any documentation files in docs/ and root markdown
 for md_file in list(root.glob("docs/*.md")) + list(root.glob("*.md")):
     rel = str(md_file.relative_to(root)).replace('\\', '/')
-    if rel not in all_docs:
-        all_docs.append(str(md_file))
+    if str(md_file.resolve()) not in all_docs:
+        all_docs.append(str(md_file.resolve()))
 
 for doc_path_str in all_docs:
     dp = Path(doc_path_str)
-    if not dp.exists() or any(x in str(dp) for x in ['node_modules', 'dist', 'temp']):
+    if not dp.exists() or is_excluded(dp):
         continue
     file_rel = str(dp.relative_to(root)).replace('\\', '/')
     file_node_id = f"doc:{file_rel}"
@@ -84,7 +87,7 @@ for doc_path_str in all_docs:
         content = dp.read_text(encoding='utf-8', errors='replace')
         lines = content.splitlines()
         current_heading_id = file_node_id
-        for i, line in enumerate(lines):
+        for line in lines:
             line_str = line.strip()
             if line_str.startswith('#'):
                 title = line_str.lstrip('#').strip()
@@ -117,7 +120,7 @@ for doc_path_str in all_docs:
                             '_origin': 'semantic',
                         })
     except Exception as e:
-        pass
+        print(f'Document extraction failed for {file_rel}: {e}')
 
 semantic_result = {
     'nodes': doc_nodes,

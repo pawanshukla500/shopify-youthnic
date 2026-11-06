@@ -32,13 +32,13 @@ The system is organized into five major integrated domains:
 ### Domain A: Accounts, Financial Ledger & Tally Integration
 
 #### `feature/accounting-financial-ledger-tally-and-graphify` (PR #88)
-- **Status:** Active / Pushed (Latest commit: `3239b36`)
+- **Status:** Open PR #88; latest commit is available on GitHub (do not rely on a hardcoded hash).
 - **Key Modules:**
   - `src/modules/accounts/ledger.service.ts`: Full double-entry financial ledger enforcing `Debits == Credits`. Tracks Sales Invoices, Credit Notes, Gateway Settlement debits/credits, COD Remittances, Freight Invoices, and Bank Receipts.
-  - `src/modules/accounts/gst-engine.service.ts`: Dynamic multi-rate GST engine (5%, 12%, 18%) calculating IGST, CGST, SGST from order line items. Removes legacy hardcoded 18% assumption.
+  - `src/modules/accounts/gst.service.ts`: Dynamic multi-rate GST engine (5%, 12%, 18%) calculating IGST, CGST, SGST from order line items. Removes legacy hardcoded 18% assumption.
   - `src/modules/accounts/bank-reconciliation.service.ts`: 3-way automated matching engine reconciling Orders, Gateway Settlements (GoKwik, Easebuzz, PhonePe), and Bank Statement UTRs (supports ICICI, HDFC, SBI, Kotak statement formats).
-  - `src/modules/accounts/tally-xml.service.ts`: Native Tally ERP 9 / TallyPrime XML export for Sales, Credit Notes, Gateway Expenses, Freight Expenses, and Bank Receipts.
-  - `src/modules/accounts/monthly-closing.service.ts`: Monthly accounting period finalization with `CLOSED` period locks preventing retro-modifications.
+  - `src/modules/accounts/tally-integration.service.ts`: Native Tally ERP 9 / TallyPrime XML export for Sales, Credit Notes, Gateway Expenses, Freight Expenses, and Bank Receipts.
+  - `src/modules/accounts/monthly-closing.service.ts`: Monthly accounting period finalization with application-level `CLOSED` checks; concurrency and explicit reopening still require approval and end-to-end validation.
   - `src/modules/accounts/freight-engine.service.ts`: Freight expense deduplication engine tracking forward, RTO, reverse pickup, COD charges, and weight adjustments across Delhivery and Velocity.
   - `.agents/rules/graphify.md` & `.agents/skills/graphify/`: Installed and verified Graphify knowledge graph engine.
 
@@ -65,21 +65,21 @@ The system is organized into five major integrated domains:
 #### `feature/return-scan-auto-refund-ekta-whatsapp` (PR #86) & `fix/whatsapp-ekta-dedup-and-test-guard` (PR #87)
 - **Status:** Merged to `main`
 - **Key Modules:**
-  - `src/modules/returns/return-scanner.service.ts`: Physical warehouse barcode scanning endpoint (`POST /api/returns/scan`). Automatically validates return waybills and updates status to `RECEIVED`.
-  - `src/modules/returns/refund-processor.service.ts`: Automated refund engine for prepaid orders. Calculates exact pro-rated item prices, line item taxes, and issues Shopify refund via GraphQL Admin API.
-  - `src/modules/whatsapp/ekta-notifier.service.ts`: Instant WhatsApp notification dispatched to Ekta (`Ekta Bhayani 918866077404@s.whatsapp.net`) on successful refund.
+  - `src/modules/returns/return-scan.service.ts`: Physical warehouse barcode scanning endpoint (`POST /api/returns/scan`). Automatically validates return waybills and updates status to `RECEIVED`.
+  - `src/modules/returns/return.service.ts`: Automated refund engine for prepaid orders. Calculates exact pro-rated item prices, line item taxes, and issues Shopify refund via GraphQL Admin API.
+  - `src/modules/whatsapp/whatsapp-gateway.service.ts`: Instant WhatsApp notification dispatched to Ekta (`Ekta Bhayani 918866077404@s.whatsapp.net`) on successful refund.
   - Duplicate notification guard & test environment mock guard preventing live WhatsApp sends during automated CI/tests.
 
 #### Exchange Order Invariant (`exchange_order` & `main` commit `5dad0e1`)
 - **Critical Business Invariant:**
-  - Exchange orders (identified by `isExchange` flag, order note tags `EXCHANGE`, `replacement_order`, or exchange line item metadata) **MUST NEVER** be refunded automatically or queued for refund.
+  - Exchange orders must not be refunded automatically or queued for refund. Verify both the `isExchange` flag and relevant Shopify tags in every return-creation and scanning path; legacy COD paths may not consistently set the flag.
   - Orders like `26YOU5987`, `26YOU5991`, `26YOU6063`, `26YOU6104`, `26YOU6128` are exchange orders and are strictly guarded from refund queues.
 
 #### `feat/cod-manual-refund-and-single-refund-guard` & `docs/COD_MANUAL_REFUND_AND_REVERSE_LOGISTICS_SPEC.md`
 - **Status:** Active in core returns flow
 - **Key Features:**
-  - Manual COD refund queue: When a COD return is scanned, it moves to `NEEDS_MANUAL_REFUND`.
-  - Finance operator must provide Bank UTR / Transaction Reference and upload a screenshot proof.
+  - Manual COD refund queue: When a COD return is scanned, after approved or partial QC the return enters `returnStatus=REFUND_PENDING` and `refundStatus=PENDING`.
+  - Finance operator must supply a Bank UTR / Transaction Reference **or** a screenshot proof, per the configured manual refund policy.
   - Concurrency lock and single-refund guard preventing double payout.
 
 ---
@@ -89,7 +89,7 @@ The system is organized into five major integrated domains:
 #### `feat/velocity-tracking-thermal-labels-ponytail` (PR #54), `velocityshipping`, & `velocity_return_support`
 - **Status:** Primary courier in production
 - **Key Modules:**
-  - `src/modules/shipping/velocity.service.ts`: Multi-carrier aggregator integrating Bluedart, Ekart, Amazon Shipping, and Shadowfax.
+  - `src/modules/velocity/velocity.service.ts`: Multi-carrier aggregator integrating Bluedart, Ekart, Amazon Shipping, and Shadowfax.
   - Automated COD remittance polling, bank UTR mapping, and carrier fee ledger sync.
   - `4x6 Thermal GST Tax Invoice`: Formatted for thermal label printers (4x6 inch) with registered GSTIN `24AERPB8666E1ZB`.
   - Standardized customer tracking URLs (`https://youthnic.com/track?awb=...`).

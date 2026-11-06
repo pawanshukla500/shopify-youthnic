@@ -160,7 +160,12 @@ export class MonthlyClosingService {
     });
     const priorClosing = priorSnapshot ? priorSnapshot.closingReceivable.toNumber() : 0;
 
-    const periodMovement = netSales - netBankReceipts;
+    // Movement in customer receivables derived directly from double-entry debtor ledgers
+    const debtorsPrepaidDebits = debtorsPrepaidRow?.periodDebit || 0;
+    const debtorsPrepaidCredits = debtorsPrepaidRow?.periodCredit || 0;
+    const debtorsCodDebits = debtorsCodRow?.periodDebit || 0;
+    const debtorsCodCredits = debtorsCodRow?.periodCredit || 0;
+    const periodMovement = (debtorsPrepaidDebits + debtorsCodDebits) - (debtorsPrepaidCredits + debtorsCodCredits);
     const closingReceivable = Math.round((priorClosing + periodMovement) * 100) / 100;
 
     const status: ClosingStatus = isProvisional || exceptions.length > 0

@@ -9,6 +9,7 @@ const { prismaMock, txMock } = vi.hoisted(() => {
   };
   const prismaMock = {
     order: { findMany: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
+    gatewaySettlementBatch: { upsert: vi.fn() },
     monthlyClosingSnapshot: { findUnique: vi.fn() },
     $transaction: vi.fn(async (callback: (tx: typeof txMock) => Promise<unknown>) => callback(txMock)),
   };
@@ -25,7 +26,10 @@ import { gatewayExpenseService } from '../src/modules/accounts/gateway-expense.s
 import { bankReconciliationService } from '../src/modules/accounts/bank-reconciliation.service';
 
 describe('Financial accounting guardrails', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    prismaMock.monthlyClosingSnapshot.findUnique.mockResolvedValue(null);
+  });
   afterEach(() => vi.restoreAllMocks());
 
   it('rejects a finalized month before posting invoice and return vouchers', async () => {
@@ -79,6 +83,49 @@ describe('Financial accounting guardrails', () => {
     expect(prismaMock.order.findFirst).not.toHaveBeenCalled();
     expect(prismaMock.order.update).not.toHaveBeenCalled();
     expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('keeps unmatched gateway collections in clearing rather than crediting customer debtors', async () => {
+    const entrySpy = vi.spyOn(ledgerService, 'createBalancedEntry').mockResolvedValue({ id: 42 });
+    await ledgerService.postGatewaySettlement({
+      gateway: 'EASEBUZZ', batchId: 'MIXED-101',
+      grossAmount: 1000, matchedGrossAmount: 600,
+      feeAmount: 10, feeGst: 1.8, netBankCredit: 988.2,
+      settlementDate: new Date('2026-11-05T12:00:00Z'), period: '2026-11', orderIds: [1],
+    });
+    const lines = entrySpy.mock.calls[0][0].lines;
+    expect(lines.find((r) => r.accountCode === 'SUNDRY_DEBTORS_PREPAID')?.credit).toBe(600);
+    expect(lines.find((r) => r.accountCode === 'CLEARING_EASEBUZZ')?.credit).toBe(400);
+  });
+
+  it('books negative freight reversals as credits to expenses and debits to the wallet', async () => {
+    const entrySpy = vi.spyOn(ledgerService, 'createBalancedEntry').mockResolvedValue({ id: 43 });
+    await ledgerService.postFreightBill({
+      carrier: 'DELHIVERY', invoiceNumber: 'CREDIT-101',
+      invoiceDate: new Date('2026-11-05T12:00:00Z'), period: '2026-11',
+      forwardFreight: -100, freightGst: -18, totalBilled: -118,
+      isWalletDeducted: true,
+    });
+    const lines = entrySpy.mock.calls[0][0].lines;
+    expect(lines.find((r) => r.accountCode === 'EXPENSE_FREIGHT_FORWARD')).toMatchObject({ debit: 0, credit: 100 });
+    expect(lines.find((r) => r.accountCode === 'INPUT_IGST')).toMatchObject({ debit: 0, credit: 18 });
+    expect(lines.find((r) => r.accountCode === 'COURIER_WALLET_DELHIVERY')).toMatchObject({ debit: 118, credit: 0 });
+  });
+
+  it('reconciles matched gateway sales without setting bank verification from gateway evidence', async () => {
+    prismaMock.order.findFirst.mockResolvedValueOnce({ id: 9, paymentReceivedUtr: null });
+    prismaMock.order.update.mockResolvedValue({ id: 9 });
+    const postSpy = vi.spyOn(ledgerService, 'postGatewaySettlement').mockResolvedValue({ id: 44 });
+    const date = new Date('2026-11-05T12:00:00Z');
+    await gatewayExpenseService.reconcileAndPostBatch('EASEBUZZ', 'MATCHED-101', date, [
+      { gateway: 'EASEBUZZ', orderReference: '#26YOU5900', transactionId: 'TXN-101',
+        grossAmount: 1000, mdrFee: 10, gstOnFee: 1.8, netCredit: 988.2,
+        batchId: 'MATCHED-101', settlementDate: date },
+    ]);
+    expect(postSpy).toHaveBeenCalledWith(expect.objectContaining({ matchedGrossAmount: 1000 }));
+    const change = prismaMock.order.update.mock.calls[0][0].data;
+    expect(change).not.toHaveProperty('paymentVerified');
+    expect(change).not.toHaveProperty('paymentVerifiedAt');
   });
 
   it('parses day-first two-digit bank years and discards invalid or missing dates', () => {

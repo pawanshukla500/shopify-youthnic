@@ -23,10 +23,13 @@ Use this skill when auditing tax calculations, determining GST rates for apparel
 - Gateway MDR and courier logistics fee invoices.
 
 ## 3. GST Calculation Rules & Procedures
-### A. Product Rates for Indian Apparel
-- **Kurtis / Garments $\le$ ₹1,000 per piece**: **5% GST**
-- **Garments > ₹1,000 per piece**: **12% GST** (or 18% for specific accessories)
-- **Universal 18% assumption is strictly prohibited.**
+### A. Time-Effective Apparel Rates
+- **Before 22 September 2025:** qualifying apparel up to ₹1,000 per piece: 5%; exceeding ₹1,000: 12%.
+- **From 22 September 2025:** qualifying readymade garments/made-ups up to ₹2,500 per piece: 5%; exceeding ₹2,500: 18%.
+- This fallback applies only to supported HSN 61/62 and qualifying 63 products, using the applicable transaction value and date of supply. It is not a rule for every saree, fabric or accessory.
+- Prefer verified invoice/item GST tax lines. When multiple rates apply, calculate tax item-wise rather than forcing one order-level rate.
+- If original invoice data, item classification, discount allocation, or supply date is uncertain, stop automatic voucher posting and request accounting review.
+- Government references: https://www.pib.gov.in/FactsheetDetails.aspx?Id=150293&lang=1 and https://www.pib.gov.in/Pressreleaseshare.aspx?PRID=2168426&lang=2 .
 
 ### B. Place of Supply (POS) Classification
 - **Intra-state (Buyer state == Gujarat / Code 24)**:
@@ -40,8 +43,9 @@ $$\text{Taxable Amount} = \frac{\text{Gross Amount}}{1 + \frac{\text{Rate}}{100}
 $$\text{Total GST} = \text{Gross Amount} - \text{Taxable Amount}$$
 
 ### D. Input Tax Credit (ITC)
-- **Payment Gateway MDR Fees**: 18% IGST on processing charges.
-- **Courier Logistics Services**: 18% IGST on freight charges.
+- Record the gateway or carrier's **actual supplier invoice tax lines** and GST registration/recipient place of supply.
+- Never force all supplier taxes into INPUT_IGST. Use the actual eligible IGST or CGST/SGST split, and classify ineligible ITC separately.
+- An expense booked to Tally and an ITC claim are different decisions; do not claim credit until evidence and eligibility are verified.
 
 ## 4. Accounting Invariants
 - Taxable Sales + Output GST must equal Gross Sales Invoice Amount.

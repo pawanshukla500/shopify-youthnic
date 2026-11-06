@@ -15,6 +15,10 @@ LOCAL_PATH=$(graphify clone <github-url> [--branch <branch>])
 # Clone each repo, run the full pipeline on each, then merge
 graphify clone <url1>   # → ~/.graphify/repos/<owner1>/<repo1>
 graphify clone <url2>   # → ~/.graphify/repos/<owner2>/<repo2>
+# From the first clone's directory, run /graphify . to create its own graphify-out/graph.json
+# Repeat from the second clone's directory. Verify both files exist and are distinct.
+# Do not run both build commands from a shared working directory: that overwrites graphify-out/.
+# The following merge command may then run from any directory.
 # Run /graphify on each local path to produce their graph.json files
 # Then merge:
 graphify merge-graphs \

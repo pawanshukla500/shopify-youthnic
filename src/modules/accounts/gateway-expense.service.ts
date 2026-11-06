@@ -77,6 +77,7 @@ export class GatewayExpenseService {
     let totalMdrFee = 0;
     let totalFeeGst = 0;
     let totalNetCredit = 0;
+    let matchedGrossAmount = 0;
     const matchedOrderIds: number[] = [];
 
     // Deduplication tracker: prevent double-booking if both GoKwik and Easebuzz report the same transaction
@@ -109,6 +110,7 @@ export class GatewayExpenseService {
 
       if (order) {
         matchedOrderIds.push(order.id);
+        matchedGrossAmount += r.grossAmount;
 
         // Update order payment tracking fields
         const totalFeeDeduction = r.mdrFee + r.gstOnFee;
@@ -198,6 +200,7 @@ export class GatewayExpenseService {
       settlementDate,
       period,
       orderIds: matchedOrderIds,
+      matchedGrossAmount: Math.round(matchedGrossAmount * 100) / 100,
     });
 
     logger.info('Gateway settlement batch posted to ledger', {

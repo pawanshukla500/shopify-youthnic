@@ -59,6 +59,20 @@ export class GatewayExpenseService {
       throw new Error(`Empty settlement batch ${batchId}`);
     }
 
+    // Validate source figures before modifying orders, settlement batches or journal entries.
+    const uniqueRows = rows.filter((row, index) => rows.findIndex((other) => other.transactionId === row.transactionId) === index);
+    const values = uniqueRows.flatMap((row) => [row.grossAmount, row.mdrFee, row.gstOnFee, row.netCredit]);
+    if (uniqueRows.some((row) => row.gateway !== gateway || row.batchId !== batchId || !row.transactionId.trim()) ||
+        values.some((value) => !Number.isFinite(value) || value < 0)) {
+      throw new Error(`Invalid provider, transaction ID or monetary values in gateway settlement batch ${batchId}`);
+    }
+    const sourceGross = Math.round(uniqueRows.reduce((sum, row) => sum + row.grossAmount, 0) * 100) / 100;
+    const sourceFees = Math.round(uniqueRows.reduce((sum, row) => sum + row.mdrFee + row.gstOnFee, 0) * 100) / 100;
+    const sourceNet = Math.round(uniqueRows.reduce((sum, row) => sum + row.netCredit, 0) * 100) / 100;
+    if (Math.abs(sourceGross - sourceFees - sourceNet) > 0.05) {
+      throw new Error(`Gateway settlement ${batchId} has a source amount discrepancy: gross ₹${sourceGross}, deductions ₹${sourceFees}, reported net ₹${sourceNet}. Review before posting.`);
+    }
+
     let totalGross = 0;
     let totalMdrFee = 0;
     let totalFeeGst = 0;

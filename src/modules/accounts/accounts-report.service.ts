@@ -294,6 +294,7 @@ export interface ReportReturnRow {
   returnStatus: string;
   refundStatus: string;
   refundAmount: number;
+  gstRate?: number;
   paymentRail: PaymentRailName;
   tallyVoucherType: string;
   reason?: string;

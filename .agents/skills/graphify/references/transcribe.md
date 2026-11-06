@@ -44,8 +44,9 @@ print(f'Transcribed {len(transcript_paths)} file(s)', file=sys.stderr)
 ```
 
 After transcription:
-- Read the transcript paths from `graphify-out/.graphify_transcripts.json`
-- Add them to the docs list before dispatching semantic subagents in Step 3B
+- Read the transcript paths from `graphify-out/.graphify_transcripts.json`.
+- Before Step 3, append existing transcript paths to `files.document` in `graphify-out/.graphify_detect.json` (preserving `files.video` and all original categories). Deduplicate paths and persist the detection JSON. This is required **before** the empty-documents fast path is checked.
+- Add those transcript paths to the docs list before dispatching semantic subagents in Step 3B.
 - Print how many transcripts were created: `Transcribed N video file(s) -> treating as docs`
 - If transcription fails for a file, print a warning and continue with the rest
 

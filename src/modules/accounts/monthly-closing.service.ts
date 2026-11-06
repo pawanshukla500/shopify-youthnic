@@ -49,6 +49,11 @@ export class MonthlyClosingService {
     isProvisional: boolean = false
   ): Promise<MonthlyClosingReport> {
     const { start, end } = monthRange(period);
+    // Reject before any invoice/credit-note postings; a finalized period must remain immutable.
+    const closedSnapshot = await prisma.monthlyClosingSnapshot.findUnique({ where: { period } });
+    if (closedSnapshot?.status === ClosingStatus.CLOSED) {
+      throw new Error(`Period ${period} is CLOSED. Reopen with an audited authorization before posting vouchers.`);
+    }
     const exceptions: string[] = [];
 
     // 1. Ensure all orders placed in this period have sales vouchers posted

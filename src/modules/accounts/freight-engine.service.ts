@@ -71,6 +71,10 @@ export class FreightEngineService {
     }
 
     const period = ledgerService.toPeriod(invoiceDate);
+    const closedPeriod = await prisma.monthlyClosingSnapshot.findUnique({ where: { period } });
+    if (closedPeriod?.status === 'CLOSED') {
+      throw new Error(`Cannot book freight invoice ${invoiceNumber}: accounting period ${period} is CLOSED.`);
+    }
 
     let totalForwardFreight = 0;
     let totalRtoFreight = 0;

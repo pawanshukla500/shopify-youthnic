@@ -73,6 +73,12 @@ export class GatewayExpenseService {
       throw new Error(`Gateway settlement ${batchId} has a source amount discrepancy: gross ₹${sourceGross}, deductions ₹${sourceFees}, reported net ₹${sourceNet}. Review before posting.`);
     }
 
+    const period = ledgerService.toPeriod(settlementDate);
+    const existingClose = await prisma.monthlyClosingSnapshot.findUnique({ where: { period } });
+    if (existingClose?.status === 'CLOSED') {
+      throw new Error(`Cannot reconcile gateway batch ${batchId}: accounting period ${period} is CLOSED.`);
+    }
+
     let totalGross = 0;
     let totalMdrFee = 0;
     let totalFeeGst = 0;
@@ -153,8 +159,6 @@ export class GatewayExpenseService {
       // Retain reported net credit from merchant statement to avoid bank ledger drift
       batchStatus = 'NEEDS_REVIEW';
     }
-
-    const period = ledgerService.toPeriod(settlementDate);
 
     // Save or update GatewaySettlementBatch entity
     await prisma.gatewaySettlementBatch.upsert({

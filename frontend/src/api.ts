@@ -1691,6 +1691,75 @@ export async function updateRemittanceUtr(
   return response.data
 }
 
+// ─── Double-Entry Ledger, Bank Reconciliation & Tally Exports ───
+
+export async function getTrialBalance(period?: string): Promise<{
+  rows: Array<{
+    accountCode: string
+    accountName: string
+    accountType: string
+    subType: string | null
+    openingDebit: number
+    openingCredit: number
+    periodDebit: number
+    periodCredit: number
+    closingDebit: number
+    closingCredit: number
+  }>
+  totalDebit: number
+  totalCredit: number
+  isBalanced: boolean
+}> {
+  const response = await api.get('/api/accounts/ledger/trial-balance', { params: { period } })
+  return response.data
+}
+
+export async function getJournalVouchers(period?: string, limit: number = 50): Promise<any[]> {
+  const response = await api.get('/api/accounts/ledger/vouchers', { params: { period, limit } })
+  return response.data
+}
+
+export async function downloadTallyXml(period?: string): Promise<void> {
+  const response = await api.get('/api/accounts/tally/xml', {
+    params: { period },
+    responseType: 'blob',
+  })
+  const blob = new Blob([response.data], { type: 'application/xml' })
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.setAttribute('download', `Youthnic-Tally-${period || 'latest'}.xml`)
+  document.body.appendChild(link)
+  link.click()
+  link.parentNode?.removeChild(link)
+  window.URL.revokeObjectURL(url)
+}
+
+export async function getClosingHistory(): Promise<any[]> {
+  const response = await api.get('/api/accounts/closing/history')
+  return response.data
+}
+
+export async function closeMonthNow(period: string, isProvisional: boolean = false): Promise<any> {
+  const response = await api.post('/api/accounts/closing/close', { period, isProvisional })
+  return response.data
+}
+
+export async function getBankStatementLines(limit: number = 50): Promise<any[]> {
+  const response = await api.get('/api/accounts/bank-statement/lines', { params: { limit } })
+  return response.data
+}
+
+export async function getGatewayBatches(): Promise<any[]> {
+  const response = await api.get('/api/accounts/gateway/batches')
+  return response.data
+}
+
+export async function getFreightBills(): Promise<any[]> {
+  const response = await api.get('/api/accounts/freight/bills')
+  return response.data
+}
+
 export async function getReturnScanStatus(): Promise<{
   configured: boolean
   connected: boolean

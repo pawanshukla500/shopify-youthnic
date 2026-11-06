@@ -37,7 +37,7 @@ model Order {
   shippingTitle     String?
   shopifyNote       String?
   additionalDetails Json?
-  currency          String  @default("INR")
+  currency          String   @default("INR")
   paymentMethod     String? // COD, prepaid, etc.
   financialStatus   String? // paid, pending, refunded, etc.
   fulfillmentStatus String? // fulfilled, unfulfilled, etc.
@@ -111,14 +111,15 @@ model Order {
   supportFlag      String? // e.g. "URGENT_DAMAGE_CLAIM", "RETURN_WINDOW_EXPIRING", "DELAY_COMPLAINT"
 
   // Relations
-  items         OrderItem[]
-  shipment      Shipment?
-  returns       Return[]
+  items              OrderItem[]
+  shipment           Shipment?
+  returns            Return[]
   accountTrailEvents AccountTrailEvent[]
-  notifications Notification[]
-  syncLogs      SyncLog[]
-  emailLogs     EmailLog[]
-  inboundEmails InboundEmail[]
+  notifications      Notification[]
+  syncLogs           SyncLog[]
+  emailLogs          EmailLog[]
+  inboundEmails      InboundEmail[]
+  journalEntries     JournalEntry[]
 
   @@index([status])
   @@index([shopifyUpdatedAt])
@@ -172,17 +173,17 @@ model Shipment {
   order   Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   // Delhivery details
-  waybillNumber    String? @unique // AWB number from Delhivery
-  orderIdDelhivery String? // Delhivery's internal order ID
-  courier          String?
-  pickupBatchKey   String?
-  manifestedByOms Boolean @default(false)
+  waybillNumber          String?               @unique // AWB number from Delhivery
+  orderIdDelhivery       String? // Delhivery's internal order ID
+  courier                String?
+  pickupBatchKey         String?
+  manifestedByOms        Boolean               @default(false)
   manifestPickupLocation String?
-  omsManifestedAt DateTime?
-  pickupBatch      WarehousePickupBatch? @relation(fields: [pickupBatchKey], references: [key], onDelete: SetNull)
-  paymentMode      String? // COD / Pre-paid
-  codAmount        Float?  @default(0)
-  declaredValue    Float?
+  omsManifestedAt        DateTime?
+  pickupBatch            WarehousePickupBatch? @relation(fields: [pickupBatchKey], references: [key], onDelete: SetNull)
+  paymentMode            String? // COD / Pre-paid
+  codAmount              Float?                @default(0)
+  declaredValue          Float?
 
   // COD reconciliation. Delhivery's public API exposes no remittance endpoint,
   // so "collected" is derived from delivery status (the courier takes the cash
@@ -199,11 +200,11 @@ model Shipment {
   status ShipmentStatus @default(PENDING)
 
   // Tracking
-  trackingStatus    String? // Latest status from Delhivery
-  trackingLocation  String?
-  trackingUpdatedAt DateTime?
+  trackingStatus       String? // Latest status from Delhivery
+  trackingLocation     String?
+  trackingUpdatedAt    DateTime?
   expectedDeliveryDate DateTime? // Delhivery ExpectedDeliveryDate / PromisedDeliveryDate
-  trackingHistory   Json? // Full tracking timeline
+  trackingHistory      Json? // Full tracking timeline
 
   // Label
   labelUrl String? // External Delhivery PDF label URL (kept for fallback)
@@ -237,7 +238,7 @@ model Shipment {
 
   // Detailed wallet ledger transactions from Delhivery WalletReport (Debits & Refunds)
   // Array of { txnId, date, type: 'debit' | 'credit', amount: number, description: string, status: string, zone?: string, weight?: number, closureDate?: string }
-  walletTransactions  Json?
+  walletTransactions Json?
 
   // Shipping cost per leg, GST included. ESTIMATE comes from Delhivery's
   // rate API; ACTUAL replaces it when the wallet ledger / invoice backup that
@@ -357,24 +358,25 @@ model Return {
   customerNotified Boolean @default(false)
 
   // Exchange Orders Support
-  isExchange                 Boolean   @default(false)
-  exchangeVariantId          String?   // Shopify Variant ID / GID of replacement item
-  exchangeSku                String?   // SKU of replacement item
-  exchangeTitle              String?   // Title / Size of replacement item (e.g. "Size L")
-  exchangeForwardAwb         String?   // Forward replacement shipment AWB
-  exchangeForwardShipmentId  String?   // Velocity / downstream shipment ID for forward leg
-  exchangeForwardStatus      String?   // PENDING | DISPATCHED | IN_TRANSIT | DELIVERED
-  exchangeDispatchMode       String?   @default("IMMEDIATE") // IMMEDIATE | ON_PICKUP | ON_RECEIVED
-  exchangeLabelUrl           String?   // Shipping label URL for replacement forward parcel
+  isExchange                Boolean @default(false)
+  exchangeVariantId         String? // Shopify Variant ID / GID of replacement item
+  exchangeSku               String? // SKU of replacement item
+  exchangeTitle             String? // Title / Size of replacement item (e.g. "Size L")
+  exchangeForwardAwb        String? // Forward replacement shipment AWB
+  exchangeForwardShipmentId String? // Velocity / downstream shipment ID for forward leg
+  exchangeForwardStatus     String? // PENDING | DISPATCHED | IN_TRANSIT | DELIVERED
+  exchangeDispatchMode      String? @default("IMMEDIATE") // IMMEDIATE | ON_PICKUP | ON_RECEIVED
+  exchangeLabelUrl          String? // Shipping label URL for replacement forward parcel
 
   errorMessage String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
   // Relations
-  items         ReturnItem[]
+  items              ReturnItem[]
   accountTrailEvents AccountTrailEvent[]
-  notifications Notification[]
+  notifications      Notification[]
+  JournalEntry       JournalEntry[]
 
   @@index([returnStatus])
   @@index([refundStatus])
@@ -394,17 +396,17 @@ model Return {
 // (POST /fm/request/new/) is for forward parcels at the registered warehouse.
 // Reverse customer pickups are scheduled by the reverse manifest itself.
 model PickupRequest {
-  id                    Int      @id @default(autoincrement())
-  pickupId              String?
-  pickupLocation        String
-  pickupDate            String
-  pickupTime            String
-  expectedPackageCount  Int
-  direction             String   @default("FORWARD")
-  status                String // SCHEDULED | ALREADY_OPEN | FAILED
-  message               String?
-  rawResponse           Json?
-  createdAt             DateTime @default(now())
+  id                   Int      @id @default(autoincrement())
+  pickupId             String?
+  pickupLocation       String
+  pickupDate           String
+  pickupTime           String
+  expectedPackageCount Int
+  direction            String   @default("FORWARD")
+  status               String // SCHEDULED | ALREADY_OPEN | FAILED
+  message              String?
+  rawResponse          Json?
+  createdAt            DateTime @default(now())
 
   @@index([pickupLocation, pickupDate])
   @@index([status])
@@ -412,19 +414,19 @@ model PickupRequest {
 
 // Unique only on this new table; existing pickup history is left intact.
 model WarehousePickupBatch {
-  key                   String   @id
+  key                   String     @id
   pickupLocation        String
   pickupDate            String
   pickupTime            String
-  status                String   @default("QUEUED")
+  status                String     @default("QUEUED")
   pickupId              String?
-  submittedPackageCount Int      @default(0)
-  attempts              Int      @default(0)
+  submittedPackageCount Int        @default(0)
+  attempts              Int        @default(0)
   claimedAt             DateTime?
-  nextAttemptAt         DateTime @default(now())
+  nextAttemptAt         DateTime   @default(now())
   message               String?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  createdAt             DateTime   @default(now())
+  updatedAt             DateTime   @updatedAt
   shipments             Shipment[]
 
   @@index([status, nextAttemptAt])
@@ -447,20 +449,20 @@ model ReturnItem {
 // authenticated request so history remains readable if a user account changes.
 // Evidence paths point to private Firebase Storage objects, never public URLs.
 model AccountTrailEvent {
-  id       Int  @id @default(autoincrement())
-  orderId  Int
-  order    Order @relation(fields: [orderId], references: [id], onDelete: Restrict)
-  returnId Int?
+  id        Int     @id @default(autoincrement())
+  orderId   Int
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  returnId  Int?
   returnObj Return? @relation(fields: [returnId], references: [id], onDelete: SetNull)
 
-  eventType String // COD_APPROVED | RETURN_CREATED | REFUND_AUTOMATIC | REFUND_MANUAL
-  actorType String // USER | SYSTEM
-  actorUid  String?
+  eventType  String // COD_APPROVED | RETURN_CREATED | REFUND_AUTOMATIC | REFUND_MANUAL
+  actorType  String // USER | SYSTEM
+  actorUid   String?
   actorEmail String?
-  actorName String?
-  actorRole String?
-  source    String? // OMS_UI | RETURN_QC | RTO_AUTO_REFUND | SHOPIFY | MANUAL_PAYOUT
-  status    String? // COMPLETED | NO_MONEY_MOVED | FAILED
+  actorName  String?
+  actorRole  String?
+  source     String? // OMS_UI | RETURN_QC | RTO_AUTO_REFUND | SHOPIFY | MANUAL_PAYOUT
+  status     String? // COMPLETED | NO_MONEY_MOVED | FAILED
 
   amount            Float?
   currency          String? @default("INR")
@@ -469,16 +471,16 @@ model AccountTrailEvent {
   externalReference String? // Shopify refund ID, UTR, or payout reference
   note              String?
 
-  evidenceStoragePath  String?
-  evidenceFileName     String?
-  evidenceContentType  String?
-  metadata             Json?
-  createdAt            DateTime @default(now())
+  evidenceStoragePath String?
+  evidenceFileName    String?
+  evidenceContentType String?
+  metadata            Json?
+  createdAt           DateTime @default(now())
 
+  @@unique([orderId, eventType, externalReference], map: "AccountTrailEvent_refund_dedupe_key")
   @@index([orderId, createdAt])
   @@index([returnId, createdAt])
   @@index([eventType, createdAt])
-  @@unique([orderId, eventType, externalReference], map: "AccountTrailEvent_refund_dedupe_key")
 }
 
 // ─── WhatsApp Notifications ───────────────────────────────
@@ -744,4 +746,228 @@ enum SyncLogStatus {
   SUCCESS
   FAILED
   RETRY
+}
+
+// ─── Double-Entry Financial Accounting Ledger ────────────────
+
+model LedgerAccount {
+  id        Int         @id @default(autoincrement())
+  code      String      @unique // e.g. "SALES_DOMESTIC", "BANK_HDFC", "CLEARING_EASEBUZZ"
+  name      String
+  type      AccountType
+  subType   String? // BANK, GATEWAY_CLEARING, COURIER_CLEARING, SUNDRY_DEBTORS, etc.
+  currency  String      @default("INR")
+  isActive  Boolean     @default(true)
+  balance   Decimal     @default(0) @db.Decimal(15, 2)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  lineItems JournalLineItem[]
+
+  @@index([type])
+  @@index([subType])
+}
+
+model JournalEntry {
+  id               Int         @id @default(autoincrement())
+  entryNumber      String      @unique // e.g. "SALES-26YOU5754", "RCPT-UTR-123456"
+  voucherType      VoucherType
+  documentDate     DateTime
+  postingDate      DateTime
+  accountingPeriod String // "YYYY-MM" e.g. "2026-10"
+  reference        String? // Order name, AWB, UTR, Invoice No
+  orderId          Int?
+  order            Order?      @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  returnId         Int?
+  returnObj        Return?     @relation(fields: [returnId], references: [id], onDelete: SetNull)
+  narration        String?
+  status           EntryStatus @default(POSTED)
+  totalDebit       Decimal     @db.Decimal(15, 2)
+  totalCredit      Decimal     @db.Decimal(15, 2)
+  metadata         Json?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  lines JournalLineItem[]
+
+  @@index([voucherType, accountingPeriod])
+  @@index([postingDate])
+  @@index([orderId])
+  @@index([returnId])
+  @@index([reference])
+}
+
+model JournalLineItem {
+  id             Int           @id @default(autoincrement())
+  journalEntryId Int
+  journalEntry   JournalEntry  @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  accountId      Int
+  account        LedgerAccount @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  debit          Decimal       @default(0) @db.Decimal(15, 2)
+  credit         Decimal       @default(0) @db.Decimal(15, 2)
+  partyName      String?
+  statePos       String? // GST State Code e.g. "24-Gujarat"
+  gstRate        Decimal?      @db.Decimal(5, 2)
+  narration      String?
+
+  @@index([journalEntryId])
+  @@index([accountId])
+}
+
+model BankStatement {
+  id              Int                 @id @default(autoincrement())
+  fileName        String
+  bankName        String
+  accountNumber   String?
+  statementPeriod String?
+  openingBalance  Decimal?            @db.Decimal(15, 2)
+  closingBalance  Decimal?            @db.Decimal(15, 2)
+  totalCredits    Decimal?            @db.Decimal(15, 2)
+  totalDebits     Decimal?            @db.Decimal(15, 2)
+  uploadedBy      String?
+  createdAt       DateTime            @default(now())
+  lines           BankStatementLine[]
+
+  @@index([bankName, statementPeriod])
+}
+
+model BankStatementLine {
+  id              Int                      @id @default(autoincrement())
+  statementId     Int
+  statement       BankStatement            @relation(fields: [statementId], references: [id], onDelete: Cascade)
+  transactionDate DateTime
+  valueDate       DateTime?
+  description     String
+  referenceNo     String? // Bank UTR or transaction ID
+  debit           Decimal                  @default(0) @db.Decimal(15, 2)
+  credit          Decimal                  @default(0) @db.Decimal(15, 2)
+  balance         Decimal?                 @db.Decimal(15, 2)
+  status          BankReconciliationStatus @default(UNMATCHED)
+  matchedType     String? // GATEWAY_SETTLEMENT, COD_REMITTANCE, DIRECT_PAYMENT
+  matchedRef      String?
+  matchedAmount   Decimal?                 @db.Decimal(15, 2)
+  notes           String?
+  createdAt       DateTime                 @default(now())
+
+  @@index([statementId])
+  @@index([referenceNo])
+  @@index([status])
+}
+
+model GatewaySettlementBatch {
+  id                 Int                      @id @default(autoincrement())
+  gateway            String // EASEBUZZ, GOKWIK, PHONEPE
+  batchId            String                   @unique
+  settlementDate     DateTime
+  grossAmount        Decimal                  @db.Decimal(15, 2)
+  feeAmount          Decimal                  @db.Decimal(15, 2)
+  gstAmount          Decimal                  @db.Decimal(15, 2)
+  netAmount          Decimal                  @db.Decimal(15, 2)
+  bankUtr            String?
+  bankCreditDate     DateTime?
+  verificationStatus BankReconciliationStatus @default(UNVERIFIED)
+  orderCount         Int                      @default(0)
+  details            Json?
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+
+  @@index([gateway, settlementDate])
+  @@index([bankUtr])
+  @@index([verificationStatus])
+}
+
+model FreightBill {
+  id                   Int      @id @default(autoincrement())
+  carrier              String // DELHIVERY, VELOCITY
+  invoiceNumber        String   @unique
+  invoiceDate          DateTime
+  period               String // e.g. "2026-10"
+  forwardFreight       Decimal  @default(0) @db.Decimal(15, 2)
+  rtoFreight           Decimal  @default(0) @db.Decimal(15, 2)
+  reverseFreight       Decimal  @default(0) @db.Decimal(15, 2)
+  codHandlingFee       Decimal  @default(0) @db.Decimal(15, 2)
+  surcharges           Decimal  @default(0) @db.Decimal(15, 2)
+  gstAmount            Decimal  @default(0) @db.Decimal(15, 2)
+  totalBilled          Decimal  @db.Decimal(15, 2)
+  underlyingCarrier    String? // For Velocity: "Delhivery", "Ekart", "Bluedart", "Shadowfax"
+  walletDeducted       Decimal? @db.Decimal(15, 2)
+  reconciliationStatus String   @default("RECONCILED")
+  details              Json?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([carrier, period])
+  @@index([invoiceNumber])
+}
+
+model MonthlyClosingSnapshot {
+  id                       Int           @id @default(autoincrement())
+  period                   String        @unique // "YYYY-MM" e.g. "2026-10"
+  closedAt                 DateTime      @default(now())
+  closedBy                 String?
+  status                   ClosingStatus @default(CLOSED)
+  grossSales               Decimal       @db.Decimal(15, 2)
+  taxableSales             Decimal       @db.Decimal(15, 2)
+  cgstAmount               Decimal       @db.Decimal(15, 2)
+  sgstAmount               Decimal       @db.Decimal(15, 2)
+  igstAmount               Decimal       @db.Decimal(15, 2)
+  returnsAmount            Decimal       @db.Decimal(15, 2)
+  netSales                 Decimal       @db.Decimal(15, 2)
+  gatewayCollections       Decimal       @db.Decimal(15, 2)
+  gatewayFees              Decimal       @db.Decimal(15, 2)
+  freightExpenses          Decimal       @db.Decimal(15, 2)
+  netBankReceipts          Decimal       @db.Decimal(15, 2)
+  openingReceivable        Decimal       @db.Decimal(15, 2)
+  closingReceivable        Decimal       @db.Decimal(15, 2)
+  trialBalanceData         Json?
+  stateSummaryData         Json?
+  tallyXmlStoragePath      String?
+  excelWorkbookStoragePath String?
+  createdAt                DateTime      @default(now())
+  updatedAt                DateTime      @updatedAt
+
+  @@index([period])
+  @@index([status])
+}
+
+enum AccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+}
+
+enum VoucherType {
+  SALES
+  CREDIT_NOTE
+  RECEIPT
+  PAYMENT
+  JOURNAL
+  PURCHASE
+}
+
+enum EntryStatus {
+  DRAFT
+  POSTED
+  REVERSED
+  VOID
+}
+
+enum BankReconciliationStatus {
+  UNVERIFIED
+  PENDING_BANK_EVIDENCE
+  VERIFIED
+  PARTIALLY_MATCHED
+  AMOUNT_MISMATCH
+  DUPLICATE
+  UNMATCHED
+  NEEDS_REVIEW
+}
+
+enum ClosingStatus {
+  OPEN
+  PROVISIONAL
+  CLOSED
+  REOPENED
 }

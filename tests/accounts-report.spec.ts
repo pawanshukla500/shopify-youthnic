@@ -134,6 +134,7 @@ describe('State-Wise Accounting & Timing Cutoff Rule', () => {
       customerState: 'Maharashtra',
       totalAmount: 1000,
       paymentReceivedAmount: 800,
+      taxLines: [{ rate: 0.18, price: '152.54', title: 'IGST' }],
       paymentReceivedUtr: 'AXIS001',
       paymentMethod: 'COD',
       shipment: { courier: 'Delhivery' },
@@ -349,6 +350,7 @@ describe('carry forward and opening balance', () => {
       customerState: 'Maharashtra',
       totalAmount: 1000,
       paymentReceivedAmount: 800,
+      taxLines: [{ rate: 0.18, price: '152.54', title: 'IGST' }],
     });
     const opening = new Map<string, number>([['Maharashtra', 500]]);
     const summary = buildStateAccountingSummary([octOrder], [], new Date('2026-10-01'), new Date('2026-11-01'), opening);

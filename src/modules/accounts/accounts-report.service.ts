@@ -29,6 +29,7 @@ import resendService from '../email/resend.service';
 import { accountsStatus } from '../orders/order-tabs';
 import { istDateRange } from './settlement-summary';
 import { isDelhiveryCourier, isVelocityCourier } from '../../utils/courier';
+import { gstService } from './gst.service';
 
 const IST_OFFSET_MS = 5.5 * 3600 * 1000;
 
@@ -323,7 +324,8 @@ export function buildStateAccountingSummary(
   periodReturns: any[],
   start?: Date,
   end?: Date,
-  openingBalances?: Map<string, number> | Record<string, number>
+  openingBalances?: Map<string, number> | Record<string, number>,
+  periodSettledOrders?: any[]
 ): { states: StateAccountingRow[]; totals: StateAccountingTotals } {
   const safeReturns = Array.isArray(periodReturns) ? periodReturns : [];
   const stateMap = new Map<string, StateAccountingRow>();
@@ -366,22 +368,53 @@ export function buildStateAccountingSummary(
     }
   }
 
-  // 1. Tally gross sales and payments received for orders placed in this month
+  // 1. Tally gross sales, GST and payments received for orders placed in this month
   for (const order of orders) {
     if (order.status === 'CANCELLED' && !order.paymentReceivedAmount) {
       continue;
     }
     const row = getRow(order.customerState);
     row.orderCount += 1;
-    row.grossSales += order.totalAmount || 0;
+    const gross = order.totalAmount || 0;
+    row.grossSales += gross;
 
-    const rail = resolvePaymentRailName(order);
-    const rec = order.paymentReceivedAmount || 0;
-    row.paymentReceived += rec;
-    if (rail === 'Delhivery') row.delhivery += rec;
-    else if (rail === 'EaseBuzz') row.easebuzz += rec;
-    else if (rail === 'PhonePe') row.phonepe += rec;
-    else if (rail === 'Velocity') row.velocity += rec;
+    // Dynamic GST calculation (replacing hardcoded 18%)
+    const tax = gstService.calculateSalesTax(gross, order.customerState, undefined, order);
+    row.taxableSales += tax.taxableAmount;
+    row.gstAmount += tax.totalGst;
+
+    // Check payment cutoff timing: only count payment if received within this period [start, end)
+    let isSettledInPeriod = true;
+    if (start && end && order.paymentReceivedAt) {
+      const payDate = new Date(order.paymentReceivedAt);
+      isSettledInPeriod = payDate >= start && payDate < end;
+    }
+
+    if (isSettledInPeriod) {
+      const rail = resolvePaymentRailName(order);
+      const rec = order.paymentReceivedAmount || 0;
+      row.paymentReceived += rec;
+      if (rail === 'Delhivery') row.delhivery += rec;
+      else if (rail === 'EaseBuzz') row.easebuzz += rec;
+      else if (rail === 'PhonePe') row.phonepe += rec;
+      else if (rail === 'Velocity') row.velocity += rec;
+    }
+  }
+
+  // 1b. Tally payments received in this period for prior-period orders (carry forward settlement)
+  if (Array.isArray(periodSettledOrders)) {
+    for (const order of periodSettledOrders) {
+      const rec = order.paymentReceivedAmount || 0;
+      if (rec > 0) {
+        const row = getRow(order.customerState);
+        const rail = resolvePaymentRailName(order);
+        row.paymentReceived += rec;
+        if (rail === 'Delhivery') row.delhivery += rec;
+        else if (rail === 'EaseBuzz') row.easebuzz += rec;
+        else if (rail === 'PhonePe') row.phonepe += rec;
+        else if (rail === 'Velocity') row.velocity += rec;
+      }
+    }
   }
 
   // 2. Tally return deductions for all returns effective in this month
@@ -398,8 +431,8 @@ export function buildStateAccountingSummary(
   const states: StateAccountingRow[] = [];
   for (const row of stateMap.values()) {
     row.grossSales = money(row.grossSales) || 0;
-    row.taxableSales = money(row.grossSales / 1.18) || 0;
-    row.gstAmount = money(row.grossSales - row.taxableSales) || 0;
+    row.taxableSales = money(row.taxableSales) || 0;
+    row.gstAmount = money(row.gstAmount) || 0;
     row.returnsDeducted = money(row.returnsDeducted) || 0;
     row.netSales = money(row.grossSales - row.returnsDeducted) || 0;
     row.paymentReceived = money(row.paymentReceived) || 0;
@@ -847,7 +880,7 @@ export async function renderWorkbook(data: ReportData): Promise<Buffer> {
     'Opening Balance (B/F) (₹)',
     'Gross Sales (₹)',
     'Taxable Sales (₹)',
-    'GST 18% (₹)',
+    'Output GST (₹)',
     'Returns Deducted (₹)',
     'Net Sales (₹)',
     'Payment Received (₹)',
@@ -1128,20 +1161,18 @@ export async function renderWorkbook(data: ReportData): Promise<Buffer> {
   // 1. Sales & Receipt vouchers for orders in period
   for (const o of data.orders) {
     if (o.accountsStatus === 'Not a sale') continue;
-    const taxable = money(o.orderValue / 1.18) || 0;
-    const tax = money(o.orderValue - taxable) || 0;
-    const intra = isIntraState(o.state);
+    const tax = gstService.calculateSalesTax(o.orderValue, o.state);
     tallyVoucherRows.push({
       voucherDate: o.orderDate,
       voucherType: 'Sales',
       voucherNo: o.orderNo,
       partyLedger: `Sundry Debtors - ${o.state}`,
-      particulars: intra ? 'E-commerce Sales @ 18% (Intra-State)' : 'E-commerce Sales @ 18% (Inter-State)',
+      particulars: tax.isInterState ? `E-commerce Sales @ ${tax.gstRate}% (Inter-State IGST)` : `E-commerce Sales @ ${tax.gstRate}% (Intra-State CGST/SGST)`,
       gstPos: `${getGstStateCode(o.state)}-${o.state}`,
-      taxableAmount: taxable,
-      igst: intra ? 0 : tax,
-      cgst: intra ? money(tax / 2) || 0 : 0,
-      sgst: intra ? money(tax / 2) || 0 : 0,
+      taxableAmount: tax.taxableAmount,
+      igst: tax.igst,
+      cgst: tax.cgst,
+      sgst: tax.sgst,
       totalAmount: o.orderValue,
       drCr: 'Dr',
       paymentRail: o.paymentRail,
@@ -1174,20 +1205,18 @@ export async function renderWorkbook(data: ReportData): Promise<Buffer> {
   for (const ret of data.returnsInPeriod) {
     const retAmt = ret.refundAmount > 0 ? ret.refundAmount : 0;
     if (retAmt <= 0) continue;
-    const taxable = money(retAmt / 1.18) || 0;
-    const tax = money(retAmt - taxable) || 0;
-    const intra = isIntraState(ret.state);
+    const tax = gstService.calculateReturnTax(retAmt, ret.state);
     tallyVoucherRows.push({
       voucherDate: ret.refundDate || ret.returnDate,
       voucherType: 'Credit Note',
       voucherNo: `CN-${ret.orderNo}`,
       partyLedger: `Sundry Debtors - ${ret.state}`,
-      particulars: 'Sales Return @ 18%',
+      particulars: tax.isInterState ? `Sales Return @ ${tax.gstRate}% (Inter-State IGST)` : `Sales Return @ ${tax.gstRate}% (Intra-State CGST/SGST)`,
       gstPos: `${getGstStateCode(ret.state)}-${ret.state}`,
-      taxableAmount: taxable,
-      igst: intra ? 0 : tax,
-      cgst: intra ? money(tax / 2) || 0 : 0,
-      sgst: intra ? money(tax / 2) || 0 : 0,
+      taxableAmount: tax.taxableAmount,
+      igst: tax.igst,
+      cgst: tax.cgst,
+      sgst: tax.sgst,
       totalAmount: retAmt,
       drCr: 'Cr',
       paymentRail: ret.paymentRail,

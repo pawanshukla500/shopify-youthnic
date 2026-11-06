@@ -102,6 +102,55 @@ export interface TrialBalanceRow {
   closingCredit: number;
 }
 
+export const DEFAULT_LEDGER_ACCOUNTS: Array<{
+  code: string;
+  name: string;
+  type: AccountType;
+  subType: string;
+}> = [
+  // Assets
+  { code: 'BANK_MAIN', name: 'HDFC Bank Current Account', type: AccountType.ASSET, subType: 'BANK' },
+  { code: 'COURIER_WALLET_DELHIVERY', name: 'Delhivery Prepaid Logistics Wallet', type: AccountType.ASSET, subType: 'PREPAYMENT' },
+  { code: 'COURIER_WALLET_VELOCITY', name: 'Velocity Prepaid Logistics Wallet', type: AccountType.ASSET, subType: 'PREPAYMENT' },
+  { code: 'SUNDRY_DEBTORS_PREPAID', name: 'Sundry Debtors - Online Store Customers', type: AccountType.ASSET, subType: 'DEBTORS' },
+  { code: 'SUNDRY_DEBTORS_COD', name: 'Sundry Debtors - COD Customers', type: AccountType.ASSET, subType: 'DEBTORS' },
+  { code: 'CLEARING_EASEBUZZ', name: 'Easebuzz Settlement Clearing Account', type: AccountType.ASSET, subType: 'GATEWAY_CLEARING' },
+  { code: 'CLEARING_GOKWIK', name: 'GoKwik Settlement Clearing Account', type: AccountType.ASSET, subType: 'GATEWAY_CLEARING' },
+  { code: 'CLEARING_PHONEPE', name: 'PhonePe Settlement Clearing Account', type: AccountType.ASSET, subType: 'GATEWAY_CLEARING' },
+  { code: 'CLEARING_DELHIVERY_COD', name: 'Delhivery COD Remittance Clearing', type: AccountType.ASSET, subType: 'COURIER_CLEARING' },
+  { code: 'CLEARING_VELOCITY_COD', name: 'Velocity COD Remittance Clearing', type: AccountType.ASSET, subType: 'COURIER_CLEARING' },
+  { code: 'INPUT_CGST', name: 'Input CGST (Duties & Taxes)', type: AccountType.ASSET, subType: 'INPUT_TAX' },
+  { code: 'INPUT_SGST', name: 'Input SGST (Duties & Taxes)', type: AccountType.ASSET, subType: 'INPUT_TAX' },
+  { code: 'INPUT_IGST', name: 'Input IGST (Duties & Taxes)', type: AccountType.ASSET, subType: 'INPUT_TAX' },
+
+  // Liabilities
+  { code: 'SUNDRY_CREDITORS_DELHIVERY', name: 'Delhivery Limited (Vendor Payable)', type: AccountType.LIABILITY, subType: 'CREDITORS' },
+  { code: 'SUNDRY_CREDITORS_VELOCITY', name: 'Velocity Technologies (Vendor Payable)', type: AccountType.LIABILITY, subType: 'CREDITORS' },
+  { code: 'CUSTOMER_REFUND_PAYABLE', name: 'Customer Refund Payable Account', type: AccountType.LIABILITY, subType: 'REFUND_PAYABLE' },
+  { code: 'OUTPUT_CGST', name: 'Output CGST (Central Goods & Services Tax)', type: AccountType.LIABILITY, subType: 'OUTPUT_TAX' },
+  { code: 'OUTPUT_SGST', name: 'Output SGST (State Goods & Services Tax)', type: AccountType.LIABILITY, subType: 'OUTPUT_TAX' },
+  { code: 'OUTPUT_IGST', name: 'Output IGST (Integrated Goods & Services Tax)', type: AccountType.LIABILITY, subType: 'OUTPUT_TAX' },
+
+  // Equity
+  { code: 'OWNERS_CAPITAL', name: 'Capital Account', type: AccountType.EQUITY, subType: 'EQUITY' },
+  { code: 'RETAINED_EARNINGS', name: 'Retained Earnings', type: AccountType.EQUITY, subType: 'EQUITY' },
+
+  // Revenue
+  { code: 'SALES_REVENUE', name: 'Domestic Apparel Sales Revenue', type: AccountType.REVENUE, subType: 'SALES' },
+  { code: 'SALES_RETURNS', name: 'Sales Returns & Deductions', type: AccountType.REVENUE, subType: 'SALES_RETURN' },
+
+  // Expenses
+  { code: 'EXPENSE_PG_FEES_EASEBUZZ', name: 'Payment Gateway Processing Fees (Easebuzz)', type: AccountType.EXPENSE, subType: 'MDR' },
+  { code: 'EXPENSE_PG_FEES_GOKWIK', name: 'Checkout Technology Platform Fees (GoKwik)', type: AccountType.EXPENSE, subType: 'PLATFORM_FEE' },
+  { code: 'EXPENSE_PG_FEES_PHONEPE', name: 'Payment Gateway Processing Fees (PhonePe)', type: AccountType.EXPENSE, subType: 'MDR' },
+  { code: 'EXPENSE_FREIGHT_FORWARD', name: 'Freight Charges - Forward Shipments', type: AccountType.EXPENSE, subType: 'FREIGHT' },
+  { code: 'EXPENSE_FREIGHT_RTO', name: 'Freight Charges - Return to Origin (RTO)', type: AccountType.EXPENSE, subType: 'FREIGHT' },
+  { code: 'EXPENSE_FREIGHT_REVERSE', name: 'Freight Charges - Customer Reverse Pickups', type: AccountType.EXPENSE, subType: 'FREIGHT' },
+  { code: 'EXPENSE_COD_HANDLING', name: 'Logistics COD Collection & Handling Charges', type: AccountType.EXPENSE, subType: 'COURIER_FEE' },
+  { code: 'EXPENSE_WEIGHT_SURCHARGES', name: 'Logistics Weight Discrepancy Surcharges', type: AccountType.EXPENSE, subType: 'SURCHARGES' },
+];
+
+
 export class LedgerService {
   private accountsCache = new Map<string, number>();
 
@@ -109,55 +158,8 @@ export class LedgerService {
    * Seed / Ensure standard Chart of Accounts in the database.
    */
   public async ensureChartOfAccounts(): Promise<void> {
-    const defaultAccounts: Array<{
-      code: string;
-      name: string;
-      type: AccountType;
-      subType: string;
-    }> = [
-      // Assets
-      { code: 'BANK_MAIN', name: 'HDFC Bank Current Account', type: AccountType.ASSET, subType: 'BANK' },
-      { code: 'COURIER_WALLET_DELHIVERY', name: 'Delhivery Prepaid Logistics Wallet', type: AccountType.ASSET, subType: 'PREPAYMENT' },
-      { code: 'COURIER_WALLET_VELOCITY', name: 'Velocity Prepaid Logistics Wallet', type: AccountType.ASSET, subType: 'PREPAYMENT' },
-      { code: 'SUNDRY_DEBTORS_PREPAID', name: 'Sundry Debtors - Online Store Customers', type: AccountType.ASSET, subType: 'DEBTORS' },
-      { code: 'SUNDRY_DEBTORS_COD', name: 'Sundry Debtors - COD Customers', type: AccountType.ASSET, subType: 'DEBTORS' },
-      { code: 'CLEARING_EASEBUZZ', name: 'Easebuzz Settlement Clearing Account', type: AccountType.ASSET, subType: 'GATEWAY_CLEARING' },
-      { code: 'CLEARING_GOKWIK', name: 'GoKwik Settlement Clearing Account', type: AccountType.ASSET, subType: 'GATEWAY_CLEARING' },
-      { code: 'CLEARING_PHONEPE', name: 'PhonePe Settlement Clearing Account', type: AccountType.ASSET, subType: 'GATEWAY_CLEARING' },
-      { code: 'CLEARING_DELHIVERY_COD', name: 'Delhivery COD Remittance Clearing', type: AccountType.ASSET, subType: 'COURIER_CLEARING' },
-      { code: 'CLEARING_VELOCITY_COD', name: 'Velocity COD Remittance Clearing', type: AccountType.ASSET, subType: 'COURIER_CLEARING' },
-      { code: 'INPUT_CGST', name: 'Input CGST (Duties & Taxes)', type: AccountType.ASSET, subType: 'INPUT_TAX' },
-      { code: 'INPUT_SGST', name: 'Input SGST (Duties & Taxes)', type: AccountType.ASSET, subType: 'INPUT_TAX' },
-      { code: 'INPUT_IGST', name: 'Input IGST (Duties & Taxes)', type: AccountType.ASSET, subType: 'INPUT_TAX' },
 
-      // Liabilities
-      { code: 'SUNDRY_CREDITORS_DELHIVERY', name: 'Delhivery Limited (Vendor Payable)', type: AccountType.LIABILITY, subType: 'CREDITORS' },
-      { code: 'SUNDRY_CREDITORS_VELOCITY', name: 'Velocity Technologies (Vendor Payable)', type: AccountType.LIABILITY, subType: 'CREDITORS' },
-      { code: 'CUSTOMER_REFUND_PAYABLE', name: 'Customer Refund Payable Account', type: AccountType.LIABILITY, subType: 'REFUND_PAYABLE' },
-      { code: 'OUTPUT_CGST', name: 'Output CGST (Central Goods & Services Tax)', type: AccountType.LIABILITY, subType: 'OUTPUT_TAX' },
-      { code: 'OUTPUT_SGST', name: 'Output SGST (State Goods & Services Tax)', type: AccountType.LIABILITY, subType: 'OUTPUT_TAX' },
-      { code: 'OUTPUT_IGST', name: 'Output IGST (Integrated Goods & Services Tax)', type: AccountType.LIABILITY, subType: 'OUTPUT_TAX' },
-
-      // Equity
-      { code: 'OWNERS_CAPITAL', name: 'Capital Account', type: AccountType.EQUITY, subType: 'EQUITY' },
-      { code: 'RETAINED_EARNINGS', name: 'Retained Earnings', type: AccountType.EQUITY, subType: 'EQUITY' },
-
-      // Revenue
-      { code: 'SALES_REVENUE', name: 'Domestic Apparel Sales Revenue', type: AccountType.REVENUE, subType: 'SALES' },
-      { code: 'SALES_RETURNS', name: 'Sales Returns & Deductions', type: AccountType.REVENUE, subType: 'SALES_RETURN' },
-
-      // Expenses
-      { code: 'EXPENSE_PG_FEES_EASEBUZZ', name: 'Payment Gateway Processing Fees (Easebuzz)', type: AccountType.EXPENSE, subType: 'MDR' },
-      { code: 'EXPENSE_PG_FEES_GOKWIK', name: 'Checkout Technology Platform Fees (GoKwik)', type: AccountType.EXPENSE, subType: 'PLATFORM_FEE' },
-      { code: 'EXPENSE_PG_FEES_PHONEPE', name: 'Payment Gateway Processing Fees (PhonePe)', type: AccountType.EXPENSE, subType: 'MDR' },
-      { code: 'EXPENSE_FREIGHT_FORWARD', name: 'Freight Charges - Forward Shipments', type: AccountType.EXPENSE, subType: 'FREIGHT' },
-      { code: 'EXPENSE_FREIGHT_RTO', name: 'Freight Charges - Return to Origin (RTO)', type: AccountType.EXPENSE, subType: 'FREIGHT' },
-      { code: 'EXPENSE_FREIGHT_REVERSE', name: 'Freight Charges - Customer Reverse Pickups', type: AccountType.EXPENSE, subType: 'FREIGHT' },
-      { code: 'EXPENSE_COD_HANDLING', name: 'Logistics COD Collection & Handling Charges', type: AccountType.EXPENSE, subType: 'COURIER_FEE' },
-      { code: 'EXPENSE_WEIGHT_SURCHARGES', name: 'Logistics Weight Discrepancy Surcharges', type: AccountType.EXPENSE, subType: 'SURCHARGES' },
-    ];
-
-    for (const acc of defaultAccounts) {
+    for (const acc of DEFAULT_LEDGER_ACCOUNTS) {
       const existing = await prisma.ledgerAccount.upsert({
         where: { code: acc.code },
         create: {

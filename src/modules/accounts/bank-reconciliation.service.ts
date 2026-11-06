@@ -14,6 +14,7 @@
 import { BankReconciliationStatus, Prisma } from '@prisma/client';
 import prisma from '../../database/prisma';
 import logger from '../../utils/logger';
+import { parseDateLoose } from './spreadsheet';
 
 export interface ParsedBankStatementRow {
   transactionDate: Date;
@@ -332,26 +333,23 @@ export class BankReconciliationService {
    */
   public parseBankCsv(rows: any[]): ParsedBankStatementRow[] {
     return rows.map((r) => {
-      // Date parsing: support DD/MM/YYYY and DD-MM-YYYY Indian bank format
+      // Bank statements use Indian day-first dates, including two-digit years.
+      // Never assign a fabricated current date to an unparseable transaction.
       const rawDate = r['Date'] || r['Txn Date'] || r['Transaction Date'] || r['Value Date'];
-      let transactionDate = new Date();
-      if (rawDate) {
-        if (rawDate instanceof Date && !isNaN(rawDate.getTime())) {
-          transactionDate = rawDate;
-        } else {
-          const str = String(rawDate).trim();
-          const dmyMatch = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
-          if (dmyMatch) {
-            const day = parseInt(dmyMatch[1], 10);
-            const month = parseInt(dmyMatch[2], 10) - 1;
-            const year = parseInt(dmyMatch[3], 10);
-            const d = new Date(Date.UTC(year, month, day, 12, 0, 0));
-            if (!isNaN(d.getTime())) transactionDate = d;
-          } else {
-            const fallback = new Date(str);
-            if (!isNaN(fallback.getTime())) transactionDate = fallback;
-          }
-        }
+      const transactionDate = rawDate instanceof Date
+        ? (Number.isNaN(rawDate.getTime()) ? null : rawDate)
+        : parseDateLoose(rawDate == null ? null : String(rawDate));
+      if (!transactionDate) return null;
+
+      // Reject impossible dates such as 31/02/26 that JS would otherwise roll over.
+      const dayFirst = String(rawDate).match(/^(\\d{1,2})[\\/-](\\d{1,2})[\\/-](\\d{2}|\\d{4})(?!\\d)/);
+      if (dayFirst) {
+        const day = Number(dayFirst[1]);
+        const month = Number(dayFirst[2]);
+        const inputYear = Number(dayFirst[3]);
+        const year = inputYear < 100 ? 2000 + inputYear : inputYear;
+        const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+        if (month < 1 || month > 12 || day < 1 || day > daysInMonth) return null;
       }
 
       const desc = String(r['Description'] || r['Narration'] || r['Particulars'] || '').trim();
@@ -376,7 +374,7 @@ export class BankReconciliationService {
         credit,
         balance: isNaN(balance) ? undefined : balance,
       };
-    }).filter((r) => r.debit > 0 || r.credit > 0);
+    }).filter((r): r is ParsedBankStatementRow => r !== null && (r.debit > 0 || r.credit > 0));
   }
 }
 

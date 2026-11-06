@@ -16,6 +16,7 @@
  */
 
 import prisma from '../../database/prisma';
+import { DEFAULT_LEDGER_ACCOUNTS } from './ledger.service';
 import logger from '../../utils/logger';
 import { VoucherType } from '@prisma/client';
 
@@ -35,46 +36,29 @@ export interface TallyLedgerMasterDef {
   rate?: number;
 }
 
-export const TALLY_STANDARD_LEDGER_MASTERS: TallyLedgerMasterDef[] = [
-  // Revenue & Returns
-  { name: 'Sales Revenue', parent: 'Sales Accounts' },
-  { name: 'Sales Returns', parent: 'Sales Accounts' },
+const tallyLedgerParent = (type: string, subType: string): string => {
+  if (subType === 'BANK') return 'Bank Accounts';
+  if (subType === 'DEBTORS') return 'Sundry Debtors';
+  if (subType === 'CREDITORS') return 'Sundry Creditors';
+  if (subType === 'INPUT_TAX' || subType === 'OUTPUT_TAX') return 'Duties & Taxes';
+  if (subType === 'GATEWAY_CLEARING' || subType === 'COURIER_CLEARING' || subType === 'PREPAYMENT') return 'Current Assets';
+  if (subType === 'REFUND_PAYABLE') return 'Current Liabilities';
+  if (type === 'EQUITY') return 'Capital Account';
+  if (type === 'REVENUE') return 'Sales Accounts';
+  if (type === 'EXPENSE') return subType === 'FREIGHT' || subType === 'COURIER_FEE' || subType === 'SURCHARGES'
+    ? 'Direct Expenses' : 'Indirect Expenses';
+  return 'Current Assets';
+};
 
-  // GST Duties & Taxes
-  { name: 'Output IGST', parent: 'Duties & Taxes', isGstApplicable: true, taxType: 'Integrated Tax' },
-  { name: 'Output CGST', parent: 'Duties & Taxes', isGstApplicable: true, taxType: 'Central Tax' },
-  { name: 'Output SGST', parent: 'Duties & Taxes', isGstApplicable: true, taxType: 'State Tax' },
-  { name: 'Input GST (Eligible)', parent: 'Duties & Taxes', isGstApplicable: true, taxType: 'Input Tax Credit' },
-  { name: 'Input GST (Ineligible)', parent: 'Duties & Taxes', isGstApplicable: true },
-
-  // Debtors & Customers
-  { name: 'Sundry Debtors (Prepaid Orders)', parent: 'Sundry Debtors' },
-  { name: 'Sundry Debtors (COD Orders)', parent: 'Sundry Debtors' },
-
-  // Bank & Clearing Accounts
-  { name: 'HDFC Bank Current Account', parent: 'Bank Accounts' },
-  { name: 'Easebuzz Clearing Account', parent: 'Bank Accounts' },
-  { name: 'GoKwik Clearing Account', parent: 'Bank Accounts' },
-  { name: 'PhonePe Clearing Account', parent: 'Bank Accounts' },
-  { name: 'Courier Remittance Clearing', parent: 'Bank Accounts' },
-  { name: 'Courier Prepaid Wallets', parent: 'Current Assets' },
-
-  // Payment Gateway Expenses
-  { name: 'Payment Gateway Fees (Easebuzz)', parent: 'Indirect Expenses' },
-  { name: 'Payment Gateway Fees (GoKwik)', parent: 'Indirect Expenses' },
-  { name: 'Payment Gateway Fees (PhonePe)', parent: 'Indirect Expenses' },
-
-  // Freight & Courier Expenses
-  { name: 'Forward Freight Expense', parent: 'Direct Expenses' },
-  { name: 'RTO Freight Expense', parent: 'Direct Expenses' },
-  { name: 'Reverse Pickup Freight Expense', parent: 'Direct Expenses' },
-  { name: 'COD Handling Charges', parent: 'Direct Expenses' },
-  { name: 'Weight Discrepancy Charges', parent: 'Direct Expenses' },
-
-  // Courier Creditors
-  { name: 'Delhivery Logistics Payable', parent: 'Sundry Creditors' },
-  { name: 'Velocity Freight Payable', parent: 'Sundry Creditors' },
-];
+/** Ledger master names are derived from the same chart used for journal entries. */
+export const TALLY_STANDARD_LEDGER_MASTERS: TallyLedgerMasterDef[] = DEFAULT_LEDGER_ACCOUNTS.map((account) => ({
+  name: account.name,
+  parent: tallyLedgerParent(account.type, account.subType),
+  isGstApplicable: account.subType === 'INPUT_TAX' || account.subType === 'OUTPUT_TAX',
+  taxType: account.code.endsWith('IGST') ? 'Integrated Tax'
+    : account.code.endsWith('CGST') ? 'Central Tax'
+    : account.code.endsWith('SGST') ? 'State Tax' : undefined,
+}));
 
 export class TallyIntegrationService {
   /**

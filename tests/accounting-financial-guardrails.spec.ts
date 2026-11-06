@@ -173,7 +173,7 @@ describe('Financial accounting guardrails', () => {
     const base = { totalAmount: 1999, totalDiscounts: 0, items: [{ price: 1999, quantity: 1 }] };
     expect(gstService.determineOrderGstRate({ ...base, shopifyCreatedAt: new Date('2025-09-20T12:00:00Z') })).toBe(12);
     expect(gstService.determineOrderGstRate({ ...base, shopifyCreatedAt: new Date('2025-09-23T12:00:00Z') })).toBe(5);
-    expect(gstService.determineOrderGstRate({ ...base, shopifyCreatedAt: new Date('2026-10-20T12:00:00Z'), items: [{price: 2400, quantity: 1}, {price: 3000, quantity: 1}] }))
+    expect(() => gstService.determineOrderGstRate({ ...base, shopifyCreatedAt: new Date('2026-10-20T12:00:00Z'), items: [{price: 2400, quantity: 1}, {price: 3000, quantity: 1}] }))
       .toThrow(/Mixed GST rates/);
   });
 

@@ -2154,7 +2154,12 @@ router.post('/orders/:id/exchange', async (req: AuthenticatedRequest, res: Respo
       return;
     }
 
-    const isSkuExchange = exchangeType === 'SKU';
+    const normalizedExchangeType = exchangeType ? String(exchangeType).trim().toUpperCase() : 'SIZE';
+    if (exchangeType && normalizedExchangeType !== 'SIZE' && normalizedExchangeType !== 'SKU') {
+      res.status(400).json({ error: 'exchangeType must be either SIZE or SKU' });
+      return;
+    }
+    const isSkuExchange = normalizedExchangeType === 'SKU';
 
     if (isSkuExchange && !exchangeSku) {
       res.status(400).json({ error: 'exchangeSku is required for SKU change exchange' });

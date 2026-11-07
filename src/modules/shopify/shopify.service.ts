@@ -951,13 +951,20 @@ class ShopifyService {
     const cleanVarId = variantId ? String(variantId).replace('gid://shopify/ProductVariant/', '').trim() : '';
 
     // 1. Verify against active Shopify listings first via searchExchangeSkus
+    // Use an exact sku:"<SKU>" query filter so exact-match lookup is not capped by partial search limits
     let shopifySearchSucceeded = false;
     try {
-      const searchRes = await this.searchExchangeSkus(cleanSku);
+      let searchRes = await this.searchExchangeSkus(`sku:"${cleanSku}"`);
       shopifySearchSucceeded = true;
-      const exact = searchRes.find(
+      let exact = searchRes.find(
         (s) => s.sku.toUpperCase() === cleanSku
       );
+      if (!exact) {
+        searchRes = await this.searchExchangeSkus(cleanSku);
+        exact = searchRes.find(
+          (s) => s.sku.toUpperCase() === cleanSku
+        );
+      }
       if (exact) {
         if (cleanVarId && exact.variantId && exact.variantId !== cleanVarId) {
           return {

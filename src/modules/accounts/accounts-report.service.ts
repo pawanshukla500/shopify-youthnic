@@ -1599,7 +1599,10 @@ export async function renderWorkbook(data: ReportData): Promise<Buffer> {
   brHeader.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
 
   const brStartRow = 6;
-  data.stateSummary.forEach((row) => {
+  const bridgeRows = (data.settlementBridge && Array.isArray(data.settlementBridge.states) && data.settlementBridge.states.length > 0)
+    ? data.settlementBridge.states
+    : data.stateSummary;
+  bridgeRows.forEach((row: any) => {
     const outSettlement = row.outstandingSettlement !== undefined ? row.outstandingSettlement : (row.closingBalance !== undefined ? row.closingBalance : row.outstanding);
     const r = bridgeSheet.addRow([
       row.state,
@@ -1627,8 +1630,8 @@ export async function renderWorkbook(data: ReportData): Promise<Buffer> {
     r.getCell(2).alignment = { horizontal: 'center' };
   });
 
-  const brHasRows = data.stateSummary.length > 0;
-  const brEndRow = brStartRow + data.stateSummary.length - 1;
+  const brHasRows = bridgeRows.length > 0;
+  const brEndRow = brStartRow + bridgeRows.length - 1;
   const brTotRow = bridgeSheet.addRow([
     'TOTAL (NATIONAL SETTLEMENT BRIDGE)',
     'ALL',
@@ -1872,7 +1875,10 @@ export async function generateMonthlyReport(
       : Promise.resolve([]),
     financialEventService
       .getStateSettlementBridge(month, undefined, false)
-      .catch(() => null),
+      .catch((err) => {
+        logger.warn('Settlement bridge calculation failed for monthly report', { month, error: err?.message });
+        return null;
+      }),
   ]);
 
   const data = buildReportData(

@@ -2160,8 +2160,9 @@ router.post('/orders/:id/exchange', async (req: AuthenticatedRequest, res: Respo
       return;
     }
     const isSkuExchange = normalizedExchangeType === 'SKU';
+    const cleanExchangeSku = exchangeSku ? String(exchangeSku).trim() : '';
 
-    if (isSkuExchange && !exchangeSku) {
+    if (isSkuExchange && !cleanExchangeSku) {
       res.status(400).json({ error: 'exchangeSku is required for SKU change exchange' });
       return;
     }
@@ -2172,7 +2173,7 @@ router.post('/orders/:id/exchange', async (req: AuthenticatedRequest, res: Respo
       returnReason: String(returnReason).trim(),
       exchangeType: isSkuExchange ? 'SKU' : 'SIZE',
       exchangeVariantId: String(exchangeVariantId).trim(),
-      exchangeSku: exchangeSku ? String(exchangeSku).trim() : undefined,
+      exchangeSku: cleanExchangeSku || undefined,
       exchangeTitle: exchangeTitle ? String(exchangeTitle).trim() : undefined,
       dispatchMode: dispatchMode === 'ON_PICKUP' ? 'ON_PICKUP' : 'IMMEDIATE',
       carrier: carrierName,

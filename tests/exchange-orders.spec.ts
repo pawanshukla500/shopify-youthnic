@@ -1087,10 +1087,14 @@ describe('Exchange Orders API & Workflow (/agency-api-tester)', () => {
       const emptyResult = await shopifyService.validateExchangeSku('');
       expect(emptyResult.valid).toBe(false);
 
-      vi.spyOn(shopifyService, 'searchExchangeSkus').mockResolvedValueOnce([]);
+      const notFoundSpy = vi.spyOn(shopifyService, 'searchExchangeSkus')
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]);
       const notFoundResult = await shopifyService.validateExchangeSku('NON-EXISTENT-SKU');
       expect(notFoundResult.valid).toBe(false);
       expect(notFoundResult.error).toContain('not found in the product listings');
+      expect(notFoundSpy).toHaveBeenCalledWith('sku:"NON-EXISTENT-SKU"');
+      expect(notFoundSpy).toHaveBeenCalledWith('NON-EXISTENT-SKU');
     });
 
     it('shopifyService.validateExchangeSku rejects unavailable variants and mismatched variant IDs', async () => {

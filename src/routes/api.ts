@@ -2179,7 +2179,7 @@ router.post('/orders/:id/exchange', async (req: AuthenticatedRequest, res: Respo
       actor: req.user,
       source: 'OMS_UI',
       status: 'COMPLETED',
-      note: `${exchangeType === 'SKU' ? 'SKU' : 'Size'} exchange created by ${req.user?.email || req.user?.name || 'authenticated user'}. Replacement: ${exchangeSku || exchangeTitle || 'New Item'}.`,
+      note: `${exchangeType === 'SKU' ? 'SKU' : 'Size'} exchange created by ${req.user?.email || req.user?.name || 'authenticated user'}. Replacement: ${exchangeType === 'SKU' ? (exchangeSku || exchangeTitle || 'New Item') : (exchangeTitle || exchangeSku || 'New Size')}.`,
       metadata: {
         exchangeType: exchangeType === 'SKU' ? 'SKU' : 'SIZE',
         exchangeSku,

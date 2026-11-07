@@ -1095,6 +1095,38 @@ describe('Exchange Orders API & Workflow (/agency-api-tester)', () => {
       expect(notFoundResult.error).toContain('not found in the product listings');
     });
 
+    it('shopifyService.validateExchangeSku rejects unavailable variants and mismatched variant IDs', async () => {
+      vi.spyOn(shopifyService, 'searchExchangeSkus').mockResolvedValueOnce([
+        {
+          variantId: '778899',
+          gid: 'gid://shopify/ProductVariant/778899',
+          sku: '26YOU-RED-M',
+          title: 'Printed Cotton Kurti Red',
+          variantTitle: 'M',
+          price: 899,
+          availableForSale: false,
+        },
+      ]);
+      const unavailResult = await shopifyService.validateExchangeSku('26YOU-RED-M');
+      expect(unavailResult.valid).toBe(false);
+      expect(unavailResult.error).toContain('unavailable for sale');
+
+      vi.spyOn(shopifyService, 'searchExchangeSkus').mockResolvedValueOnce([
+        {
+          variantId: '778899',
+          gid: 'gid://shopify/ProductVariant/778899',
+          sku: '26YOU-RED-M',
+          title: 'Printed Cotton Kurti Red',
+          variantTitle: 'M',
+          price: 899,
+          availableForSale: true,
+        },
+      ]);
+      const mismatchResult = await shopifyService.validateExchangeSku('26YOU-RED-M', '999999');
+      expect(mismatchResult.valid).toBe(false);
+      expect(mismatchResult.error).toContain('does not match');
+    });
+
     it('creates SKU exchange successfully when valid SKU is selected and records exchangeType SKU', async () => {
       prismaStub.order.findUnique.mockResolvedValueOnce({
         ...mockOrder,

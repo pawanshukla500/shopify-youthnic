@@ -948,32 +948,36 @@ class ShopifyService {
     if (!cleanSku) {
       return { valid: false, sku: '', variantId: '', title: '', price: 0, error: 'Exchange SKU is required.' };
     }
+    const cleanVarId = variantId ? String(variantId).replace('gid://shopify/ProductVariant/', '').trim() : '';
 
-    // 1. Check local catalog
-    const local = await prisma.orderItem.findFirst({
-      where: {
-        sku: { equals: cleanSku, mode: 'insensitive' },
-      },
-    });
-
-    if (local) {
-      return {
-        valid: true,
-        sku: local.sku || cleanSku,
-        variantId: variantId || local.shopifyVariantId || `VAR-${local.id}`,
-        title: local.title,
-        variantTitle: local.variantTitle || undefined,
-        price: local.price || 0,
-      };
-    }
-
-    // 2. Check Shopify GraphQL search
+    // 1. Verify against active Shopify listings first via searchExchangeSkus
     try {
       const searchRes = await this.searchExchangeSkus(cleanSku);
       const exact = searchRes.find(
-        (s) => s.sku.toUpperCase() === cleanSku || (variantId && s.variantId === variantId)
+        (s) => s.sku.toUpperCase() === cleanSku || (cleanVarId && s.variantId === cleanVarId)
       );
       if (exact) {
+        if (cleanVarId && exact.variantId && exact.variantId !== cleanVarId) {
+          return {
+            valid: false,
+            sku: cleanSku,
+            variantId: cleanVarId,
+            title: exact.title,
+            price: exact.price,
+            error: `Supplied variant ID (${cleanVarId}) does not match listing variant ID (${exact.variantId}) for SKU "${cleanSku}".`,
+          };
+        }
+        if (exact.availableForSale === false) {
+          return {
+            valid: false,
+            sku: exact.sku,
+            variantId: exact.variantId,
+            title: exact.title,
+            variantTitle: exact.variantTitle,
+            price: exact.price,
+            error: `SKU "${cleanSku}" is currently unavailable for sale in Shopify listings.`,
+          };
+        }
         return {
           valid: true,
           sku: exact.sku,
@@ -984,13 +988,42 @@ class ShopifyService {
         };
       }
     } catch {
-      // Fall through
+      // Fall through to local catalog
+    }
+
+    // 2. Check local catalog if Shopify query was unavailable or returned nothing
+    const local = await prisma.orderItem.findFirst({
+      where: {
+        sku: { equals: cleanSku, mode: 'insensitive' },
+      },
+    });
+
+    if (local && local.shopifyVariantId) {
+      const localVarId = local.shopifyVariantId.replace('gid://shopify/ProductVariant/', '').trim();
+      if (cleanVarId && localVarId && cleanVarId !== localVarId) {
+        return {
+          valid: false,
+          sku: cleanSku,
+          variantId: cleanVarId,
+          title: local.title,
+          price: local.price || 0,
+          error: `Supplied variant ID (${cleanVarId}) does not match catalog variant ID (${localVarId}) for SKU "${cleanSku}".`,
+        };
+      }
+      return {
+        valid: true,
+        sku: local.sku || cleanSku,
+        variantId: localVarId,
+        title: local.title,
+        variantTitle: local.variantTitle || undefined,
+        price: local.price || 0,
+      };
     }
 
     return {
       valid: false,
       sku: cleanSku,
-      variantId: variantId || '',
+      variantId: cleanVarId,
       title: '',
       price: 0,
       error: `SKU "${cleanSku}" was not found in the product listings.`,

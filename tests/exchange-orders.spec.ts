@@ -30,6 +30,10 @@ const { prismaStub, delhiveryStub, notificationStub, whatsappStub } = vi.hoisted
       findMany: vi.fn(),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
+    orderItem: {
+      findFirst: vi.fn().mockResolvedValue(null),
+      findMany: vi.fn().mockResolvedValue([]),
+    },
     trackingLog: {
       create: vi.fn().mockResolvedValue({}),
     },
@@ -1030,6 +1034,223 @@ describe('Exchange Orders API & Workflow (/agency-api-tester)', () => {
       const { carrierTrackingUrl } = await import('../frontend/src/lib');
       const url = carrierTrackingUrl(null, 'R2757220019VE0');
       expect(url).toBe('https://www.velocityshipping.in/track/R2757220019VE0');
+    });
+  });
+
+  describe('SKU change exchange workflow & listings validation', () => {
+    it('shopifyService.searchExchangeSkus finds matching variants by SKU/title', async () => {
+      const mockGqlVariants = [
+        {
+          id: 'gid://shopify/ProductVariant/778899',
+          sku: '26YOU-RED-M',
+          title: 'M',
+          price: '899.00',
+          inventoryQuantity: 5,
+          availableForSale: true,
+          product: { id: 'gid://shopify/Product/1234', title: 'Printed Cotton Kurti Red' },
+          image: { url: 'https://cdn.shopify.com/red.jpg' },
+        },
+      ];
+
+      vi.spyOn(shopifyService, 'graphql').mockResolvedValueOnce({
+        productVariants: {
+          nodes: mockGqlVariants,
+        },
+      } as any);
+
+      const res = await shopifyService.searchExchangeSkus('26YOU');
+      expect(res.length).toBe(1);
+      expect(res[0].sku).toBe('26YOU-RED-M');
+      expect(res[0].variantId).toBe('778899');
+      expect(res[0].title).toBe('Printed Cotton Kurti Red');
+      expect(res[0].price).toBe(899);
+      expect(res[0].inventoryQuantity).toBe(5);
+    });
+
+    it('shopifyService.validateExchangeSku validates against listings or rejects missing SKU', async () => {
+      vi.spyOn(shopifyService, 'searchExchangeSkus').mockResolvedValueOnce([
+        {
+          variantId: '778899',
+          gid: 'gid://shopify/ProductVariant/778899',
+          sku: '26YOU-RED-M',
+          title: 'Printed Cotton Kurti Red',
+          variantTitle: 'M',
+          price: 899,
+          inventoryQuantity: 5,
+          availableForSale: true,
+        },
+      ]);
+
+      const validResult = await shopifyService.validateExchangeSku('26YOU-RED-M');
+      expect(validResult.valid).toBe(true);
+
+      const emptyResult = await shopifyService.validateExchangeSku('');
+      expect(emptyResult.valid).toBe(false);
+
+      const notFoundSpy = vi.spyOn(shopifyService, 'searchExchangeSkus')
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]);
+      const notFoundResult = await shopifyService.validateExchangeSku('NON-EXISTENT-SKU');
+      expect(notFoundResult.valid).toBe(false);
+      expect(notFoundResult.error).toContain('not found in the product listings');
+      expect(notFoundSpy).toHaveBeenCalledWith('sku:"NON-EXISTENT-SKU"');
+      expect(notFoundSpy).toHaveBeenCalledWith('NON-EXISTENT-SKU');
+    });
+
+    it('shopifyService.validateExchangeSku rejects unavailable variants and mismatched variant IDs', async () => {
+      vi.spyOn(shopifyService, 'searchExchangeSkus').mockResolvedValueOnce([
+        {
+          variantId: '778899',
+          gid: 'gid://shopify/ProductVariant/778899',
+          sku: '26YOU-RED-M',
+          title: 'Printed Cotton Kurti Red',
+          variantTitle: 'M',
+          price: 899,
+          availableForSale: false,
+        },
+      ]);
+      const unavailResult = await shopifyService.validateExchangeSku('26YOU-RED-M');
+      expect(unavailResult.valid).toBe(false);
+      expect(unavailResult.error).toContain('unavailable for sale');
+
+      vi.spyOn(shopifyService, 'searchExchangeSkus').mockResolvedValueOnce([
+        {
+          variantId: '778899',
+          gid: 'gid://shopify/ProductVariant/778899',
+          sku: '26YOU-RED-M',
+          title: 'Printed Cotton Kurti Red',
+          variantTitle: 'M',
+          price: 899,
+          availableForSale: true,
+        },
+      ]);
+      const mismatchResult = await shopifyService.validateExchangeSku('26YOU-RED-M', '999999');
+      expect(mismatchResult.valid).toBe(false);
+      expect(mismatchResult.error).toContain('does not match');
+    });
+
+    it('shopifyService.validateExchangeSku falls back to local catalog when Shopify search throws', async () => {
+      vi.spyOn(shopifyService, 'searchExchangeSkus').mockRejectedValueOnce(new Error('Shopify search network timeout'));
+      prismaStub.orderItem.findFirst.mockResolvedValueOnce({
+        id: 101,
+        sku: 'OFFLINE-SKU',
+        title: 'Offline Kurta',
+        shopifyVariantId: 'gid://shopify/ProductVariant/556677',
+        price: 999,
+      });
+
+      const fallbackResult = await shopifyService.validateExchangeSku('OFFLINE-SKU');
+      expect(fallbackResult.valid).toBe(true);
+      expect(fallbackResult.variantId).toBe('556677');
+      expect(fallbackResult.sku).toBe('OFFLINE-SKU');
+    });
+
+    it('creates SKU exchange successfully when valid SKU is selected and records exchangeType SKU', async () => {
+      prismaStub.order.findUnique.mockResolvedValueOnce({
+        ...mockOrder,
+        status: 'DELIVERED',
+        shipment: { courier: 'Velocity', waybillNumber: 'V99101', status: 'DELIVERED' },
+      });
+
+      vi.spyOn(shopifyService, 'validateExchangeSku').mockResolvedValueOnce({ valid: true });
+
+      vi.spyOn(velocityService, 'createReverseShipment').mockResolvedValueOnce({
+        awbCode: 'R-SKU-99101',
+        shipmentId: 'SHI-REV-99101',
+        courierName: 'Velocity',
+        labelUrl: 'https://cdn.velocity.in/labels/r-sku.pdf',
+        raw: {},
+      });
+
+      const forwardSpy = vi.spyOn(velocityService, 'createExchangeForwardShipment').mockResolvedValueOnce({
+        orderId: '26YOU99101-EX-FWD',
+        shipmentId: 'SHI-FWD-99101',
+        awbCode: 'VEL-FWD-SKU-99101',
+        courierName: 'Velocity',
+        labelUrl: 'https://cdn.velocity.in/labels/fwd-sku.pdf',
+      });
+
+      vi.spyOn(shopifyService, 'registerExchangeOnShopify').mockResolvedValueOnce({
+        success: true,
+        shopifyReturnId: 'gid://shopify/Return/99101',
+      });
+
+      let createdPayload: any = null;
+      prismaStub.return.create.mockImplementationOnce(async (args: any) => {
+        createdPayload = args.data;
+        return {
+          id: 991,
+          orderId: mockOrder.id,
+          isExchange: true,
+          exchangeType: 'SKU',
+          exchangeSku: '26YOU-BLUE-XL',
+          exchangeTitle: 'Printed Blue Kurta (XL)',
+          carrier: 'Velocity',
+          exchangeForwardAwb: 'VEL-FWD-SKU-99101',
+        };
+      });
+      prismaStub.order.update.mockResolvedValueOnce({});
+      prismaStub.order.create.mockResolvedValueOnce({ id: 99199, shopifyOrderName: '26YOU99101-EX-FWD' });
+
+      const res = await returnService.createExchange(mockOrder.id, {
+        returnOrderItemId: 101,
+        returnQuantity: 1,
+        returnReason: 'Exchange with another design/SKU',
+        exchangeType: 'SKU',
+        exchangeVariantId: '889900',
+        exchangeSku: '26YOU-BLUE-XL',
+        exchangeTitle: 'Printed Blue Kurta (XL)',
+        carrier: 'Velocity',
+      });
+
+      expect(res.returnId).toBe(991);
+      expect(res.exchangeForwardAwb).toBe('VEL-FWD-SKU-99101');
+      expect(createdPayload.exchangeType).toBe('SKU');
+      expect(createdPayload.exchangeSku).toBe('26YOU-BLUE-XL');
+
+      // Verify that replacement title was forwarded into Velocity shipment
+      expect(forwardSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          exchangeItem: expect.objectContaining({
+            name: 'Printed Blue Kurta (XL)',
+            sku: '26YOU-BLUE-XL',
+          }),
+        })
+      );
+    });
+
+    it('rejects SKU exchange when exchangeSku is invalid or missing from listings', async () => {
+      prismaStub.order.findUnique.mockResolvedValueOnce({
+        ...mockOrder,
+        status: 'DELIVERED',
+        shipment: { courier: 'Velocity', waybillNumber: 'V99101', status: 'DELIVERED' },
+      });
+
+      vi.spyOn(shopifyService, 'validateExchangeSku').mockResolvedValueOnce({
+        valid: false,
+        error: 'Exchange SKU "INVALID-SKU" is not found in Shopify listings.',
+      });
+
+      await expect(
+        returnService.createExchange(mockOrder.id, {
+          returnOrderItemId: 101,
+          returnQuantity: 1,
+          returnReason: 'Exchange with another design/SKU',
+          exchangeType: 'SKU',
+          exchangeSku: 'INVALID-SKU',
+        })
+      ).rejects.toThrow('Exchange SKU "INVALID-SKU" is not found in Shopify listings.');
+    });
+
+    it('registers /orders/exchange-sku-search ahead of /orders/:id to prevent route shadowing', async () => {
+      const apiRoutes = (await import('../src/routes/api')).default;
+      const stack = (apiRoutes as any).stack || [];
+      const searchIndex = stack.findIndex((l: any) => l.route?.path === '/orders/exchange-sku-search');
+      const orderIdIndex = stack.findIndex((l: any) => l.route?.path === '/orders/:id');
+
+      expect(searchIndex).toBeGreaterThan(-1);
+      expect(orderIdIndex).toBeGreaterThan(-1);
+      expect(searchIndex).toBeLessThan(orderIdIndex);
     });
   });
 });

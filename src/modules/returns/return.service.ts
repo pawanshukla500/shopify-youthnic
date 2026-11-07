@@ -59,6 +59,7 @@ class ReturnService {
       returnOrderItemId: number;
       returnQuantity: number;
       returnReason: string;
+      exchangeType?: 'SIZE' | 'SKU';
       exchangeVariantId: string;
       exchangeSku?: string;
       exchangeTitle?: string;
@@ -94,6 +95,7 @@ class ReturnService {
       returnOrderItemId: number;
       returnQuantity: number;
       returnReason: string;
+      exchangeType?: 'SIZE' | 'SKU';
       exchangeVariantId: string;
       exchangeSku?: string;
       exchangeTitle?: string;
@@ -141,6 +143,14 @@ class ReturnService {
     const returnItem = order.items.find((i) => i.id === params.returnOrderItemId);
     if (!returnItem) {
       throw new Error('The selected item to return was not found in this order.');
+    }
+
+    // Validate exchange SKU from listings if SKU-level exchange is requested
+    if (params.exchangeType === 'SKU' && params.exchangeSku) {
+      const validation = await shopifyService.validateExchangeSku(params.exchangeSku, params.exchangeVariantId);
+      if (!validation.valid) {
+        throw new Error(validation.error || `Exchange SKU "${params.exchangeSku}" is not valid in product listings.`);
+      }
     }
 
     const returnQty = Math.max(1, Math.min(returnItem.quantity, params.returnQuantity || 1));
@@ -251,7 +261,9 @@ class ReturnService {
           const velFwd = await velocityService.createExchangeForwardShipment({
             order,
             exchangeItem: {
-              name: params.exchangeTitle ? `${returnItem.title} (${params.exchangeTitle})` : returnItem.title,
+              name: params.exchangeType === 'SKU'
+                ? (params.exchangeTitle || params.exchangeSku || returnItem.title)
+                : (params.exchangeTitle ? `${returnItem.title} (${params.exchangeTitle})` : returnItem.title),
               sku: params.exchangeSku || returnItem.sku || `SKU-${returnItem.id}`,
               units: returnQty,
               selling_price: Math.max(1, Math.round(returnItem.price || 0)),
@@ -309,9 +321,10 @@ class ReturnService {
         shopifyReturnId,
         // Exchange properties
         isExchange: true,
+        exchangeType: params.exchangeType || 'SIZE',
         exchangeVariantId: params.exchangeVariantId,
         exchangeSku: params.exchangeSku || returnItem.sku,
-        exchangeTitle: params.exchangeTitle || 'Replacement Size',
+        exchangeTitle: params.exchangeTitle || (params.exchangeType === 'SKU' ? params.exchangeSku : 'Replacement Size'),
         exchangeForwardAwb: exchangeForwardAwb || null,
         exchangeForwardShipmentId: exchangeForwardShipmentId || null,
         exchangeForwardStatus: exchangeForwardAwb ? 'DISPATCHED' : 'PENDING',

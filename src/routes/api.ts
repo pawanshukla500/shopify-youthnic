@@ -609,6 +609,21 @@ router.get('/orders/count', async (req: Request, res: Response): Promise<void> =
   }
 });
 
+/**
+ * Search product listings & variants for exchange SKU autocomplete (supports partial SKU input).
+ * Placed ahead of dynamic /orders/:id route to avoid route shadowing.
+ */
+router.get('/orders/exchange-sku-search', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const q = typeof req.query.q === 'string' ? req.query.q : '';
+    const items = await shopifyService.searchExchangeSkus(q);
+    res.json({ success: true, items });
+  } catch (error: any) {
+    logger.error('Failed to search exchange SKUs from listings', { query: req.query.q, error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.get('/orders', async (req: Request, res: Response): Promise<void> => {
   try {
     const status = req.query.status as string | undefined;
@@ -2126,6 +2141,7 @@ router.post('/orders/:id/exchange', async (req: AuthenticatedRequest, res: Respo
       returnOrderItemId,
       returnQuantity,
       returnReason,
+      exchangeType,
       exchangeVariantId,
       exchangeSku,
       exchangeTitle,
@@ -2138,12 +2154,26 @@ router.post('/orders/:id/exchange', async (req: AuthenticatedRequest, res: Respo
       return;
     }
 
+    const normalizedExchangeType = exchangeType ? String(exchangeType).trim().toUpperCase() : 'SIZE';
+    if (exchangeType && normalizedExchangeType !== 'SIZE' && normalizedExchangeType !== 'SKU') {
+      res.status(400).json({ error: 'exchangeType must be either SIZE or SKU' });
+      return;
+    }
+    const isSkuExchange = normalizedExchangeType === 'SKU';
+    const cleanExchangeSku = exchangeSku ? String(exchangeSku).trim() : '';
+
+    if (isSkuExchange && !cleanExchangeSku) {
+      res.status(400).json({ error: 'exchangeSku is required for SKU change exchange' });
+      return;
+    }
+
     const result = await returnService.createExchange(orderId, {
       returnOrderItemId: Number(returnOrderItemId),
       returnQuantity: Number(returnQuantity) || 1,
       returnReason: String(returnReason).trim(),
+      exchangeType: isSkuExchange ? 'SKU' : 'SIZE',
       exchangeVariantId: String(exchangeVariantId).trim(),
-      exchangeSku: exchangeSku ? String(exchangeSku).trim() : undefined,
+      exchangeSku: cleanExchangeSku || undefined,
       exchangeTitle: exchangeTitle ? String(exchangeTitle).trim() : undefined,
       dispatchMode: dispatchMode === 'ON_PICKUP' ? 'ON_PICKUP' : 'IMMEDIATE',
       carrier: carrierName,
@@ -2157,15 +2187,18 @@ router.post('/orders/:id/exchange', async (req: AuthenticatedRequest, res: Respo
       actor: req.user,
       source: 'OMS_UI',
       status: 'COMPLETED',
-      note: `Size exchange created by ${req.user?.email || req.user?.name || 'authenticated user'}. Replacement: ${exchangeTitle || exchangeSku || 'New Size'}.`,
+      note: `${isSkuExchange ? 'SKU' : 'Size'} exchange created by ${req.user?.email || req.user?.name || 'authenticated user'}. Replacement: ${isSkuExchange ? (exchangeSku || exchangeTitle || 'New Item') : (exchangeTitle || exchangeSku || 'New Size')}.`,
       metadata: {
+        exchangeType: isSkuExchange ? 'SKU' : 'SIZE',
+        exchangeSku,
+        exchangeTitle,
         returnReason,
         returnWaybill: result.returnWaybill,
         exchangeForwardAwb: result.exchangeForwardAwb,
         returnOrderItemId,
         returnQuantity,
         exchangeVariantId,
-        dispatchMode: result.dispatchMode,
+        dispatchMode,
       },
     }).catch((auditError: any) => {
       logger.error('Exchange was created but account-trail event could not be written', {

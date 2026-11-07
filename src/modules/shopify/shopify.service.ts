@@ -951,10 +951,12 @@ class ShopifyService {
     const cleanVarId = variantId ? String(variantId).replace('gid://shopify/ProductVariant/', '').trim() : '';
 
     // 1. Verify against active Shopify listings first via searchExchangeSkus
+    let shopifySearchSucceeded = false;
     try {
       const searchRes = await this.searchExchangeSkus(cleanSku);
+      shopifySearchSucceeded = true;
       const exact = searchRes.find(
-        (s) => s.sku.toUpperCase() === cleanSku || (cleanVarId && s.variantId === cleanVarId)
+        (s) => s.sku.toUpperCase() === cleanSku
       );
       if (exact) {
         if (cleanVarId && exact.variantId && exact.variantId !== cleanVarId) {
@@ -988,36 +990,38 @@ class ShopifyService {
         };
       }
     } catch {
-      // Fall through to local catalog
+      // Fall through to local catalog only if Shopify search failed with an error
     }
 
-    // 2. Check local catalog if Shopify query was unavailable or returned nothing
-    const local = await prisma.orderItem.findFirst({
-      where: {
-        sku: { equals: cleanSku, mode: 'insensitive' },
-      },
-    });
+    // 2. Check local catalog as an offline/error fallback if Shopify search threw
+    if (!shopifySearchSucceeded) {
+      const local = await prisma.orderItem.findFirst({
+        where: {
+          sku: { equals: cleanSku, mode: 'insensitive' },
+        },
+      });
 
-    if (local && local.shopifyVariantId) {
-      const localVarId = local.shopifyVariantId.replace('gid://shopify/ProductVariant/', '').trim();
-      if (cleanVarId && localVarId && cleanVarId !== localVarId) {
+      if (local && local.shopifyVariantId) {
+        const localVarId = local.shopifyVariantId.replace('gid://shopify/ProductVariant/', '').trim();
+        if (cleanVarId && localVarId && cleanVarId !== localVarId) {
+          return {
+            valid: false,
+            sku: cleanSku,
+            variantId: cleanVarId,
+            title: local.title,
+            price: local.price || 0,
+            error: `Supplied variant ID (${cleanVarId}) does not match catalog variant ID (${localVarId}) for SKU "${cleanSku}".`,
+          };
+        }
         return {
-          valid: false,
-          sku: cleanSku,
-          variantId: cleanVarId,
+          valid: true,
+          sku: local.sku || cleanSku,
+          variantId: localVarId,
           title: local.title,
+          variantTitle: local.variantTitle || undefined,
           price: local.price || 0,
-          error: `Supplied variant ID (${cleanVarId}) does not match catalog variant ID (${localVarId}) for SKU "${cleanSku}".`,
         };
       }
-      return {
-        valid: true,
-        sku: local.sku || cleanSku,
-        variantId: localVarId,
-        title: local.title,
-        variantTitle: local.variantTitle || undefined,
-        price: local.price || 0,
-      };
     }
 
     return {

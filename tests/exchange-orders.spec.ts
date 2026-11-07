@@ -1068,7 +1068,6 @@ describe('Exchange Orders API & Workflow (/agency-api-tester)', () => {
     });
 
     it('shopifyService.validateExchangeSku validates against listings or rejects missing SKU', async () => {
-      prismaStub.orderItem.findFirst.mockResolvedValueOnce(null);
       vi.spyOn(shopifyService, 'searchExchangeSkus').mockResolvedValueOnce([
         {
           variantId: '778899',
@@ -1088,7 +1087,6 @@ describe('Exchange Orders API & Workflow (/agency-api-tester)', () => {
       const emptyResult = await shopifyService.validateExchangeSku('');
       expect(emptyResult.valid).toBe(false);
 
-      prismaStub.orderItem.findFirst.mockResolvedValueOnce(null);
       vi.spyOn(shopifyService, 'searchExchangeSkus').mockResolvedValueOnce([]);
       const notFoundResult = await shopifyService.validateExchangeSku('NON-EXISTENT-SKU');
       expect(notFoundResult.valid).toBe(false);
@@ -1125,6 +1123,22 @@ describe('Exchange Orders API & Workflow (/agency-api-tester)', () => {
       const mismatchResult = await shopifyService.validateExchangeSku('26YOU-RED-M', '999999');
       expect(mismatchResult.valid).toBe(false);
       expect(mismatchResult.error).toContain('does not match');
+    });
+
+    it('shopifyService.validateExchangeSku falls back to local catalog when Shopify search throws', async () => {
+      vi.spyOn(shopifyService, 'searchExchangeSkus').mockRejectedValueOnce(new Error('Shopify search network timeout'));
+      prismaStub.orderItem.findFirst.mockResolvedValueOnce({
+        id: 101,
+        sku: 'OFFLINE-SKU',
+        title: 'Offline Kurta',
+        shopifyVariantId: 'gid://shopify/ProductVariant/556677',
+        price: 999,
+      });
+
+      const fallbackResult = await shopifyService.validateExchangeSku('OFFLINE-SKU');
+      expect(fallbackResult.valid).toBe(true);
+      expect(fallbackResult.variantId).toBe('556677');
+      expect(fallbackResult.sku).toBe('OFFLINE-SKU');
     });
 
     it('creates SKU exchange successfully when valid SKU is selected and records exchangeType SKU', async () => {

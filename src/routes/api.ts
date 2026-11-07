@@ -2154,7 +2154,9 @@ router.post('/orders/:id/exchange', async (req: AuthenticatedRequest, res: Respo
       return;
     }
 
-    if (exchangeType === 'SKU' && !exchangeSku) {
+    const isSkuExchange = exchangeType === 'SKU';
+
+    if (isSkuExchange && !exchangeSku) {
       res.status(400).json({ error: 'exchangeSku is required for SKU change exchange' });
       return;
     }
@@ -2163,7 +2165,7 @@ router.post('/orders/:id/exchange', async (req: AuthenticatedRequest, res: Respo
       returnOrderItemId: Number(returnOrderItemId),
       returnQuantity: Number(returnQuantity) || 1,
       returnReason: String(returnReason).trim(),
-      exchangeType: exchangeType === 'SKU' ? 'SKU' : 'SIZE',
+      exchangeType: isSkuExchange ? 'SKU' : 'SIZE',
       exchangeVariantId: String(exchangeVariantId).trim(),
       exchangeSku: exchangeSku ? String(exchangeSku).trim() : undefined,
       exchangeTitle: exchangeTitle ? String(exchangeTitle).trim() : undefined,
@@ -2179,9 +2181,9 @@ router.post('/orders/:id/exchange', async (req: AuthenticatedRequest, res: Respo
       actor: req.user,
       source: 'OMS_UI',
       status: 'COMPLETED',
-      note: `${exchangeType === 'SKU' ? 'SKU' : 'Size'} exchange created by ${req.user?.email || req.user?.name || 'authenticated user'}. Replacement: ${exchangeType === 'SKU' ? (exchangeSku || exchangeTitle || 'New Item') : (exchangeTitle || exchangeSku || 'New Size')}.`,
+      note: `${isSkuExchange ? 'SKU' : 'Size'} exchange created by ${req.user?.email || req.user?.name || 'authenticated user'}. Replacement: ${isSkuExchange ? (exchangeSku || exchangeTitle || 'New Item') : (exchangeTitle || exchangeSku || 'New Size')}.`,
       metadata: {
-        exchangeType: exchangeType === 'SKU' ? 'SKU' : 'SIZE',
+        exchangeType: isSkuExchange ? 'SKU' : 'SIZE',
         exchangeSku,
         exchangeTitle,
         returnReason,

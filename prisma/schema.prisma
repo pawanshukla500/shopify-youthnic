@@ -361,6 +361,7 @@ model Return {
 
   // Exchange Orders Support
   isExchange                Boolean @default(false)
+  exchangeType              String? @default("SIZE") // SIZE | SKU
   exchangeVariantId         String? // Shopify Variant ID / GID of replacement item
   exchangeSku               String? // SKU of replacement item
   exchangeTitle             String? // Title / Size of replacement item (e.g. "Size L")

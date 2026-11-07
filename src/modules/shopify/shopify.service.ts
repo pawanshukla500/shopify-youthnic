@@ -778,6 +778,219 @@ class ShopifyService {
     return results;
   }
 
+  /**
+   * Search product listings and variants for SKU-based exchange.
+   * Matches against partial SKU or product title in Shopify and local order catalog.
+   */
+  async searchExchangeSkus(query: string): Promise<Array<{
+    variantId: string;
+    gid: string;
+    sku: string;
+    title: string;
+    variantTitle: string;
+    price: number;
+    inventoryQuantity?: number;
+    availableForSale: boolean;
+    imageUrl?: string | null;
+  }>> {
+    const q = (query || '').trim();
+    const results: Array<{
+      variantId: string;
+      gid: string;
+      sku: string;
+      title: string;
+      variantTitle: string;
+      price: number;
+      inventoryQuantity?: number;
+      availableForSale: boolean;
+      imageUrl?: string | null;
+    }> = [];
+    const seenVariantIds = new Set<string>();
+    const seenSkus = new Set<string>();
+
+    const addOption = (item: {
+      variantId: string;
+      gid: string;
+      sku: string;
+      title: string;
+      variantTitle: string;
+      price: number;
+      inventoryQuantity?: number;
+      availableForSale: boolean;
+      imageUrl?: string | null;
+    }) => {
+      const cleanSku = (item.sku || '').trim().toUpperCase();
+      const cleanVarId = String(item.variantId).replace('gid://shopify/ProductVariant/', '').trim();
+      if (!cleanSku && !cleanVarId) return;
+      if (cleanVarId && seenVariantIds.has(cleanVarId)) return;
+      if (cleanSku && seenSkus.has(cleanSku)) return;
+
+      if (cleanVarId) seenVariantIds.add(cleanVarId);
+      if (cleanSku) seenSkus.add(cleanSku);
+
+      results.push({
+        variantId: cleanVarId || cleanSku,
+        gid: item.gid || (cleanVarId ? `gid://shopify/ProductVariant/${cleanVarId}` : `gid://shopify/ProductVariant/${cleanSku}`),
+        sku: cleanSku || `SKU-${cleanVarId}`,
+        title: item.title,
+        variantTitle: item.variantTitle || '',
+        price: item.price || 0,
+        inventoryQuantity: item.inventoryQuantity,
+        availableForSale: item.availableForSale !== false,
+        imageUrl: item.imageUrl || null,
+      });
+    };
+
+    // 1. Search Shopify GraphQL if query provided
+    if (q) {
+      try {
+        const gqlQuery = `query SearchVariants($q: String!) {
+          productVariants(first: 25, query: $q) {
+            nodes {
+              id
+              title
+              sku
+              price
+              availableForSale
+              inventoryQuantity
+              image {
+                url
+              }
+              product {
+                id
+                title
+                featuredImage {
+                  url
+                }
+              }
+            }
+          }
+        }`;
+        const searchExpr = q.includes(':') ? q : `sku:*${q}* OR title:*${q}*`;
+        const resp = await this.graphql<any>(gqlQuery, { q: searchExpr });
+        const nodes = resp?.productVariants?.nodes || [];
+        for (const node of nodes) {
+          if (!node) continue;
+          const varId = node.id.replace('gid://shopify/ProductVariant/', '');
+          addOption({
+            variantId: varId,
+            gid: node.id,
+            sku: node.sku || `SKU-${varId}`,
+            title: node.product?.title || node.title || 'Product',
+            variantTitle: node.title || '',
+            price: parseFloat(node.price) || 0,
+            inventoryQuantity: node.inventoryQuantity,
+            availableForSale: node.availableForSale !== false,
+            imageUrl: node.image?.url || node.product?.featuredImage?.url || null,
+          });
+        }
+      } catch (err: any) {
+        logger.warn('Shopify GraphQL searchVariants lookup skipped or failed', { query: q, error: err.message });
+      }
+    }
+
+    // 2. Query local OrderItem database catalog (ensures immediate local matching & offline resilience)
+    try {
+      const localItems = await prisma.orderItem.findMany({
+        where: q
+          ? {
+              OR: [
+                { sku: { contains: q, mode: 'insensitive' } },
+                { title: { contains: q, mode: 'insensitive' } },
+                { variantTitle: { contains: q, mode: 'insensitive' } },
+              ],
+            }
+          : undefined,
+        take: 30,
+        orderBy: { id: 'desc' },
+      });
+
+      for (const item of localItems) {
+        if (!item.sku) continue;
+        const varId = item.shopifyVariantId || `ITEM-${item.id}`;
+        addOption({
+          variantId: varId,
+          gid: varId.startsWith('gid://') ? varId : `gid://shopify/ProductVariant/${varId}`,
+          sku: item.sku,
+          title: item.title,
+          variantTitle: item.variantTitle || '',
+          price: item.price || 0,
+          availableForSale: true,
+          imageUrl: item.imageUrl || null,
+        });
+      }
+    } catch (err: any) {
+      logger.warn('Local orderItem catalog search error', { query: q, error: err.message });
+    }
+
+    return results;
+  }
+
+  /**
+   * Validate that an exchange SKU exists in active listings.
+   */
+  async validateExchangeSku(sku: string, variantId?: string): Promise<{
+    valid: boolean;
+    sku: string;
+    variantId: string;
+    title: string;
+    variantTitle?: string;
+    price: number;
+    error?: string;
+  }> {
+    const cleanSku = (sku || '').trim().toUpperCase();
+    if (!cleanSku) {
+      return { valid: false, sku: '', variantId: '', title: '', price: 0, error: 'Exchange SKU is required.' };
+    }
+
+    // 1. Check local catalog
+    const local = await prisma.orderItem.findFirst({
+      where: {
+        sku: { equals: cleanSku, mode: 'insensitive' },
+      },
+    });
+
+    if (local) {
+      return {
+        valid: true,
+        sku: local.sku || cleanSku,
+        variantId: variantId || local.shopifyVariantId || `VAR-${local.id}`,
+        title: local.title,
+        variantTitle: local.variantTitle || undefined,
+        price: local.price || 0,
+      };
+    }
+
+    // 2. Check Shopify GraphQL search
+    try {
+      const searchRes = await this.searchExchangeSkus(cleanSku);
+      const exact = searchRes.find(
+        (s) => s.sku.toUpperCase() === cleanSku || (variantId && s.variantId === variantId)
+      );
+      if (exact) {
+        return {
+          valid: true,
+          sku: exact.sku,
+          variantId: exact.variantId,
+          title: exact.title,
+          variantTitle: exact.variantTitle,
+          price: exact.price,
+        };
+      }
+    } catch {
+      // Fall through
+    }
+
+    return {
+      valid: false,
+      sku: cleanSku,
+      variantId: variantId || '',
+      title: '',
+      price: 0,
+      error: `SKU "${cleanSku}" was not found in the product listings.`,
+    };
+  }
+
   async registerReturnOnShopify(
     shopifyOrderId: string,
     returnData: {

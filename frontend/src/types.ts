@@ -274,6 +274,7 @@ export interface ReturnRecord {
   shippingCostSource?: 'ESTIMATE' | 'ACTUAL' | null
   // Exchange fields
   isExchange?: boolean
+  exchangeType?: 'SIZE' | 'SKU' | string | null
   exchangeVariantId?: string | null
   exchangeSku?: string | null
   exchangeTitle?: string | null

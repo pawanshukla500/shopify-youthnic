@@ -526,6 +526,24 @@ export async function updateKwikEngageConfig(payload: {
 }
 
 
+// ─── Exchange SKU Listings Autocomplete ─────────────────────
+export interface SkuListingOption {
+  variantId: string
+  gid: string
+  sku: string
+  title: string
+  variantTitle?: string
+  price: number
+  inventoryQuantity?: number
+  availableForSale?: boolean
+  imageUrl?: string | null
+}
+
+export async function searchExchangeSkus(query: string): Promise<SkuListingOption[]> {
+  const response = await api.get('/api/orders/exchange-sku-search', { params: { q: query } })
+  return response.data?.items || []
+}
+
 // ─── Shopify Products & Listings API (A-to-Z Management) ─
 export async function getProducts(params?: {
   status?: string

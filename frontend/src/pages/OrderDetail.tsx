@@ -23,6 +23,8 @@ import {
   downloadBulkPackZip,
   syncExternalOrderFulfillment,
   getOrderShippingOptions,
+  searchExchangeSkus,
+  type SkuListingOption,
 } from '../api'
 import { ORDER_TABS, carrierTrackingUrl, formatDate, formatMoney, labelize, isVelocityCourier, normalizeCourierName, getCourierLogoUrl } from '../lib'
 import { classifyOrderTab, isCodConfirmed, isPrepaidOrder } from '../../../src/modules/orders/order-tabs'
@@ -3506,6 +3508,7 @@ function ExchangeModal({
   onSuccess: () => void
 }) {
   const toast = useToast()
+  const [exchangeType, setExchangeType] = useState<'SIZE' | 'SKU'>('SIZE')
   const [selectedItemId, setSelectedItemId] = useState<number>(order.items?.[0]?.id || 0)
   const [selectedVariantId, setSelectedVariantId] = useState<string>('')
   const [reason, setReason] = useState<string>('Size mismatch')
@@ -3514,6 +3517,24 @@ function ExchangeModal({
   const [loadingOptions, setLoadingOptions] = useState(false)
   const [exchangeOptions, setExchangeOptions] = useState<any[]>([])
   const [submitting, setSubmitting] = useState(false)
+
+  // SKU change search and dropdown state
+  const [skuQuery, setSkuQuery] = useState('')
+  const [skuResults, setSkuResults] = useState<SkuListingOption[]>([])
+  const [loadingSkus, setLoadingSkus] = useState(false)
+  const [selectedSkuOption, setSelectedSkuOption] = useState<SkuListingOption | null>(null)
+  const [showDropdown, setShowDropdown] = useState(false)
+  const dropdownRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setShowDropdown(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   useEffect(() => {
     if (!isOpen) return
@@ -3540,6 +3561,35 @@ function ExchangeModal({
     return () => { cancelled = true }
   }, [isOpen, order.id])
 
+  // Debounced search for SKU change autocomplete
+  useEffect(() => {
+    if (exchangeType !== 'SKU') return
+    const trimmed = skuQuery.trim()
+    if (trimmed.length < 2) {
+      setSkuResults([])
+      return
+    }
+    let active = true
+    setLoadingSkus(true)
+    const timer = setTimeout(async () => {
+      try {
+        const items = await searchExchangeSkus(trimmed)
+        if (active) {
+          setSkuResults(items)
+          setShowDropdown(true)
+        }
+      } catch {
+        if (active) setSkuResults([])
+      } finally {
+        if (active) setLoadingSkus(false)
+      }
+    }, 250)
+    return () => {
+      active = false
+      clearTimeout(timer)
+    }
+  }, [skuQuery, exchangeType])
+
   if (!isOpen) return null
 
   const isDelivered =
@@ -3551,11 +3601,20 @@ function ExchangeModal({
   const currentItemOptions = exchangeOptions.find((o) => o.orderItemId === selectedItemId) || exchangeOptions[0]
   const currentItem = order.items?.find((i) => i.id === selectedItemId) || order.items?.[0]
   const selectedVariant = currentItemOptions?.availableVariants?.find((v: any) => v.id === selectedVariantId)
+  const isSkuExchange = exchangeType === 'SKU'
+  const isFormValid = isDelivered && (isSkuExchange ? Boolean(selectedSkuOption?.sku) : Boolean(selectedVariantId && !loadingOptions))
 
   const handleSubmit = async () => {
-    if (!selectedItemId || !selectedVariantId) {
-      toast.toast('error', 'Please select the item and the replacement size.')
-      return
+    if (isSkuExchange) {
+      if (!selectedSkuOption) {
+        toast.toast('error', 'Please search and select a replacement SKU from listings.')
+        return
+      }
+    } else {
+      if (!selectedItemId || !selectedVariantId) {
+        toast.toast('error', 'Please select the item and the replacement size.')
+        return
+      }
     }
     setSubmitting(true)
     try {
@@ -3563,9 +3622,12 @@ function ExchangeModal({
         returnOrderItemId: selectedItemId,
         returnQuantity: 1,
         returnReason: reason,
-        exchangeVariantId: selectedVariantId,
-        exchangeSku: selectedVariant?.sku || currentItem?.sku,
-        exchangeTitle: selectedVariant?.title || 'Replacement Size',
+        exchangeType,
+        exchangeVariantId: isSkuExchange ? (selectedSkuOption?.variantId || undefined) : selectedVariantId,
+        exchangeSku: isSkuExchange ? selectedSkuOption?.sku : (selectedVariant?.sku || currentItem?.sku),
+        exchangeTitle: isSkuExchange
+          ? `${selectedSkuOption?.title}${selectedSkuOption?.variantTitle && selectedSkuOption?.variantTitle !== 'Default Title' ? ` (${selectedSkuOption?.variantTitle})` : ''}`
+          : (selectedVariant?.title || 'Replacement Size'),
         dispatchMode,
         carrierName: carrier,
       }
@@ -3582,15 +3644,19 @@ function ExchangeModal({
 
   return (
     <div className="modal-backdrop" onClick={() => !submitting && onClose()}>
-      <div className="modal-card" role="dialog" aria-modal="true" aria-label="Create Size Exchange" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '560px' }}>
+      <div className="modal-card" role="dialog" aria-modal="true" aria-label={isSkuExchange ? 'Create SKU Exchange' : 'Create Size Exchange'} onClick={(e) => e.stopPropagation()} style={{ maxWidth: '580px' }}>
         <div className="modal-header">
           <div className="modal-header-left">
             <div className="modal-icon-badge" style={{ background: '#ede9fe', color: '#7c3aed' }}>
               <Icon name="refresh" size={20} />
             </div>
             <div>
-              <h3 className="modal-title">Create Size Exchange</h3>
-              <p className="modal-desc">Schedule reverse pickup & dispatch replacement size for {order.shopifyOrderName}.</p>
+              <h3 className="modal-title">{isSkuExchange ? 'Create SKU / Product Exchange' : 'Create Size Exchange'}</h3>
+              <p className="modal-desc">
+                {isSkuExchange
+                  ? `Schedule reverse pickup & dispatch replacement SKU for ${order.shopifyOrderName}.`
+                  : `Schedule reverse pickup & dispatch replacement size for ${order.shopifyOrderName}.`}
+              </p>
             </div>
           </div>
           <button type="button" className="modal-close-btn" disabled={submitting} onClick={onClose}>
@@ -3599,12 +3665,55 @@ function ExchangeModal({
         </div>
 
         <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          {/* Exchange Mode Switcher */}
+          <div style={{ display: 'flex', gap: '6px', padding: '4px', background: '#f1f5f9', borderRadius: '8px' }}>
+            <button
+              type="button"
+              onClick={() => setExchangeType('SIZE')}
+              style={{
+                flex: 1,
+                padding: '8px 12px',
+                borderRadius: '6px',
+                border: 'none',
+                fontSize: '13px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                background: exchangeType === 'SIZE' ? '#ffffff' : 'transparent',
+                color: exchangeType === 'SIZE' ? '#7c3aed' : '#64748b',
+                boxShadow: exchangeType === 'SIZE' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              1. Size Exchange (Same Product)
+            </button>
+            <button
+              type="button"
+              onClick={() => setExchangeType('SKU')}
+              style={{
+                flex: 1,
+                padding: '8px 12px',
+                borderRadius: '6px',
+                border: 'none',
+                fontSize: '13px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                background: exchangeType === 'SKU' ? '#ffffff' : 'transparent',
+                color: exchangeType === 'SKU' ? '#7c3aed' : '#64748b',
+                boxShadow: exchangeType === 'SKU' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              2. SKU / Product Change
+            </button>
+          </div>
+
           {!isDelivered && (
             <div style={{ padding: '10px 14px', borderRadius: '8px', background: '#fffbeb', border: '1px solid #fde68a', color: '#b45309', fontSize: '12.5px', lineHeight: 1.4 }}>
               <strong>Notice:</strong> Order status is currently <strong>{order.status}</strong>. Logistics courier exchange requires the parcel to be delivered to the customer first.
             </div>
           )}
-          <FormField label="Item to Return (Old Size)">
+
+          <FormField label="Item to Return (Old Item)">
             <select
               className="input-select"
               value={selectedItemId}
@@ -3625,36 +3734,197 @@ function ExchangeModal({
             </select>
           </FormField>
 
-          <FormField label="Replacement Size to Dispatch (New)">
-            {loadingOptions ? (
-              <p className="cell-muted" style={{ padding: '8px 0' }}>Loading available sizes from Shopify...</p>
-            ) : (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '4px' }}>
-                {(currentItemOptions?.availableVariants || []).map((v: any) => {
-                  const isSelected = v.id === selectedVariantId
-                  const isCurrent = currentItem?.variantTitle && (v.title.toLowerCase() === currentItem.variantTitle.toLowerCase() || v.sku === currentItem.sku)
-                  return (
-                    <button
-                      type="button"
-                      key={v.id}
-                      onClick={() => setSelectedVariantId(v.id)}
-                      className={`button ${isSelected ? 'button-primary' : 'button-secondary'}`}
-                      style={{
-                        padding: '6px 14px',
-                        fontSize: '13px',
-                        fontWeight: 600,
-                        ...(isSelected ? { background: '#7c3aed', borderColor: '#7c3aed' } : {}),
-                        ...(isCurrent ? { opacity: 0.6 } : {})
+          {/* Mode 1: Size Exchange */}
+          {exchangeType === 'SIZE' && (
+            <FormField label="Replacement Size to Dispatch (New)">
+              {loadingOptions ? (
+                <p className="cell-muted" style={{ padding: '8px 0' }}>Loading available sizes from Shopify...</p>
+              ) : (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '4px' }}>
+                  {(currentItemOptions?.availableVariants || []).map((v: any) => {
+                    const isSelected = v.id === selectedVariantId
+                    const isCurrent = currentItem?.variantTitle && (v.title.toLowerCase() === currentItem.variantTitle.toLowerCase() || v.sku === currentItem.sku)
+                    return (
+                      <button
+                        type="button"
+                        key={v.id}
+                        onClick={() => setSelectedVariantId(v.id)}
+                        className={`button ${isSelected ? 'button-primary' : 'button-secondary'}`}
+                        style={{
+                          padding: '6px 14px',
+                          fontSize: '13px',
+                          fontWeight: 600,
+                          ...(isSelected ? { background: '#7c3aed', borderColor: '#7c3aed' } : {}),
+                          ...(isCurrent ? { opacity: 0.6 } : {})
+                        }}
+                        title={isCurrent ? 'Current size on order' : `Switch to size ${v.title}`}
+                      >
+                        {v.title} {isCurrent ? '(Current)' : ''}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </FormField>
+          )}
+
+          {/* Mode 2: SKU / Product Change with Autocomplete */}
+          {exchangeType === 'SKU' && (
+            <FormField label="Replacement SKU / Product (Search Listings)">
+              {selectedSkuOption ? (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '10px 14px',
+                  background: '#f5f3ff',
+                  border: '1px solid #ddd6fe',
+                  borderRadius: '8px',
+                  gap: '12px'
+                }}>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                      <span className="mono" style={{ background: '#7c3aed', color: '#fff', padding: '2px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: 700 }}>
+                        {selectedSkuOption.sku}
+                      </span>
+                      {selectedSkuOption.price ? (
+                        <span style={{ fontSize: '12.5px', fontWeight: 600, color: '#059669' }}>
+                          ₹{selectedSkuOption.price}
+                        </span>
+                      ) : null}
+                      {typeof selectedSkuOption.inventoryQuantity === 'number' && (
+                        <span style={{
+                          fontSize: '11px',
+                          padding: '1px 6px',
+                          borderRadius: '4px',
+                          background: selectedSkuOption.inventoryQuantity > 0 ? '#dcfce7' : '#fee2e2',
+                          color: selectedSkuOption.inventoryQuantity > 0 ? '#15803d' : '#b91c1c',
+                          fontWeight: 600
+                        }}>
+                          {selectedSkuOption.inventoryQuantity > 0 ? `In Stock (${selectedSkuOption.inventoryQuantity})` : 'Out of Stock'}
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: '13px', fontWeight: 600, color: '#1e293b', marginTop: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {selectedSkuOption.title} {selectedSkuOption.variantTitle && selectedSkuOption.variantTitle !== 'Default Title' ? `(${selectedSkuOption.variantTitle})` : ''}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    onClick={() => {
+                      setSelectedSkuOption(null)
+                      setSkuQuery('')
+                    }}
+                    style={{ fontSize: '12px', padding: '4px 10px', height: 'auto', flexShrink: 0 }}
+                  >
+                    Change SKU
+                  </button>
+                </div>
+              ) : (
+                <div ref={dropdownRef} style={{ position: 'relative' }}>
+                  <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                    <input
+                      type="text"
+                      className="input-text"
+                      placeholder="Type partial SKU (e.g. 26YOU, TEE) or title to search listings…"
+                      value={skuQuery}
+                      onChange={(e) => {
+                        setSkuQuery(e.target.value)
+                        setShowDropdown(true)
                       }}
-                      title={isCurrent ? 'Current size on order' : `Switch to size ${v.title}`}
-                    >
-                      {v.title} {isCurrent ? '(Current)' : ''}
-                    </button>
-                  )
-                })}
-              </div>
-            )}
-          </FormField>
+                      onFocus={() => {
+                        if (skuResults.length > 0) setShowDropdown(true)
+                      }}
+                      disabled={submitting}
+                      style={{ width: '100%', paddingRight: '36px' }}
+                      autoComplete="off"
+                    />
+                    {loadingSkus && (
+                      <div style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', color: '#7c3aed', fontSize: '12px', pointerEvents: 'none' }}>
+                        <span className="spin" style={{ display: 'inline-flex' }}>
+                          <Icon name="refresh" size={14} />
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {showDropdown && (
+                    <div style={{
+                      position: 'absolute',
+                      top: '100%',
+                      left: 0,
+                      right: 0,
+                      zIndex: 50,
+                      background: '#ffffff',
+                      borderRadius: '8px',
+                      border: '1px solid #cbd5e1',
+                      boxShadow: '0 10px 25px -5px rgba(0,0,0,0.15)',
+                      maxHeight: '260px',
+                      overflowY: 'auto',
+                      marginTop: '4px',
+                    }}>
+                      {skuResults.length === 0 ? (
+                        <div style={{ padding: '12px 14px', fontSize: '12.5px', color: '#64748b', textAlign: 'center' }}>
+                          {loadingSkus ? 'Searching product listings…' : skuQuery.trim().length < 2 ? 'Type at least 2 characters…' : 'No matching SKUs found in listings.'}
+                        </div>
+                      ) : (
+                        skuResults.map((item) => (
+                          <div
+                            key={`${item.variantId || ''}-${item.sku}`}
+                            onClick={() => {
+                              setSelectedSkuOption(item)
+                              setShowDropdown(false)
+                            }}
+                            style={{
+                              padding: '9px 12px',
+                              cursor: 'pointer',
+                              borderBottom: '1px solid #f1f5f9',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              gap: '8px',
+                              transition: 'background 0.1s ease',
+                            }}
+                            onMouseEnter={(e) => (e.currentTarget.style.background = '#f8fafc')}
+                            onMouseLeave={(e) => (e.currentTarget.style.background = '#ffffff')}
+                          >
+                            <div style={{ minWidth: 0, flex: 1 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <span className="mono" style={{ background: '#ede9fe', color: '#6d28d9', padding: '1px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: 700 }}>
+                                  {item.sku}
+                                </span>
+                                {item.variantTitle && item.variantTitle !== 'Default Title' && (
+                                  <span style={{ fontSize: '11.5px', color: '#475569', fontWeight: 600 }}>
+                                    Size: {item.variantTitle}
+                                  </span>
+                                )}
+                              </div>
+                              <div style={{ fontSize: '12.5px', color: '#1e293b', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {item.title}
+                              </div>
+                            </div>
+                            <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                              {item.price ? (
+                                <div style={{ fontSize: '12px', fontWeight: 600, color: '#059669' }}>
+                                  ₹{item.price}
+                                </div>
+                              ) : null}
+                              {typeof item.inventoryQuantity === 'number' && (
+                                <div style={{ fontSize: '10.5px', color: item.inventoryQuantity > 0 ? '#16a34a' : '#dc2626' }}>
+                                  {item.inventoryQuantity > 0 ? `${item.inventoryQuantity} left` : 'Out of stock'}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </FormField>
+          )}
 
           <FormField label="Exchange Reason">
             <select
@@ -3665,6 +3935,8 @@ function ExchangeModal({
               style={{ width: '100%' }}
             >
               <option value="Size mismatch">Size mismatch / Wrong size</option>
+              <option value="Exchange with another design/SKU">Exchange with another design/SKU</option>
+              <option value="Customer preferred different style">Customer preferred different style</option>
               <option value="Size too small">Size too small</option>
               <option value="Size too large">Size too large</option>
               <option value="Fit unsatisfactory">Fit unsatisfactory</option>
@@ -3704,7 +3976,7 @@ function ExchangeModal({
           <div style={{ padding: '10px 14px', borderRadius: '8px', background: '#f8fafc', border: '1px solid #e2e8f0', fontSize: '12px', color: '#475569', lineHeight: 1.5 }}>
             <strong style={{ color: '#1e293b', display: 'block', marginBottom: '2px' }}>How this exchange works:</strong>
             1. <strong>Reverse Leg:</strong> {carrier} books a doorstep pickup from the customer to Surat Warehouse.<br />
-            2. <strong>Forward Leg:</strong> {dispatchMode === 'IMMEDIATE' ? 'Replacement size will be manifested immediately with a fresh shipping label.' : 'Replacement will be dispatched once courier scans the return parcel.'}<br />
+            2. <strong>Forward Leg:</strong> {dispatchMode === 'IMMEDIATE' ? (isSkuExchange ? 'Replacement SKU parcel will be manifested immediately with a fresh shipping label.' : 'Replacement size will be manifested immediately with a fresh shipping label.') : 'Replacement will be dispatched once courier scans the return parcel.'}<br />
             3. <strong>Shopify:</strong> A Return with replacement exchange item is registered, linking both journeys without refunding.
           </div>
         </div>
@@ -3716,11 +3988,11 @@ function ExchangeModal({
           <button
             type="button"
             className="button button-primary"
-            disabled={submitting || !selectedVariantId || loadingOptions || !isDelivered}
+            disabled={submitting || !isFormValid}
             onClick={handleSubmit}
             style={{ background: '#7c3aed', borderColor: '#6d28d9' }}
           >
-            {submitting ? 'Creating Exchange…' : 'Confirm Size Exchange'}
+            {submitting ? 'Creating Exchange…' : isSkuExchange ? 'Confirm SKU Exchange' : 'Confirm Size Exchange'}
           </button>
         </div>
       </div>
@@ -3732,12 +4004,13 @@ function ActiveExchangeCard({ record, orderName }: { record: ReturnRecord; order
   const forwardDelivered = record.exchangeForwardStatus === 'DELIVERED'
   const reverseDelivered = record.returnStatus === 'RECEIVED' || record.returnStatus === 'QC_APPROVED'
   const exchangeOrderName = `${(orderName || '').replace('#', '')}-EX-FWD`
+  const isSkuExchange = record.exchangeType === 'SKU'
   return (
     <div className="active-return-card" style={{ borderLeft: '4px solid #7c3aed' }}>
       <div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
           <span className="eyebrow" style={{ color: '#7c3aed', background: '#ede9fe', padding: '2px 8px', borderRadius: '4px' }}>
-            Size Exchange in Progress
+            {isSkuExchange ? 'SKU Exchange in Progress' : 'Size Exchange in Progress'}
           </span>
           {record.exchangeTitle && (
             <span style={{ fontSize: '12px', fontWeight: 600, color: '#475569' }}>

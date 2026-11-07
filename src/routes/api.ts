@@ -609,6 +609,21 @@ router.get('/orders/count', async (req: Request, res: Response): Promise<void> =
   }
 });
 
+/**
+ * Search product listings & variants for exchange SKU autocomplete (supports partial SKU input).
+ * Placed ahead of dynamic /orders/:id route to avoid route shadowing.
+ */
+router.get('/orders/exchange-sku-search', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const q = typeof req.query.q === 'string' ? req.query.q : '';
+    const items = await shopifyService.searchExchangeSkus(q);
+    res.json({ success: true, items });
+  } catch (error: any) {
+    logger.error('Failed to search exchange SKUs from listings', { query: req.query.q, error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.get('/orders', async (req: Request, res: Response): Promise<void> => {
   try {
     const status = req.query.status as string | undefined;
@@ -2114,18 +2129,6 @@ router.get('/orders/:id/exchange-options', async (req: Request, res: Response): 
   }
 });
 
-// Search product listings & variants for exchange SKU autocomplete (supports partial SKU input)
-router.get('/orders/exchange-sku-search', async (req: Request, res: Response): Promise<void> => {
-  try {
-    const q = typeof req.query.q === 'string' ? req.query.q : '';
-    const items = await shopifyService.searchExchangeSkus(q);
-    res.json({ success: true, items });
-  } catch (error: any) {
-    logger.error('Failed to search exchange SKUs from listings', { query: req.query.q, error: error.message });
-    res.status(500).json({ error: error.message });
-  }
-});
-
 // Create an exchange request for an order
 router.post('/orders/:id/exchange', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
@@ -2146,8 +2149,8 @@ router.post('/orders/:id/exchange', async (req: AuthenticatedRequest, res: Respo
       carrierName,
     } = req.body;
 
-    if (!returnOrderItemId || !returnReason || (!exchangeVariantId && !exchangeSku)) {
-      res.status(400).json({ error: 'returnOrderItemId, returnReason, and replacement variant or SKU are required' });
+    if (!returnOrderItemId || !returnReason || !exchangeVariantId) {
+      res.status(400).json({ error: 'returnOrderItemId, returnReason, and exchangeVariantId are required' });
       return;
     }
 

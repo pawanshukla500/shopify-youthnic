@@ -1191,5 +1191,16 @@ describe('Exchange Orders API & Workflow (/agency-api-tester)', () => {
         })
       ).rejects.toThrow('Exchange SKU "INVALID-SKU" is not found in Shopify listings.');
     });
+
+    it('registers /orders/exchange-sku-search ahead of /orders/:id to prevent route shadowing', async () => {
+      const apiRoutes = (await import('../src/routes/api')).default;
+      const stack = (apiRoutes as any).stack || [];
+      const searchIndex = stack.findIndex((l: any) => l.route?.path === '/orders/exchange-sku-search');
+      const orderIdIndex = stack.findIndex((l: any) => l.route?.path === '/orders/:id');
+
+      expect(searchIndex).toBeGreaterThan(-1);
+      expect(orderIdIndex).toBeGreaterThan(-1);
+      expect(searchIndex).toBeLessThan(orderIdIndex);
+    });
   });
 });

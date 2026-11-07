@@ -906,11 +906,12 @@ class ShopifyService {
       });
 
       for (const item of localItems) {
-        if (!item.sku) continue;
-        const varId = item.shopifyVariantId || `ITEM-${item.id}`;
+        if (!item.sku || !item.shopifyVariantId) continue;
+        const varId = item.shopifyVariantId.replace('gid://shopify/ProductVariant/', '').trim();
+        if (!varId) continue;
         addOption({
           variantId: varId,
-          gid: varId.startsWith('gid://') ? varId : `gid://shopify/ProductVariant/${varId}`,
+          gid: `gid://shopify/ProductVariant/${varId}`,
           sku: item.sku,
           title: item.title,
           variantTitle: item.variantTitle || '',
@@ -928,6 +929,11 @@ class ShopifyService {
 
   /**
    * Validate that an exchange SKU exists in active listings.
+   * Checks local catalog first, then queries Shopify GraphQL search.
+   *
+   * @param sku - Stock Keeping Unit of replacement item to validate
+   * @param variantId - Optional Shopify variant ID if already known
+   * @returns Validation outcome with resolved item details or descriptive error
    */
   async validateExchangeSku(sku: string, variantId?: string): Promise<{
     valid: boolean;

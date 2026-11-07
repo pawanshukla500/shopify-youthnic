@@ -3563,10 +3563,15 @@ function ExchangeModal({
 
   // Debounced search for SKU change autocomplete
   useEffect(() => {
-    if (exchangeType !== 'SKU') return
+    if (exchangeType !== 'SKU') {
+      setLoadingSkus(false)
+      return
+    }
     const trimmed = skuQuery.trim()
     if (trimmed.length < 2) {
       setSkuResults([])
+      setShowDropdown(false)
+      setLoadingSkus(false)
       return
     }
     let active = true
@@ -3870,13 +3875,18 @@ function ExchangeModal({
                         </div>
                       ) : (
                         skuResults.map((item) => (
-                          <div
+                          <button
+                            type="button"
                             key={`${item.variantId || ''}-${item.sku}`}
                             onClick={() => {
                               setSelectedSkuOption(item)
                               setShowDropdown(false)
                             }}
                             style={{
+                              width: '100%',
+                              textAlign: 'left',
+                              background: '#ffffff',
+                              border: 'none',
                               padding: '9px 12px',
                               cursor: 'pointer',
                               borderBottom: '1px solid #f1f5f9',
@@ -3885,9 +3895,12 @@ function ExchangeModal({
                               justifyContent: 'space-between',
                               gap: '8px',
                               transition: 'background 0.1s ease',
+                              fontFamily: 'inherit',
                             }}
                             onMouseEnter={(e) => (e.currentTarget.style.background = '#f8fafc')}
                             onMouseLeave={(e) => (e.currentTarget.style.background = '#ffffff')}
+                            onFocus={(e) => (e.currentTarget.style.background = '#f8fafc')}
+                            onBlur={(e) => (e.currentTarget.style.background = '#ffffff')}
                           >
                             <div style={{ minWidth: 0, flex: 1 }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -3916,7 +3929,7 @@ function ExchangeModal({
                                 </div>
                               )}
                             </div>
-                          </div>
+                          </button>
                         ))
                       )}
                     </div>

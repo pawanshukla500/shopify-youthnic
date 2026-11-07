@@ -48,6 +48,7 @@ import {
 import resendService from '../modules/email/resend.service';
 import { correctImportUtr } from '../modules/accounts/settlement-utr.service';
 import { istDateRange } from '../modules/accounts/settlement-summary';
+import { financialEventService } from '../modules/accounts/financial-event.service';
 
 const router = Router();
 
@@ -71,6 +72,13 @@ const IMPORT_KINDS: ImportKind[] = [
   'GENERIC_CARRIER',
 ];
 
+/**
+ * Resolves and validates the requested accounting month parameter in YYYY-MM format.
+ * Defaults to previous calendar month if omitted or empty.
+ *
+ * @param value - Query or body value representing requested month
+ * @returns Validated "YYYY-MM" period string
+ */
 function requestedMonth(value: unknown): string {
   const month = typeof value === 'string' && value ? value : previousMonth();
   monthRange(month); // validates
@@ -684,4 +692,47 @@ router.post('/freight/upload', async (req: AuthenticatedRequest, res: Response):
   }
 });
 
+
+router.get('/settlement-bridge', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const month = requestedMonth(req.query.month);
+    const data = await financialEventService.getStateSettlementBridge(month);
+    res.json(data);
+  } catch (error: any) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+router.get('/monthly-expenses', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const month = requestedMonth(req.query.month);
+    const data = await financialEventService.buildMonthlyExpenseReport(month);
+    res.json(data);
+  } catch (error: any) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+router.get('/monthly-contribution', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const month = requestedMonth(req.query.month);
+    const data = await financialEventService.buildMonthlyContributionReport(month);
+    res.json(data);
+  } catch (error: any) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+router.post('/events/sync', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const period = requestedMonth(req.body?.period);
+    const result = await financialEventService.syncFinancialEvents(period);
+    res.json(result);
+  } catch (error: any) {
+    logger.error('Financial event sync failed', { error: error.message });
+    res.status(500).json({ error: 'Financial event sync failed.' });
+  }
+});
+
 export default router;
+

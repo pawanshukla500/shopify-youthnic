@@ -1605,6 +1605,22 @@ export interface StateAccountingRow {
   phonepe: number
   velocity: number
   notes?: string
+
+  openingOutstanding?: number
+  grossOrderSales?: number
+  cancelledOrders?: number
+  rtoAdjustments?: number
+  customerReturns?: number
+  expectedGrossSettlement?: number
+  gokwikEasebuzzFeeDeducted?: number
+  phonepeFeeDeducted?: number
+  codSettlementDeductions?: number
+  netExpectedBankSettlement?: number
+  verifiedPaymentReceived?: number
+  outstandingSettlement?: number
+  actualFreightExpenses?: number
+  exchangeFreightExpenses?: number
+  estimatedFreightNotBilled?: number
 }
 
 export interface StateAccountingTotals {
@@ -1623,6 +1639,77 @@ export interface StateAccountingTotals {
   easebuzz: number
   phonepe: number
   velocity: number
+
+  openingOutstanding?: number
+  grossOrderSales?: number
+  cancelledOrders?: number
+  rtoAdjustments?: number
+  customerReturns?: number
+  expectedGrossSettlement?: number
+  gokwikEasebuzzFeeDeducted?: number
+  phonepeFeeDeducted?: number
+  codSettlementDeductions?: number
+  netExpectedBankSettlement?: number
+  verifiedPaymentReceived?: number
+  outstandingSettlement?: number
+  actualFreightExpenses?: number
+  exchangeFreightExpenses?: number
+  estimatedFreightNotBilled?: number
+}
+
+export interface MonthlyExpenseReport {
+  period: string
+  gokwikFees: { mdr: number; platform: number; gst: number; total: number }
+  easebuzzFees: { mdr: number; gst: number; total: number }
+  phonepeFees: { mdr: number; gst: number; total: number }
+  delhiveryFreight: {
+    forward: number
+    rto: number
+    reverse: number
+    cod: number
+    weight: number
+    gst: number
+    total: number
+    walletDeducted: number
+  }
+  velocityFreight: {
+    forward: number
+    rto: number
+    reverse: number
+    cod: number
+    weight: number
+    gst: number
+    total: number
+    billed: number
+  }
+  exchangeFreight: {
+    reverseFreight: number
+    forwardFreight: number
+    extraPaidByCustomer: number
+    netFreightExpense: number
+    exchangeCount: number
+  }
+  totalOperatingExpenses: number
+  totalInputGstEligible: number
+}
+
+export interface MonthlyContributionReport {
+  period: string
+  grossBookings: number
+  cancelledOrders: number
+  rtoAdjustments: number
+  customerReturns: number
+  netRecognizedRevenue: number
+  taxableRevenue: number
+  totalOutputGst: number
+  gatewayExpenses: number
+  freightExpenses: number
+  exchangeExpenses: number
+  totalVariableExpenses: number
+  contributionBeforeCogs: number
+  contributionMarginPercent: number
+  cogsAvailable: boolean
+  notes: string
 }
 
 export interface StateMonthlyAccountingData {
@@ -1633,10 +1720,34 @@ export interface StateMonthlyAccountingData {
   carryForwardRule?: string
   totals: StateAccountingTotals
   states: StateAccountingRow[]
+  settlementBridge?: any
+  monthlyExpenses?: MonthlyExpenseReport
+  monthlyContribution?: MonthlyContributionReport
   crossMonthReturnsCount: number
   recipients: { to: string[]; cc: string[] }
   reportDay: number
   reportSentAt: { sentAt: string; to: string[] } | null
+}
+
+
+export async function getSettlementBridge(month?: string): Promise<any> {
+  const response = await api.get('/api/accounts/settlement-bridge', { params: { month } });
+  return response.data;
+}
+
+export async function getMonthlyExpenses(month?: string): Promise<MonthlyExpenseReport> {
+  const response = await api.get('/api/accounts/monthly-expenses', { params: { month } });
+  return response.data;
+}
+
+export async function getMonthlyContribution(month?: string): Promise<MonthlyContributionReport> {
+  const response = await api.get('/api/accounts/monthly-contribution', { params: { month } });
+  return response.data;
+}
+
+export async function syncFinancialEvents(period?: string): Promise<{ created: number; updated: number }> {
+  const response = await api.post('/api/accounts/events/sync', { period });
+  return response.data;
 }
 
 export async function getStateMonthlyAccounting(month?: string): Promise<StateMonthlyAccountingData> {

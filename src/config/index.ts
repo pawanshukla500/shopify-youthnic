@@ -221,16 +221,17 @@ export const config = {
 
   // GoKwik (primary payment gateway)
   gokwik: {
-    merchantId: optional('GOKWIK_MERCHANT_ID', ''),
+    merchantId: optional('GOKWIK_MERCHANT_ID', optional('MERCHANT_ID', '')),
     appId: optional('GOKWIK_APP_ID', ''),
     appSecret: optional('GOKWIK_APP_SECRET', ''),
-    apiUrl: optional('GOKWIK_API_URL', 'https://gkx.gokwik.co'),
+    gokwikId: optional('GOKWIK_ID', ''),
+    apiUrl: optional('GOKWIK_API_URL', 'https://api.gokwik.co'),
+    orderApiUrl: optional('GOKWIK_ORDER_API_URL', 'https://gkx.gokwik.co'),
     // GoKwik does not publish a universal payment-status path for every product.
     // Keep this empty until the account team confirms the endpoint for the merchant.
     statusPath: optional('GOKWIK_STATUS_PATH', ''),
-    // Confirmed by GoKwik's public WooCommerce integration.
-    refundPath: optional('GOKWIK_REFUND_PATH', '/v3/orders/update'),
-    verifyEnabled: optional('GOKWIK_VERIFY_ENABLED', 'false') === 'true',
+    refundPath: optional('GOKWIK_REFUND_PATH', '/v2/order/refund/initiate'),
+    verifyEnabled: optional('GOKWIK_VERIFY_ENABLED', 'true') === 'true',
   },
 
   // PhonePe (secondary payment gateway)
@@ -294,6 +295,18 @@ export const config = {
     tagline: optional('BRAND_TAGLINE', 'Modernly Ethnic · Surat Fulfillment Center'),
   },
 
+  // Gmail API for automated settlement reconciliation (Easebuzz / GoKwik payout emails)
+  gmail: {
+    clientId: optional('GMAIL_CLIENT_ID', ''),
+    clientSecret: optional('GMAIL_CLIENT_SECRET', ''),
+    refreshToken: optional('GMAIL_REFRESH_TOKEN', ''),
+    userEmail: optional('GMAIL_USER_EMAIL', 'me'),
+    settlementQuery: optional('GMAIL_SETTLEMENT_QUERY', 'from:info@easebuzz.com "Settlement Report" has:attachment'),
+    syncCron: optional('CRON_GMAIL_SETTLEMENT_SYNC', '30 12,16,23 * * *'),
+    startDate: optional('GMAIL_SETTLEMENT_START_DATE', '2026-09-24'),
+    enabled: optional('GMAIL_SETTLEMENT_ENABLED', 'true') === 'true',
+  },
+
   // Cron schedules
   cron: {
     orderSync: optional('CRON_ORDER_SYNC', '0 * * * *'),
@@ -306,6 +319,8 @@ export const config = {
     shippingCostEstimate: optional('CRON_SHIPPING_COST_ESTIMATE', '*/15 * * * *'),
     // Pull PhonePe / Easebuzz settlements (when credentials are set), daily.
     gatewaySettlementSync: optional('CRON_GATEWAY_SETTLEMENT_SYNC', '30 7 * * *'),
+    // Automated Gmail settlement reconciliation (Easebuzz / GoKwik payout emails)
+    gmailSettlementSync: optional('CRON_GMAIL_SETTLEMENT_SYNC', '30 12,16,23 * * *'),
     // Sync warehouse return scans from read-only RETURN_SCAN_DATABASE
     returnScanSync: optional('CRON_RETURN_SCAN_SYNC', '*/30 * * * *'),
     // Send daily manual COD refund digest email to listings@vbexports.co.in

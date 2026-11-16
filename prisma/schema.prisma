@@ -872,13 +872,66 @@ model GatewaySettlementBatch {
   bankCreditDate     DateTime?
   verificationStatus BankReconciliationStatus @default(UNVERIFIED)
   orderCount         Int                      @default(0)
+  refundCount        Int                      @default(0)
+  refundAmount       Decimal                  @default(0) @db.Decimal(15, 2)
   details            Json?
   createdAt          DateTime                 @default(now())
   updatedAt          DateTime                 @updatedAt
 
+  settledOrders      GatewaySettlementOrder[]
+  settledRefunds     GatewaySettlementRefund[]
+
   @@index([gateway, settlementDate])
   @@index([bankUtr])
   @@index([verificationStatus])
+}
+
+model GatewaySettlementOrder {
+  id                Int                    @id @default(autoincrement())
+  batchId           String
+  batch             GatewaySettlementBatch @relation(fields: [batchId], references: [batchId], onDelete: Cascade)
+  orderId           Int?
+  shopifyOrderName  String?
+  merchantTrxnId    String?
+  easebuzzTrxnId    String?
+  customerPhone     String?
+  customerEmail     String?
+  transactionDate   DateTime?
+  transactionAmount Decimal                @db.Decimal(15, 2)
+  serviceCharge     Decimal                @default(0) @db.Decimal(15, 2)
+  gst               Decimal                @default(0) @db.Decimal(15, 2)
+  netAmount         Decimal                @db.Decimal(15, 2)
+  bankUtr           String?
+  status            String                 @default("MATCHED") // MATCHED, UNMATCHED, ALREADY_SETTLED
+  createdAt         DateTime               @default(now())
+
+  @@index([batchId])
+  @@index([orderId])
+  @@index([merchantTrxnId])
+  @@index([easebuzzTrxnId])
+  @@index([bankUtr])
+}
+
+model GatewaySettlementRefund {
+  id               Int                    @id @default(autoincrement())
+  batchId          String
+  batch            GatewaySettlementBatch @relation(fields: [batchId], references: [batchId], onDelete: Cascade)
+  orderId          Int?
+  returnId         Int?
+  shopifyOrderName String?
+  refundId         String?
+  merchantTrxnId   String?
+  easebuzzTrxnId   String?
+  refundAmount     Decimal                @db.Decimal(15, 2)
+  settlementAmount Decimal                @db.Decimal(15, 2)
+  bankUtr          String?
+  status           String                 @default("MATCHED") // MATCHED, UNMATCHED
+  createdAt        DateTime               @default(now())
+
+  @@index([batchId])
+  @@index([orderId])
+  @@index([refundId])
+  @@index([bankUtr])
 }
 
 model FreightBill {

@@ -7,6 +7,8 @@ import { Button, FormField, Panel, PanelHeading, useToast } from './UI'
 
 const SOURCE_LABELS: Record<string, string> = {
   DELHIVERY_REMITTANCE: 'Delhivery COD remittance',
+  VELOCITY_REMITTANCE: 'Velocity COD remittance',
+  Velocity: 'Velocity COD remittance',
   PG_SETTLEMENT_REPORT: 'Gateway settlement report',
   PHONEPE_SETTLEMENT_API: 'PhonePe settlement',
   EASEBUZZ_PAYOUT_API: 'Easebuzz payout',

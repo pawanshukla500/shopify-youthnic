@@ -16,6 +16,7 @@ export interface ParsedSheet {
   rows: Array<Record<string, string>>;
   sourceFile?: string;
   isZipExtracted?: boolean;
+  metadata?: Record<string, any>;
 }
 
 /** Lower-case, punctuation collapsed to single spaces: "Bank_Txn-ID " → "bank txn id". */
@@ -168,7 +169,7 @@ export function parseDelimited(text: string): string[][] {
  * that has (nearly) as many filled cells as the widest of them.
  */
 export function gridToSheet(name: string, grid: string[][]): ParsedSheet {
-  const top = grid.slice(0, 10);
+  const top = grid.slice(0, Math.min(30, grid.length));
   const widest = Math.max(0, ...top.map((r) => r.filter(Boolean).length));
   const headerIndex = top.findIndex((r) => r.filter(Boolean).length >= Math.max(2, Math.ceil(widest * 0.6)));
   if (headerIndex === -1) return { name, headers: [], rows: [] };
@@ -350,6 +351,102 @@ async function readZipArchive(content: Buffer): Promise<ParsedSheet[]> {
 }
 
 /**
+ * Splits multi-section text grids (e.g. Easebuzz / PG payout exports with
+ * "SETTLED TRANSACTIONS" and "SPLIT REFUND TRANSACTIONS" sections and top metadata)
+ * into distinct ParsedSheets with top UTR and payout references attached.
+ */
+export function parseGridToSheets(name: string, grid: string[][]): ParsedSheet[] {
+  const markerIdxs: Array<{ name: string; index: number }> = [];
+  grid.forEach((row, i) => {
+    const cells = row.filter(Boolean);
+    if (cells.length === 1 && /^(settled transactions|split refund transactions|refund transactions)/i.test(cells[0].trim())) {
+      markerIdxs.push({ name: cells[0].trim(), index: i });
+    }
+  });
+
+  if (markerIdxs.length === 0) {
+    const s = gridToSheet(name, grid);
+    return s.headers.length > 0 ? [s] : [];
+  }
+
+  // Scan top metadata rows (before the first section marker) for bank details, amounts, UTR and Payout reference
+  let extractedUtr: string | null = null;
+  let extractedRef: string | null = null;
+  const payoutMetadata: Record<string, any> = {};
+  const topRows = grid.slice(0, markerIdxs[0].index);
+  for (const row of topRows) {
+    for (let c = 0; c < row.length; c++) {
+      const cell = (row[c] || '').trim();
+      const nextCell = (row[c + 1] || '').trim();
+      if (/^date\s*-\s*([0-9-]+)/i.test(cell)) {
+        payoutMetadata.payoutDate = cell.match(/^date\s*-\s*([0-9-]+)/i)?.[1];
+      }
+      if (/^payouts\s*-\s*([a-z0-9]+)/i.test(cell)) {
+        const m = cell.match(/^payouts\s*-\s*([a-z0-9]+)/i);
+        if (m) {
+          extractedRef = m[1];
+          payoutMetadata.payoutRef = m[1];
+        }
+      }
+      if (/^neft ref(\.|\s)?\s*no/i.test(cell) && nextCell) {
+        extractedUtr = nextCell;
+        payoutMetadata.utr = nextCell;
+      }
+      if (/^bank$/i.test(cell) && nextCell) payoutMetadata.bankName = nextCell;
+      if (/^ifsc code$/i.test(cell) && nextCell) payoutMetadata.ifsc = nextCell;
+      if (/^account number$/i.test(cell) && nextCell) payoutMetadata.accountNumber = nextCell;
+      if (/^total transactions$/i.test(cell) && nextCell) payoutMetadata.totalTransactions = parseInt(nextCell, 10) || 0;
+      if (/^settled transactions$/i.test(cell) && nextCell) payoutMetadata.settledTransactions = parseInt(nextCell, 10) || 0;
+      if (/^refunded transactions$/i.test(cell) && nextCell) payoutMetadata.refundedTransactions = parseInt(nextCell, 10) || 0;
+      if (/^total amount$/i.test(cell) && nextCell) payoutMetadata.totalAmount = parseFloat(nextCell) || 0;
+      if (/^refunded amount$/i.test(cell) && nextCell) payoutMetadata.refundedAmount = parseFloat(nextCell) || 0;
+      if (/^total service charge$/i.test(cell) && nextCell) payoutMetadata.totalServiceCharge = parseFloat(nextCell) || 0;
+      if (/^total gst$/i.test(cell) && nextCell) payoutMetadata.totalGst = parseFloat(nextCell) || 0;
+      if (/^total payable amount$/i.test(cell) && nextCell) payoutMetadata.totalPayableAmount = parseFloat(nextCell) || 0;
+    }
+  }
+
+  const sheets: ParsedSheet[] = [];
+  for (let m = 0; m < markerIdxs.length; m++) {
+    const curr = markerIdxs[m];
+    const nextIdx = m + 1 < markerIdxs.length ? markerIdxs[m + 1].index : grid.length;
+    const subGrid = grid.slice(curr.index + 1, nextIdx).filter((r) => r.some(Boolean));
+    if (subGrid.length < 2) continue;
+
+    const sheet = gridToSheet(curr.name, subGrid);
+    if (sheet.headers.length > 0) {
+      sheet.metadata = payoutMetadata;
+      const isRefundSection = /refund/i.test(curr.name);
+      if (isRefundSection) {
+        if (!sheet.headers.includes('Transaction Type')) sheet.headers.push('Transaction Type');
+        if (!sheet.headers.includes('Debit')) sheet.headers.push('Debit');
+        for (const row of sheet.rows) {
+          row['Transaction Type'] = 'refund';
+          const refundAmt = row['Refund Amount'] || row['Settlement Amount'] || row['Debit'] || row['Transaction Amount'];
+          if (refundAmt) row['Debit'] = refundAmt;
+        }
+      }
+
+      if (extractedUtr && !sheet.headers.some((h) => /utr|bank transaction id/i.test(h))) {
+        sheet.headers.push('Settlement UTR');
+        for (const row of sheet.rows) {
+          row['Settlement UTR'] = extractedUtr;
+        }
+      }
+      if (extractedRef && !sheet.headers.some((h) => /payout id|settlement ref/i.test(h))) {
+        sheet.headers.push('Payout ID');
+        for (const row of sheet.rows) {
+          row['Payout ID'] = extractedRef;
+        }
+      }
+      sheets.push(sheet);
+    }
+  }
+
+  return sheets.length > 0 ? sheets : [gridToSheet(name, grid)].filter((s) => s.headers.length > 0);
+}
+
+/**
  * Read an uploaded report. .xlsx, .zip, and .csv/.tsv/.txt are supported; an old
  * binary .xls must be re-saved as .xlsx or .csv first.
  */
@@ -404,6 +501,5 @@ export async function readSpreadsheet(fileName: string, content: Buffer): Promis
   }
 
   // 3. Delimited text (.csv, .tsv, .txt)
-  const sheet = gridToSheet(fileName, parseDelimited(content.toString('utf8')));
-  return sheet.headers.length > 0 ? [sheet] : [];
+  return parseGridToSheets(fileName, parseDelimited(content.toString('utf8')));
 }

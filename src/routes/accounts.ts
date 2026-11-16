@@ -46,6 +46,7 @@ import {
   setReportRecipients,
 } from '../modules/accounts/accounts-report.service';
 import resendService from '../modules/email/resend.service';
+import gmailSettlementService from '../modules/accounts/gmail-settlement.service';
 import { correctImportUtr } from '../modules/accounts/settlement-utr.service';
 import { istDateRange } from '../modules/accounts/settlement-summary';
 import { financialEventService } from '../modules/accounts/financial-event.service';
@@ -382,6 +383,35 @@ router.get('/imports', async (_req: AuthenticatedRequest, res: Response): Promis
   res.json(imports);
 });
 
+router.get('/gmail/status', async (_req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const configured = gmailSettlementService.isConfigured();
+    res.json({
+      configured,
+      userEmail: config.gmail.userEmail || 'me',
+      query: config.gmail.settlementQuery,
+      cron: config.cron.gmailSettlementSync,
+      enabled: config.gmail.enabled,
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/gmail/sync', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const { query, maxMessages, forceReimport } = req.body || {};
+    const result = await gmailSettlementService.syncSettlementEmails({
+      query,
+      maxMessages: maxMessages ? Number(maxMessages) : undefined,
+      forceReimport: Boolean(forceReimport),
+    });
+    res.json(result);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.patch('/remittance/:importId/utr', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const importId = parsePositiveInt(req.params.importId);
@@ -620,13 +650,39 @@ router.get('/bank-statement/lines', async (req: AuthenticatedRequest, res: Respo
 });
 
 // ─── Phase 3: Payment Gateway Batches ─────────────────────────
-router.get('/gateway/batches', async (_req: AuthenticatedRequest, res: Response): Promise<void> => {
+router.get('/gateway/batches', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
+    const limit = Math.min(100, parseInt(req.query.limit as string) || 50);
     const batches = await prisma.gatewaySettlementBatch.findMany({
       orderBy: { settlementDate: 'desc' },
-      take: 50,
+      take: limit,
+      include: {
+        _count: {
+          select: { settledOrders: true, settledRefunds: true },
+        },
+      },
     });
     res.json(batches);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/gateway/batches/:batchId', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const { batchId } = req.params;
+    const batch = await prisma.gatewaySettlementBatch.findUnique({
+      where: { batchId },
+      include: {
+        settledOrders: true,
+        settledRefunds: true,
+      },
+    });
+    if (!batch) {
+      res.status(404).json({ error: 'Gateway settlement batch not found' });
+      return;
+    }
+    res.json(batch);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

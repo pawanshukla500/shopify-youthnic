@@ -1850,6 +1850,31 @@ router.post('/orders/:id/confirm-cod', async (req: AuthenticatedRequest, res: Re
   }
 });
 
+// Live RTO Risk Prediction via GoKwik Predict API (/v2/rto/predict)
+router.post('/orders/:id/check-rto-risk', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const orderId = parseInt(req.params.id, 10);
+    if (isNaN(orderId)) {
+      res.status(400).json({ error: 'Valid order ID is required' });
+      return;
+    }
+
+    const evaluation = await orderService.evaluateOrderRtoRisk(orderId);
+    res.json({
+      success: true,
+      data: evaluation,
+      message: `RTO risk evaluated: ${evaluation.rtoRiskLevel} (${evaluation.source})`,
+    });
+  } catch (error: any) {
+    logger.error('Error evaluating order RTO risk', { orderId: req.params.id, error: error.message });
+    if (error.message?.includes('not found')) {
+      res.status(404).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Cancel order (with trigger confirmation, cancels Delhivery shipment if any and cancels in Shopify)
 router.post('/orders/:id/cancel', async (req: Request, res: Response): Promise<void> => {
   try {
@@ -4061,6 +4086,7 @@ router.get('/settings/shipping-preferences', async (_req: Request, res: Response
             'shipping_prepaid_courier',
             'velocity_warehouse_id',
             'velocity_auto_remittance',
+            'velocity_courier_priority',
           ],
         },
       },
@@ -4076,6 +4102,15 @@ router.get('/settings/shipping-preferences', async (_req: Request, res: Response
       velocityWarehouseId: map.get('velocity_warehouse_id') || config.velocity.warehouseId || '',
       velocityAutoRemittance: map.get('velocity_auto_remittance') !== 'false',
       velocityConfigured: Boolean(config.velocity.apiToken),
+      velocityCourierPriority: (() => {
+        const raw = map.get('velocity_courier_priority');
+        if (!raw) return null;
+        try {
+          return JSON.parse(raw);
+        } catch {
+          return raw;
+        }
+      })(),
     });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -4085,7 +4120,15 @@ router.get('/settings/shipping-preferences', async (_req: Request, res: Response
 // POST /api/settings/shipping-preferences
 router.post('/settings/shipping-preferences', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { priority, autoFailover, codCourier, prepaidCourier, velocityWarehouseId, velocityAutoRemittance } = req.body;
+    const {
+      priority,
+      autoFailover,
+      codCourier,
+      prepaidCourier,
+      velocityWarehouseId,
+      velocityAutoRemittance,
+      velocityCourierPriority,
+    } = req.body;
 
     if (priority && (priority === 'DELHIVERY_FIRST' || priority === 'VELOCITY_FIRST')) {
       await shippingRouterService.setCarrierPriority(priority);
@@ -4106,6 +4149,12 @@ router.post('/settings/shipping-preferences', async (req: Request, res: Response
     }
     if (velocityAutoRemittance !== undefined) {
       updates.push({ key: 'velocity_auto_remittance', value: String(Boolean(velocityAutoRemittance)) });
+    }
+    if (velocityCourierPriority !== undefined) {
+      const serialized = typeof velocityCourierPriority === 'string'
+        ? velocityCourierPriority
+        : JSON.stringify(velocityCourierPriority);
+      updates.push({ key: 'velocity_courier_priority', value: serialized });
     }
 
     for (const u of updates) {

@@ -6,29 +6,79 @@ import prisma from '../../database/prisma';
 import { Order, OrderItem, ShipmentStatus } from '@prisma/client';
 import { isPrepaidOrder } from '../orders/order-tabs';
 
-export const VELOCITY_CARRIER_PRIORITY: Record<string, number> = {
-  bluedart: 1,
-  ekart: 2,
-  delhivery: 3,
-  xpressbees: 4,
-  dtdc: 5,
-  shadowfax: 6,
-  ats: 90,
-  amazon: 90,
+export const DEFAULT_VELOCITY_CARRIER_PRIORITY: Record<string, number> = {
+  'ekart standard': 1,
+  'ekart': 1,
+  'bluedart standard': 2,
+  'bluedart': 2,
+  'delhivery standard': 3,
+  'delhivery': 3,
+  'amazon transportation': 4,
+  'amazon standard 5kg': 5,
+  'ats': 4,
+  'amazon': 4,
+  'xpressbees standard': 6,
+  'xpressbees': 6,
+  'dtdc standard': 7,
+  'dtdc': 7,
+  'shadowfax standard': 8,
+  'shadowfax': 8,
+  'bluedart air': 9,
 };
 
-export function getVelocityCarrierRank(carrierNameOrCode?: string): number {
-  const lower = (carrierNameOrCode || '').toLowerCase();
-  for (const [key, rank] of Object.entries(VELOCITY_CARRIER_PRIORITY)) {
-    if (lower.includes(key)) return rank;
+export const VELOCITY_CARRIER_PRIORITY: Record<string, number> = DEFAULT_VELOCITY_CARRIER_PRIORITY;
+
+export function getVelocityCarrierRank(
+  identifier?: string | { name?: string; code?: string; id?: string },
+  customPriority?: Record<string, number>
+): number {
+  if (!identifier) return 99;
+
+  const priorityMap = customPriority || VELOCITY_CARRIER_PRIORITY;
+  const names: string[] = [];
+
+  if (typeof identifier === 'string') {
+    const raw = identifier.trim().toLowerCase();
+    if (raw) names.push(raw);
+  } else if (typeof identifier === 'object') {
+    if (identifier.name) names.push(identifier.name.trim().toLowerCase());
+    if (identifier.code) names.push(identifier.code.trim().toLowerCase());
+    if (identifier.id) names.push(identifier.id.trim().toLowerCase());
+  }
+
+  // Map known courier aliases bidirectionally so user settings using either "amazon" or "ats" match
+  for (const n of [...names]) {
+    if (n.includes('amazon') || n.includes('ats')) {
+      if (!names.includes('amazon')) names.push('amazon');
+      if (!names.includes('ats')) names.push('ats');
+    }
+    if (n.includes('bluedart') || n.includes('blue dart')) {
+      if (!names.includes('bluedart')) names.push('bluedart');
+    }
+    if (n.includes('ekart') || n.includes('e-kart')) {
+      if (!names.includes('ekart')) names.push('ekart');
+    }
+  }
+
+  // Exact or pattern match: longer keys first so specific matches (e.g. 'amazon standard 5kg') precede generic 'amazon'
+  const sortedKeys = Object.keys(priorityMap).sort((a, b) => b.length - a.length);
+  for (const target of names) {
+    for (const key of sortedKeys) {
+      const k = key.toLowerCase();
+      if (target === k || target.includes(k) || k.includes(target)) {
+        return priorityMap[key];
+      }
+    }
   }
   return 99;
 }
 
 export const VELOCITY_PRIORITY_CARRIERS = [
-  { id: 'CAR2FZNOLGJ2X', name: 'Bluedart Standard', code: 'bluedart' },
   { id: 'CARR5H4WQY3PM', name: 'Ekart Standard', code: 'ekart' },
+  { id: 'CAR2FZNOLGJ2X', name: 'Bluedart Standard', code: 'bluedart' },
   { id: 'CARO0ZZQH1H6U', name: 'Delhivery Standard', code: 'delhivery' },
+  { id: 'CARPGK29DN9ZW', name: 'Amazon Transportation', code: 'ats' },
+  { id: 'CARZB0CTTMHJD', name: 'Amazon Standard 5KG', code: 'ats' },
   { id: 'CARADCBTZMQMM', name: 'Xpressbees Standard', code: 'xpressbees' },
   { id: 'CAR0EPDPJXXL4', name: 'DTDC Standard', code: 'dtdc' },
   { id: 'CAR7RFCSBPAV7', name: 'Shadowfax Standard', code: 'shadowfax' },
@@ -297,6 +347,54 @@ export class VelocityService {
         return reqConfig;
       });
     }
+  }
+
+  /**
+   * Load effective carrier priority map from DB settings or default.
+   * Enables dynamic priority reconfiguration at any time without redeployment.
+   */
+  async getEffectiveCarrierPriority(): Promise<Record<string, number>> {
+    try {
+      const setting = await prisma.setting.findUnique({
+        where: { key: 'velocity_courier_priority' },
+      });
+      if (setting?.value) {
+        const parsed = JSON.parse(setting.value);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const map: Record<string, number> = {};
+          parsed.forEach((item: string, idx: number) => {
+            map[item.toLowerCase().trim()] = idx + 1;
+          });
+          return map;
+        }
+        if (typeof parsed === 'object' && parsed !== null) {
+          return parsed;
+        }
+      }
+    } catch {
+      // ignore & use default
+    }
+    return VELOCITY_CARRIER_PRIORITY;
+  }
+
+  /**
+   * Load effective priority carriers list (with dynamic DB setting override if present).
+   */
+  async getEffectivePriorityCarriers(): Promise<Array<{ id: string; name: string; code: string }>> {
+    try {
+      const setting = await prisma.setting.findUnique({
+        where: { key: 'velocity_priority_carriers' },
+      });
+      if (setting?.value) {
+        const parsed = JSON.parse(setting.value);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
+    } catch {
+      // ignore & use default
+    }
+    return VELOCITY_PRIORITY_CARRIERS;
   }
 
   /**
@@ -583,23 +681,24 @@ export class VelocityService {
     }
     const orderId = hasCancelledShipment ? `${baseOrderId}-R1` : baseOrderId;
 
-    // Carrier priority list: 1. Bluedart Standard, 2. Ekart Standard, 3. Delhivery Standard, 4. Xpressbees Standard, 5. DTDC Standard, 6. Shadowfax Standard
+    // Carrier priority list: 1. Ekart Standard, 2. Bluedart Standard, 3. Delhivery Standard, 4. Amazon Transportation, 5. Amazon Standard 5KG, etc.
+    const priorityCarriers = await this.getEffectivePriorityCarriers();
     let carriersToTry: string[] = [];
     if (options?.carrierId) {
       carriersToTry.push(options.carrierId);
-      const chosenIndex = VELOCITY_PRIORITY_CARRIERS.findIndex((p) => p.id === options.carrierId);
+      const chosenIndex = priorityCarriers.findIndex((p) => p.id === options.carrierId);
       if (chosenIndex >= 0) {
         // Fall forward only to downstream priority carriers, never backwards to a higher-ranked one
-        for (let idx = chosenIndex + 1; idx < VELOCITY_PRIORITY_CARRIERS.length; idx++) {
-          carriersToTry.push(VELOCITY_PRIORITY_CARRIERS[idx].id);
+        for (let idx = chosenIndex + 1; idx < priorityCarriers.length; idx++) {
+          carriersToTry.push(priorityCarriers[idx].id);
         }
       } else {
-        for (const p of VELOCITY_PRIORITY_CARRIERS) {
+        for (const p of priorityCarriers) {
           if (!carriersToTry.includes(p.id)) carriersToTry.push(p.id);
         }
       }
     } else {
-      carriersToTry = VELOCITY_PRIORITY_CARRIERS.map((p) => p.id);
+      carriersToTry = priorityCarriers.map((p) => p.id);
       carriersToTry.push('');
     }
 
@@ -614,7 +713,7 @@ export class VelocityService {
           external_id: order.shopifyOrderId ? String(order.shopifyOrderId) : orderId,
           store_name: storeName,
           order_date: orderDateStr,
-          carrier_id: candidateCarrierId,
+          carrier_id: candidateCarrierId || undefined,
           billing_customer_name: firstName,
           billing_last_name: lastName,
           billing_address: customerAddress,
@@ -1082,7 +1181,7 @@ export class VelocityService {
       ? raw
       : [];
 
-    const mapped = list.map((item: any) => {
+    const mapped = list.map((item: any, originalIndex: number) => {
       const freight = Number(
         item.charges?.forward_freight_charges ??
         item.charges?.freight_charges ??
@@ -1124,13 +1223,25 @@ export class VelocityService {
         expectedDeliveryDays: deliveryDays,
         zone: item.zone || raw?.result?.shipment_details?.zone || undefined,
         raw: item,
+        originalIndex,
       };
     });
 
+    const priorityMap = await this.getEffectiveCarrierPriority();
+
     return mapped.sort((a: any, b: any) => {
-      const rankA = getVelocityCarrierRank(a.carrierName || a.raw?.carrier_code);
-      const rankB = getVelocityCarrierRank(b.carrierName || b.raw?.carrier_code);
+      const rankA = getVelocityCarrierRank(
+        { name: a.carrierName, code: a.raw?.carrier_code, id: a.carrierId },
+        priorityMap
+      );
+      const rankB = getVelocityCarrierRank(
+        { name: b.carrierName, code: b.raw?.carrier_code, id: b.carrierId },
+        priorityMap
+      );
       if (rankA !== rankB) return rankA - rankB;
+      if (a.originalIndex !== undefined && b.originalIndex !== undefined && a.originalIndex !== b.originalIndex) {
+        return a.originalIndex - b.originalIndex;
+      }
       return a.totalCharge - b.totalCharge;
     });
   }

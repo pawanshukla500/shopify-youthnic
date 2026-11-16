@@ -106,6 +106,7 @@ const ORDER_COLUMN = [
   /merchant order (id|number|no)/,
   /^(client )?order (number|no|id|name|ref|reference)$/,
   /merchant order id|order id|order no|order number|order name|client order|reference (number|no|id)|^reference$/,
+  /udf[1-5]/,
 ];
 
 function rowsOf(sheets: ParsedSheet[], skipSheet?: RegExp): Array<{ sheet: ParsedSheet; row: Record<string, string> }> {
@@ -247,10 +248,12 @@ export async function recordPaymentReceived(
   const previous = await prisma.order.findUnique({ where: { id: orderId } });
   if (!previous) throw new Error('Order not found while recording payment.');
   const recorded = Boolean(previous.paymentReceivedAt);
+  const isLegacyVelocityPlaceholder =
+    recorded && !previous.paymentReceivedUtr && previous.paymentReceivedRef === 'VELOCITY_REMITTANCE' && Boolean(payment.utr);
   if (recorded && previous.paymentReceivedUtr && payment.utr && previous.paymentReceivedUtr !== payment.utr) {
     throw new Error('Order already has a different bank UTR. Use a settlement-scoped correction.');
   }
-  if (recorded && previous.paymentReceivedRef && payment.ref && previous.paymentReceivedRef !== payment.ref) {
+  if (recorded && !isLegacyVelocityPlaceholder && previous.paymentReceivedRef && payment.ref && previous.paymentReceivedRef !== payment.ref) {
     throw new Error('Order already belongs to another settlement; review before replacing it.');
   }
   if (recorded && previous.paymentReceivedUtr) return;
@@ -259,24 +262,24 @@ export async function recordPaymentReceived(
     const written = await tx.order.updateMany({
       where: { id: orderId, paymentReceivedAt: previous.paymentReceivedAt, paymentReceivedUtr: previous.paymentReceivedUtr, paymentReceivedRef: previous.paymentReceivedRef },
       data: {
-        paymentReceivedAt: previous.paymentReceivedAt || payment.receivedAt,
-        paymentReceivedAmount: recorded ? previous.paymentReceivedAmount : payment.amount ?? null,
+        paymentReceivedAt: isLegacyVelocityPlaceholder ? payment.receivedAt : (previous.paymentReceivedAt || payment.receivedAt),
+        paymentReceivedAmount: (recorded && !isLegacyVelocityPlaceholder) ? previous.paymentReceivedAmount : payment.amount ?? null,
         paymentReceivedUtr: payment.utr || previous.paymentReceivedUtr || null,
-        paymentReceivedRef: previous.paymentReceivedRef || payment.ref || null,
-        paymentReceivedSource: previous.paymentReceivedSource || payment.source,
+        paymentReceivedRef: isLegacyVelocityPlaceholder ? (payment.ref || payment.utr || null) : (previous.paymentReceivedRef || payment.ref || null),
+        paymentReceivedSource: isLegacyVelocityPlaceholder ? payment.source : (previous.paymentReceivedSource || payment.source),
         ...(!recorded && payment.gatewayFee !== undefined && payment.gatewayFee !== null ? { gatewayFee: payment.gatewayFee } : {}),
         paymentVerified: true,
-        paymentVerifiedAt: previous.paymentVerifiedAt || payment.receivedAt,
+        paymentVerifiedAt: isLegacyVelocityPlaceholder ? payment.receivedAt : (previous.paymentVerifiedAt || payment.receivedAt),
       },
     });
     if (written.count !== 1) throw new Error('Payment changed concurrently. Reload and retry.');
     await recordAccountTrailEvent({
-      orderId, eventType: recorded ? 'BANK_UTR_UPDATED' : 'PAYMENT_RECEIVED',
+      orderId, eventType: (recorded && !isLegacyVelocityPlaceholder) ? 'BANK_UTR_UPDATED' : 'PAYMENT_RECEIVED',
       actor: payment.actor, actorType: payment.actor?.uid ? 'USER' : payment.actor?.email ? 'EXTERNAL' : 'SYSTEM',
       source: payment.source, status: payment.utr ? 'COMPLETED' : 'UTR_MISSING',
-      note: recorded ? 'Missing bank UTR added; existing amount and settlement date preserved.' : payment.utr ? 'Bank receipt recorded. Customer checkout reference is unchanged.' : 'Settlement reported without a bank UTR; this does not close the order for accounts.',
-      amount: (recorded ? previous.paymentReceivedAmount : payment.amount) ?? null,
-      externalReference: payment.utr || null, metadata: { source: payment.source, settlementRef: previous.paymentReceivedRef || payment.ref || null },
+      note: (recorded && !isLegacyVelocityPlaceholder) ? 'Missing bank UTR added; existing amount and settlement date preserved.' : payment.utr ? 'Bank receipt recorded. Customer checkout reference is unchanged.' : 'Settlement reported without a bank UTR; this does not close the order for accounts.',
+      amount: ((recorded && !isLegacyVelocityPlaceholder) ? previous.paymentReceivedAmount : payment.amount) ?? null,
+      externalReference: payment.utr || null, metadata: { source: payment.source, settlementRef: isLegacyVelocityPlaceholder ? (payment.ref || payment.utr || null) : (previous.paymentReceivedRef || payment.ref || null) },
     }, tx);
   });
 }
@@ -1008,7 +1011,7 @@ export async function importGatewaySettlement(
   const columns = {
     order: pickColumn(headers, ORDER_COLUMN),
     transaction: pickColumn(headers, [
-      /merchant transaction id|pg transaction id|transaction id|txn ?id|txnid/,
+      /merchant trxn id|easebuzz trxn id|merchant transaction id|pg transaction id|transaction id|txn ?id|txnid|trxn ?id/,
       /easepayid|payment id|^reference$/,
     ]),
     settlementRef: pickColumn(headers, [/settlement (id|ref|reference|number)|payout (id|ref)/]),
@@ -1069,6 +1072,34 @@ export async function importGatewaySettlement(
   >();
   const ambiguousOrders = new Set<number>();
   const matchedOrders: MatchedOrderSummary[] = [];
+  const collectedSettledRows: Array<{
+    orderId: number | null;
+    shopifyOrderName: string | null;
+    merchantTrxnId: string | null;
+    easebuzzTrxnId: string | null;
+    customerPhone: string | null;
+    customerEmail: string | null;
+    transactionDate: Date | null;
+    transactionAmount: number;
+    serviceCharge: number;
+    gst: number;
+    netAmount: number;
+    bankUtr: string | null;
+    status: string;
+  }> = [];
+  const collectedRefundRows: Array<{
+    orderId: number | null;
+    returnId: number | null;
+    shopifyOrderName: string | null;
+    refundId: string | null;
+    merchantTrxnId: string | null;
+    easebuzzTrxnId: string | null;
+    refundAmount: number;
+    settlementAmount: number;
+    bankUtr: string | null;
+    status: string;
+  }> = [];
+
   let rowCount = 0;
   let skippedState = 0;
   let codRows = 0;
@@ -1087,28 +1118,47 @@ export async function importGatewaySettlement(
       }
     }
 
-    const order = (orderRef && (await findOrderByReference(orderRef))) || (txn && (await findOrderByReference(txn))) || null;
-    if (!order) {
-      unmatched.push(orderRef || txn);
-      continue;
-    }
-    if (ambiguousOrders.has(order.id)) continue;
-    const isC2P =
-      Boolean((order as any).gokwikPaymentId) ||
-      /c2p|prepaid|converted/i.test((order as any).tags || '');
-    if (order.paymentMethod === 'COD' && !isC2P) {
-      codRows++;
-      continue;
-    }
-
     const txnType = (row['Transaction Type'] || row['transaction type'] || row['Type'] || row['type'] || '').toLowerCase();
     const debitVal = parseAmount(row['Debit'] || row['debit']);
     const isRefundDebit = txnType === 'refund' || (debitVal !== null && debitVal > 0);
+    const utr = (columns.utr ? row[columns.utr] : '') || typedUtr || '';
+    const at = (columns.date && parseDateLoose(row[columns.date])) || new Date();
+    const rawMerchantTrxnId = (row['Merchant Trxn ID'] || row['merchant transaction id'] || row['txnid'] || txn || '').trim();
+    const rawEasebuzzTrxnId = (row['Easebuzz Trxn ID'] || row['easepayid'] || '').trim();
+    const rawPhone = (row['Customer Phone'] || row['customer phone'] || row['Phone'] || '').trim();
+    const rawEmail = (row['Customer Email'] || row['customer email'] || row['Email'] || '').trim();
+    const rawRefundId = (row['Refund ID'] || row['refund id'] || '').trim();
+    const rawRrn = (row['Transaction Reference Number'] || row['Transaction Reference No'] || row['ref_no'] || '').trim();
+    const rawUdf1 = (row['UDF1'] || row['udf1'] || '').trim();
+
+    const order =
+      (orderRef && (await findOrderByReference(orderRef))) ||
+      (rawMerchantTrxnId && (await findOrderByReference(rawMerchantTrxnId))) ||
+      (rawEasebuzzTrxnId && (await findOrderByReference(rawEasebuzzTrxnId))) ||
+      (txn && (await findOrderByReference(txn))) ||
+      (rawRrn && (await findOrderByReference(rawRrn))) ||
+      (rawUdf1 && (await findOrderByReference(rawUdf1))) ||
+      null;
 
     if (isRefundDebit) {
       const debitAmount = Math.abs(debitVal || (columns.amount ? parseAmount(row[columns.amount]) : null) || 0);
-      const utr = (columns.utr ? row[columns.utr] : '') || typedUtr || '';
-      const at = (columns.date && parseDateLoose(row[columns.date])) || new Date();
+
+      if (!order) {
+        unmatched.push(orderRef || txn);
+        collectedRefundRows.push({
+          orderId: null,
+          returnId: null,
+          shopifyOrderName: null,
+          refundId: rawRefundId || null,
+          merchantTrxnId: rawMerchantTrxnId || null,
+          easebuzzTrxnId: rawEasebuzzTrxnId || null,
+          refundAmount: debitAmount,
+          settlementAmount: debitAmount,
+          bankUtr: utr || null,
+          status: 'UNMATCHED',
+        });
+        continue;
+      }
 
       const matchingReturn = await prisma.return.findFirst({
         where: { orderId: order.id, refundStatus: { not: 'PROCESSED' } },
@@ -1149,8 +1199,72 @@ export async function importGatewaySettlement(
         remittanceRef: utr,
         city: (order as any).city || row['City'] || row['city'] || undefined,
       });
+
+      collectedRefundRows.push({
+        orderId: order.id,
+        returnId: matchingReturn?.id || null,
+        shopifyOrderName: order.shopifyOrderName,
+        refundId: rawRefundId || null,
+        merchantTrxnId: rawMerchantTrxnId || null,
+        easebuzzTrxnId: rawEasebuzzTrxnId || null,
+        refundAmount: debitAmount,
+        settlementAmount: debitAmount,
+        bankUtr: utr || null,
+        status: 'MATCHED',
+      });
       continue;
     }
+
+    const rawTxnAmt = (columns.amount ? parseAmount(row[columns.amount]) : null) || parseAmount(row['Transaction Amount']) || 0;
+    const rawSc = parseAmount(row['Service Charge'] || row['service charge'] || (columns.fee ? row[columns.fee] : null)) || 0;
+    const rawGst = parseAmount(row['GST'] || row['gst'] || (columns.tax ? row[columns.tax] : null)) || 0;
+    const rawNet = parseAmount(row['Settlement Amount'] || row['settlement amount']) || (rawTxnAmt - rawSc - rawGst);
+    const rowTxnDate = (columns.date && parseDateLoose(row[columns.date])) || parseDateLoose(row['Transaction Date']) || at;
+
+    if (!order) {
+      unmatched.push(orderRef || txn);
+      collectedSettledRows.push({
+        orderId: null,
+        shopifyOrderName: null,
+        merchantTrxnId: rawMerchantTrxnId || null,
+        easebuzzTrxnId: rawEasebuzzTrxnId || null,
+        customerPhone: rawPhone || null,
+        customerEmail: rawEmail || null,
+        transactionDate: rowTxnDate,
+        transactionAmount: rawTxnAmt,
+        serviceCharge: rawSc,
+        gst: rawGst,
+        netAmount: rawNet,
+        bankUtr: utr || null,
+        status: 'UNMATCHED',
+      });
+      continue;
+    }
+
+    if (ambiguousOrders.has(order.id)) continue;
+    const isC2P =
+      Boolean((order as any).gokwikPaymentId) ||
+      /c2p|prepaid|converted/i.test((order as any).tags || '');
+    if (order.paymentMethod === 'COD' && !isC2P) {
+      codRows++;
+      continue;
+    }
+
+    collectedSettledRows.push({
+      orderId: order.id,
+      shopifyOrderName: order.shopifyOrderName,
+      merchantTrxnId: rawMerchantTrxnId || null,
+      easebuzzTrxnId: rawEasebuzzTrxnId || null,
+      customerPhone: rawPhone || null,
+      customerEmail: rawEmail || null,
+      transactionDate: rowTxnDate,
+      transactionAmount: rawTxnAmt,
+      serviceCharge: rawSc,
+      gst: rawGst,
+      netAmount: rawNet,
+      bankUtr: utr || null,
+      status: 'MATCHED',
+    });
 
     const entry = perOrder.get(order.id) || {
       orderName: order.shopifyOrderName,
@@ -1165,7 +1279,6 @@ export async function importGatewaySettlement(
     if (rowAmount === null || rowAmount < 0) { unmatched.push(orderRef || txn); notes.push(`${orderRef || txn}: settlement amount missing/negative; review instead of inferring a credit.`); continue; }
     entry.amount += rowAmount;
     entry.fee += Math.abs((columns.fee && parseAmount(row[columns.fee])) || 0) + Math.abs((columns.tax && parseAmount(row[columns.tax])) || 0);
-    const utr = (columns.utr ? row[columns.utr] : '') || typedUtr || '';
     if (entry.utr && utr && entry.utr !== utr) {
       ambiguousOrders.add(order.id); perOrder.delete(order.id); unmatched.push(orderRef || txn);
       notes.push(`${orderRef || txn}: multiple bank UTRs for one order; requires reconciliation rather than overwriting one.`);
@@ -1173,8 +1286,7 @@ export async function importGatewaySettlement(
     }
     if (utr) entry.utr = utr;
     entry.ref = (columns.settlementRef && row[columns.settlementRef]) || defaults.remittanceRef || utr || txn || entry.ref;
-    const at = (columns.date && parseDateLoose(row[columns.date])) || null;
-    if (at && at > entry.at) entry.at = at;
+    if (rowTxnDate && rowTxnDate > entry.at) entry.at = rowTxnDate;
     perOrder.set(order.id, entry);
   }
 
@@ -1226,6 +1338,112 @@ export async function importGatewaySettlement(
   if (skippedState) notes.push(`${skippedState} row(s) were not settled yet (status column) and were skipped.`);
   if (codRows) notes.push(`${codRows} row(s) matched COD orders and were skipped; COD money comes from the Delhivery remittance.`);
   if (missingUtr) notes.push(`${missingUtr} order(s) were matched but the file has no UTR for them.`);
+
+  const sheetMeta = sheets.find((s) => s.metadata && Object.keys(s.metadata).length > 0)?.metadata || {};
+  const batchId =
+    defaults.remittanceRef ||
+    fileName.match(/(PT[A-Z0-9]+)/i)?.[1] ||
+    sheetMeta.payoutRef ||
+    primaryUtr ||
+    fileName.replace(/\.[^.]+$/, '');
+
+  const bankUtrFinal =
+    primaryUtr ||
+    typedUtr ||
+    sheetMeta.utr ||
+    defaults.utr ||
+    null;
+
+  const grossFinal = sheetMeta.totalAmount ?? totalSettled;
+  const feeFinal = sheetMeta.totalServiceCharge ?? 0;
+  const gstFinal = sheetMeta.totalGst ?? 0;
+  const netFinal = sheetMeta.totalPayableAmount ?? totalSettled;
+  const refundFinal = sheetMeta.refundedAmount ?? 0;
+
+  try {
+    if (prisma.gatewaySettlementBatch) {
+      await prisma.gatewaySettlementBatch.upsert({
+        where: { batchId },
+        create: {
+          gateway: kind === 'GOKWIK_SETTLEMENT' || kind === 'PG_SETTLEMENT' ? 'EASEBUZZ' : 'OTHER',
+          batchId,
+          settlementDate: sheetMeta.payoutDate ? new Date(sheetMeta.payoutDate) : new Date(),
+          grossAmount: grossFinal,
+          feeAmount: feeFinal,
+          gstAmount: gstFinal,
+          netAmount: netFinal,
+          bankUtr: bankUtrFinal,
+          orderCount: sheetMeta.settledTransactions ?? collectedSettledRows.length,
+          refundCount: sheetMeta.refundedTransactions ?? collectedRefundRows.length,
+          refundAmount: refundFinal,
+          details: {
+            ...sheetMeta,
+            fileName,
+            uploadedBy,
+          },
+        },
+        update: {
+          settlementDate: sheetMeta.payoutDate ? new Date(sheetMeta.payoutDate) : new Date(),
+          grossAmount: grossFinal,
+          feeAmount: feeFinal,
+          gstAmount: gstFinal,
+          netAmount: netFinal,
+          bankUtr: bankUtrFinal,
+          orderCount: sheetMeta.settledTransactions ?? collectedSettledRows.length,
+          refundCount: sheetMeta.refundedTransactions ?? collectedRefundRows.length,
+          refundAmount: refundFinal,
+          details: {
+            ...sheetMeta,
+            fileName,
+            uploadedBy,
+          },
+        },
+      });
+    }
+
+    if (prisma.gatewaySettlementOrder && collectedSettledRows.length > 0) {
+      await prisma.gatewaySettlementOrder.deleteMany({ where: { batchId } });
+      await prisma.gatewaySettlementOrder.createMany({
+        data: collectedSettledRows.map((r) => ({
+          batchId,
+          orderId: r.orderId,
+          shopifyOrderName: r.shopifyOrderName,
+          merchantTrxnId: r.merchantTrxnId,
+          easebuzzTrxnId: r.easebuzzTrxnId,
+          customerPhone: r.customerPhone,
+          customerEmail: r.customerEmail,
+          transactionDate: r.transactionDate,
+          transactionAmount: r.transactionAmount,
+          serviceCharge: r.serviceCharge,
+          gst: r.gst,
+          netAmount: r.netAmount,
+          bankUtr: r.bankUtr || bankUtrFinal,
+          status: r.status,
+        })),
+      });
+    }
+
+    if (prisma.gatewaySettlementRefund && collectedRefundRows.length > 0) {
+      await prisma.gatewaySettlementRefund.deleteMany({ where: { batchId } });
+      await prisma.gatewaySettlementRefund.createMany({
+        data: collectedRefundRows.map((r) => ({
+          batchId,
+          orderId: r.orderId,
+          returnId: r.returnId,
+          shopifyOrderName: r.shopifyOrderName,
+          refundId: r.refundId,
+          merchantTrxnId: r.merchantTrxnId,
+          easebuzzTrxnId: r.easebuzzTrxnId,
+          refundAmount: r.refundAmount,
+          settlementAmount: r.settlementAmount,
+          bankUtr: r.bankUtr || bankUtrFinal,
+          status: r.status,
+        })),
+      });
+    }
+  } catch (batchErr: any) {
+    logger.warn('Could not persist GatewaySettlementBatch / lines to DB', { batchId, error: batchErr.message });
+  }
 
   return saveImport(
     {

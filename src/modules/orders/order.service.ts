@@ -7,6 +7,7 @@ import shippingRouterService, { CourierChoice } from '../shipping/shipping-route
 import { isVelocityCourier, isDelhiveryCourier, getTrackingUrl, normalizeCourierName } from '../../utils/courier';
 import notificationEngine from '../notifications/notification.service';
 import paymentService from '../payments/payment.service';
+import gokwikService from '../payments/gokwik.service';
 import whatsappGatewayService from '../whatsapp/whatsapp-gateway.service';
 import { recordAccountTrailEvent, type AccountTrailActor } from '../accounts/account-trail.service';
 import { queueManifestForPickup } from '../delhivery/pickup-batch.service';
@@ -2264,6 +2265,161 @@ class OrderService {
     }
 
     return { success: true, courier: normCourier, waybillNumber: finalAwb || undefined };
+  }
+
+  /**
+   * Evaluate RTO risk for an order using GoKwik RTO Predict API (/v2/rto/predict).
+   * Persists the evaluated riskLevel and riskReason to the database.
+   * If GoKwik API is not configured or fails, falls back safely to rule-based evaluation.
+   */
+  async evaluateOrderRtoRisk(orderId: number): Promise<{
+    orderId: number;
+    rtoRiskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+    rtoRiskReason: string;
+    source: 'GOKWIK_PREDICT_API' | 'HEURISTIC_FALLBACK';
+    allowCod: boolean;
+    riskScore?: number;
+    deliverOrderCount?: number | null;
+  }> {
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: { items: true, shipment: true },
+    });
+
+    if (!order) {
+      throw new Error(`Order ${orderId} not found`);
+    }
+
+    // Prepaid orders have zero financial RTO risk upfront
+    if (order.paymentMethod === 'Prepaid') {
+      const rtoRiskLevel = 'LOW';
+      const rtoRiskReason = order.rtoRiskReason || 'Prepaid order (Zero RTO risk: payment captured upfront)';
+      if (order.rtoRiskLevel !== rtoRiskLevel) {
+        await prisma.order.update({
+          where: { id: orderId },
+          data: { rtoRiskLevel, rtoRiskReason },
+        });
+      }
+      return {
+        orderId,
+        rtoRiskLevel,
+        rtoRiskReason,
+        source: 'HEURISTIC_FALLBACK',
+        allowCod: false,
+        deliverOrderCount: order.deliverOrderCount,
+      };
+    }
+
+    const nameParts = (order.customerName || '').trim().split(/\s+/);
+    const firstName = nameParts[0] || 'Customer';
+    const lastName = nameParts.slice(1).join(' ') || '';
+
+    const shippingAddress = {
+      firstName,
+      lastName,
+      address1: order.customerAddress || 'N/A',
+      city: order.customerCity || 'N/A',
+      state: order.customerState || 'N/A',
+      postcode: order.customerPincode || 'N/A',
+      phone: order.customerPhone || '',
+      email: order.customerEmail || undefined,
+    };
+
+    const predictResult = await gokwikService.predictRtoRisk({
+      requestId: `ord_${order.id}_${Date.now()}`,
+      merchantOrderId: order.shopifyOrderName || String(order.id),
+      orderDate: order.shopifyCreatedAt || new Date(),
+      platformType: 'shopify',
+      totalPrice: order.totalAmount,
+      paymentMethod: order.paymentMethod || 'COD',
+      customer: {
+        firstName,
+        lastName,
+        phone: order.customerPhone,
+        email: order.customerEmail || undefined,
+      },
+      shippingAddress,
+      billingAddress: shippingAddress,
+      lineItems: (order.items || []).map((item) => ({
+        name: item.title,
+        title: item.title,
+        quantity: item.quantity,
+        price: item.price,
+        sku: item.sku || undefined,
+        productId: item.shopifyVariantId || String(item.id),
+        lineItemId: String(item.id),
+      })),
+    });
+
+    if (predictResult.success && predictResult.riskFlag !== 'UNKNOWN') {
+      const rtoRiskLevel: 'LOW' | 'MEDIUM' | 'HIGH' =
+        predictResult.riskFlag === 'HIGH'
+          ? 'HIGH'
+          : predictResult.riskFlag === 'MEDIUM'
+          ? 'MEDIUM'
+          : 'LOW';
+
+      const rtoRiskReason =
+        predictResult.riskReason ||
+        (rtoRiskLevel === 'HIGH'
+          ? 'High RTO risk flagged by GoKwik Predict API'
+          : rtoRiskLevel === 'MEDIUM'
+          ? 'Medium RTO risk flagged by GoKwik Predict API'
+          : 'Low RTO risk confirmed by GoKwik Predict API');
+
+      await prisma.order.update({
+        where: { id: orderId },
+        data: {
+          rtoRiskLevel,
+          rtoRiskReason,
+        },
+      });
+
+      return {
+        orderId,
+        rtoRiskLevel,
+        rtoRiskReason,
+        source: 'GOKWIK_PREDICT_API',
+        allowCod: predictResult.allowCod ?? (rtoRiskLevel !== 'HIGH'),
+        riskScore: predictResult.riskScore,
+        deliverOrderCount: order.deliverOrderCount,
+      };
+    }
+
+    // Fallback: rule-based evaluation using Shopify tags and historical deliverOrderCount
+    const isCodBlocked = isCodRiskHold(order);
+    const isCodConfirmed = orderIsCodConfirmed(order);
+
+    let rtoRiskLevel: 'LOW' | 'MEDIUM' | 'HIGH' = 'MEDIUM';
+    let rtoRiskReason = 'Unconfirmed COD (GoKwik API unreachable, awaiting verification)';
+
+    if (isCodBlocked) {
+      rtoRiskLevel = 'HIGH';
+      rtoRiskReason = 'GoKwik flagged COD blocked / customer cancelled';
+    } else if (isCodConfirmed) {
+      rtoRiskLevel = 'LOW';
+      rtoRiskReason = 'Customer verified intent via WhatsApp / GoKwik confirmation';
+    } else if (order.deliverOrderCount && order.deliverOrderCount >= 2) {
+      rtoRiskLevel = 'LOW';
+      rtoRiskReason = `Repeat trustworthy buyer (${order.deliverOrderCount} prior deliveries on GoKwik network)`;
+    }
+
+    await prisma.order.update({
+      where: { id: orderId },
+      data: {
+        rtoRiskLevel,
+        rtoRiskReason,
+      },
+    });
+
+    return {
+      orderId,
+      rtoRiskLevel,
+      rtoRiskReason,
+      source: 'HEURISTIC_FALLBACK',
+      allowCod: rtoRiskLevel !== 'HIGH',
+      deliverOrderCount: order.deliverOrderCount,
+    };
   }
 }
 

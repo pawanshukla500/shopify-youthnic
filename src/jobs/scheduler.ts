@@ -10,6 +10,7 @@ import { backfillMissingRefundTrailEvents } from '../modules/accounts/account-tr
 import { sendDueMonthlyReport } from '../modules/accounts/accounts-report.service';
 import { estimatePendingShippingCosts } from '../modules/accounts/shipping-cost.service';
 import { syncGatewaySettlements } from '../modules/accounts/gateway-settlement.service';
+import gmailSettlementService from '../modules/accounts/gmail-settlement.service';
 import logger from '../utils/logger';
 import { processPickupBatches } from '../modules/delhivery/pickup-batch.service';
 import returnScanService from '../modules/returns/return-scan.service';
@@ -138,6 +139,34 @@ class Scheduler {
         { timezone: 'Asia/Kolkata' }
       )
     );
+
+    // 7b. Gmail Settlement Sync (Easebuzz / GoKwik payout emails with attached CSV)
+    if (config.gmail.enabled) {
+      this.jobs.push(
+        cron.schedule(
+          config.cron.gmailSettlementSync || '30 12,16,23 * * *',
+          async () => {
+            logger.info('[CRON] Running automated Gmail settlement sync...');
+            try {
+              if (gmailSettlementService.isConfigured()) {
+                const res = await gmailSettlementService.syncSettlementEmails();
+                logger.info('[CRON] Gmail settlement sync finished', {
+                  scanned: res.emailsScanned,
+                  processed: res.emailsProcessed,
+                  matchedOrders: res.matchedOrdersCount,
+                  refundsDebited: res.refundsDebitedCount,
+                });
+              } else {
+                logger.debug('[CRON] Gmail settlement sync skipped: credentials not set');
+              }
+            } catch (error: any) {
+              logger.error('[CRON] Gmail settlement sync error', { error: error.message });
+            }
+          },
+          { timezone: 'Asia/Kolkata' }
+        )
+      );
+    }
 
     // 8. Return scan sync (reads read-only RETURN_SCAN_DATABASE and updates Return Delivered / auto-refunds)
     this.jobs.push(

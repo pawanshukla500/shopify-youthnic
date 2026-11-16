@@ -16,6 +16,7 @@ const { prismaStub, velocityServiceStub, reconStub } = vi.hoisted(() => ({
       findMany: vi.fn(),
       findUnique: vi.fn(),
       findFirst: vi.fn(),
+      update: vi.fn(),
       updateMany: vi.fn(),
     },
     reconciliationImport: {
@@ -180,35 +181,65 @@ describe('VelocityFinancialSyncService', () => {
         expect.objectContaining({
           amount: 1200,
           utr: 'AXISN0987654321',
-          source: 'Velocity',
+          ref: 'AXISN0987654321',
+          source: 'VELOCITY_REMITTANCE',
         })
       );
 
-      // Verify ReconciliationImport persistence
+      // Verify per-UTR ReconciliationImport persistence
       expect(prismaStub.reconciliationImport.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
             kind: 'VELOCITY_REMITTANCE',
+            fileName: 'Velocity-UTR-AXISN0987654321',
             matchedCount: 1,
             summary: expect.objectContaining({
               totalRemittance: 1200,
               totalBilledCharges: 76.7,
               bankTransactionId: 'AXISN0987654321',
+              singleSettlement: true,
+              state: 'SETTLED',
             }),
           }),
         })
       );
     });
 
-    it('updates existing daily ReconciliationImport record instead of creating duplicates', async () => {
+    it('updates existing per-UTR ReconciliationImport record and merges orders instead of creating duplicates', async () => {
       prismaStub.reconciliationImport.findFirst.mockResolvedValueOnce({
         id: 79,
-        fileName: `Velocity-Auto-Sync-${new Date().toISOString().slice(0, 10)}`,
+        fileName: 'Velocity-UTR-CMS5976875819',
+        summary: {
+          matchedOrders: [
+            {
+              orderId: 9,
+              shopifyOrderName: '#26YOU099',
+              waybillNumber: 'VEL099',
+              codAmount: 500,
+              remittedAmount: 500,
+              utr: 'CMS5976875819',
+              remittanceDate: '2026-11-11',
+            },
+          ],
+        },
       });
       prismaStub.reconciliationImport.update.mockResolvedValueOnce({ id: 79 });
+      reconStub.findOrderByReference.mockResolvedValueOnce({
+        id: 10,
+        shopifyOrderName: '#26YOU100',
+        totalAmount: 1000,
+        status: 'DELIVERED',
+        deliveredAt: new Date('2026-11-08'),
+        shipment: { id: 110, waybillNumber: 'VEL123', codAmount: 1000 },
+      });
+      prismaStub.shipment.update.mockResolvedValue({});
       velocityServiceStub.getCodRemittance.mockResolvedValueOnce([
         {
           trackingNumber: 'VEL123',
+          deliveryDate: '2026-11-08',
+          codAmount: 1000,
+          remittanceDate: '2026-11-11',
+          utrNo: 'CMS5976875819',
           error: null,
         },
       ]);
@@ -222,11 +253,169 @@ describe('VelocityFinancialSyncService', () => {
         expect.objectContaining({
           where: { id: 79 },
           data: expect.objectContaining({
+            matchedCount: 2,
             uploadedBy: 'Velocity Financial Auto-Sync',
+            summary: expect.objectContaining({
+              totalRemittance: 1500,
+              bankTransactionId: 'CMS5976875819',
+            }),
           }),
         })
       );
       expect(prismaStub.reconciliationImport.create).not.toHaveBeenCalled();
+    });
+
+    it('does NOT mark undelivered or RTO COD orders with scheduled remittanceDate as collected or remitted', async () => {
+      velocityServiceStub.getCodRemittance.mockResolvedValueOnce([
+        {
+          trackingNumber: 'VEL_RTO_1',
+          deliveryDate: null,
+          codAmount: 1499,
+          remittanceDate: '2026-11-15',
+          utrNo: null,
+          error: null,
+        },
+      ]);
+      velocityServiceStub.getShippingCharges.mockResolvedValueOnce([]);
+      velocityServiceStub.getSummaryReport.mockResolvedValueOnce({ summary: {} });
+
+      const result = await service.syncVelocityFinancials({ awbs: ['VEL_RTO_1'] });
+
+      expect(result.success).toBe(true);
+      expect(result.remittancesMatched).toBe(0);
+      expect(reconStub.findOrderByReference).not.toHaveBeenCalled();
+      expect(prismaStub.shipment.update).not.toHaveBeenCalled();
+      expect(reconStub.recordPaymentReceived).not.toHaveBeenCalled();
+      expect(prismaStub.reconciliationImport.create).not.toHaveBeenCalled();
+    });
+
+    it('marks delivered COD order without UTR as codCollected only and backfills deliveredAt', async () => {
+      reconStub.findOrderByReference.mockResolvedValueOnce({
+        id: 21,
+        shopifyOrderName: '#26YOU21',
+        totalAmount: 899,
+        status: 'DELIVERED',
+        deliveredAt: null,
+        shipment: { id: 221, waybillNumber: 'VEL_DEL_NO_UTR', codAmount: 899 },
+      });
+      prismaStub.shipment.update.mockResolvedValue({});
+      prismaStub.order.update.mockResolvedValue({});
+      velocityServiceStub.getCodRemittance.mockResolvedValueOnce([
+        {
+          trackingNumber: 'VEL_DEL_NO_UTR',
+          deliveryDate: '2026-11-10',
+          codAmount: 899,
+          remittanceDate: '2026-11-14',
+          utrNo: null,
+          error: null,
+        },
+      ]);
+      velocityServiceStub.getShippingCharges.mockResolvedValueOnce([]);
+      velocityServiceStub.getSummaryReport.mockResolvedValueOnce({ summary: {} });
+
+      const result = await service.syncVelocityFinancials({ awbs: ['VEL_DEL_NO_UTR'] });
+
+      expect(result.success).toBe(true);
+      expect(result.remittancesMatched).toBe(0);
+      expect(prismaStub.shipment.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 221 },
+          data: expect.objectContaining({
+            codCollected: true,
+          }),
+        })
+      );
+      expect(prismaStub.shipment.update.mock.calls[0][0].data.codRemitted).toBeUndefined();
+      expect(prismaStub.order.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 21 },
+          data: { deliveredAt: new Date('2026-11-10') },
+        })
+      );
+      expect(reconStub.recordPaymentReceived).not.toHaveBeenCalled();
+    });
+
+    it('ignores prepaid order errors from cod-remittance without polluting unmatchedAwbs', async () => {
+      velocityServiceStub.getCodRemittance.mockResolvedValueOnce([
+        {
+          trackingNumber: 'PREPAID_AWB_1',
+          error: 'AWB PREPAID_AWB_1 is a prepaid order.',
+        },
+      ]);
+      velocityServiceStub.getShippingCharges.mockResolvedValueOnce([]);
+      velocityServiceStub.getSummaryReport.mockResolvedValueOnce({ summary: {} });
+
+      const result = await service.syncVelocityFinancials({ awbs: ['PREPAID_AWB_1'] });
+
+      expect(result.success).toBe(true);
+      expect(result.unmatchedAwbs).toEqual([]);
+    });
+
+    it('creates separate per-UTR ReconciliationImport records for multiple settled UTRs', async () => {
+      reconStub.findOrderByReference
+        .mockResolvedValueOnce({
+          id: 31,
+          shopifyOrderName: '#26YOU31',
+          totalAmount: 1000,
+          status: 'DELIVERED',
+          deliveredAt: new Date('2026-11-05'),
+          shipment: { id: 331, waybillNumber: 'VEL_U1', codAmount: 1000 },
+        })
+        .mockResolvedValueOnce({
+          id: 32,
+          shopifyOrderName: '#26YOU32',
+          totalAmount: 2000,
+          status: 'DELIVERED',
+          deliveredAt: new Date('2026-11-07'),
+          shipment: { id: 332, waybillNumber: 'VEL_U2', codAmount: 2000 },
+        });
+      prismaStub.shipment.update.mockResolvedValue({});
+      prismaStub.reconciliationImport.findFirst.mockResolvedValue(null);
+      prismaStub.reconciliationImport.create
+        .mockResolvedValueOnce({ id: 201 })
+        .mockResolvedValueOnce({ id: 202 });
+      velocityServiceStub.getCodRemittance.mockResolvedValueOnce([
+        {
+          trackingNumber: 'VEL_U1',
+          deliveryDate: '2026-11-05',
+          codAmount: 1000,
+          remittanceDate: '2026-11-06',
+          utrNo: 'CMS5968746447',
+          error: null,
+        },
+        {
+          trackingNumber: 'VEL_U2',
+          deliveryDate: '2026-11-07',
+          codAmount: 2000,
+          remittanceDate: '2026-11-09',
+          utrNo: 'CMS5975017830',
+          error: null,
+        },
+      ]);
+      velocityServiceStub.getShippingCharges.mockResolvedValueOnce([]);
+      velocityServiceStub.getSummaryReport.mockResolvedValueOnce({ summary: {} });
+
+      const result = await service.syncVelocityFinancials({ awbs: ['VEL_U1', 'VEL_U2'] });
+
+      expect(result.remittancesMatched).toBe(2);
+      expect(result.totalRemittanceAmount).toBe(3000);
+      expect(prismaStub.reconciliationImport.create).toHaveBeenCalledTimes(2);
+      expect(prismaStub.reconciliationImport.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            fileName: 'Velocity-UTR-CMS5968746447',
+            matchedCount: 1,
+          }),
+        })
+      );
+      expect(prismaStub.reconciliationImport.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            fileName: 'Velocity-UTR-CMS5975017830',
+            matchedCount: 1,
+          }),
+        })
+      );
     });
 
     it('gracefully handles non-existent AWBs returned with error from Velocity API', async () => {

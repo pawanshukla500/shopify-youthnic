@@ -351,6 +351,9 @@ describe('GoKwik Payment & Integrated Refund API', () => {
     (gokwikService as any).client = {
       post: gkPost,
     };
+    (gokwikService as any).orderClient = {
+      post: gkPost,
+    };
   });
 
   afterEach(() => {
@@ -427,8 +430,72 @@ describe('GoKwik Payment & Integrated Refund API', () => {
     });
   });
 
-  describe('Integrated Refund API (/v3/orders/update)', () => {
-    it('posts refund amount and note to GoKwik update order endpoint', async () => {
+  describe('Integrated Refund API (/v3/orders/update & /v2/order/refund/initiate)', () => {
+    it('initiates refund via official GoKwik Refund V2 API (/v2/order/refund/initiate)', async () => {
+      config.gokwik.refundPath = '/v2/order/refund/initiate';
+      gkPost.mockResolvedValueOnce({
+        status: 200,
+        data: {
+          statusCode: 200,
+          statusMessage: 'Refund initiated successfully',
+          data: {
+            refund_id: 'RKWIKPPBAZAYY3176643MP',
+            amount: 1344,
+            status: 'Initiated',
+            created_at: '2026-11-16T10:00:00.000Z',
+          },
+        },
+      });
+
+      const res = await gokwikService.processRefund(
+        '26YOU5759',
+        1344,
+        'RTO Delivery refund',
+        { gokwikOrderId: 'KWIKZEOIYJUT1946889MP' }
+      );
+
+      expect(res.success).toBe(true);
+      expect(res.refundId).toBe('RKWIKPPBAZAYY3176643MP');
+      expect(res.statusCode).toBe(200);
+      expect(gkPost).toHaveBeenCalledWith(
+        '/v2/order/refund/initiate',
+        {
+          amount: 1344,
+          moid: '#26YOU5759',
+          gokwik_oid: 'KWIKZEOIYJUT1946889MP',
+        }
+      );
+    });
+
+    it('verifies refund status via official GoKwik Verify Refund API (/v2/order/refund/verify)', async () => {
+      gkPost.mockResolvedValueOnce({
+        status: 200,
+        data: {
+          statusCode: 200,
+          statusMessage: 'Refund initiated',
+          data: {
+            refund_id: 'RKWIKPPBAZAYY3176643MP',
+            amount: '1344.0',
+            status: 'Initiated',
+            reference_id: 'NA',
+            created_at: '2026-11-16T10:00:00.000Z',
+            refunded_at: 'NA',
+          },
+        },
+      });
+
+      const res = await gokwikService.verifyRefund('RKWIKPPBAZAYY3176643MP');
+      expect(res.success).toBe(true);
+      expect(res.refundId).toBe('RKWIKPPBAZAYY3176643MP');
+      expect(res.amount).toBe(1344);
+      expect(res.status).toBe('Initiated');
+      expect(gkPost).toHaveBeenCalledWith('/v2/order/refund/verify', {
+        refund_id: 'RKWIKPPBAZAYY3176643MP',
+      });
+    });
+
+    it('posts refund amount and note to GoKwik update order endpoint when v3 path configured', async () => {
+      config.gokwik.refundPath = '/v3/orders/update';
       gkPost.mockResolvedValueOnce({
         status: 200,
         data: {
@@ -463,6 +530,7 @@ describe('GoKwik Payment & Integrated Refund API', () => {
     });
 
     it('handles refund failures and captures error message', async () => {
+      config.gokwik.refundPath = '/v3/orders/update';
       gkPost.mockRejectedValueOnce({
         response: {
           status: 400,
@@ -521,6 +589,191 @@ describe('GoKwik Payment & Integrated Refund API', () => {
       expect(parsed.merchantOrderId).toBe('YOUTH-1005');
       expect(parsed.paymentId).toBe('pay_gk_888');
       expect(parsed.amount).toBe(1999);
+    });
+  });
+
+  describe('RTO Predict API (/v2/rto/predict)', () => {
+    it('successfully predicts LOW risk with allow_cod and risk score', async () => {
+      gkPost.mockResolvedValueOnce({
+        status: 200,
+        data: {
+          success: true,
+          data: {
+            request_id: 'req_rto_12345',
+            risk_flag: 'Low Risk',
+            risk_score: 15,
+            risk_reason: 'High successful delivery propensity',
+            recommendations: {
+              allow_cod: true,
+              incentivize_prepaid: false,
+            },
+          },
+        },
+      });
+
+      const res = await gokwikService.predictRtoRisk({
+        merchantOrderId: '#26YOU5999',
+        totalPrice: 1299,
+        paymentMethod: 'COD',
+        customer: {
+          firstName: 'Pawan',
+          lastName: 'Shukla',
+          phone: '9426279142',
+          email: 'pawan@example.com',
+        },
+        shippingAddress: {
+          firstName: 'Pawan',
+          lastName: 'Shukla',
+          address1: 'Plot 42, Green Avenue',
+          city: 'Surat',
+          state: 'Gujarat',
+          postcode: '395007',
+          phone: '9426279142',
+        },
+        lineItems: [
+          {
+            title: 'Classic Kurta Pajama',
+            quantity: 1,
+            price: 1299,
+            sku: 'YTH-KRT-01',
+          },
+        ],
+      });
+
+      expect(res.success).toBe(true);
+      expect(res.riskFlag).toBe('LOW');
+      expect(res.riskScore).toBe(15);
+      expect(res.riskReason).toBe('High successful delivery propensity');
+      expect(res.allowCod).toBe(true);
+      expect(res.incentivizePrepaid).toBe(false);
+      expect(res.requestId).toBe('req_rto_12345');
+
+      expect(gkPost).toHaveBeenCalledWith(
+        '/v2/rto/predict',
+        expect.objectContaining({
+          order: expect.objectContaining({
+            total: '1299',
+            shipping_address: expect.objectContaining({
+              city: 'Surat',
+              postcode: '395007',
+            }),
+          }),
+          customer: expect.objectContaining({
+            phone: '9426279142',
+          }),
+        }),
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            appid: 'test_gk_app_id',
+            appsecret: 'test_gk_app_secret',
+            'gk-app-id': 'test_gk_app_id',
+            'gk-app-secret': 'test_gk_app_secret',
+          }),
+        })
+      );
+    });
+
+    it('identifies HIGH risk and restricts COD recommendation', async () => {
+      gkPost.mockResolvedValueOnce({
+        status: 200,
+        data: {
+          success: true,
+          data: {
+            request_id: 'req_rto_99999',
+            risk_flag: 'High Risk',
+            risk_score: 87,
+            risk_reason: 'High RTO propensity detected in pin code & phone network',
+            recommendations: {
+              allow_cod: false,
+              incentivize_prepaid: true,
+            },
+          },
+        },
+      });
+
+      const res = await gokwikService.predictRtoRisk({
+        merchantOrderId: '#26YOU6000',
+        totalPrice: 2499,
+        paymentMethod: 'COD',
+        customer: {
+          firstName: 'Suspicious',
+          lastName: 'Buyer',
+          phone: '9999999999',
+        },
+        shippingAddress: {
+          firstName: 'Suspicious',
+          address1: 'Somewhere far away',
+          city: 'Remote City',
+          state: 'State',
+          postcode: '110001',
+          phone: '9999999999',
+        },
+      });
+
+      expect(res.success).toBe(true);
+      expect(res.riskFlag).toBe('HIGH');
+      expect(res.riskScore).toBe(87);
+      expect(res.allowCod).toBe(false);
+      expect(res.incentivizePrepaid).toBe(true);
+    });
+
+    it('identifies MEDIUM risk with moderate intent', async () => {
+      gkPost.mockResolvedValueOnce({
+        status: 200,
+        data: {
+          success: true,
+          data: {
+            risk_flag: 'Medium Risk',
+            risk_score: 48,
+            recommendations: {
+              allow_cod: true,
+              incentivize_prepaid: true,
+            },
+          },
+        },
+      });
+
+      const res = await gokwikService.predictRtoRisk({
+        merchantOrderId: '#26YOU6001',
+        totalPrice: 899,
+        paymentMethod: 'COD',
+      });
+
+      expect(res.success).toBe(true);
+      expect(res.riskFlag).toBe('MEDIUM');
+      expect(res.riskScore).toBe(48);
+      expect(res.allowCod).toBe(true);
+      expect(res.incentivizePrepaid).toBe(true);
+    });
+
+    it('returns error when GoKwik client is unconfigured', async () => {
+      (gokwikService as any).client = null;
+      (gokwikService as any).orderClient = null;
+
+      const res = await gokwikService.predictRtoRisk({
+        merchantOrderId: '#26YOU6002',
+      });
+
+      expect(res.success).toBe(false);
+      expect(res.riskFlag).toBe('UNKNOWN');
+      expect(res.error).toContain('not configured');
+    });
+
+    it('handles API network failure gracefully without throwing', async () => {
+      gkPost.mockRejectedValueOnce({
+        response: {
+          status: 500,
+          data: { message: 'Internal GoKwik Service Error' },
+        },
+      });
+
+      const res = await gokwikService.predictRtoRisk({
+        merchantOrderId: '#26YOU6003',
+      });
+
+      expect(res.success).toBe(false);
+      expect(res.riskFlag).toBe('UNKNOWN');
+      expect(res.error).toBe('Internal GoKwik Service Error');
     });
   });
 });

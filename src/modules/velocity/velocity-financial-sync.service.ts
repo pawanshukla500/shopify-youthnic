@@ -53,8 +53,102 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function parseValidDate(value?: string | Date | null): Date | null {
+  if (!value) return null;
+  const d = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 export class VelocityFinancialSyncService {
   constructor(private vService: VelocityService = velocityService) {}
+
+  /**
+   * Apply a single Velocity /cod-remittance entry onto Shipment & Order.
+   * Velocity returns `cod_amount` and a scheduled `remittance_date` even for
+   * IN_TRANSIT / FAILED / RTO / CANCELLED AWBs, so `codRemitted` and payment receipt
+   * are strictly gated on a real bank `utr_no`, and `codCollected` on valid `delivery_date`.
+   */
+  private async applyCodRemittanceEntry(
+    order: any,
+    item: VelocityCodRemittanceEntry,
+    actor: AccountTrailActor
+  ): Promise<{
+    collected: boolean;
+    remitted: boolean;
+    utr: string | null;
+    remittedVal: number;
+    remittanceDate: string | null;
+  }> {
+    const utr = item.utrNo?.trim() || null;
+    const deliveryDate = parseValidDate(item.deliveryDate);
+    const remittanceDate = parseValidDate(item.remittanceDate);
+
+    const statusUpper = String(order.status || '').toUpperCase();
+    const shipStatusUpper = String(order.shipment?.currentStatus || '').toUpperCase();
+    const isRtoOrCancelled =
+      Boolean(order.isCancelled || order.isRto) ||
+      statusUpper === 'CANCELLED' ||
+      statusUpper === 'RTO' ||
+      shipStatusUpper.includes('RTO') ||
+      shipStatusUpper.includes('CANCEL');
+
+    const isDelivered = Boolean(deliveryDate && !isRtoOrCancelled);
+    const isRemitted = Boolean(utr);
+
+    if (!isDelivered && !isRemitted) {
+      return { collected: false, remitted: false, utr: null, remittedVal: 0, remittanceDate: null };
+    }
+
+    const remittedVal = item.codAmount ?? order.shipment?.codAmount ?? order.totalAmount;
+    const collectedAt = deliveryDate || order.shipment?.codCollectedAt || null;
+    const remittedAtDate = isRemitted ? remittanceDate || deliveryDate || new Date() : null;
+
+    if (order.shipment) {
+      const shipmentData: Record<string, any> = {
+        codCollected: true,
+        ...(collectedAt ? { codCollectedAt: collectedAt } : {}),
+      };
+      if (isRemitted) {
+        shipmentData.codRemitted = true;
+        shipmentData.codRemittedAt = remittedAtDate;
+        shipmentData.codRemittanceRef = utr;
+        shipmentData.codRemittedAmount = remittedVal;
+      }
+      await prisma.shipment.update({
+        where: { id: order.shipment.id },
+        data: shipmentData,
+      });
+    }
+
+    if (isDelivered && deliveryDate && !order.deliveredAt) {
+      await prisma.order.update({
+        where: { id: order.id },
+        data: { deliveredAt: deliveryDate },
+      });
+    }
+
+    if (isRemitted && utr) {
+      await recordPaymentReceived(order.id, {
+        amount: remittedVal,
+        utr,
+        ref: utr,
+        source: 'VELOCITY_REMITTANCE',
+        receivedAt: remittedAtDate!,
+        deliveredAt: deliveryDate,
+        actor,
+      });
+    }
+
+    return {
+      collected: isDelivered || isRemitted,
+      remitted: isRemitted,
+      utr,
+      remittedVal,
+      remittanceDate: remittanceDate
+        ? remittanceDate.toISOString().slice(0, 10)
+        : item.remittanceDate || null,
+    };
+  }
 
   /**
    * Main synchronization routine:
@@ -102,19 +196,23 @@ export class VelocityFinancialSyncService {
 
     // ── 1. Discover Candidate AWBs ───────────────────────────
     const candidateAwbSet = new Set<string>();
+    const codCandidateAwbSet = new Set<string>();
 
     if (options.awbs && options.awbs.length > 0) {
       options.awbs.forEach((awb) => {
         const cleaned = String(awb || '').trim();
-        if (cleaned) candidateAwbSet.add(cleaned);
+        if (cleaned) {
+          candidateAwbSet.add(cleaned);
+          codCandidateAwbSet.add(cleaned);
+        }
       });
     } else {
-      // 1a. Query local database for Velocity shipments
+      // 1a. Query local database for Velocity shipments needing COD remittance or freight audit
       try {
         const dbShipments = await prisma.shipment.findMany({
           where: {
             waybillNumber: { not: null },
-            updatedAt: { gte: sinceDate },
+            ...(options.forceAll ? {} : { updatedAt: { gte: sinceDate } }),
             OR: [
               { courier: { contains: 'velocity', mode: 'insensitive' } },
               { courier: { contains: 'Velocity' } },
@@ -126,71 +224,89 @@ export class VelocityFinancialSyncService {
               select: {
                 id: true,
                 shopifyOrderName: true,
+                paymentMethod: true,
                 paymentGateway: true,
                 totalAmount: true,
                 status: true,
+                paymentReceivedUtr: true,
               },
             },
           },
-          take: 500,
+          take: 1000,
         });
 
         for (const s of dbShipments) {
-          if (!s.waybillNumber) continue;
-          const isVel = isVelocityCourier(s.courier);
-          // Include if explicitly Velocity or if pending COD remittance / charges audit
-          if (isVel || !s.codRemitted || s.billingStatus !== 'AUDITED' || !s.netBilledCost) {
-            candidateAwbSet.add(s.waybillNumber.trim());
+          const wb = s.waybillNumber?.trim();
+          if (!wb) continue;
+          const isVel = isVelocityCourier(s.courier, s.labelUrl, wb);
+          const needsRemitAudit = !s.codRemitted || !s.order?.paymentReceivedUtr;
+          const needsChargeAudit = s.billingStatus !== 'AUDITED' || !s.netBilledCost;
+          if (isVel || needsRemitAudit || needsChargeAudit) {
+            candidateAwbSet.add(wb);
+            const isPrepaid =
+              s.paymentMode === 'Prepaid' ||
+              s.paymentMode === 'Pre-paid' ||
+              s.order?.paymentMethod === 'PREPAID';
+            if (!isPrepaid && (isVel || needsRemitAudit)) {
+              codCandidateAwbSet.add(wb);
+            }
           }
         }
       } catch (err: any) {
         logger.warn('Failed querying DB shipments for Velocity candidates', { error: err.message });
       }
 
-      // 1b. Query Velocity live shipments API to discover any orders manifested in Velocity
+      // 1b. Query Velocity live shipments API (up to 5 pages) to discover recently manifested orders
       try {
-        const liveList = await this.vService.getShipmentsList({
-          page: 1,
-          per_page: 50,
-        });
+        for (let page = 1; page <= 5; page++) {
+          const liveList = await this.vService.getShipmentsList({
+            page,
+            per_page: 100,
+          });
 
-        const list = liveList?.data || [];
-        for (const item of list) {
-          const attrs = item.attributes;
-          const trackingNumber = attrs?.tracking_number?.trim();
-          const displayId = attrs?.order?.display_id?.trim();
-          const externalId = attrs?.order?.external_id?.trim();
+          const list = liveList?.data || [];
+          for (const item of list) {
+            const attrs = item.attributes;
+            const trackingNumber = attrs?.tracking_number?.trim();
+            const displayId = attrs?.order?.display_id?.trim();
+            const externalId = attrs?.order?.external_id?.trim();
 
-          if (trackingNumber) {
-            candidateAwbSet.add(trackingNumber);
+            if (trackingNumber) {
+              candidateAwbSet.add(trackingNumber);
+              if (attrs?.is_cod !== false) {
+                codCandidateAwbSet.add(trackingNumber);
+              }
 
-            // If local shipment is missing waybillNumber, link it automatically
-            if (displayId || externalId) {
-              try {
-                const existingOrder = await findOrderByReference(displayId || externalId);
-                if (existingOrder && !existingOrder.shipment?.waybillNumber) {
-                  await prisma.shipment.upsert({
-                    where: { orderId: existingOrder.id },
-                    create: {
-                      orderId: existingOrder.id,
-                      waybillNumber: trackingNumber,
-                      courier: 'Velocity',
-                      paymentMode: attrs?.is_cod ? 'COD' : 'Pre-paid',
-                      codAmount: attrs?.cod_amount ? Number(attrs.cod_amount) : 0,
-                    },
-                    update: {
-                      waybillNumber: trackingNumber,
-                      courier: 'Velocity',
-                      paymentMode: attrs?.is_cod ? 'COD' : 'Pre-paid',
-                      codAmount: attrs?.cod_amount ? Number(attrs.cod_amount) : undefined,
-                    },
-                  });
+              // If local shipment is missing waybillNumber, link it automatically
+              if (displayId || externalId) {
+                try {
+                  const existingOrder = await findOrderByReference(displayId || externalId);
+                  if (existingOrder && !existingOrder.shipment?.waybillNumber) {
+                    await prisma.shipment.upsert({
+                      where: { orderId: existingOrder.id },
+                      create: {
+                        orderId: existingOrder.id,
+                        waybillNumber: trackingNumber,
+                        courier: 'Velocity',
+                        paymentMode: attrs?.is_cod ? 'COD' : 'Pre-paid',
+                        codAmount: attrs?.cod_amount ? Number(attrs.cod_amount) : 0,
+                      },
+                      update: {
+                        waybillNumber: trackingNumber,
+                        courier: 'Velocity',
+                        paymentMode: attrs?.is_cod ? 'COD' : 'Pre-paid',
+                        codAmount: attrs?.cod_amount ? Number(attrs.cod_amount) : undefined,
+                      },
+                    });
+                  }
+                } catch {
+                  // non-fatal link attempt
                 }
-              } catch {
-                // non-fatal link attempt
               }
             }
           }
+
+          if (list.length < 100) break;
         }
       } catch (err: any) {
         logger.warn('Velocity live shipments listing failed during discovery', { error: err.message });
@@ -198,7 +314,8 @@ export class VelocityFinancialSyncService {
     }
 
     const candidateAwbs = Array.from(candidateAwbSet);
-    logger.info(`Discovered ${candidateAwbs.length} candidate Velocity AWBs for financial sync`);
+    const codCandidateAwbs = Array.from(codCandidateAwbSet);
+    logger.info(`Discovered ${candidateAwbs.length} candidate Velocity AWBs (${codCandidateAwbs.length} COD) for financial sync`);
 
     if (candidateAwbs.length === 0) {
       return {
@@ -218,8 +335,9 @@ export class VelocityFinancialSyncService {
 
     // ── 2. Batch Sync COD Remittances & Bank UTRs ─────────────
     const batchSize = 100;
-    for (let i = 0; i < candidateAwbs.length; i += batchSize) {
-      const batch = candidateAwbs.slice(i, i + batchSize);
+    const actor = options.actor || { name: 'Velocity Financial Auto-Sync' };
+    for (let i = 0; i < codCandidateAwbs.length; i += batchSize) {
+      const batch = codCandidateAwbs.slice(i, i + batchSize);
       try {
         const remittanceResults = await this.vService.getCodRemittance(batch);
 
@@ -227,18 +345,17 @@ export class VelocityFinancialSyncService {
           const awb = item.trackingNumber?.trim();
           if (!awb) continue;
 
-          // If Velocity returned an error (e.g. AWB does not exist in account)
           if (item.error) {
-            unmatchedAwbs.push(`${awb}: ${item.error}`);
+            if (!/prepaid order/i.test(item.error)) {
+              unmatchedAwbs.push(`${awb}: ${item.error}`);
+            }
             continue;
           }
 
           const hasUtr = Boolean(item.utrNo && item.utrNo.trim());
-          const hasRemitDate = Boolean(item.remittanceDate);
-          const hasCodAmount = item.codAmount != null && item.codAmount > 0;
-
-          if (!hasUtr && !hasRemitDate && !hasCodAmount) {
-            // No remittance processed yet by Velocity for this AWB
+          const hasDeliveryDate = Boolean(parseValidDate(item.deliveryDate));
+          if (!hasUtr && !hasDeliveryDate) {
+            // In-transit / RTO / undelivered without bank UTR — do not mark collected or remitted
             continue;
           }
 
@@ -248,41 +365,14 @@ export class VelocityFinancialSyncService {
             continue;
           }
 
-          const remittedVal = item.codAmount ?? order.shipment?.codAmount ?? order.totalAmount;
-          const remittedAtDate = item.remittanceDate
-            ? new Date(item.remittanceDate)
-            : item.deliveryDate
-            ? new Date(item.deliveryDate)
-            : new Date();
-
-          // Update Shipment COD remittance flags
-          if (order.shipment) {
-            await prisma.shipment.update({
-              where: { id: order.shipment.id },
-              data: {
-                codCollected: true,
-                codCollectedAt: item.deliveryDate ? new Date(item.deliveryDate) : order.shipment.codCollectedAt || new Date(),
-                codRemitted: Boolean(hasUtr || hasRemitDate),
-                codRemittedAt: remittedAtDate,
-                codRemittanceRef: item.utrNo || order.shipment.codRemittanceRef || 'VELOCITY_REMITTANCE',
-                codRemittedAmount: remittedVal,
-              },
-            });
-          }
-
-          // Record payment received and UTR in Order table & AccountTrail
           try {
-            await recordPaymentReceived(order.id, {
-              amount: remittedVal,
-              utr: item.utrNo || null,
-              ref: item.utrNo || 'VELOCITY_REMITTANCE',
-              source: 'Velocity',
-              receivedAt: remittedAtDate,
-              actor: options.actor || { name: 'Velocity Financial Auto-Sync' },
-            });
+            const applied = await this.applyCodRemittanceEntry(order, item, actor);
+            if (!applied.remitted) {
+              continue;
+            }
 
             remittancesMatched++;
-            totalRemittanceAmount += remittedVal;
+            totalRemittanceAmount += applied.remittedVal;
 
             const existing: MatchedVelocityOrderFinancials = matchedMap.get(order.id) || {
               orderId: order.id,
@@ -293,10 +383,10 @@ export class VelocityFinancialSyncService {
             };
 
             existing.codAmount = item.codAmount;
-            existing.remittedAmount = remittedVal;
-            existing.utr = item.utrNo || null;
-            existing.remittanceDate = item.remittanceDate || null;
-            existing.remittanceRef = item.utrNo || null;
+            existing.remittedAmount = applied.remittedVal;
+            existing.utr = applied.utr;
+            existing.remittanceDate = applied.remittanceDate;
+            existing.remittanceRef = applied.utr;
 
             matchedMap.set(order.id, existing);
           } catch (recErr: any) {
@@ -311,8 +401,7 @@ export class VelocityFinancialSyncService {
         notes.push(`COD remittance batch error: ${batchErr.message}`);
       }
 
-      // Small throttle between batches
-      if (i + batchSize < candidateAwbs.length) {
+      if (i + batchSize < codCandidateAwbs.length) {
         await sleep(500);
       }
     }
@@ -438,58 +527,87 @@ export class VelocityFinancialSyncService {
       });
     }
 
-    // ── 5. Record ReconciliationImport Entry (Upsert per day) ─
+    // ── 5. Record ReconciliationImport Entries (Upsert per UTR batch) ─
     const matchedOrders = Array.from(matchedMap.values());
-    const fileName = `Velocity-Auto-Sync-${new Date().toISOString().slice(0, 10)}`;
-    const defaultRef = `VEL-BATCH-${Date.now()}`;
-    const defaultUtr = matchedOrders.find((m) => m.utr)?.utr || null;
+    const utrGroups = new Map<string, MatchedVelocityOrderFinancials[]>();
+    for (const m of matchedOrders) {
+      const utrKey = m.utr?.trim();
+      if (!utrKey) continue;
+      const list = utrGroups.get(utrKey) || [];
+      list.push(m);
+      utrGroups.set(utrKey, list);
+    }
 
     let importId: number | undefined;
     try {
-      const existing = await prisma.reconciliationImport.findFirst({
-        where: { kind: 'VELOCITY_REMITTANCE', fileName },
-        orderBy: { id: 'desc' },
-      });
-
-      const importData = {
-        rowCount: candidateAwbs.length,
-        matchedCount: matchedOrders.length,
-        unmatched: unmatchedAwbs.slice(0, 500),
-        summary: {
-          remittanceNumber: defaultRef,
-          remittanceDate: new Date().toISOString().slice(0, 10),
-          bankTransactionId: defaultUtr,
-          state: 'Completed',
-          totalRemittance: Math.round(totalRemittanceAmount * 100) / 100,
-          totalBilledCharges: Math.round(totalBilledCharges * 100) / 100,
-          remittancesMatched,
-          chargesAudited,
-          matchedOrders: matchedOrders.slice(0, 500),
-          summaryReport: forwardSummary?.summary || null,
-          syncedAt: new Date().toISOString(),
-          notes,
-        } as any,
-        uploadedBy: options.actor?.name || 'Velocity Financial Auto-Sync',
-      };
-
-      if (existing) {
-        const imp = await prisma.reconciliationImport.update({
-          where: { id: existing.id },
-          data: {
-            ...importData,
-            createdAt: new Date(),
-          },
+      for (const [utr, batchOrders] of utrGroups.entries()) {
+        const fileName = `Velocity-UTR-${utr}`;
+        const existing = await prisma.reconciliationImport.findFirst({
+          where: { kind: 'VELOCITY_REMITTANCE', fileName },
+          orderBy: { id: 'desc' },
         });
-        importId = imp.id;
-      } else {
-        const imp = await prisma.reconciliationImport.create({
-          data: {
-            kind: 'VELOCITY_REMITTANCE',
-            fileName,
-            ...importData,
-          },
-        });
-        importId = imp.id;
+
+        const prevOrders: MatchedVelocityOrderFinancials[] = Array.isArray((existing?.summary as any)?.matchedOrders)
+          ? (existing!.summary as any).matchedOrders
+          : [];
+        const byWaybill = new Map<string, MatchedVelocityOrderFinancials>();
+        for (const p of prevOrders) {
+          if (p?.waybillNumber) byWaybill.set(String(p.waybillNumber).trim(), p);
+        }
+        for (const o of batchOrders) {
+          byWaybill.set(o.waybillNumber.trim(), o);
+        }
+        const mergedOrders = Array.from(byWaybill.values());
+        const batchRemitTotal = mergedOrders.reduce(
+          (sum, o) => sum + Number(o.remittedAmount ?? o.codAmount ?? 0),
+          0
+        );
+        const batchChargesTotal = mergedOrders.reduce(
+          (sum, o) => sum + Number(o.netBilledCost || 0),
+          0
+        );
+        const batchDate =
+          mergedOrders.find((o) => o.remittanceDate)?.remittanceDate ||
+          new Date().toISOString().slice(0, 10);
+
+        const importData = {
+          rowCount: mergedOrders.length,
+          matchedCount: mergedOrders.length,
+          unmatched: [],
+          summary: {
+            remittanceNumber: utr,
+            remittanceDate: batchDate,
+            bankTransactionId: utr,
+            utr,
+            singleSettlement: true,
+            state: 'SETTLED',
+            totalRemittance: Math.round(batchRemitTotal * 100) / 100,
+            totalBilledCharges: Math.round(batchChargesTotal * 100) / 100,
+            remittancesMatched: mergedOrders.length,
+            matchedOrders: mergedOrders.slice(0, 500),
+            summaryReport: forwardSummary?.summary || null,
+            syncedAt: new Date().toISOString(),
+            notes,
+          } as any,
+          uploadedBy: actor.name || 'Velocity Financial Auto-Sync',
+        };
+
+        if (existing) {
+          const imp = await prisma.reconciliationImport.update({
+            where: { id: existing.id },
+            data: { ...importData, createdAt: new Date() },
+          });
+          importId = imp.id;
+        } else {
+          const imp = await prisma.reconciliationImport.create({
+            data: {
+              kind: 'VELOCITY_REMITTANCE',
+              fileName,
+              ...importData,
+            },
+          });
+          importId = imp.id;
+        }
       }
     } catch (saveErr: any) {
       logger.warn('Could not persist Velocity reconciliation import record', {
@@ -569,12 +687,42 @@ export class VelocityFinancialSyncService {
       }
     }
 
+    let remittedAgg: any = null;
+    let chargesAgg: any = null;
+    try {
+      const velocityFilter = {
+        OR: [
+          { courier: { contains: 'velocity', mode: 'insensitive' as const } },
+          { courier: { contains: 'Velocity' as const } },
+        ],
+      };
+      if (typeof (prisma.shipment as any).aggregate === 'function') {
+        [remittedAgg, chargesAgg] = await Promise.all([
+          prisma.shipment.aggregate({
+            where: { ...velocityFilter, codRemitted: true },
+            _sum: { codRemittedAmount: true },
+            _count: { _all: true },
+          }),
+          prisma.shipment.aggregate({
+            where: { ...velocityFilter, billingStatus: 'AUDITED' },
+            _sum: { netBilledCost: true },
+          }),
+        ]);
+      }
+    } catch (aggErr: any) {
+      logger.warn('Failed aggregating Velocity financial overview totals', { error: aggErr.message });
+    }
+
+    const dbMatchedCount = remittedAgg?._count?._all;
+    const dbTotalRemittance = remittedAgg?._sum?.codRemittedAmount;
+    const dbTotalCharges = chargesAgg?._sum?.netBilledCost;
+
     return {
       configured,
       lastSync: lastRecord?.createdAt || null,
-      matchedCount: lastRecord?.matchedCount || 0,
-      totalRemittance: (lastRecord?.summary as any)?.totalRemittance ?? null,
-      totalBilledCharges: (lastRecord?.summary as any)?.totalBilledCharges ?? null,
+      matchedCount: dbMatchedCount ?? lastRecord?.matchedCount ?? 0,
+      totalRemittance: dbTotalRemittance ?? (lastRecord?.summary as any)?.totalRemittance ?? null,
+      totalBilledCharges: dbTotalCharges ?? (lastRecord?.summary as any)?.totalBilledCharges ?? null,
       latestBatch: lastRecord?.fileName || null,
       summaryReport,
     };
@@ -792,42 +940,21 @@ export class VelocityFinancialSyncService {
       try {
         const remitRes = await this.vService.getCodRemittance([waybill]);
         const rItem = remitRes[0];
-        if (rItem && (rItem.utrNo || rItem.remittanceDate || (rItem.codAmount && rItem.codAmount > 0))) {
-          const remittedVal = rItem.codAmount ?? order.shipment.codAmount ?? order.totalAmount;
-          const remittedAtDate = rItem.remittanceDate
-            ? new Date(rItem.remittanceDate)
-            : rItem.deliveryDate
-            ? new Date(rItem.deliveryDate)
-            : new Date();
-
-          codSummary = {
-            codCollected: true,
-            codRemitted: Boolean(rItem.utrNo || rItem.remittanceDate),
-            utr: rItem.utrNo || null,
-            remittedAmount: remittedVal,
-            remittanceDate: rItem.remittanceDate || null,
-          };
-
-          await prisma.shipment.update({
-            where: { id: order.shipment.id },
-            data: {
-              codCollected: true,
-              codCollectedAt: rItem.deliveryDate ? new Date(rItem.deliveryDate) : order.shipment.codCollectedAt || new Date(),
-              codRemitted: codSummary.codRemitted,
-              codRemittedAt: remittedAtDate,
-              codRemittanceRef: rItem.utrNo || order.shipment.codRemittanceRef || 'VELOCITY_REMITTANCE',
-              codRemittedAmount: remittedVal,
-            },
-          });
-
-          await recordPaymentReceived(order.id, {
-            amount: remittedVal,
-            utr: rItem.utrNo || null,
-            ref: rItem.utrNo || 'VELOCITY_REMITTANCE',
-            source: 'Velocity',
-            receivedAt: remittedAtDate,
-            actor: actor || { name: 'Velocity Order Sync' },
-          });
+        if (rItem && !rItem.error) {
+          const applied = await this.applyCodRemittanceEntry(
+            order,
+            rItem,
+            actor || { name: 'Velocity Order Sync' }
+          );
+          if (applied.collected || applied.remitted) {
+            codSummary = {
+              codCollected: applied.collected,
+              codRemitted: applied.remitted,
+              utr: applied.utr,
+              remittedAmount: applied.remittedVal,
+              remittanceDate: applied.remittanceDate,
+            };
+          }
         }
       } catch (remitErr: any) {
         syncErrors.push(`Remittance: ${remitErr.message}`);

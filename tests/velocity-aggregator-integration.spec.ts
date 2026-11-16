@@ -57,6 +57,11 @@ const { prismaStub, reconStub } = vi.hoisted(() => ({
     accountTrailEvent: {
       create: vi.fn(),
     },
+    setting: {
+      findUnique: vi.fn(),
+      findMany: vi.fn().mockResolvedValue([]),
+      upsert: vi.fn(),
+    },
     $transaction: vi.fn(async (cb: any) => cb(prismaStub)),
   },
   reconStub: {
@@ -173,10 +178,12 @@ describe('Velocity Aggregator Integration & Business Rules', () => {
       });
 
       expect(rates.length).toBe(2);
-      expect(rates[0].carrierName).toBe('Amazon Air');
-      expect(rates[0].freightCharge).toBe(55);
-      expect(rates[1].carrierName).toBe('Blue Dart Surface');
-      expect(rates[1].totalCharge).toBe(57);
+      const amazonRate = rates.find((r) => r.carrierName === 'Amazon Air');
+      const bluedartRate = rates.find((r) => r.carrierName === 'Blue Dart Surface');
+      expect(amazonRate).toBeDefined();
+      expect(amazonRate?.freightCharge).toBe(55);
+      expect(bluedartRate).toBeDefined();
+      expect(bluedartRate?.totalCharge).toBe(57);
     });
 
     it('passes explicit carrierId to forward order orchestration payload', async () => {
@@ -224,7 +231,7 @@ describe('Velocity Aggregator Integration & Business Rules', () => {
       expect(result.courierName).toBe('Velocity');
     });
 
-    it('ranks courier rates strictly according to priority: Amazon -> Ekart -> Delhivery -> Shadowfax', async () => {
+    it('ranks courier rates strictly according to priority: Ekart -> Bluedart -> Delhivery -> Amazon -> Shadowfax', async () => {
       (velocityService as any).client.post = vi.fn().mockResolvedValueOnce({
         data: {
           status: 'SUCCESS',
@@ -276,15 +283,15 @@ describe('Velocity Aggregator Integration & Business Rules', () => {
       });
 
       expect(rates.map((r: any) => r.carrierName)).toEqual([
-        'Bluedart Standard',
         'Ekart Standard',
+        'Bluedart Standard',
         'Delhivery Standard',
-        'Shadowfax Standard',
         'Amazon Transportation',
+        'Shadowfax Standard',
       ]);
     });
 
-    it('automatically fails forward to Bluedart when Amazon Transportation is unserviceable for destination address', async () => {
+    it('automatically fails forward to Bluedart when Ekart Standard is unserviceable for destination address', async () => {
       (velocityService as any).client.post = vi
         .fn()
         .mockRejectedValueOnce({
@@ -331,14 +338,14 @@ describe('Velocity Aggregator Integration & Business Rules', () => {
       };
 
       const result = await velocityService.createForwardShipment(mockOrder, {
-        carrierId: 'CARPGK29DN9ZW',
+        carrierId: 'CARR5H4WQY3PM',
       });
 
       expect((velocityService as any).client.post).toHaveBeenCalledTimes(2);
       expect((velocityService as any).client.post).toHaveBeenNthCalledWith(
         1,
         '/custom/api/v1/forward-order-orchestration',
-        expect.objectContaining({ carrier_id: 'CARPGK29DN9ZW' })
+        expect.objectContaining({ carrier_id: 'CARR5H4WQY3PM' })
       );
       expect((velocityService as any).client.post).toHaveBeenNthCalledWith(
         2,
@@ -392,6 +399,96 @@ describe('Velocity Aggregator Integration & Business Rules', () => {
           carrier_id: 'CARR5H4WQY3PM',
         })
       );
+    });
+
+    it('defaults to trying Ekart Standard first when no carrierId is specified and falls forward down priority', async () => {
+      (velocityService as any).client.post = vi
+        .fn()
+        .mockRejectedValueOnce({
+          response: {
+            status: 422,
+            data: { meta: { status: 422, success: false, message: 'Carrier not serviceable for the shipment' } },
+          },
+        })
+        .mockResolvedValueOnce({
+          data: {
+            status: 1,
+            payload: {
+              order_id: '#26YOU6157',
+              awb_code: 'VELP987654321',
+              courier_name: 'Bluedart Standard',
+              courier_company_id: 'CAR2FZNOLGJ2X',
+              label_url: 'https://velocity-labels.s3.amazonaws.com/VELP987654321.pdf',
+            },
+          },
+        });
+
+      const mockOrder: any = {
+        id: 1979,
+        shopifyOrderId: '18963752583368',
+        shopifyOrderName: '#26YOU6157',
+        customerName: 'Priya Sharma',
+        customerPhone: '9876543210',
+        customerAddress: 'Delhi',
+        customerCity: 'New Delhi',
+        customerState: 'Delhi',
+        customerPincode: '110001',
+        paymentMethod: 'Prepaid',
+        totalAmount: 1499,
+        items: [{ id: 2, title: 'Saree', sku: 'SAR-02', quantity: 1, price: 1499 }],
+      };
+
+      const result = await velocityService.createForwardShipment(mockOrder);
+
+      expect((velocityService as any).client.post).toHaveBeenNthCalledWith(
+        1,
+        '/custom/api/v1/forward-order-orchestration',
+        expect.objectContaining({ carrier_id: 'CARR5H4WQY3PM' })
+      );
+      expect((velocityService as any).client.post).toHaveBeenNthCalledWith(
+        2,
+        '/custom/api/v1/forward-order-orchestration',
+        expect.objectContaining({ carrier_id: 'CAR2FZNOLGJ2X' })
+      );
+      expect(result.awbCode).toBe('VELP987654321');
+    });
+
+    it('dynamically adapts rate sorting when user updates shipping rules / priority in setting', async () => {
+      // Mock setting where user dynamically changes priority anytime to Amazon first, then Delhivery, then Ekart
+      prismaStub.setting.findUnique.mockResolvedValueOnce({
+        key: 'velocity_courier_priority',
+        value: JSON.stringify(['ats', 'delhivery', 'ekart', 'bluedart']),
+      });
+
+      (velocityService as any).client.post = vi.fn().mockResolvedValueOnce({
+        data: {
+          status: 'SUCCESS',
+          result: {
+            serviceable_couriers: [
+              { carrier_id: 'CARR5H4WQY3PM', carrier_name: 'Ekart Standard', carrier_code: 'ekart', charges: { total_forward_charges: 45 } },
+              { carrier_id: 'CARPGK29DN9ZW', carrier_name: 'Amazon Transportation', carrier_code: 'ats', charges: { total_forward_charges: 45 } },
+              { carrier_id: 'CARO0ZZQH1H6U', carrier_name: 'Delhivery Standard', carrier_code: 'delhivery', charges: { total_forward_charges: 48 } },
+            ],
+          },
+        },
+      });
+
+      const rates = await velocityService.calculateCourierRates({
+        originPincode: '395002',
+        destinationPincode: '110001',
+        deadWeightGrams: 350,
+        lengthCm: 22,
+        widthCm: 20,
+        heightCm: 3,
+        paymentMethod: 'prepaid',
+      });
+
+      // When user changes priority to Amazon first, Amazon must be ranked first!
+      expect(rates.map((r: any) => r.carrierName)).toEqual([
+        'Amazon Transportation',
+        'Delhivery Standard',
+        'Ekart Standard',
+      ]);
     });
   });
 
@@ -545,7 +642,7 @@ describe('Velocity Aggregator Integration & Business Rules', () => {
         expect.objectContaining({
           amount: 999,
           utr: 'HDFC-VEL-998877',
-          source: 'Velocity',
+          source: 'VELOCITY_REMITTANCE',
         })
       );
     });

@@ -148,4 +148,30 @@ describe('readSpreadsheet', () => {
       'Order Number': '26YOU5840',
     });
   });
+
+  it('reads Easebuzz / multi-section settlement CSVs with top metadata and sections', async () => {
+    const csv = [
+      '"PAYOUTS - PT7WVA6KEQ"',
+      '"Date - 2026-11-12"',
+      '"BANK DETAILS","","","TRANSACTION DETAILS"',
+      '"Bank","ICICI Bank","","Total Transactions","2"',
+      '"NEFT Ref. No.","YESF263166456982","","Total GST","26.14"',
+      '""',
+      '"SETTLED TRANSACTIONS"',
+      '"#","Easebuzz Trxn ID","Merchant Trxn ID","Transaction Date","Transaction Amount","Settlement Amount"',
+      '"1","E2611111A8MBE1","KWIKBTV1GPNP7802938MP","2026-11-11","1052.52","1021.47"',
+      '"2","E2611111A8OLO5","KWIK4H0B91S29531715MP","2026-11-11","730.02","708.48"',
+      '""',
+      '"SPLIT REFUND TRANSACTIONS"',
+      '"#","Refund ID","Easebuzz Trxn ID"',
+    ].join('\r\n');
+
+    const sheets = await readSpreadsheet('2026-11-12-PT7WVA6KEQ-MID-159037.csv', Buffer.from(csv, 'utf8'));
+    expect(sheets).toHaveLength(1); // SETTLED TRANSACTIONS has data rows, SPLIT REFUND is empty
+    expect(sheets[0].name).toBe('SETTLED TRANSACTIONS');
+    expect(sheets[0].rows).toHaveLength(2);
+    expect(sheets[0].rows[0]['Merchant Trxn ID']).toBe('KWIKBTV1GPNP7802938MP');
+    expect(sheets[0].rows[0]['Settlement UTR']).toBe('YESF263166456982');
+    expect(sheets[0].rows[0]['Payout ID']).toBe('PT7WVA6KEQ');
+  });
 });

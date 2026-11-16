@@ -22,7 +22,9 @@
     "test:coverage": "vitest run --coverage",
     "shopify:docs": "node .agents/skills/shopify-admin/scripts/search_docs.js",
     "shopify:validate": "node .agents/skills/shopify-admin/scripts/validate.js",
-    "webhook:test:delhivery": "tsx scripts/test-delhivery-webhooks.ts"
+    "webhook:test:delhivery": "tsx scripts/test-delhivery-webhooks.ts",
+    "gmail:connect": "tsx scripts/connect-gmail.ts",
+    "gmail:sync": "tsx scripts/sync-gmail-settlements.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

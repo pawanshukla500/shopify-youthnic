@@ -17,7 +17,7 @@ import {
   updateMetaAgentConfig,
   apiError,
 } from '../api'
-import { ErrorBox, Icon, LoadingState, PageIntro, Panel, PanelHeading, useDocumentTitle, useToast } from '../components/UI'
+import { ErrorBox, Icon, LoadingState, Modal, PageIntro, Panel, PanelHeading, useDocumentTitle, useToast } from '../components/UI'
 import type { InboundEmail, CustomerHistoryEvent } from '../types'
 import { formatDate, formatMoney, carrierTrackingUrl, isVelocityCourier } from '../lib'
 
@@ -912,25 +912,13 @@ export function SupportDesk() {
       </div>
 
       {/* ─── Simulation Modal for Testing Inbound Customer Emails ──── */}
-      {isSimulateModalOpen && (
-        <div className="modal-backdrop" onClick={() => setIsSimulateModalOpen(false)}>
-          <div className="modal-card" role="dialog" aria-modal="true" aria-label="Simulate Inbound Customer Email" style={{ maxWidth: '600px' }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', gap: '12px' }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 800, color: 'var(--ink)' }}>Simulate Inbound Customer Email</h3>
-                <p style={{ margin: '3px 0 0', fontSize: '12px', color: 'var(--muted)' }}>
-                  Inject realistic customer scenarios to test Muse Spark 1.3 AI classification, order flagging, and auto-drafting.
-                </p>
-              </div>
-              <button
-                type="button"
-                className="modal-close-btn"
-                aria-label="Close modal"
-                onClick={() => setIsSimulateModalOpen(false)}
-              >
-                <Icon name="close" size={16} />
-              </button>
-            </div>
+      <Modal
+        isOpen={isSimulateModalOpen}
+        onClose={() => setIsSimulateModalOpen(false)}
+        title="Simulate Inbound Customer Email"
+        description="Inject realistic customer scenarios to test Muse Spark 1.3 AI classification, order flagging, and auto-drafting."
+        maxWidth={600}
+      >
 
             {/* Quick Scenario Buttons */}
             <div style={{ marginBottom: '14px' }}>
@@ -1072,53 +1060,20 @@ export function SupportDesk() {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
+      </Modal>
       {/* ─── Meta LLM API Settings Modal ──────────────────────── */}
-      {isMetaModalOpen && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(15, 23, 42, 0.65)',
-            backdropFilter: 'blur(3px)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 100,
-            padding: '16px',
-          }}
-        >
-          <div
-            className="modal-card"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Meta Model API Configuration"
-            style={{
-              maxWidth: '540px',
-              width: '100%',
-              padding: '24px',
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', gap: '12px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Icon name="settings" size={18} />
-                <div>
-                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 800, color: 'var(--ink)' }}>Meta Model API Configuration</h3>
-                  <span style={{ fontSize: '11.5px', color: 'var(--muted)' }}>Configure Muse Spark 1.3 Contributor Agent</span>
-                </div>
-              </div>
-              <button
-                type="button"
-                className="modal-close-btn"
-                aria-label="Close modal"
-                onClick={() => setIsMetaModalOpen(false)}
-              >
-                <Icon name="close" size={16} />
-              </button>
-            </div>
+      <Modal
+        isOpen={isMetaModalOpen}
+        onClose={() => setIsMetaModalOpen(false)}
+        title={
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+            <Icon name="settings" size={18} />
+            <span>Meta Model API Configuration</span>
+          </span>
+        }
+        description="Configure Muse Spark 1.3 Contributor Agent"
+        maxWidth={540}
+      >
 
             <form onSubmit={handleUpdateMetaConfig} style={{ display: 'grid', gap: '14px' }}>
               <div>
@@ -1182,9 +1137,7 @@ export function SupportDesk() {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
+      </Modal>
     </div>
   )
 }

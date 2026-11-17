@@ -1238,7 +1238,7 @@ a { color: inherit; text-decoration: none; }
 [data-theme='dark'] .quick-action-call { background: var(--tone-info-bg); border-color: var(--tone-info-border); color: var(--tone-info-fg); }
 [data-theme='dark'] .quick-action-call:hover { filter: brightness(1.12); color: #ffffff; }
 [data-theme='dark'] .quick-action-copy { background: var(--surface-elevated); border-color: var(--border-strong); color: var(--ink-secondary); }
-[data-theme='dark'] .quick-action-copy:hover { background: var(--bg-soft); color: var(--ink); }
+[data-theme='dark'] .quick-action-copy:hover { background: var(--border-strong); color: var(--ink); }
 
 /* Waybill chip with click-to-copy */
 .waybill-chip { display: inline-flex; align-items: center; gap: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; font-weight: 800; color: #1e3a8a; background: #eff6ff; border: 1px solid #bfdbfe; padding: 4px 9px; border-radius: 6px; cursor: pointer; transition: all .15s; }
@@ -1417,13 +1417,15 @@ button.shopify-line-sku { border: 0; background: none; padding: 0; text-align: l
 }
 
 .modal-card {
-  background: #ffffff;
+  background: var(--panel);
+  color: var(--ink);
   border-radius: 16px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--line);
   box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.28), 0 0 0 1px rgba(0, 0, 0, 0.05);
   width: 100%;
   max-width: 490px;
-  overflow: hidden;
+  max-height: calc(100dvh - 36px);
+  overflow-y: auto;
   animation: modalSlideUp 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -1437,7 +1439,7 @@ button.shopify-line-sku { border: 0; background: none; padding: 0; text-align: l
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid var(--line-subtle);
 }
 
 .modal-header-left {
@@ -1456,28 +1458,28 @@ button.shopify-line-sku { border: 0; background: none; padding: 0; text-align: l
 }
 
 .modal-icon-badge.danger {
-  background: #fee2e2;
-  color: #dc2626;
-  border: 1px solid #fecaca;
+  background: var(--tone-danger-bg);
+  color: var(--tone-danger-fg);
+  border: 1px solid var(--tone-danger-border);
 }
 
 .modal-icon-badge.warning {
-  background: #fffbeb;
-  color: #d97706;
-  border: 1px solid #fde68a;
+  background: var(--tone-warning-bg);
+  color: var(--tone-warning-fg);
+  border: 1px solid var(--tone-warning-border);
 }
 
 .modal-title {
   font-size: 15px;
   font-weight: 800;
-  color: #0f172a;
+  color: var(--ink);
   letter-spacing: -0.02em;
   margin: 0 0 3px;
 }
 
 .modal-desc {
   font-size: 11.5px;
-  color: #64748b;
+  color: var(--muted);
   margin: 0;
   line-height: 1.4;
 }
@@ -1486,7 +1488,7 @@ button.shopify-line-sku { border: 0; background: none; padding: 0; text-align: l
   background: none;
   border: 0;
   padding: 4px;
-  color: #94a3b8;
+  color: var(--muted-light);
   cursor: pointer;
   border-radius: 6px;
   transition: all 0.15s ease;
@@ -1495,8 +1497,8 @@ button.shopify-line-sku { border: 0; background: none; padding: 0; text-align: l
 }
 
 .modal-close-btn:hover {
-  background: #f1f5f9;
-  color: #0f172a;
+  background: var(--line-subtle);
+  color: var(--ink);
 }
 
 .modal-body {
@@ -1507,8 +1509,8 @@ button.shopify-line-sku { border: 0; background: none; padding: 0; text-align: l
 }
 
 .modal-order-summary-box {
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: var(--surface-elevated);
+  border: 1px solid var(--line);
   border-radius: 10px;
   padding: 12px 14px;
   display: flex;
@@ -1525,28 +1527,28 @@ button.shopify-line-sku { border: 0; background: none; padding: 0; text-align: l
 .modal-order-name {
   font-size: 13px;
   font-weight: 800;
-  color: #0f172a;
+  color: var(--ink);
 }
 
 .modal-order-sub {
   font-size: 11px;
-  color: #64748b;
+  color: var(--muted);
 }
 
 .modal-order-amount {
   font-size: 15px;
   font-weight: 850;
-  color: #1e3a8a;
+  color: var(--tone-info-fg);
 }
 
 .modal-warning-alert {
-  background: #fffbeb;
-  border: 1px solid #fef3c7;
-  border-left: 3.5px solid #f59e0b;
+  background: var(--tone-warning-bg);
+  border: 1px solid var(--tone-warning-border);
+  border-left: 3.5px solid var(--amber);
   border-radius: 8px;
   padding: 10px 12px;
   font-size: 11px;
-  color: #92400e;
+  color: var(--tone-warning-fg);
   display: flex;
   align-items: flex-start;
   gap: 8px;
@@ -1554,13 +1556,13 @@ button.shopify-line-sku { border: 0; background: none; padding: 0; text-align: l
 }
 
 .modal-danger-alert {
-  background: #fef2f2;
-  border: 1px solid #fee2e2;
-  border-left: 3.5px solid #ef4444;
+  background: var(--tone-danger-bg);
+  border: 1px solid var(--tone-danger-border);
+  border-left: 3.5px solid var(--red);
   border-radius: 8px;
   padding: 10px 12px;
   font-size: 11px;
-  color: #991b1b;
+  color: var(--tone-danger-fg);
   display: flex;
   align-items: flex-start;
   gap: 8px;
@@ -1569,8 +1571,8 @@ button.shopify-line-sku { border: 0; background: none; padding: 0; text-align: l
 
 .modal-footer {
   padding: 14px 22px;
-  background: #f8fafc;
-  border-top: 1px solid #e2e8f0;
+  background: var(--surface-elevated);
+  border-top: 1px solid var(--line);
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -1580,9 +1582,9 @@ button.shopify-line-sku { border: 0; background: none; padding: 0; text-align: l
 .modal-btn-cancel {
   height: 34px;
   border-radius: 7px;
-  border: 1px solid #cbd5e1;
-  background: #ffffff;
-  color: #334155;
+  border: 1px solid var(--border-strong);
+  background: var(--panel);
+  color: var(--ink-secondary);
   font-size: 11.5px;
   font-weight: 700;
   padding: 0 14px;
@@ -1591,8 +1593,8 @@ button.shopify-line-sku { border: 0; background: none; padding: 0; text-align: l
 }
 
 .modal-btn-cancel:hover {
-  background: #f1f5f9;
-  color: #0f172a;
+  background: var(--line-subtle);
+  color: var(--ink);
 }
 
 .modal-btn-danger {
@@ -3390,11 +3392,12 @@ body { min-width: 0; }
   background: var(--tone-neutral-bg);
   color: var(--tone-neutral-fg);
 }
-.tone-chip--info { background: var(--tone-info-bg); color: var(--tone-info-fg); border-color: var(--tone-info-border); }
-.tone-chip--success { background: var(--tone-success-bg); color: var(--tone-success-fg); border-color: var(--tone-success-border); }
-.tone-chip--warning { background: var(--tone-warning-bg); color: var(--tone-warning-fg); border-color: var(--tone-warning-border); }
-.tone-chip--danger { background: var(--tone-danger-bg); color: var(--tone-danger-fg); border-color: var(--tone-danger-border); }
-.tone-chip--purple { background: var(--tone-purple-bg); color: var(--tone-purple-fg); border-color: var(--tone-purple-border); }
+.tone-chip--info, .tone-chip-info { background: var(--tone-info-bg); color: var(--tone-info-fg); border-color: var(--tone-info-border); }
+.tone-chip--success, .tone-chip-success { background: var(--tone-success-bg); color: var(--tone-success-fg); border-color: var(--tone-success-border); }
+.tone-chip--warning, .tone-chip-warning { background: var(--tone-warning-bg); color: var(--tone-warning-fg); border-color: var(--tone-warning-border); }
+.tone-chip--danger, .tone-chip-danger { background: var(--tone-danger-bg); color: var(--tone-danger-fg); border-color: var(--tone-danger-border); }
+.tone-chip--purple, .tone-chip-purple { background: var(--tone-purple-bg); color: var(--tone-purple-fg); border-color: var(--tone-purple-border); }
+.tone-chip--neutral, .tone-chip-neutral { background: var(--tone-neutral-bg); color: var(--tone-neutral-fg); border-color: var(--line); }
 
 button.tone-chip {
   cursor: pointer;

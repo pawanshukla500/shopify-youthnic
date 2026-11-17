@@ -28,7 +28,7 @@ import {
   testVelocityConnection,
   checkVelocityServiceability,
 } from '../api'
-import { ErrorBox, FormField, Icon, LoadingState, PageIntro, Panel, PanelHeading, useDocumentTitle, useToast } from '../components/UI'
+import { ErrorBox, FormField, Icon, LoadingState, Modal, PageIntro, Panel, PanelHeading, useDocumentTitle, useToast } from '../components/UI'
 import type { SystemUser, CarrierPriority, ShippingPreferences } from '../types'
 
 type SettingsTab = 'stack' | 'shipping' | 'users'
@@ -107,16 +107,6 @@ export function Settings() {
     email: '',
   })
   const [whBusy, setWhBusy] = useState(false)
-
-  // Esc closes the operator modal (focus-trap lite: autofocus first field via required input).
-  useEffect(() => {
-    if (!isAddModalOpen) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setIsAddModalOpen(false)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [isAddModalOpen])
 
   // Queries
   const statusQuery = useQuery({
@@ -1865,54 +1855,14 @@ export function Settings() {
       {/* ─────────────────────────────────────────────────────────────
           CREATE / EDIT OPERATOR MODAL
           ───────────────────────────────────────────────────────────── */}
-      {isAddModalOpen && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 1000,
-            background: 'rgba(15, 23, 42, 0.65)',
-            backdropFilter: 'blur(4px)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '20px',
-          }}
-          onClick={() => setIsAddModalOpen(false)}
-        >
-          <div
-            style={{
-              background: 'var(--panel)',
-              border: '1px solid var(--line)',
-              borderRadius: '16px',
-              padding: '28px',
-              width: '100%',
-              maxWidth: '520px',
-              boxShadow: '0 20px 40px rgba(0, 0, 0, 0.25)',
-              position: 'relative',
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 800, color: 'var(--ink)' }}>
-                  {editingUser ? 'Edit Operator Account' : 'Create New Team Operator'}
-                </h3>
-                <p style={{ margin: '4px 0 0', fontSize: '11.5px', color: 'var(--muted)' }}>
-                  Assign role permissions for Surat fulfillment, QC scans, or finance auditing.
-                </p>
-              </div>
-              <button
-                type="button"
-                aria-label="Close operator dialog"
-                className="modal-close-btn"
-                onClick={() => setIsAddModalOpen(false)}
-              >
-                <Icon name="close" size={18} />
-              </button>
-            </div>
-
-            <form onSubmit={handleSubmitForm} style={{ display: 'grid', gap: '14px' }}>
+      <Modal
+        isOpen={isAddModalOpen}
+        onClose={() => setIsAddModalOpen(false)}
+        title={editingUser ? 'Edit Operator Account' : 'Create New Team Operator'}
+        description="Assign role permissions for Surat fulfillment, QC scans, or finance auditing."
+        maxWidth={520}
+      >
+        <form onSubmit={handleSubmitForm} style={{ display: 'grid', gap: '14px' }}>
               <div className="form-field">
                 <label className="field-label">Full Name</label>
                 <input
@@ -2050,62 +2000,30 @@ export function Settings() {
                   {editingUser ? 'Save Changes' : 'Create Operator Account'}
                 </button>
               </div>
-            </form>
-          </div>
-        </div>
-      )}
+        </form>
+      </Modal>
 
       {/* ─────────────────────────────────────────────────────────────
           KWIKENGAGE WHATSAPP TEST MODAL
           ───────────────────────────────────────────────────────────── */}
-      {isWhatsAppTestModalOpen && (
-        <div
-          className="modal-backdrop"
-          onClick={() => setIsWhatsAppTestModalOpen(false)}
+      <Modal
+        isOpen={isWhatsAppTestModalOpen}
+        onClose={() => setIsWhatsAppTestModalOpen(false)}
+        title="Test KwikEngage WhatsApp Trigger"
+        description="Send a live or test trigger to any phone number via official KwikEngage WhatsApp messaging API."
+        maxWidth={520}
+      >
+        <form
+          onSubmit={(e) => {
+            e.preventDefault()
+            testWhatsAppMutation.mutate({
+              phone: testPhone,
+              trigger: testTrigger,
+              customMessage: testCustomMsg,
+            })
+          }}
+          style={{ display: 'grid', gap: '14px' }}
         >
-          <div
-            className="modal-card"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Test KwikEngage WhatsApp Trigger"
-            style={{
-              padding: '28px',
-              width: '100%',
-              maxWidth: '520px',
-              position: 'relative',
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 800, color: 'var(--ink)' }}>
-                  Test KwikEngage WhatsApp Trigger
-                </h3>
-                <p style={{ margin: '4px 0 0', fontSize: '11.5px', color: 'var(--muted)' }}>
-                  Send a live or test trigger to any phone number via official KwikEngage WhatsApp messaging API.
-                </p>
-              </div>
-              <button
-                type="button"
-                className="modal-close-btn"
-                aria-label="Close modal"
-                onClick={() => setIsWhatsAppTestModalOpen(false)}
-              >
-                <Icon name="close" size={18} />
-              </button>
-            </div>
-
-            <form
-              onSubmit={(e) => {
-                e.preventDefault()
-                testWhatsAppMutation.mutate({
-                  phone: testPhone,
-                  trigger: testTrigger,
-                  customMessage: testCustomMsg,
-                })
-              }}
-              style={{ display: 'grid', gap: '14px' }}
-            >
               <FormField label="Recipient Mobile Number (E.164 / 10 Digits)">
                 <input
                   required
@@ -2158,79 +2076,37 @@ export function Settings() {
                 <button
                   type="submit"
                   className="button button-primary"
-                  style={{ background: '#10b981', borderColor: '#059669' }}
+                  style={{ background: 'var(--emerald-solid)', borderColor: 'var(--emerald-solid-hover)' }}
                   disabled={testWhatsAppMutation.isPending}
                 >
                   {testWhatsAppMutation.isPending ? 'Dispatching…' : 'Send WhatsApp Message'}
                 </button>
               </div>
-            </form>
-          </div>
-        </div>
-      )}
+        </form>
+      </Modal>
 
       {/* ─────────────────────────────────────────────────────────────
           KWIKENGAGE WHATSAPP CONFIGURATION MODAL
           ───────────────────────────────────────────────────────────── */}
-      {isKwikEngageConfigModalOpen && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 1000,
-            background: 'rgba(15, 23, 42, 0.65)',
-            backdropFilter: 'blur(4px)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '20px',
+      <Modal
+        isOpen={isKwikEngageConfigModalOpen}
+        onClose={() => setIsKwikEngageConfigModalOpen(false)}
+        title="Configure KwikEngage WhatsApp REST API"
+        description="Update live credentials for official GoKwik KwikEngage WhatsApp triggers (COD verification, shipping updates, NDR alerts)."
+        maxWidth={540}
+      >
+        <form
+          onSubmit={(e) => {
+            e.preventDefault()
+            updateKwikEngageMutation.mutate({
+              apiKey: kwikEngageApiKey.trim(),
+              merchantId: kwikEngageMerchantId.trim() || undefined,
+              senderPhone: kwikEngageSenderPhone.trim() || undefined,
+              wabaId: kwikEngageWabaId.trim() || undefined,
+            })
           }}
-          onClick={() => setIsKwikEngageConfigModalOpen(false)}
+          style={{ display: 'grid', gap: '14px' }}
         >
-          <div
-            style={{
-              background: 'var(--panel)',
-              border: '1px solid var(--line)',
-              borderRadius: '16px',
-              padding: '28px',
-              width: '100%',
-              maxWidth: '540px',
-              boxShadow: '0 20px 40px rgba(0, 0, 0, 0.25)',
-              position: 'relative',
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 800, color: 'var(--ink)' }}>
-                  Configure KwikEngage WhatsApp REST API
-                </h3>
-                <p style={{ margin: '4px 0 0', fontSize: '11.5px', color: 'var(--muted)' }}>
-                  Update live credentials for official GoKwik KwikEngage WhatsApp triggers (COD verification, shipping updates, NDR alerts).
-                </p>
-              </div>
-              <button
-                type="button"
-                className="modal-close-btn"
-                aria-label="Close modal"
-                onClick={() => setIsKwikEngageConfigModalOpen(false)}
-              >
-                <Icon name="close" size={18} />
-              </button>
-            </div>
-
-            <form
-              onSubmit={(e) => {
-                e.preventDefault()
-                updateKwikEngageMutation.mutate({
-                  apiKey: kwikEngageApiKey.trim(),
-                  merchantId: kwikEngageMerchantId.trim() || undefined,
-                  senderPhone: kwikEngageSenderPhone.trim() || undefined,
-                  wabaId: kwikEngageWabaId.trim() || undefined,
-                })
-              }}
-              style={{ display: 'grid', gap: '14px' }}
-            >
               <div className="form-field">
                 <label htmlFor="kwik-api-key" className="field-label">KwikEngage API Key (Bearer Token)</label>
                 <input
@@ -2305,42 +2181,27 @@ export function Settings() {
                   {updateKwikEngageMutation.isPending ? 'Verifying & Saving…' : 'Save & Verify KwikEngage Connection'}
                 </button>
               </div>
-            </form>
-          </div>
-        </div>
-      )}
+        </form>
+      </Modal>
 
       {/* Configure Resend Modal */}
-      {isResendModalOpen && (
-        <div className="modal-backdrop" onClick={() => setIsResendModalOpen(false)}>
-          <div className="modal-card" role="dialog" aria-modal="true" aria-label="Configure Resend Mail Integration" style={{ maxWidth: '540px' }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', gap: '12px' }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--ink)' }}>Configure Resend Mail Integration</h3>
-                <p style={{ margin: '3px 0 0', fontSize: '12px', color: 'var(--muted)' }}>
-                  Provide your Resend API credentials to send live branded customer notifications.
-                </p>
-              </div>
-              <button
-                type="button"
-                className="modal-close-btn"
-                aria-label="Close modal"
-                onClick={() => setIsResendModalOpen(false)}
-              >
-                <Icon name="close" size={16} />
-              </button>
-            </div>
-
-            <form
-              onSubmit={(e: FormEvent) => {
-                e.preventDefault()
-                updateResendMutation.mutate({
-                  apiKey: resendApiKey,
-                  fromEmail: resendFromEmail,
-                })
-              }}
-              style={{ display: 'grid', gap: '14px' }}
-            >
+      <Modal
+        isOpen={isResendModalOpen}
+        onClose={() => setIsResendModalOpen(false)}
+        title="Configure Resend Mail Integration"
+        description="Provide your Resend API credentials to send live branded customer notifications."
+        maxWidth={540}
+      >
+        <form
+          onSubmit={(e: FormEvent) => {
+            e.preventDefault()
+            updateResendMutation.mutate({
+              apiKey: resendApiKey,
+              fromEmail: resendFromEmail,
+            })
+          }}
+          style={{ display: 'grid', gap: '14px' }}
+        >
               <div className="form-field">
                 <label htmlFor="resend-api-key" className="field-label">Resend API Key</label>
                 <input
@@ -2389,42 +2250,27 @@ export function Settings() {
                   {updateResendMutation.isPending ? 'Verifying & Saving…' : 'Save & Verify Resend Configuration'}
                 </button>
               </div>
-            </form>
-          </div>
-        </div>
-      )}
+        </form>
+      </Modal>
 
       {/* Test Email Modal */}
-      {isTestEmailModalOpen && (
-        <div className="modal-backdrop" onClick={() => setIsTestEmailModalOpen(false)}>
-          <div className="modal-card" role="dialog" aria-modal="true" aria-label="Send Test Notification Email" style={{ maxWidth: '500px' }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', gap: '12px' }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--ink)' }}>Send Test Notification Email</h3>
-                <p style={{ margin: '3px 0 0', fontSize: '12px', color: 'var(--muted)' }}>
-                  Validate Resend dispatch, layout rendering, and click-to-convert tracking.
-                </p>
-              </div>
-              <button
-                type="button"
-                className="modal-close-btn"
-                aria-label="Close modal"
-                onClick={() => setIsTestEmailModalOpen(false)}
-              >
-                <Icon name="close" size={16} />
-              </button>
-            </div>
-
-            <form
-              onSubmit={(e: FormEvent) => {
-                e.preventDefault()
-                testEmailMutation.mutate({
-                  to: testEmailTo,
-                  templateType: testEmailTemplate,
-                })
-              }}
-              style={{ display: 'grid', gap: '14px' }}
-            >
+      <Modal
+        isOpen={isTestEmailModalOpen}
+        onClose={() => setIsTestEmailModalOpen(false)}
+        title="Send Test Notification Email"
+        description="Validate Resend dispatch, layout rendering, and click-to-convert tracking."
+        maxWidth={500}
+      >
+        <form
+          onSubmit={(e: FormEvent) => {
+            e.preventDefault()
+            testEmailMutation.mutate({
+              to: testEmailTo,
+              templateType: testEmailTemplate,
+            })
+          }}
+          style={{ display: 'grid', gap: '14px' }}
+        >
               <FormField label="Recipient Email">
                 <input
                   type="email"
@@ -2466,10 +2312,8 @@ export function Settings() {
                   {testEmailMutation.isPending ? 'Sending Test…' : 'Send Test Notification'}
                 </button>
               </div>
-            </form>
-          </div>
-        </div>
-      )}
+        </form>
+      </Modal>
 
     </div>
   )

@@ -2011,14 +2011,14 @@ export function OrderDetail() {
             {order.shipment && (
               <div style={{ background: 'var(--tone-danger-bg)', border: '1px solid var(--tone-danger-border)', color: 'var(--tone-danger-fg)', borderRadius: '8px', padding: '12px', fontSize: '12px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                  <span style={{ fontWeight: 700, color: '#9f1239' }}>
+                  <span style={{ fontWeight: 700 }}>
                     Courier Status: {order.shipment.courier || 'Delhivery'} (AWB: {order.shipment.waybillNumber})
                   </span>
-                  <span style={{ fontWeight: 700, color: '#be123c' }}>
+                  <span style={{ fontWeight: 700 }}>
                     {order.shipment.trackingStatus || 'Failed Delivery Attempt'}
                   </span>
                 </div>
-                <div style={{ color: '#881337', fontSize: '11.5px' }}>
+                <div style={{ fontSize: '11.5px' }}>
                   Location: {order.shipment.trackingLocation || 'Destination Delivery Center'}
                 </div>
               </div>

@@ -506,6 +506,7 @@ export interface DashboardStats {
     codRevenue: number
     codRatio: number
     readyToDispatch: number
+    prepaidPendingDispatchCount?: number
     delayedDispatchCount?: number
     activeShipments: number
     deliveredCount: number

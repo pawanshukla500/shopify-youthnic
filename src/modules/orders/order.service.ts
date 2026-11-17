@@ -21,6 +21,7 @@ import {
   isCodRiskHold,
   isHighRtoCancel,
   isOperationalTab,
+  isPrepaidOrder,
   prioritizeOrdersForDispatch,
   type OrderTab,
 } from './order-tabs';
@@ -1592,26 +1593,29 @@ class OrderService {
       where.AND = andConditions;
     }
 
+    const deferPagination = Boolean(classifyTab || filter === 'PREPAID_DISPATCH' || filter === 'DELAYED_DISPATCH');
     const orders = await prisma.order.findMany({
       where,
       include: { items: true, shipment: true, returns: true },
       orderBy: { shopifyCreatedAt: 'desc' },
       // Pagination is applied after tab classification so a limit cannot
       // drop an order that belongs in this queue but sits later in the table.
-      take: classifyTab ? undefined : limit,
-      skip: classifyTab ? undefined : offset,
+      take: deferPagination ? undefined : limit,
+      skip: deferPagination ? undefined : offset,
     });
 
     let mapped = orders.map((o) => this.enrichOrderMetadata(o));
     if (classifyTab) {
       mapped = mapped.filter((order) => classifyOrderTab(order) === classifyTab);
-      const start = offset ?? 0;
-      if (limit !== undefined || offset !== undefined) {
-        mapped = mapped.slice(start, limit !== undefined ? start + limit : undefined);
-      }
     }
     if (filter === 'DELAYED_DISPATCH') {
       mapped = mapped.filter((order) => classifyOrderTab(order) === 'dispatch' && order.isDispatchOverdue);
+    } else if (filter === 'PREPAID_DISPATCH') {
+      mapped = mapped.filter((order) => classifyOrderTab(order) === 'dispatch' && isPrepaidOrder(order));
+    }
+    if (deferPagination && (limit !== undefined || offset !== undefined)) {
+      const start = offset ?? 0;
+      mapped = mapped.slice(start, limit !== undefined ? start + limit : undefined);
     }
     return mapped;
   }

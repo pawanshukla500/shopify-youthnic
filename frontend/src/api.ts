@@ -227,6 +227,26 @@ export async function confirmCodOrder(orderId: number): Promise<{
   return response.data
 }
 
+export async function dispatchOrder(orderId: number, courier?: 'Delhivery' | 'Velocity' | 'auto'): Promise<{
+  success: boolean
+  waybillNumber: string
+  courier: string
+}> {
+  const response = await api.post(`/api/orders/${orderId}/dispatch`, { courier })
+  return response.data
+}
+
+export async function bulkDispatchOrders(orderIds: number[]): Promise<{
+  success: boolean
+  total: number
+  dispatched: number
+  failed: number
+  results: Array<{ orderId: number; success: boolean; waybillNumber?: string; courier?: string; error?: string }>
+}> {
+  const response = await api.post('/api/orders/bulk-dispatch', { orderIds })
+  return response.data
+}
+
 export async function cancelOrder(
   orderId: number,
   reason?: string
@@ -1922,6 +1942,11 @@ export async function uploadFreightBill(payload: {
 
 export async function getGatewayBatches(): Promise<any[]> {
   const response = await api.get('/api/accounts/gateway/batches')
+  return response.data
+}
+
+export async function getGatewayBatchDetail(batchId: string): Promise<any> {
+  const response = await api.get(`/api/accounts/gateway/batches/${encodeURIComponent(batchId)}`)
   return response.data
 }
 

@@ -9,7 +9,7 @@
 /* Metrics Ribbon */
 .returns-metrics-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 20px;
 }
@@ -301,4 +301,34 @@
     flex-direction: column;
     align-items: stretch;
   }
+}
+
+
+/* ─── Phase 2 Design System: Accessibility & Mobile Touch Targets ─── */
+.returns-metric-card:focus-visible,
+.returns-tab-btn:focus-visible,
+.waybill-chip:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+[data-theme='dark'] .waybill-chip {
+  background: var(--surface-elevated);
+  border-color: var(--border-strong);
+  color: var(--ink);
+}
+
+@media (max-width: 768px) {
+  .returns-tab-btn,
+  .waybill-chip,
+  .returns-scan-card input,
+  .returns-scan-card select {
+    min-height: 44px;
+  }
+}
+
+
+[data-theme="dark"] .returns-tab-btn.active {
+  color: var(--tone-info-fg);
+  border-bottom-color: var(--tone-info-fg);
 }

@@ -101,6 +101,7 @@ export function Layout() {
           </span>
           <input
             className="sidebar-search-input"
+            aria-label="Search order or AWB"
             placeholder="Search order or AWB…"
             value={quickSearch}
             onChange={(e) => setQuickSearch(e.target.value)}
@@ -129,7 +130,7 @@ export function Layout() {
         </nav>
 
         {/* Section 2: Carrier & Finance */}
-        <div className="nav-label" style={{ marginTop: '14px' }}>Logistics & Finance</div>
+        <div className="nav-label" style={{ marginTop: '12px' }}>Logistics & Finance</div>
         <nav className="sidebar-nav" aria-label="Finance navigation">
           {financeNav.map((item) => (
             <NavLink
@@ -144,7 +145,7 @@ export function Layout() {
         </nav>
 
         {/* Section 3: Admin & System */}
-        <div className="nav-label" style={{ marginTop: '14px' }}>System Admin</div>
+        <div className="nav-label" style={{ marginTop: '12px' }}>System Admin</div>
         <nav className="sidebar-nav" aria-label="Administration navigation">
           {adminNav.map((item) => (
             <NavLink
@@ -161,12 +162,18 @@ export function Layout() {
         {/* Sidebar Footer with Theme & User Card */}
         <div className="sidebar-footer">
           {/* Quick Theme Switcher Pill in Sidebar */}
-          <div className="sidebar-theme-switch" onClick={toggleTheme} title={`Click to switch to ${theme === 'light' ? 'Dark' : 'Light'} Mode`}>
+          <button
+            type="button"
+            className="sidebar-theme-switch"
+            onClick={toggleTheme}
+            aria-label={`Switch to ${theme === 'light' ? 'Dark' : 'Light'} Mode`}
+          >
             <span className="sidebar-theme-label">Interface Mode</span>
-            <button type="button" className="btn-theme-pill">
-              {theme === 'light' ? '☀️ Light' : '🌙 Dark'}
-            </button>
-          </div>
+            <span className="btn-theme-pill" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+              <Icon name={theme === 'light' ? 'sun' : 'moon'} size={12} />
+              <span>{theme === 'light' ? 'Light' : 'Dark'}</span>
+            </span>
+          </button>
 
           <div className="user-profile-card">
             <div className="user-profile-info">
@@ -193,7 +200,7 @@ export function Layout() {
       <main className="main-content">
         <header className="topbar">
           <div className="breadcrumb">
-            <button type="button" className="topbar-menu-btn" aria-label="Open menu" onClick={() => setNavOpen((v) => !v)}>☰</button>
+            <button type="button" className="topbar-menu-btn" aria-label="Open navigation menu" onClick={() => setNavOpen((v) => !v)}><Icon name="menu" size={18} /></button>
             <span>Youthnic</span>
             <span className="breadcrumb-slash">/</span>
             <strong>{location.pathname === '/reports' ? 'Reports & Analytics' : current?.label ?? 'Console'}</strong>
@@ -206,20 +213,11 @@ export function Layout() {
               onClick={toggleTheme}
               title={`Switch to ${theme === 'light' ? 'Dark' : 'Light'} Theme`}
             >
-              {theme === 'light' ? (
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
-                  <span>🌙</span>
-                  <span style={{ fontSize: '11px', fontWeight: 700 }}>Dark</span>
-                </span>
-              ) : (
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
-                  <span>☀️</span>
-                  <span style={{ fontSize: '11px', fontWeight: 700 }}>Light</span>
-                </span>
-              )}
+              <Icon name={theme === 'light' ? 'moon' : 'sun'} size={14} />
+              <span>{theme === 'light' ? 'Dark' : 'Light'}</span>
             </button>
 
-            <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <div style={{ fontSize: '12px', color: 'var(--muted)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
               <Icon name="clock" size={13} />
               <span>{new Date().toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
             </div>

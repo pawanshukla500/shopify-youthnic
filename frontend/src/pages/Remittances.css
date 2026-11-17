@@ -47,3 +47,20 @@
 .remittance-extraction-meta { margin-bottom:14px; padding:12px 14px; background:var(--panel); border:1px solid var(--line); border-radius:8px; font-size:12px; }
 .remittance-extraction-meta ul { margin:6px 0 6px 16px; padding:0; }
 .remittance-extraction-meta li { margin-bottom:3px; }
+
+
+/* ─── Phase 2 Design System: Dark Mode & Focus ─── */
+[data-theme='dark'] .remittance-state {
+  background: var(--tone-success-bg);
+  color: var(--tone-success-fg);
+}
+[data-theme='dark'] .remittance-state.needs-review {
+  background: var(--tone-warning-bg);
+  color: var(--tone-warning-fg);
+}
+.remittance-filters input:focus-visible,
+.remittance-filters select:focus-visible,
+.remittance-correction input:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}

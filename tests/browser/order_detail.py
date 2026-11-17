@@ -121,7 +121,7 @@ def run():
                     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), width
                     expect(rows.filter(has_text="Discount")).to_be_visible()
                     page.screenshot(path=str(artifacts / f"order-{width}.png"), full_page=True)
-                page.get_by_role("button", name="🌙 Dark", exact=True).click()
+                page.get_by_role("button", name="Dark", exact=True).click()
                 page.screenshot(path=str(artifacts / "order-dark.png"), full_page=True)
                 current.update({"totalShipping": None, "totalDiscounts": None, "totalTax": None})
                 page.reload()

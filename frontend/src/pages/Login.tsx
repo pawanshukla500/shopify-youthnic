@@ -92,17 +92,8 @@ export function Login() {
           onClick={toggleTheme}
           title={`Switch to ${theme === 'light' ? 'Dark' : 'Light'} Mode`}
         >
-          {theme === 'light' ? (
-            <>
-              <span className="theme-toggle-icon">🌙</span>
-              <span>Dark Mode</span>
-            </>
-          ) : (
-            <>
-              <span className="theme-toggle-icon">☀️</span>
-              <span>Light Mode</span>
-            </>
-          )}
+          <Icon name={theme === 'light' ? 'moon' : 'sun'} size={14} />
+          <span>{theme === 'light' ? 'Dark Mode' : 'Light Mode'}</span>
         </button>
       </div>
 
@@ -201,7 +192,7 @@ export function Login() {
 
         {/* Error Alert */}
         {error && (
-          <div className="login-alert-box error">
+          <div className="login-alert-box error" role="alert">
             <Icon name="alert" size={15} />
             <span>{error}</span>
           </div>
@@ -241,7 +232,7 @@ export function Login() {
               Work Email
             </label>
             <div className="login-input-box">
-              <Icon name="pin" size={15} />
+              <Icon name="mail" size={15} />
               <input
                 id="email"
                 type="email"
@@ -287,7 +278,7 @@ export function Login() {
                 onClick={() => setShowPassword(!showPassword)}
                 aria-label={showPassword ? 'Hide password' : 'Show password'}
               >
-                <Icon name={showPassword ? 'close' : 'check'} size={14} />
+                <Icon name={showPassword ? 'eyeOff' : 'eye'} size={15} />
               </button>
             </div>
           </div>

@@ -145,55 +145,55 @@ export function Workflows() {
         </div>
 
         <div className="wf-ribbon-card" onClick={() => navigate('/orders?tab=dispatch')}>
-          <div className="wf-ribbon-header" style={{ color: 'var(--amber)' }}>
+          <div className="wf-ribbon-header" style={{ color: 'var(--tone-warning-fg)' }}>
             <span>Dispatch Pending</span>
             <Icon name="clock" size={15} />
           </div>
-          <strong className="wf-ribbon-val" style={{ color: 'var(--amber)' }}>
+          <strong className="wf-ribbon-val" style={{ color: 'var(--tone-warning-fg)' }}>
             {counts.dispatch ?? 0}
           </strong>
           <span className="wf-ribbon-sub">Locked or queuing for manifest</span>
         </div>
 
         <div className="wf-ribbon-card" onClick={() => navigate('/orders?tab=ready')}>
-          <div className="wf-ribbon-header" style={{ color: 'var(--blue)' }}>
+          <div className="wf-ribbon-header" style={{ color: 'var(--tone-info-fg)' }}>
             <span>Dispatched / In-Flight</span>
             <Icon name="truck" size={15} />
           </div>
-          <strong className="wf-ribbon-val" style={{ color: 'var(--blue)' }}>
+          <strong className="wf-ribbon-val" style={{ color: 'var(--tone-info-fg)' }}>
             {(counts.ready ?? 0) + (counts.transit ?? 0)}
           </strong>
           <span className="wf-ribbon-sub">AWB assigned & with courier</span>
         </div>
 
         <div className="wf-ribbon-card" onClick={() => navigate('/returns?tab=EXCHANGES')}>
-          <div className="wf-ribbon-header" style={{ color: 'var(--purple)' }}>
+          <div className="wf-ribbon-header" style={{ color: 'var(--tone-purple-fg)' }}>
             <span>Active Exchanges</span>
             <Icon name="refresh" size={15} />
           </div>
-          <strong className="wf-ribbon-val" style={{ color: 'var(--purple)' }}>
+          <strong className="wf-ribbon-val" style={{ color: 'var(--tone-purple-fg)' }}>
             {returnMetrics.exchanges}
           </strong>
           <span className="wf-ribbon-sub">Reverse + forward replacement</span>
         </div>
 
         <div className="wf-ribbon-card" onClick={() => navigate('/returns?tab=QC_PASSED_UNREFUNDED')}>
-          <div className="wf-ribbon-header" style={{ color: 'var(--red)' }}>
+          <div className="wf-ribbon-header" style={{ color: 'var(--tone-danger-fg)' }}>
             <span>QC Passed (Unrefunded)</span>
             <Icon name="alert" size={15} />
           </div>
-          <strong className="wf-ribbon-val" style={{ color: 'var(--red)' }}>
+          <strong className="wf-ribbon-val" style={{ color: 'var(--tone-danger-fg)' }}>
             {returnMetrics.qcPassedUnrefunded}
           </strong>
           <span className="wf-ribbon-sub">Action required to settle</span>
         </div>
 
         <div className="wf-ribbon-card" onClick={() => navigate('/remittance')}>
-          <div className="wf-ribbon-header" style={{ color: 'var(--green)' }}>
+          <div className="wf-ribbon-header" style={{ color: 'var(--tone-success-fg)' }}>
             <span>Delivered & Closed</span>
             <Icon name="check" size={15} />
           </div>
-          <strong className="wf-ribbon-val" style={{ color: 'var(--green)' }}>
+          <strong className="wf-ribbon-val" style={{ color: 'var(--tone-success-fg)' }}>
             {(counts.delivered ?? 0) + (counts.closed ?? 0)}
           </strong>
           <span className="wf-ribbon-sub">Settled in ledger</span>

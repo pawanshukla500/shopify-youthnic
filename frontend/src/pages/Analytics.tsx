@@ -377,7 +377,7 @@ export function Analytics() {
             <button
               type="button"
               className="btn-export"
-              style={{ background: '#10b981', color: '#ffffff', borderColor: '#059669' }}
+              style={{ background: 'var(--emerald-solid)', color: '#ffffff', borderColor: 'var(--emerald-solid-hover)' }}
               onClick={() => {
                 refetch()
                 if (activeTab === 'distribution') refetchHistory()
@@ -403,13 +403,13 @@ export function Analytics() {
 
           <div className="kpi-card">
             <div className="kpi-label">Gross Revenue (GMV)</div>
-            <div className="kpi-val" style={{ color: '#059669' }}>{formatMoney(kpis.totalGrossRevenue, 'INR')}</div>
+            <div className="kpi-val" style={{ color: 'var(--tone-success-fg)' }}>{formatMoney(kpis.totalGrossRevenue, 'INR')}</div>
             <span className="kpi-sub">Across all payment channels</span>
           </div>
 
           <div className="kpi-card">
             <div className="kpi-label">Realized Net Margin</div>
-            <div className="kpi-val" style={{ color: '#047857' }}>
+            <div className="kpi-val" style={{ color: 'var(--tone-success-fg)' }}>
               {insights ? formatMoney(insights.realizedNetMargin, 'INR') : '—'}
             </div>
             <span className="kpi-sub">
@@ -419,7 +419,7 @@ export function Analytics() {
 
           <div className="kpi-card">
             <div className="kpi-label">Delivery Success Rate</div>
-            <div className="kpi-val" style={{ color: '#2563eb' }}>
+            <div className="kpi-val" style={{ color: 'var(--tone-info-fg)' }}>
               {insights ? `${insights.deliverySuccessRate}%` : `${kpis.prepaidRatio}%`}
             </div>
             <span className="kpi-sub">{kpis.totalPrepaidOrders} Prepaid · {kpis.totalCodOrders} COD</span>
@@ -427,7 +427,7 @@ export function Analytics() {
 
           <div className="kpi-card">
             <div className="kpi-label">Customer Accounts LTV</div>
-            <div className="kpi-val" style={{ color: '#7c3aed' }}>
+            <div className="kpi-val" style={{ color: 'var(--tone-purple-fg)' }}>
               {accounts ? formatMoney(accounts.avgCustomerLtv, 'INR') : '—'}
             </div>
             <span className="kpi-sub">
@@ -492,32 +492,32 @@ export function Analytics() {
           {insights && (
             <Panel>
               <PanelHeading
-                title="Executive Business Intelligence & Strategy (/agency-analytics-reporter)"
+                title="Executive Business Intelligence & Strategy"
                 eyebrow="Decision Support"
               />
-              <div style={{ padding: '16px 20px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+              <div style={{ padding: '16px 20px', background: 'var(--surface-elevated)', borderBottom: '1px solid var(--line)', borderRadius: '0 0 10px 10px' }}>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px', marginBottom: '16px' }}>
-                  <div style={{ background: '#ffffff', padding: '12px 14px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                    <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 700 }}>AVERAGE ORDER VALUE</div>
-                    <div style={{ fontSize: '18px', fontWeight: 800, color: '#0f172a', marginTop: '2px' }}>
+                  <div style={{ background: 'var(--panel)', padding: '12px 14px', borderRadius: '8px', border: '1px solid var(--line)' }}>
+                    <div style={{ fontSize: '11px', color: 'var(--muted)', fontWeight: 700 }}>AVERAGE ORDER VALUE</div>
+                    <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--ink)', marginTop: '2px' }}>
                       {formatMoney(insights.averageOrderValue, 'INR')}
                     </div>
                   </div>
-                  <div style={{ background: '#ffffff', padding: '12px 14px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                    <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 700 }}>MOM REVENUE GROWTH</div>
-                    <div style={{ fontSize: '18px', fontWeight: 800, color: insights.momGrowthRate >= 0 ? '#059669' : '#dc2626', marginTop: '2px' }}>
+                  <div style={{ background: 'var(--panel)', padding: '12px 14px', borderRadius: '8px', border: '1px solid var(--line)' }}>
+                    <div style={{ fontSize: '11px', color: 'var(--muted)', fontWeight: 700 }}>MOM REVENUE GROWTH</div>
+                    <div style={{ fontSize: '18px', fontWeight: 800, color: insights.momGrowthRate >= 0 ? 'var(--tone-success-fg)' : 'var(--tone-danger-fg)', marginTop: '2px' }}>
                       {insights.momGrowthRate >= 0 ? `+${insights.momGrowthRate}%` : `${insights.momGrowthRate}%`}
                     </div>
                   </div>
-                  <div style={{ background: '#ffffff', padding: '12px 14px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                    <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 700 }}>RTO LOSS RATIO</div>
-                    <div style={{ fontSize: '18px', fontWeight: 800, color: '#d97706', marginTop: '2px' }}>
+                  <div style={{ background: 'var(--panel)', padding: '12px 14px', borderRadius: '8px', border: '1px solid var(--line)' }}>
+                    <div style={{ fontSize: '11px', color: 'var(--muted)', fontWeight: 700 }}>RTO LOSS RATIO</div>
+                    <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--tone-warning-fg)', marginTop: '2px' }}>
                       {insights.rtoLossRate}%
                     </div>
                   </div>
-                  <div style={{ background: '#ffffff', padding: '12px 14px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                    <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 700 }}>DATA QUALITY & AUDIT SCORE</div>
-                    <div style={{ fontSize: '18px', fontWeight: 800, color: '#2563eb', marginTop: '2px' }}>
+                  <div style={{ background: 'var(--panel)', padding: '12px 14px', borderRadius: '8px', border: '1px solid var(--line)' }}>
+                    <div style={{ fontSize: '11px', color: 'var(--muted)', fontWeight: 700 }}>DATA QUALITY & AUDIT SCORE</div>
+                    <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--tone-info-fg)', marginTop: '2px' }}>
                       {insights.dataQualityScore}%
                     </div>
                   </div>
@@ -528,11 +528,11 @@ export function Analytics() {
                     <div
                       key={rec.title}
                       style={{
-                        background: '#ffffff',
-                        borderLeft: `4px solid ${rec.priority === 'HIGH' ? '#dc2626' : rec.priority === 'MEDIUM' ? '#2563eb' : '#059669'}`,
+                        background: 'var(--panel)',
+                        border: '1px solid var(--line)',
+                        borderLeft: `4px solid ${rec.priority === 'HIGH' ? 'var(--tone-danger-fg)' : rec.priority === 'MEDIUM' ? 'var(--tone-info-fg)' : 'var(--tone-success-fg)'}`,
                         padding: '12px 16px',
                         borderRadius: '0 8px 8px 0',
-                        boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
                       }}
                     >
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
@@ -543,17 +543,17 @@ export function Analytics() {
                             padding: '2px 6px',
                             borderRadius: '4px',
                             color: '#ffffff',
-                            background: rec.priority === 'HIGH' ? '#dc2626' : rec.priority === 'MEDIUM' ? '#2563eb' : '#059669',
+                            background: rec.priority === 'HIGH' ? '#b91c1c' : rec.priority === 'MEDIUM' ? '#1d4ed8' : '#047857',
                           }}
                         >
                           {rec.priority}
                         </span>
-                        <strong style={{ fontSize: '13px', color: '#0f172a' }}>{rec.title}</strong>
+                        <strong style={{ fontSize: '13px', color: 'var(--ink)' }}>{rec.title}</strong>
                       </div>
-                      <div style={{ fontSize: '12px', color: '#334155', lineHeight: 1.5 }}>
+                      <div style={{ fontSize: '12px', color: 'var(--ink-secondary)', lineHeight: 1.5 }}>
                         <strong>Action:</strong> {rec.action}
                       </div>
-                      <div style={{ fontSize: '11.5px', color: '#64748b', marginTop: '2px' }}>
+                      <div style={{ fontSize: '11.5px', color: 'var(--muted)', marginTop: '2px' }}>
                         <em>Expected Impact:</em> {rec.impact}
                       </div>
                     </div>
@@ -594,7 +594,7 @@ export function Analytics() {
                     <th style={{ textAlign: 'right' }}>Shipping Cost (R) [C]</th>
                     <th style={{ textAlign: 'right' }}>COD Fee [D]</th>
                     <th style={{ textAlign: 'right' }}>Gateway Fee [E]</th>
-                    <th style={{ textAlign: 'right', background: 'rgba(16, 185, 129, 0.12)', color: '#047857' }}>
+                    <th style={{ textAlign: 'right', background: 'var(--tone-success-bg)', color: 'var(--tone-success-fg)' }}>
                       Received Payment [F=A-E]
                     </th>
                   </tr>
@@ -605,18 +605,18 @@ export function Analytics() {
                       <td><strong>{row.month}</strong></td>
                       <td className="mono" style={{ textAlign: 'right' }}>{row.noOfOrders}</td>
                       <td className="mono" style={{ textAlign: 'right' }}>{row.prepaidCount}</td>
-                      <td className="mono" style={{ textAlign: 'right', color: '#2563eb', fontWeight: 700 }}>
+                      <td className="mono" style={{ textAlign: 'right', color: 'var(--tone-info-fg)', fontWeight: 700 }}>
                         {row.prepaidPercent}%
                       </td>
                       <td className="mono" style={{ textAlign: 'right' }}>{formatMoney(row.grossAmount, 'INR')}</td>
                       <td className="mono" style={{ textAlign: 'right' }}>{row.grossQty}</td>
-                      <td className="mono" style={{ textAlign: 'right', color: row.rtoCancelAmount > 0 ? '#b91c1c' : '#64748b' }}>
+                      <td className="mono" style={{ textAlign: 'right', color: row.rtoCancelAmount > 0 ? 'var(--tone-danger-fg)' : 'var(--muted)' }}>
                         {formatMoney(row.rtoCancelAmount, 'INR')}
                       </td>
                       <td className="mono" style={{ textAlign: 'right' }}>{row.rtoCancelQty}</td>
                       <td className="mono" style={{ textAlign: 'right' }}>{formatMoney(row.sellerCancelAmount, 'INR')}</td>
                       <td className="mono" style={{ textAlign: 'right' }}>{row.sellerCancelQty}</td>
-                      <td className="mono" style={{ textAlign: 'right', fontWeight: 800, background: 'rgba(37, 99, 235, 0.04)' }}>
+                      <td className="mono" style={{ textAlign: 'right', fontWeight: 800, background: 'var(--tone-info-bg)' }}>
                         {formatMoney(row.forwardSalesAmount, 'INR')}
                       </td>
                       <td className="mono" style={{ textAlign: 'right' }}>{row.forwardSalesQty}</td>
@@ -624,7 +624,7 @@ export function Analytics() {
                       <td className="mono" style={{ textAlign: 'right' }}>{formatMoney(row.shippingCostR, 'INR')}</td>
                       <td className="mono" style={{ textAlign: 'right' }}>{formatMoney(row.codCollectionFee, 'INR')}</td>
                       <td className="mono" style={{ textAlign: 'right' }}>{formatMoney(row.paymentGatewayFee, 'INR')}</td>
-                      <td className="mono" style={{ textAlign: 'right', fontWeight: 850, color: '#047857', background: 'rgba(16, 185, 129, 0.06)' }}>
+                      <td className="mono" style={{ textAlign: 'right', fontWeight: 850, color: 'var(--tone-success-fg)', background: 'var(--tone-success-bg)' }}>
                         {formatMoney(row.receivedPayment, 'INR')}
                       </td>
                     </tr>
@@ -649,7 +649,7 @@ export function Analytics() {
                       <td className="mono" style={{ textAlign: 'right' }}><strong>{formatMoney(monthlySummary.shippingCostR, 'INR')}</strong></td>
                       <td className="mono" style={{ textAlign: 'right' }}><strong>{formatMoney(monthlySummary.codCollectionFee, 'INR')}</strong></td>
                       <td className="mono" style={{ textAlign: 'right' }}><strong>{formatMoney(monthlySummary.paymentGatewayFee, 'INR')}</strong></td>
-                      <td className="mono" style={{ textAlign: 'right', color: '#047857' }}>
+                      <td className="mono" style={{ textAlign: 'right', color: 'var(--tone-success-fg)' }}>
                         <strong>{formatMoney(monthlySummary.receivedPayment, 'INR')}</strong>
                       </td>
                     </tr>
@@ -735,9 +735,10 @@ export function Analytics() {
             title="State-wise Geographic Volume & Demand Distribution"
             eyebrow="Geographic Heatmap"
             action={
-              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
                 <input
                   type="text"
+                  aria-label="Search state or city"
                   placeholder="Search state or city…"
                   className="table-search-input"
                   value={stateSearch}
@@ -820,75 +821,75 @@ export function Analytics() {
       {activeTab === 'accounts' && accounts && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
           {/* RFM Cohort Summary Cards */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '14px' }}>
-            <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '10px', padding: '14px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '14px' }}>
+            <div style={{ background: 'var(--tone-success-bg)', border: '1px solid var(--tone-success-border)', borderRadius: '10px', padding: '14px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '11px', fontWeight: 800, color: '#166534', textTransform: 'uppercase' }}>Champions</span>
-                <span style={{ background: '#166534', color: '#fff', fontSize: '10px', fontWeight: 800, padding: '2px 6px', borderRadius: '4px' }}>
+                <span style={{ fontSize: '11px', fontWeight: 800, color: 'var(--tone-success-fg)', textTransform: 'uppercase' }}>Champions</span>
+                <span style={{ background: '#047857', color: '#fff', fontSize: '10px', fontWeight: 800, padding: '2px 6px', borderRadius: '4px' }}>
                   {accounts.rfmSummary.champions.count} ACCOUNTS
                 </span>
               </div>
-              <div style={{ fontSize: '18px', fontWeight: 800, color: '#166534', marginTop: '6px' }}>
+              <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--tone-success-fg)', marginTop: '6px' }}>
                 {formatMoney(accounts.rfmSummary.champions.totalRevenue, 'INR')}
               </div>
-              <div style={{ fontSize: '11px', color: '#15803d', marginTop: '4px' }}>
+              <div style={{ fontSize: '11.5px', color: 'var(--ink-secondary)', marginTop: '4px' }}>
                 {accounts.rfmSummary.champions.description}
               </div>
-              <div style={{ fontSize: '11px', color: '#0f172a', fontWeight: 600, marginTop: '8px', borderTop: '1px dashed #bbf7d0', paddingTop: '6px' }}>
+              <div style={{ fontSize: '11.5px', color: 'var(--ink)', fontWeight: 600, marginTop: '8px', borderTop: '1px dashed var(--tone-success-border)', paddingTop: '6px' }}>
                 <em>Play:</em> {accounts.rfmSummary.champions.play}
               </div>
             </div>
 
-            <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '10px', padding: '14px' }}>
+            <div style={{ background: 'var(--tone-info-bg)', border: '1px solid var(--tone-info-border)', borderRadius: '10px', padding: '14px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '11px', fontWeight: 800, color: '#1e40af', textTransform: 'uppercase' }}>Loyal Customers</span>
-                <span style={{ background: '#1e40af', color: '#fff', fontSize: '10px', fontWeight: 800, padding: '2px 6px', borderRadius: '4px' }}>
+                <span style={{ fontSize: '11px', fontWeight: 800, color: 'var(--tone-info-fg)', textTransform: 'uppercase' }}>Loyal Customers</span>
+                <span style={{ background: '#1d4ed8', color: '#fff', fontSize: '10px', fontWeight: 800, padding: '2px 6px', borderRadius: '4px' }}>
                   {accounts.rfmSummary.loyal.count} ACCOUNTS
                 </span>
               </div>
-              <div style={{ fontSize: '18px', fontWeight: 800, color: '#1e40af', marginTop: '6px' }}>
+              <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--tone-info-fg)', marginTop: '6px' }}>
                 {formatMoney(accounts.rfmSummary.loyal.totalRevenue, 'INR')}
               </div>
-              <div style={{ fontSize: '11px', color: '#1d4ed8', marginTop: '4px' }}>
+              <div style={{ fontSize: '11.5px', color: 'var(--ink-secondary)', marginTop: '4px' }}>
                 {accounts.rfmSummary.loyal.description}
               </div>
-              <div style={{ fontSize: '11px', color: '#0f172a', fontWeight: 600, marginTop: '8px', borderTop: '1px dashed #bfdbfe', paddingTop: '6px' }}>
+              <div style={{ fontSize: '11.5px', color: 'var(--ink)', fontWeight: 600, marginTop: '8px', borderTop: '1px dashed var(--tone-info-border)', paddingTop: '6px' }}>
                 <em>Play:</em> {accounts.rfmSummary.loyal.play}
               </div>
             </div>
 
-            <div style={{ background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: '10px', padding: '14px' }}>
+            <div style={{ background: 'var(--tone-purple-bg)', border: '1px solid var(--tone-purple-border)', borderRadius: '10px', padding: '14px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '11px', fontWeight: 800, color: '#5b21b6', textTransform: 'uppercase' }}>Potential Loyalists</span>
-                <span style={{ background: '#5b21b6', color: '#fff', fontSize: '10px', fontWeight: 800, padding: '2px 6px', borderRadius: '4px' }}>
+                <span style={{ fontSize: '11px', fontWeight: 800, color: 'var(--tone-purple-fg)', textTransform: 'uppercase' }}>Potential Loyalists</span>
+                <span style={{ background: '#6d28d9', color: '#fff', fontSize: '10px', fontWeight: 800, padding: '2px 6px', borderRadius: '4px' }}>
                   {accounts.rfmSummary.potential.count} ACCOUNTS
                 </span>
               </div>
-              <div style={{ fontSize: '18px', fontWeight: 800, color: '#5b21b6', marginTop: '6px' }}>
+              <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--tone-purple-fg)', marginTop: '6px' }}>
                 {formatMoney(accounts.rfmSummary.potential.totalRevenue, 'INR')}
               </div>
-              <div style={{ fontSize: '11px', color: '#6d28d9', marginTop: '4px' }}>
+              <div style={{ fontSize: '11.5px', color: 'var(--ink-secondary)', marginTop: '4px' }}>
                 {accounts.rfmSummary.potential.description}
               </div>
-              <div style={{ fontSize: '11px', color: '#0f172a', fontWeight: 600, marginTop: '8px', borderTop: '1px dashed #ddd6fe', paddingTop: '6px' }}>
+              <div style={{ fontSize: '11.5px', color: 'var(--ink)', fontWeight: 600, marginTop: '8px', borderTop: '1px dashed var(--tone-purple-border)', paddingTop: '6px' }}>
                 <em>Play:</em> {accounts.rfmSummary.potential.play}
               </div>
             </div>
 
-            <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '10px', padding: '14px' }}>
+            <div style={{ background: 'var(--tone-danger-bg)', border: '1px solid var(--tone-danger-border)', borderRadius: '10px', padding: '14px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '11px', fontWeight: 800, color: '#991b1b', textTransform: 'uppercase' }}>At Risk (RTO Flagged)</span>
-                <span style={{ background: '#991b1b', color: '#fff', fontSize: '10px', fontWeight: 800, padding: '2px 6px', borderRadius: '4px' }}>
+                <span style={{ fontSize: '11px', fontWeight: 800, color: 'var(--tone-danger-fg)', textTransform: 'uppercase' }}>At Risk (RTO Flagged)</span>
+                <span style={{ background: '#b91c1c', color: '#fff', fontSize: '10px', fontWeight: 800, padding: '2px 6px', borderRadius: '4px' }}>
                   {accounts.rfmSummary.atRisk.count} ACCOUNTS
                 </span>
               </div>
-              <div style={{ fontSize: '18px', fontWeight: 800, color: '#991b1b', marginTop: '6px' }}>
+              <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--tone-danger-fg)', marginTop: '6px' }}>
                 {formatMoney(accounts.rfmSummary.atRisk.totalRevenue, 'INR')}
               </div>
-              <div style={{ fontSize: '11px', color: '#b91c1c', marginTop: '4px' }}>
+              <div style={{ fontSize: '11.5px', color: 'var(--ink-secondary)', marginTop: '4px' }}>
                 {accounts.rfmSummary.atRisk.description}
               </div>
-              <div style={{ fontSize: '11px', color: '#0f172a', fontWeight: 600, marginTop: '8px', borderTop: '1px dashed #fecaca', paddingTop: '6px' }}>
+              <div style={{ fontSize: '11.5px', color: 'var(--ink)', fontWeight: 600, marginTop: '8px', borderTop: '1px dashed var(--tone-danger-border)', paddingTop: '6px' }}>
                 <em>Play:</em> {accounts.rfmSummary.atRisk.play}
               </div>
             </div>
@@ -900,8 +901,9 @@ export function Analytics() {
               title="Customer Account Intelligence & Strategic Retention"
               eyebrow="Account Portfolio"
               action={
-                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
                   <select
+                    aria-label="Filter customer cohorts"
                     className="table-search-input"
                     style={{ width: 'auto' }}
                     value={accountSegmentFilter}
@@ -917,6 +919,7 @@ export function Analytics() {
                   </select>
                   <input
                     type="text"
+                    aria-label="Search customer accounts by name, phone, or city"
                     placeholder="Search name, phone, city…"
                     className="table-search-input"
                     value={accountSearch}
@@ -947,18 +950,18 @@ export function Analytics() {
                     <tr key={a.phone}>
                       <td>
                         <div style={{ fontWeight: 700, color: '#0f172a' }}>{a.name}</div>
-                        <div style={{ fontSize: '11px', color: '#64748b' }}>
+                        <div style={{ fontSize: '11px', color: 'var(--muted)' }}>
                           <code>{a.phone}</code>
                           {a.email ? ` · ${a.email}` : ''}
                         </div>
                       </td>
                       <td>
                         <div style={{ fontSize: '12px', fontWeight: 600 }}>{a.city}</div>
-                        <div style={{ fontSize: '11px', color: '#64748b' }}>{a.state}</div>
+                        <div style={{ fontSize: '11px', color: 'var(--muted)' }}>{a.state}</div>
                       </td>
                       <td className="mono" style={{ textAlign: 'center' }}>
                         <strong>{a.orderCount}</strong>
-                        <span style={{ fontSize: '11px', color: '#64748b' }}>
+                        <span style={{ fontSize: '11px', color: 'var(--muted)' }}>
                           {' '}(<span style={{ color: '#047857' }}>{a.deliveredCount} del</span>
                           {a.rtoCount > 0 ? <span style={{ color: '#dc2626' }}>, {a.rtoCount} rto</span> : null})
                         </span>
@@ -1015,55 +1018,55 @@ export function Analytics() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
           {/* Automated Distribution Schedules */}
           {schedule && (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '14px' }}>
-              <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '16px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '14px' }}>
+              <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '10px', padding: '16px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: '11px', fontWeight: 800, color: '#2563eb', textTransform: 'uppercase' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 800, color: 'var(--tone-info-fg)', textTransform: 'uppercase' }}>
                     DAILY TERRITORY SCHEDULE
                   </span>
-                  <span style={{ background: '#dcfce7', color: '#15803d', fontSize: '10px', fontWeight: 800, padding: '2px 8px', borderRadius: '10px' }}>
+                  <span className="tone-chip tone-chip--success">
                     {schedule.dailyReport.status}
                   </span>
                 </div>
-                <div style={{ fontSize: '16px', fontWeight: 800, color: '#0f172a', marginTop: '6px' }}>
+                <div style={{ fontSize: '16px', fontWeight: 800, color: 'var(--ink)', marginTop: '6px' }}>
                   {schedule.dailyReport.name}
                 </div>
-                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
+                <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '4px' }}>
                   <strong>Cadence:</strong> {schedule.dailyReport.humanSchedule} (<code>{schedule.dailyReport.cron}</code>)
                 </div>
-                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
+                <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '2px' }}>
                   <strong>Target Audience:</strong> {schedule.dailyReport.targetAudience}
                 </div>
               </div>
 
-              <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '16px' }}>
+              <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '10px', padding: '16px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: '11px', fontWeight: 800, color: '#7c3aed', textTransform: 'uppercase' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 800, color: 'var(--tone-purple-fg)', textTransform: 'uppercase' }}>
                     WEEKLY EXECUTIVE SCHEDULE
                   </span>
-                  <span style={{ background: '#dcfce7', color: '#15803d', fontSize: '10px', fontWeight: 800, padding: '2px 8px', borderRadius: '10px' }}>
+                  <span className="tone-chip tone-chip--success">
                     {schedule.weeklyReport.status}
                   </span>
                 </div>
-                <div style={{ fontSize: '16px', fontWeight: 800, color: '#0f172a', marginTop: '6px' }}>
+                <div style={{ fontSize: '16px', fontWeight: 800, color: 'var(--ink)', marginTop: '6px' }}>
                   {schedule.weeklyReport.name}
                 </div>
-                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
+                <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '4px' }}>
                   <strong>Cadence:</strong> {schedule.weeklyReport.humanSchedule} (<code>{schedule.weeklyReport.cron}</code>)
                 </div>
-                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
+                <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '2px' }}>
                   <strong>Target Audience:</strong> {schedule.weeklyReport.targetAudience}
                 </div>
               </div>
 
-              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '16px' }}>
-                <div style={{ fontSize: '11px', fontWeight: 800, color: '#64748b', textTransform: 'uppercase' }}>
+              <div style={{ background: 'var(--surface-elevated)', border: '1px solid var(--line)', borderRadius: '10px', padding: '16px' }}>
+                <div style={{ fontSize: '11px', fontWeight: 800, color: 'var(--muted)', textTransform: 'uppercase' }}>
                   DISTRIBUTION AGENT AUDIT STATUS
                 </div>
-                <div style={{ fontSize: '20px', fontWeight: 900, color: '#0f172a', marginTop: '6px' }}>
+                <div style={{ fontSize: '20px', fontWeight: 900, color: 'var(--ink)', marginTop: '6px' }}>
                   {schedule.totalDistributionsCount} Dispatches Logged
                 </div>
-                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
+                <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '4px' }}>
                   Last run: {schedule.lastDistribution ? `${schedule.lastDistribution.recipient} (${new Date(schedule.lastDistribution.timestamp).toLocaleDateString()})` : 'Never'}
                 </div>
               </div>
@@ -1079,10 +1082,11 @@ export function Analytics() {
             <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px' }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '6px' }}>
+                  <label htmlFor="dist-recipient-email" style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--ink-secondary)', marginBottom: '6px' }}>
                     Recipient Email Address
                   </label>
                   <input
+                    id="dist-recipient-email"
                     type="email"
                     className="table-search-input"
                     style={{ width: '100%' }}
@@ -1090,10 +1094,10 @@ export function Analytics() {
                     onChange={(e) => setDistRecipient(e.target.value)}
                     placeholder="e.g. accounts@youthnic.com"
                   />
-                  <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
+                  <div style={{ display: 'flex', gap: '6px', marginTop: '6px', flexWrap: 'wrap' }}>
                     <button
                       type="button"
-                      style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', border: '1px solid #cbd5e1', background: '#f8fafc', cursor: 'pointer' }}
+                      className="tool-pill-btn"
                       onClick={() => {
                         setDistRecipient('accounts@youthnic.com')
                         setDistRecipientName('Finance & Accounts')
@@ -1103,7 +1107,7 @@ export function Analytics() {
                     </button>
                     <button
                       type="button"
-                      style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', border: '1px solid #cbd5e1', background: '#f8fafc', cursor: 'pointer' }}
+                      className="tool-pill-btn"
                       onClick={() => {
                         setDistRecipient('management@youthnic.com')
                         setDistRecipientName('Executive Leadership')
@@ -1113,7 +1117,7 @@ export function Analytics() {
                     </button>
                     <button
                       type="button"
-                      style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', border: '1px solid #cbd5e1', background: '#f8fafc', cursor: 'pointer' }}
+                      className="tool-pill-btn"
                       onClick={() => {
                         setDistRecipient('ops@youthnic.com')
                         setDistRecipientName('Operations Lead')
@@ -1125,10 +1129,11 @@ export function Analytics() {
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '6px' }}>
+                  <label htmlFor="dist-recipient-name" style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--ink-secondary)', marginBottom: '6px' }}>
                     Recipient Name / Department
                   </label>
                   <input
+                    id="dist-recipient-name"
                     type="text"
                     className="table-search-input"
                     style={{ width: '100%' }}
@@ -1139,10 +1144,11 @@ export function Analytics() {
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '6px' }}>
+                  <label htmlFor="dist-report-package" style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--ink-secondary)', marginBottom: '6px' }}>
                     Report Package
                   </label>
                   <select
+                    id="dist-report-package"
                     className="table-search-input"
                     style={{ width: '100%' }}
                     value={distReportType}
@@ -1156,10 +1162,11 @@ export function Analytics() {
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '6px' }}>
+                <label htmlFor="dist-notes" style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--ink-secondary)', marginBottom: '6px' }}>
                   Executive Context / Custom Notes (Optional)
                 </label>
                 <textarea
+                  id="dist-notes"
                   className="table-search-input"
                   style={{ width: '100%', minHeight: '60px', resize: 'vertical' }}
                   value={distNotes}
@@ -1168,11 +1175,10 @@ export function Analytics() {
                 />
               </div>
 
-              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
                 <button
                   type="button"
-                  className="btn-export"
-                  style={{ background: '#2563eb', color: '#ffffff', borderColor: '#1d4ed8', padding: '10px 20px', fontWeight: 700 }}
+                  className="button button-primary"
                   disabled={distributeMutation.isPending || !distRecipient.trim()}
                   onClick={() => {
                     distributeMutation.mutate({
@@ -1189,8 +1195,7 @@ export function Analytics() {
 
                 <button
                   type="button"
-                  className="btn-export"
-                  style={{ background: '#f8fafc', color: '#334155', borderColor: '#cbd5e1' }}
+                  className="button button-secondary"
                   disabled={distributeMutation.isPending}
                   onClick={() => {
                     distributeMutation.mutate({
@@ -1211,7 +1216,7 @@ export function Analytics() {
           {/* Distribution History Audit Log Table */}
           <Panel>
             <PanelHeading
-              title="Distribution Audit Trail & Compliance Log (/agency-report-distribution-agent)"
+              title="Distribution Audit Trail & Compliance Log"
               eyebrow="Activity Ledger"
               action={
                 <button type="button" className="btn-table-action" onClick={() => refetchHistory()}>
@@ -1234,39 +1239,31 @@ export function Analytics() {
                 <tbody>
                   {(!historyData?.history || historyData.history.length === 0) ? (
                     <tr>
-                      <td colSpan={5} style={{ textAlign: 'center', padding: '24px', color: '#64748b' }}>
+                      <td colSpan={5} style={{ textAlign: 'center', padding: '24px', color: 'var(--muted)' }}>
                         No reports distributed yet. Click "Send Report to Email Now" above to trigger your first distribution.
                       </td>
                     </tr>
                   ) : (
                     historyData.history.map((log) => (
                       <tr key={log.id}>
-                        <td className="mono" style={{ fontSize: '11.5px', color: '#334155' }}>
+                        <td className="mono" style={{ fontSize: '11.5px', color: 'var(--ink-secondary)' }}>
                           {new Date(log.sentAt || log.createdAt).toLocaleString()}
                         </td>
                         <td>
-                          <div style={{ fontWeight: 700, color: '#0f172a' }}>{log.recipientName}</div>
-                          <div style={{ fontSize: '11px', color: '#64748b' }}>{log.recipientEmail}</div>
+                          <div style={{ fontWeight: 700, color: 'var(--ink)' }}>{log.recipientName}</div>
+                          <div style={{ fontSize: '11px', color: 'var(--muted)' }}>{log.recipientEmail}</div>
                         </td>
-                        <td style={{ fontSize: '12px', fontWeight: 600 }}>
+                        <td style={{ fontSize: '12px', fontWeight: 600, color: 'var(--ink)' }}>
                           {log.subject}
                         </td>
                         <td style={{ textAlign: 'center' }}>
                           <span
-                            style={{
-                              display: 'inline-block',
-                              padding: '3px 8px',
-                              borderRadius: '12px',
-                              fontSize: '10px',
-                              fontWeight: 800,
-                              background: log.status === 'SENT' ? '#dcfce7' : log.status === 'SIMULATED' ? '#eff6ff' : '#fee2e2',
-                              color: log.status === 'SENT' ? '#15803d' : log.status === 'SIMULATED' ? '#1d4ed8' : '#b91c1c',
-                            }}
+                            className={`tone-chip ${log.status === 'SENT' ? 'tone-chip-success' : log.status === 'SIMULATED' ? 'tone-chip-info' : 'tone-chip-danger'}`}
                           >
                             {log.status}
                           </span>
                         </td>
-                        <td style={{ fontSize: '11px', color: '#64748b' }}>
+                        <td style={{ fontSize: '11px', color: 'var(--muted)' }}>
                           <code>{log.metadata?.reportType || 'EXECUTIVE_DIGEST'}</code>
                           {log.metadata?.mode ? ` · ${log.metadata.mode}` : ''}
                         </td>
@@ -1283,22 +1280,15 @@ export function Analytics() {
       {/* Modal to Preview Sent HTML if needed */}
       {previewLogHtml && (
         <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(0,0,0,0.5)',
-            zIndex: 9999,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '20px',
-          }}
+          className="modal-backdrop"
           onClick={() => setPreviewLogHtml(null)}
         >
           <div
+            className="modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Report HTML Preview"
             style={{
-              background: '#ffffff',
-              borderRadius: '12px',
               maxWidth: '750px',
               width: '100%',
               maxHeight: '90vh',
@@ -1307,13 +1297,13 @@ export function Analytics() {
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <h3 style={{ margin: 0 }}>Report HTML Preview</h3>
-              <button type="button" onClick={() => setPreviewLogHtml(null)} style={{ border: 0, background: 'none', cursor: 'pointer' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', gap: '12px' }}>
+              <h3 style={{ margin: 0, color: 'var(--ink)' }}>Report HTML Preview</h3>
+              <button type="button" className="modal-close-btn" aria-label="Close modal" onClick={() => setPreviewLogHtml(null)}>
                 <Icon name="close" size={18} />
               </button>
             </div>
-            <div dangerouslySetInnerHTML={{ __html: previewLogHtml }} />
+            <div style={{ background: '#ffffff', color: '#0f172a', borderRadius: '8px', padding: '12px' }} dangerouslySetInnerHTML={{ __html: previewLogHtml }} />
           </div>
         </div>
       )}

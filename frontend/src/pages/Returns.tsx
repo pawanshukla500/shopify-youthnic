@@ -198,11 +198,11 @@ export function Returns() {
           title="Click to view returns with QC passed or received at warehouse but not yet refunded (COD & Prepaid)"
           style={{ cursor: 'pointer' }}
         >
-          <div className="returns-metric-label" style={{ color: '#b45309' }}>
+          <div className="returns-metric-label" style={{ color: 'var(--tone-warning-fg)' }}>
             <span>QC Passed (Unrefunded)</span>
             <Icon name="alert" size={14} />
           </div>
-          <strong className="returns-metric-value" style={{ color: '#b45309' }}>{metrics.qcPassedUnrefunded}</strong>
+          <strong className="returns-metric-value" style={{ color: 'var(--tone-warning-fg)' }}>{metrics.qcPassedUnrefunded}</strong>
         </div>
 
         <div
@@ -210,11 +210,11 @@ export function Returns() {
           onClick={() => selectFilterTab('PENDING_QC')}
           title="Click to view returns pending QC"
         >
-          <div className="returns-metric-label" style={{ color: '#b45309' }}>
+          <div className="returns-metric-label" style={{ color: 'var(--tone-warning-fg)' }}>
             <span>Pending QC</span>
             <Icon name="clock" size={14} />
           </div>
-          <strong className="returns-metric-value" style={{ color: '#b45309' }}>{metrics.pendingQc}</strong>
+          <strong className="returns-metric-value" style={{ color: 'var(--tone-warning-fg)' }}>{metrics.pendingQc}</strong>
         </div>
 
         <div
@@ -222,11 +222,11 @@ export function Returns() {
           onClick={() => selectFilterTab('COD_DUE')}
           title="Click to view COD returns waiting for manual payout"
         >
-          <div className="returns-metric-label" style={{ color: '#b45309' }}>
+          <div className="returns-metric-label" style={{ color: 'var(--tone-warning-fg)' }}>
             <span>COD Refund Due</span>
             <Icon name="dollar" size={14} />
           </div>
-          <strong className="returns-metric-value" style={{ color: '#b45309' }}>{metrics.codDue}</strong>
+          <strong className="returns-metric-value" style={{ color: 'var(--tone-warning-fg)' }}>{metrics.codDue}</strong>
         </div>
 
         <div
@@ -234,11 +234,11 @@ export function Returns() {
           onClick={() => selectFilterTab('EXCHANGES')}
           title="Click to view size exchange returns"
         >
-          <div className="returns-metric-label" style={{ color: '#6b21a8' }}>
+          <div className="returns-metric-label" style={{ color: 'var(--tone-purple-fg)' }}>
             <span>Size Exchanges</span>
             <Icon name="refresh" size={14} />
           </div>
-          <strong className="returns-metric-value" style={{ color: '#6b21a8' }}>{metrics.exchanges}</strong>
+          <strong className="returns-metric-value" style={{ color: 'var(--tone-purple-fg)' }}>{metrics.exchanges}</strong>
         </div>
 
         <div
@@ -246,11 +246,11 @@ export function Returns() {
           onClick={() => selectFilterTab('REFUNDED')}
           title="Click to view settled / refunded returns"
         >
-          <div className="returns-metric-label" style={{ color: '#15803d' }}>
+          <div className="returns-metric-label" style={{ color: 'var(--tone-success-fg)' }}>
             <span>Settled / Refunded</span>
             <Icon name="check" size={14} />
           </div>
-          <strong className="returns-metric-value" style={{ color: '#15803d' }}>{metrics.settled}</strong>
+          <strong className="returns-metric-value" style={{ color: 'var(--tone-success-fg)' }}>{metrics.settled}</strong>
         </div>
       </div>
 
@@ -317,7 +317,7 @@ export function Returns() {
           <div>
             <Button
               className="button-primary"
-              style={{ minHeight: '38px', padding: '0 18px', fontWeight: 650 }}
+              style={{ minHeight: '44px', padding: '0 18px', fontWeight: 650 }}
               loading={scan.isPending}
               onClick={() => scan.mutate()}
             >
@@ -334,17 +334,23 @@ export function Returns() {
           eyebrow="Reverse logistics queue"
           title={`Returns Queue (${filtered.length})`}
           action={
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <div className="search-field" style={{ width: '220px', height: '34px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <div className="search-field" style={{ width: '220px', maxWidth: '100%', height: '36px' }}>
                 <Icon name="search" size={14} />
                 <input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Search order, waybill, customer…"
+                  aria-label="Search returns by order, waybill, or customer"
                 />
                 {search && (
-                  <button className="search-clear-btn" onClick={() => setSearch('')}>
-                    ✕
+                  <button
+                    type="button"
+                    className="search-clear-btn"
+                    onClick={() => setSearch('')}
+                    aria-label="Clear search"
+                  >
+                    <Icon name="close" size={12} />
                   </button>
                 )}
               </div>
@@ -353,7 +359,7 @@ export function Returns() {
                 <select
                   value={status}
                   onChange={(event) => setStatus(event.target.value)}
-                  style={{ height: '34px', fontSize: '12px' }}
+                  style={{ height: '36px', fontSize: '12px' }}
                 >
                   <option value="">All statuses</option>
                   {RETURN_STATUSES.map((item) => (
@@ -370,6 +376,7 @@ export function Returns() {
         {/* Quick Filter Navigation Tabs */}
         <div className="returns-filter-nav">
           <button
+            type="button"
             className={`returns-tab-btn ${filterTab === 'ALL' ? 'active' : ''}`}
             onClick={() => selectFilterTab('ALL')}
           >
@@ -377,47 +384,52 @@ export function Returns() {
             <span className="returns-tab-count">{metrics.total}</span>
           </button>
           <button
+            type="button"
             className={`returns-tab-btn ${filterTab === 'QC_PASSED_UNREFUNDED' ? 'active' : ''}`}
             onClick={() => selectFilterTab('QC_PASSED_UNREFUNDED')}
           >
             QC Passed (Unrefunded)
-            <span className="returns-tab-count" style={{ background: '#fef3c7', color: '#92400e', fontWeight: 700 }}>
+            <span className="returns-tab-count" style={{ background: 'var(--tone-warning-bg)', color: 'var(--tone-warning-fg)', fontWeight: 700 }}>
               {metrics.qcPassedUnrefunded}
             </span>
           </button>
           <button
+            type="button"
             className={`returns-tab-btn ${filterTab === 'COD_DUE' ? 'active' : ''}`}
             onClick={() => selectFilterTab('COD_DUE')}
           >
             COD Refund Due
-            <span className="returns-tab-count" style={{ background: '#fef3c7', color: '#92400e' }}>
+            <span className="returns-tab-count" style={{ background: 'var(--tone-warning-bg)', color: 'var(--tone-warning-fg)' }}>
               {metrics.codDue}
             </span>
           </button>
           <button
+            type="button"
             className={`returns-tab-btn ${filterTab === 'EXCHANGES' ? 'active' : ''}`}
             onClick={() => selectFilterTab('EXCHANGES')}
           >
             Size Exchanges
-            <span className="returns-tab-count" style={{ background: '#f3e8ff', color: '#6b21a8' }}>
+            <span className="returns-tab-count" style={{ background: 'var(--tone-purple-bg)', color: 'var(--tone-purple-fg)' }}>
               {metrics.exchanges}
             </span>
           </button>
           <button
+            type="button"
             className={`returns-tab-btn ${filterTab === 'PENDING_QC' ? 'active' : ''}`}
             onClick={() => selectFilterTab('PENDING_QC')}
           >
             Pending QC
-            <span className="returns-tab-count" style={{ background: '#fee2e2', color: '#991b1b' }}>
+            <span className="returns-tab-count" style={{ background: 'var(--tone-danger-bg)', color: 'var(--tone-danger-fg)' }}>
               {metrics.pendingQc}
             </span>
           </button>
           <button
+            type="button"
             className={`returns-tab-btn ${filterTab === 'REFUNDED' ? 'active' : ''}`}
             onClick={() => selectFilterTab('REFUNDED')}
           >
             Settled / Refunded
-            <span className="returns-tab-count" style={{ background: '#dcfce7', color: '#166534' }}>
+            <span className="returns-tab-count" style={{ background: 'var(--tone-success-bg)', color: 'var(--tone-success-fg)' }}>
               {metrics.settled}
             </span>
           </button>
@@ -545,14 +557,14 @@ export function Returns() {
                             Size Replacement
                           </span>
                         ) : isRefunded ? (
-                          <span style={{ fontSize: '11px', color: '#15803d', fontWeight: 650 }}>
-                            ✓ Settled
+                          <span style={{ fontSize: '11px', color: 'var(--tone-success-fg)', fontWeight: 650 }}>
+                            Settled
                           </span>
                         ) : isCod ? (
                           item.qcStatus === 'APPROVED' || item.qcStatus === 'PARTIAL' || Boolean(item.receivedAt || item.returnStatus === 'RECEIVED' || item.returnStatus === 'QC_PENDING' || item.trackingStatus === 'DTO') ? (
                             <Button
                               className="button-small button-primary"
-                              style={{ background: '#b45309', borderColor: '#b45309', color: '#fff', fontSize: '11px', fontWeight: 650 }}
+                              style={{ background: '#b45309', borderColor: '#b45309', color: '#ffffff', fontSize: '11px', fontWeight: 650 }}
                               onClick={() =>
                                 setManualRefundTarget({
                                   orderId: item.orderId,
@@ -583,7 +595,7 @@ export function Returns() {
                           (item.qcStatus === 'APPROVED' || item.qcStatus === 'PARTIAL') ? (
                           <Button
                             className="button-small button-secondary"
-                            style={{ borderColor: '#fca5a5', color: '#b91c1c', fontSize: '11px' }}
+                            style={{ borderColor: 'var(--tone-danger-border)', color: 'var(--tone-danger-fg)', fontSize: '11px' }}
                             loading={refund.isPending && refund.variables?.id === item.id}
                             onClick={() =>
                               refund.mutate({
@@ -600,7 +612,7 @@ export function Returns() {
                           Boolean(item.receivedAt || item.returnStatus === 'RECEIVED' || item.returnStatus === 'QC_PENDING' || item.trackingStatus === 'DTO') ? (
                           <Button
                             className="button-small button-primary"
-                            style={{ background: '#059669', borderColor: '#059669', color: '#fff', fontSize: '11px', fontWeight: 650 }}
+                            style={{ background: 'var(--emerald-solid)', borderColor: 'var(--emerald-solid)', color: '#ffffff', fontSize: '11px', fontWeight: 650 }}
                             loading={refund.isPending && refund.variables?.id === item.id}
                             onClick={() =>
                               refund.mutate({

@@ -136,39 +136,39 @@ export function Remittances() {
       {duplicate && <div className="remittance-warning"><p>This report already exists. Add missing UTRs in history rather than crediting the same rows again.</p><Button className="button-secondary" disabled={upload.isPending} onClick={() => { if (window.confirm('Reprocess this report? Existing payment duplicate guards still apply.')) upload.mutate(true) }}>Reprocess matching data</Button></div>}{outcome && <p role="status">{outcome}</p>}</Panel>}
     <nav className="remittance-provider-nav" aria-label="Settlement providers">{providers.map((name) => <button type="button" key={name} aria-pressed={provider === name} onClick={() => { setProvider(name); setFilter('All statuses'); setExpanded(null) }}>{name}</button>)}</nav>
     {provider === 'GoKwik' && (
-      <div style={{ display: 'flex', alignItems: 'center', padding: '14px 18px', background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '10px', marginBottom: '14px', gap: '14px' }}>
-        <img src="/logos/gokwik.svg" alt="GoKwik" style={{ height: '26px', objectFit: 'contain' }} onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none' }} />
+      <div className="surface-card" style={{ display: 'flex', alignItems: 'center', padding: '14px 18px', borderRadius: '10px', marginBottom: '14px', gap: '14px' }}>
+        <div className="logo-well-md"><img src="/logos/gokwik.svg" alt="GoKwik" style={{ height: '24px', objectFit: 'contain' }} onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none' }} /></div>
         <div>
-          <strong style={{ display: 'block', fontSize: '14px', fontWeight: 650 }}>GoKwik Checkout & Payment Settlements</strong>
+          <strong style={{ display: 'block', fontSize: '14px', fontWeight: 650, color: 'var(--ink)' }}>GoKwik Checkout & Payment Settlements</strong>
           <span style={{ fontSize: '12px', color: 'var(--muted)' }}>Prepaid orders processed through GoKwik checkout. Upload settlement reports to match bank credits with customer payments.</span>
         </div>
       </div>
     )}
     {provider === 'PhonePe' && (
-      <div style={{ display: 'flex', alignItems: 'center', padding: '14px 18px', background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '10px', marginBottom: '14px', gap: '14px' }}>
-        <img src="/logos/phonepe.svg" alt="PhonePe" style={{ height: '26px', objectFit: 'contain' }} onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none' }} />
+      <div className="surface-card" style={{ display: 'flex', alignItems: 'center', padding: '14px 18px', borderRadius: '10px', marginBottom: '14px', gap: '14px' }}>
+        <div className="logo-well-md"><img src="/logos/phonepe.svg" alt="PhonePe" style={{ height: '24px', objectFit: 'contain' }} onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none' }} /></div>
         <div>
-          <strong style={{ display: 'block', fontSize: '14px', fontWeight: 650 }}>PhonePe Payment Gateway Settlements</strong>
+          <strong style={{ display: 'block', fontSize: '14px', fontWeight: 650, color: 'var(--ink)' }}>PhonePe Payment Gateway Settlements</strong>
           <span style={{ fontSize: '12px', color: 'var(--muted)' }}>Direct UPI and PhonePe gateway settlements. Reconcile transaction IDs, merchant fees, and bank UTRs.</span>
         </div>
       </div>
     )}
     {provider === 'Delhivery' && (
-      <div style={{ display: 'flex', alignItems: 'center', padding: '14px 18px', background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '10px', marginBottom: '14px', gap: '14px' }}>
-        <img src="/logos/delhivery.svg" alt="Delhivery" style={{ height: '26px', objectFit: 'contain' }} onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none' }} />
+      <div className="surface-card" style={{ display: 'flex', alignItems: 'center', padding: '14px 18px', borderRadius: '10px', marginBottom: '14px', gap: '14px' }}>
+        <div className="logo-well-md"><img src="/logos/delhivery.svg" alt="Delhivery" style={{ height: '24px', objectFit: 'contain' }} onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none' }} /></div>
         <div>
-          <strong style={{ display: 'block', fontSize: '14px', fontWeight: 650 }}>Delhivery Courier Remittances & Freight Ledgers</strong>
+          <strong style={{ display: 'block', fontSize: '14px', fontWeight: 650, color: 'var(--ink)' }}>Delhivery Courier Remittances & Freight Ledgers</strong>
           <span style={{ fontSize: '12px', color: 'var(--muted)' }}>Reconcile COD remittance credits, client remittances (CRN), and freight deductions from Delhivery ONE.</span>
         </div>
       </div>
     )}
     {provider === 'Velocity' && (
       <>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '10px', marginBottom: '14px', gap: '16px', flexWrap: 'wrap' }}>
+        <div className="surface-card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', borderRadius: '10px', marginBottom: '14px', gap: '16px', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-            <img src="/logos/velocity.svg" alt="Velocity" style={{ height: '26px', objectFit: 'contain' }} onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none' }} />
+            <div className="logo-well-md"><img src="/logos/velocity.svg" alt="Velocity" style={{ height: '24px', objectFit: 'contain' }} onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none' }} /></div>
             <div>
-              <strong style={{ display: 'block', fontSize: '14px', fontWeight: 650 }}>Velocity Direct Finance & Remittance Sync</strong>
+              <strong style={{ display: 'block', fontSize: '14px', fontWeight: 650, color: 'var(--ink)' }}>Velocity Direct Finance & Remittance Sync</strong>
               <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
                 Direct API reconciliation active. Velocity payouts and COD settlements sync automatically without downloading or uploading CSVs.
                 {velocityStatus.data?.lastSync && ` • Last synced: ${formatDate(velocityStatus.data.lastSync)} (${velocityStatus.data.matchedCount} matched)`}

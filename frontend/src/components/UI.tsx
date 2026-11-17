@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useId, useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
 import { labelize, statusTone } from '../lib'
 
 export type IconName =
@@ -39,6 +39,11 @@ export type IconName =
   | 'key'
   | 'mail'
   | 'workflow'
+  | 'sun'
+  | 'moon'
+  | 'eye'
+  | 'eyeOff'
+  | 'menu'
 
 export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   const common = { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const }
@@ -80,6 +85,11 @@ export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
     server: <><rect width="20" height="8" x="2" y="2" rx="2" ry="2" /><rect width="20" height="8" x="2" y="14" rx="2" ry="2" /><line x1="6" x2="6.01" y1="6" y2="6" /><line x1="6" x2="6.01" y1="18" y2="18" /></>,
     key: <><circle cx="7.5" cy="15.5" r="5.5" /><path d="m21 2-9.6 9.6" /><path d="m15.5 7.5 3 3L22 7l-3-3" /></>,
     workflow: <><line x1="6" y1="3" x2="6" y2="15" /><circle cx="18" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M18 9a9 9 0 0 1-9 9" /></>,
+    sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" /></>,
+    moon: <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />,
+    eye: <><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" /><circle cx="12" cy="12" r="3" /></>,
+    eyeOff: <><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" /><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" /><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" /><line x1="2" x2="22" y1="2" y2="22" /></>,
+    menu: <><line x1="4" x2="20" y1="12" y2="12" /><line x1="4" x2="20" y1="6" y2="6" /><line x1="4" x2="20" y1="18" y2="18" /></>,
   }
   return <svg aria-hidden="true" {...common}>{paths[name]}</svg>
 }
@@ -118,16 +128,89 @@ export function PanelHeading({ eyebrow, title, action }: { eyebrow?: string; tit
   )
 }
 
-export function EmptyState({ title, description, icon = 'box' }: { title: string; description?: string; icon?: IconName }) {
-  return <div className="empty-state"><div className="empty-icon"><Icon name={icon} size={24} /></div><h3>{title}</h3>{description && <p>{description}</p>}</div>
+export function EmptyState({ title, description, icon = 'box', action }: { title: string; description?: string; icon?: IconName; action?: ReactNode }) {
+  return (
+    <div className="empty-state">
+      <div className="empty-icon"><Icon name={icon} size={24} /></div>
+      <h3>{title}</h3>
+      {description && <p>{description}</p>}
+      {action && <div style={{ marginTop: '12px' }}>{action}</div>}
+    </div>
+  )
 }
 
 export function LoadingState({ label = 'Loading data…' }: { label?: string }) {
-  return <div className="loading-state"><span className="spinner" />{label}</div>
+  return <div className="loading-state" role="status"><span className="spinner" />{label}</div>
 }
 
-export function ErrorBox({ message, compact = false }: { message: string; compact?: boolean }) {
-  return <div className={`error-box ${compact ? 'error-box-compact' : ''}`}><Icon name="alert" size={18} /><span>{message}</span></div>
+export function ErrorBox({ message, compact = false, onRetry, retryLabel = 'Retry' }: { message: string; compact?: boolean; onRetry?: () => void; retryLabel?: string }) {
+  return (
+    <div className={`error-box ${compact ? 'error-box-compact' : ''}`} role="alert">
+      <div className="error-box-main"><Icon name="alert" size={18} /><span>{message}</span></div>
+      {onRetry && (
+        <Button type="button" className="button-secondary button-small" onClick={onRetry}>
+          <Icon name="refresh" size={13} />
+          <span>{retryLabel}</span>
+        </Button>
+      )}
+    </div>
+  )
+}
+
+export function Modal({
+  isOpen,
+  onClose,
+  title,
+  description,
+  children,
+  footer,
+  maxWidth = 520,
+}: {
+  isOpen: boolean
+  onClose: () => void
+  title: ReactNode
+  description?: ReactNode
+  children: ReactNode
+  footer?: ReactNode
+  maxWidth?: number
+}) {
+  const titleId = useId()
+  useEffect(() => {
+    if (!isOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [isOpen, onClose])
+
+  if (!isOpen) return null
+  return (
+    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+      <div
+        className="modal-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        style={{ maxWidth: `min(${maxWidth}px, calc(100vw - 32px))` }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="modal-header">
+          <div className="modal-header-left">
+            <div>
+              <h3 id={titleId} className="modal-title">{title}</h3>
+              {description && <p className="modal-desc">{description}</p>}
+            </div>
+          </div>
+          <button type="button" className="modal-close-btn" aria-label="Close dialog" onClick={onClose}>
+            <Icon name="close" size={16} />
+          </button>
+        </div>
+        <div className="modal-body">{children}</div>
+        {footer && <div className="modal-footer">{footer}</div>}
+      </div>
+    </div>
+  )
 }
 
 type Toast = { id: number; kind: 'success' | 'error'; message: string }
@@ -156,8 +239,23 @@ export function useToast() {
   return value
 }
 
-export function FormField({ label, hint, children, className = '' }: { label: string; hint?: string; children: ReactNode; className?: string }) {
-  return <label className={`form-field ${className}`}><span className="field-label">{label}</span>{children}{hint && <span className="field-hint">{hint}</span>}</label>
+export function FormField({ label, hint, error, required = false, htmlFor, children, className = '' }: { label: string; hint?: string; error?: string; required?: boolean; htmlFor?: string; children: ReactNode; className?: string }) {
+  return (
+    <label htmlFor={htmlFor} className={`form-field ${error ? 'has-error' : ''} ${className}`}>
+      <span className="field-label">
+        {label}
+        {required && <span className="form-required-star" aria-hidden="true">*</span>}
+      </span>
+      {children}
+      {error && (
+        <span className="form-field-error" role="alert">
+          <Icon name="alert" size={13} />
+          <span>{error}</span>
+        </span>
+      )}
+      {hint && <span className="field-hint">{hint}</span>}
+    </label>
+  )
 }
 
 export function PageIntro({ eyebrow, title, description, action, children }: { eyebrow?: string; title: string; description?: string; action?: ReactNode; children?: ReactNode }) {

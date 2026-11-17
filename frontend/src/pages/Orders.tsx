@@ -1255,10 +1255,10 @@ export function Orders() {
               className={`analytics-tab-btn ${isActive ? 'active' : ''}`}
               onClick={() => setTabAndUrl(tab.key)}
               title={tab.hint}
-              style={isActive ? { borderColor: tab.color, color: tab.color } : undefined}
+              style={isActive && tab.color !== '#0f172a' ? { background: tab.color, borderColor: tab.color, color: '#ffffff' } : undefined}
             >
               <span>{tab.label}</span>
-              <span className="tab-badge" style={isActive ? { background: tab.color, color: 'var(--panel)' } : undefined}>
+              <span className="tab-badge" style={isActive ? { background: 'rgba(15, 23, 42, 0.32)', color: '#ffffff' } : undefined}>
                 {count ?? '…'}
               </span>
             </button>
@@ -1326,7 +1326,7 @@ export function Orders() {
           <button
             type="button"
             className="btn-export"
-            style={{ background: 'var(--blue)', color: 'var(--panel)', borderColor: 'var(--blue-hover)' }}
+            style={{ background: '#2563eb', color: '#ffffff', borderColor: '#1d4ed8' }}
             onClick={handleSyncShopify}
             disabled={isSyncingShopify}
             title="Fetch new and historical orders directly from Shopify"
@@ -1339,7 +1339,7 @@ export function Orders() {
           <button
             type="button"
             className="btn-export"
-            style={{ background: 'var(--green)', color: 'var(--panel)', borderColor: 'var(--green)' }}
+            style={{ background: '#047857', color: '#ffffff', borderColor: '#065f46' }}
             onClick={handleSyncChannel}
             disabled={isSyncingChannel}
             title="Synchronize all unfulfilled orders with Delhivery One Shopify channel"
@@ -1352,13 +1352,13 @@ export function Orders() {
           <button
             type="button"
             className="btn-export"
-            style={{ background: 'var(--purple)', color: 'var(--panel)', borderColor: 'var(--purple)' }}
+            style={{ background: '#6d28d9', color: '#ffffff', borderColor: '#5b21b6' }}
             onClick={handleSyncExternalFulfillments}
             disabled={isSyncingExternal}
             title="Automatically check and fetch fulfillment tracking & carrier for orders manifested via OMS Guru, external apps, or directly in Delhivery ONE panel"
           >
             <Icon name="zap" size={15} />
-            <span>{isSyncingExternal ? 'Fetching AWBs…' : '⚡ Fetch External AWBs'}</span>
+            <span>{isSyncingExternal ? 'Fetching AWBs…' : 'Fetch External AWBs'}</span>
           </button>
 
           {/* Download Report Button */}
@@ -1397,6 +1397,7 @@ export function Orders() {
                     <input
                       type="checkbox"
                       className="custom-checkbox"
+                      aria-label="Select all orders"
                       checked={isAllSelected}
                       ref={(el) => {
                         if (el) el.indeterminate = isSomeSelected && !isAllSelected
@@ -1434,6 +1435,7 @@ export function Orders() {
                         <input
                           type="checkbox"
                           className="custom-checkbox"
+                          aria-label={`Select order ${order.shopifyOrderName}`}
                           checked={isChecked}
                           onChange={(e) => toggleSelectOne(order.id, e)}
                         />
@@ -1825,8 +1827,8 @@ export function Orders() {
                 type="button"
                 className="modal-btn-primary"
                 style={{
-                  background: 'var(--blue)',
-                  color: 'var(--panel)',
+                  background: '#2563eb',
+                  color: '#ffffff',
                   border: 'none',
                   borderRadius: '6px',
                   padding: '8px 16px',
@@ -2217,13 +2219,13 @@ export function Orders() {
                 style={{
                   background:
                     ndrActionType === 'RE-ATTEMPT'
-                      ? 'var(--blue)'
+                      ? '#2563eb'
                       : ndrActionType === 'DEFER_DLV'
-                        ? 'var(--purple)'
+                        ? '#6d28d9'
                         : ndrActionType === 'EDIT_DETAILS'
-                          ? 'var(--green)'
-                          : 'var(--red)',
-                  color: 'var(--panel)',
+                          ? '#047857'
+                          : '#dc2626',
+                  color: '#ffffff',
                   border: 'none',
                   borderRadius: '6px',
                   padding: '8px 16px',

@@ -257,65 +257,65 @@ export function Products() {
       />
 
       {/* KPI Metrics Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', gap: '12px', marginBottom: '20px' }}>
-        <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '10px', padding: '14px 16px' }}>
-          <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>
+      <div className="kpi-grid-6">
+        <div className="surface-card">
+          <div style={{ fontSize: '11px', color: 'var(--muted)', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>
             Total Catalog
           </div>
           <div style={{ fontSize: '22px', fontWeight: 800, color: 'var(--ink)' }}>
             {summary.total.toLocaleString()}
           </div>
-          <span style={{ fontSize: '10px', color: '#64748b' }}>All Shopify listings</span>
+          <span style={{ fontSize: '11px', color: 'var(--muted)' }}>All Shopify listings</span>
         </div>
 
-        <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '10px', padding: '14px 16px' }}>
-          <div style={{ fontSize: '11px', color: '#047857', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>
+        <div className="surface-card">
+          <div style={{ fontSize: '11px', color: 'var(--tone-success-fg)', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>
             Active Published
           </div>
-          <div style={{ fontSize: '22px', fontWeight: 800, color: '#059669' }}>
+          <div style={{ fontSize: '22px', fontWeight: 800, color: 'var(--tone-success-fg)' }}>
             {summary.active.toLocaleString()}
           </div>
-          <span style={{ fontSize: '10px', color: '#059669' }}>Live on storefront</span>
+          <span style={{ fontSize: '11px', color: 'var(--tone-success-fg)' }}>Live on storefront</span>
         </div>
 
-        <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '10px', padding: '14px 16px' }}>
-          <div style={{ fontSize: '11px', color: '#d97706', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>
+        <div className="surface-card">
+          <div style={{ fontSize: '11px', color: 'var(--tone-warning-fg)', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>
             Draft Listings
           </div>
-          <div style={{ fontSize: '22px', fontWeight: 800, color: '#d97706' }}>
+          <div style={{ fontSize: '22px', fontWeight: 800, color: 'var(--tone-warning-fg)' }}>
             {summary.draft.toLocaleString()}
           </div>
-          <span style={{ fontSize: '10px', color: '#d97706' }}>Unpublished edits</span>
+          <span style={{ fontSize: '11px', color: 'var(--tone-warning-fg)' }}>Unpublished edits</span>
         </div>
 
-        <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '10px', padding: '14px 16px' }}>
-          <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>
+        <div className="surface-card">
+          <div style={{ fontSize: '11px', color: 'var(--muted)', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>
             Archived
           </div>
-          <div style={{ fontSize: '22px', fontWeight: 800, color: '#64748b' }}>
+          <div style={{ fontSize: '22px', fontWeight: 800, color: 'var(--ink-secondary)' }}>
             {summary.archived.toLocaleString()}
           </div>
-          <span style={{ fontSize: '10px', color: '#64748b' }}>Inactive archive</span>
+          <span style={{ fontSize: '11px', color: 'var(--muted)' }}>Inactive archive</span>
         </div>
 
-        <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '10px', padding: '14px 16px' }}>
-          <div style={{ fontSize: '11px', color: '#dc2626', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>
+        <div className="surface-card">
+          <div style={{ fontSize: '11px', color: 'var(--tone-danger-fg)', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>
             Sold Out (0 Stock)
           </div>
-          <div style={{ fontSize: '22px', fontWeight: 800, color: '#dc2626' }}>
+          <div style={{ fontSize: '22px', fontWeight: 800, color: 'var(--tone-danger-fg)' }}>
             {summary.outOfStock.toLocaleString()}
           </div>
-          <span style={{ fontSize: '10px', color: '#dc2626' }}>Requires restocking</span>
+          <span style={{ fontSize: '11px', color: 'var(--tone-danger-fg)' }}>Requires restocking</span>
         </div>
 
-        <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '10px', padding: '14px 16px' }}>
-          <div style={{ fontSize: '11px', color: '#2563eb', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>
+        <div className="surface-card">
+          <div style={{ fontSize: '11px', color: 'var(--tone-info-fg)', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>
             Warehouse Stock
           </div>
-          <div style={{ fontSize: '22px', fontWeight: 800, color: '#2563eb' }}>
+          <div style={{ fontSize: '22px', fontWeight: 800, color: 'var(--tone-info-fg)' }}>
             {summary.totalInventory.toLocaleString()}
           </div>
-          <span style={{ fontSize: '10px', color: '#2563eb' }}>Units in Surat Hub</span>
+          <span style={{ fontSize: '11px', color: 'var(--tone-info-fg)' }}>Units in Surat Hub</span>
         </div>
       </div>
 
@@ -323,7 +323,7 @@ export function Products() {
       <Panel>
         {/* Navigation Tabs */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--line)', padding: '0 16px', gap: '8px', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', gap: '4px' }}>
+          <div style={{ display: 'flex', gap: '4px', maxWidth: '100%', overflowX: 'auto' }}>
             <button
               type="button"
               className={`tab-btn ${activeTab === 'all' ? 'active' : ''}`}
@@ -332,8 +332,9 @@ export function Products() {
                 padding: '12px 14px',
                 fontSize: '12.5px',
                 fontWeight: activeTab === 'all' ? 750 : 600,
-                color: activeTab === 'all' ? '#2563eb' : '#64748b',
-                borderBottom: activeTab === 'all' ? '2px solid #2563eb' : '2px solid transparent',
+                color: activeTab === 'all' ? 'var(--tone-info-fg)' : 'var(--muted)',
+                borderBottom: activeTab === 'all' ? '2px solid var(--tone-info-fg)' : '2px solid transparent',
+                whiteSpace: 'nowrap',
                 background: 'transparent',
                 borderTop: 'none',
                 borderLeft: 'none',
@@ -351,8 +352,9 @@ export function Products() {
                 padding: '12px 14px',
                 fontSize: '12.5px',
                 fontWeight: activeTab === 'active' ? 750 : 600,
-                color: activeTab === 'active' ? '#059669' : '#64748b',
-                borderBottom: activeTab === 'active' ? '2px solid #059669' : '2px solid transparent',
+                color: activeTab === 'active' ? 'var(--tone-success-fg)' : 'var(--muted)',
+                borderBottom: activeTab === 'active' ? '2px solid var(--tone-success-fg)' : '2px solid transparent',
+                whiteSpace: 'nowrap',
                 background: 'transparent',
                 borderTop: 'none',
                 borderLeft: 'none',
@@ -370,8 +372,9 @@ export function Products() {
                 padding: '12px 14px',
                 fontSize: '12.5px',
                 fontWeight: activeTab === 'draft' ? 750 : 600,
-                color: activeTab === 'draft' ? '#d97706' : '#64748b',
-                borderBottom: activeTab === 'draft' ? '2px solid #d97706' : '2px solid transparent',
+                color: activeTab === 'draft' ? 'var(--tone-warning-fg)' : 'var(--muted)',
+                borderBottom: activeTab === 'draft' ? '2px solid var(--tone-warning-fg)' : '2px solid transparent',
+                whiteSpace: 'nowrap',
                 background: 'transparent',
                 borderTop: 'none',
                 borderLeft: 'none',
@@ -389,8 +392,9 @@ export function Products() {
                 padding: '12px 14px',
                 fontSize: '12.5px',
                 fontWeight: activeTab === 'archived' ? 750 : 600,
-                color: activeTab === 'archived' ? '#475569' : '#64748b',
-                borderBottom: activeTab === 'archived' ? '2px solid #475569' : '2px solid transparent',
+                color: activeTab === 'archived' ? 'var(--ink)' : 'var(--muted)',
+                borderBottom: activeTab === 'archived' ? '2px solid var(--ink)' : '2px solid transparent',
+                whiteSpace: 'nowrap',
                 background: 'transparent',
                 borderTop: 'none',
                 borderLeft: 'none',
@@ -408,8 +412,9 @@ export function Products() {
                 padding: '12px 14px',
                 fontSize: '12.5px',
                 fontWeight: activeTab === 'low_stock' ? 750 : 600,
-                color: activeTab === 'low_stock' ? '#dc2626' : '#64748b',
-                borderBottom: activeTab === 'low_stock' ? '2px solid #dc2626' : '2px solid transparent',
+                color: activeTab === 'low_stock' ? 'var(--tone-danger-fg)' : 'var(--muted)',
+                borderBottom: activeTab === 'low_stock' ? '2px solid var(--tone-danger-fg)' : '2px solid transparent',
+                whiteSpace: 'nowrap',
                 background: 'transparent',
                 borderTop: 'none',
                 borderLeft: 'none',
@@ -420,7 +425,7 @@ export function Products() {
             </button>
           </div>
 
-          <div style={{ fontSize: '11px', color: '#64748b' }}>
+          <div style={{ fontSize: '11px', color: 'var(--muted)' }}>
             Showing <strong>{filteredProducts.length}</strong> listings
           </div>
         </div>
@@ -434,38 +439,41 @@ export function Products() {
             </span>
             <input
               type="text"
+              aria-label="Search products by title, SKU, or tags"
               placeholder="Search by title, SKU, or tags…"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               style={{
                 width: '100%',
-                height: '34px',
-                padding: '0 10px 0 32px',
-                border: '1px solid var(--line)',
+                height: '36px',
+                padding: '0 32px 0 32px',
+                border: '1px solid var(--border-strong)',
                 borderRadius: '7px',
-                fontSize: '12px',
-                background: '#ffffff',
-                outline: 'none',
+                fontSize: '12.5px',
+                background: 'var(--panel)',
+                color: 'var(--ink)',
               }}
             />
             {searchQuery && (
               <button
                 type="button"
+                aria-label="Clear search"
                 onClick={() => setSearchQuery('')}
-                style={{ position: 'absolute', right: '8px', top: '8px', background: 'none', border: 'none', color: '#94a3b8' }}
+                style={{ position: 'absolute', right: '8px', top: '8px', background: 'none', border: 'none', color: 'var(--muted)' }}
               >
-                ✕
+                <Icon name="close" size={14} />
               </button>
             )}
           </div>
 
           {/* Product Type Filter */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span style={{ fontSize: '11.5px', color: '#64748b', fontWeight: 600 }}>Type:</span>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ fontSize: '12px', color: 'var(--muted)', fontWeight: 600 }}>Type:</span>
             <select
+              aria-label="Filter by product type"
               value={selectedType}
               onChange={(e) => setSelectedType(e.target.value)}
-              style={{ height: '34px', padding: '0 10px', borderRadius: '7px', border: '1px solid var(--line)', fontSize: '12px', background: '#fff' }}
+              style={{ height: '36px', padding: '0 10px', borderRadius: '7px', border: '1px solid var(--border-strong)', fontSize: '12.5px', background: 'var(--panel)', color: 'var(--ink)' }}
             >
               {productTypes.map((t) => (
                 <option key={t} value={t}>
@@ -473,15 +481,16 @@ export function Products() {
                 </option>
               ))}
             </select>
-          </div>
+          </label>
 
           {/* Sort By */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span style={{ fontSize: '11.5px', color: '#64748b', fontWeight: 600 }}>Sort:</span>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ fontSize: '12px', color: 'var(--muted)', fontWeight: 600 }}>Sort:</span>
             <select
+              aria-label="Sort products"
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value as any)}
-              style={{ height: '34px', padding: '0 10px', borderRadius: '7px', border: '1px solid var(--line)', fontSize: '12px', background: '#fff' }}
+              style={{ height: '36px', padding: '0 10px', borderRadius: '7px', border: '1px solid var(--border-strong)', fontSize: '12.5px', background: 'var(--panel)', color: 'var(--ink)' }}
             >
               <option value="newest">Newest First</option>
               <option value="oldest">Oldest First</option>
@@ -489,7 +498,7 @@ export function Products() {
               <option value="stock_high">Highest Inventory</option>
               <option value="stock_low">Lowest Inventory</option>
             </select>
-          </div>
+          </label>
         </div>
 
         {/* Products Table */}
@@ -542,7 +551,7 @@ export function Products() {
                             height: '42px',
                             borderRadius: '6px',
                             border: '1px solid var(--line)',
-                            background: '#f1f5f9',
+                            background: 'var(--surface-elevated)',
                             overflow: 'hidden',
                             display: 'grid',
                             placeItems: 'center',
@@ -566,7 +575,7 @@ export function Products() {
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                           <strong style={{ fontSize: '13px', color: 'var(--ink)' }}>{prod.title}</strong>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <span style={{ fontSize: '11px', color: '#64748b' }}>
+                            <span style={{ fontSize: '11px', color: 'var(--muted)' }}>
                               ID: <code style={{ fontSize: '10.5px' }}>{prod.id}</code>
                             </span>
                             {prod.handle && (
@@ -576,7 +585,7 @@ export function Products() {
                                 rel="noopener noreferrer"
                                 style={{
                                   fontSize: '10.5px',
-                                  color: '#2563eb',
+                                  color: 'var(--tone-info-fg)',
                                   display: 'inline-flex',
                                   alignItems: 'center',
                                   gap: '2px',
@@ -597,7 +606,7 @@ export function Products() {
                         <span style={{ fontSize: '11.5px', color: 'var(--ink)', fontWeight: 600, display: 'block' }}>
                           {prod.product_type || 'Ethnic Wear'}
                         </span>
-                        <span style={{ fontSize: '10.5px', color: '#64748b' }}>{prod.vendor || 'Youthnic'}</span>
+                        <span style={{ fontSize: '10.5px', color: 'var(--muted)' }}>{prod.vendor || 'Youthnic'}</span>
                       </td>
 
                       {/* Variants & Sizes */}
@@ -608,9 +617,9 @@ export function Products() {
                               key={v.id}
                               style={{
                                 fontSize: '10px',
-                                background: (v.inventory_quantity ?? 0) > 0 ? '#f0fdf4' : '#fef2f2',
-                                color: (v.inventory_quantity ?? 0) > 0 ? '#166534' : '#991b1b',
-                                border: `1px solid ${(v.inventory_quantity ?? 0) > 0 ? '#bbf7d0' : '#fecdd3'}`,
+                                background: (v.inventory_quantity ?? 0) > 0 ? 'var(--tone-success-bg)' : 'var(--tone-danger-bg)',
+                                color: (v.inventory_quantity ?? 0) > 0 ? 'var(--tone-success-fg)' : 'var(--tone-danger-fg)',
+                                border: `1px solid ${(v.inventory_quantity ?? 0) > 0 ? 'var(--tone-success-border)' : 'var(--tone-danger-border)'}`,
                                 padding: '1px 5px',
                                 borderRadius: '4px',
                                 fontWeight: 600,
@@ -621,7 +630,7 @@ export function Products() {
                             </span>
                           ))}
                           {(prod.variants?.length ?? 0) > 5 && (
-                            <span style={{ fontSize: '10px', color: '#64748b' }}>
+                            <span style={{ fontSize: '10px', color: 'var(--muted)' }}>
                               +{(prod.variants?.length ?? 0) - 5} more
                             </span>
                           )}
@@ -630,12 +639,12 @@ export function Products() {
 
                       {/* Price */}
                       <td>
-                        <strong style={{ fontSize: '13px', color: '#0f172a' }}>
+                        <strong style={{ fontSize: '13px', color: 'var(--ink)' }}>
                           ₹{Number(minPrice).toLocaleString()}
                           {minPrice !== maxPrice && ` - ₹${Number(maxPrice).toLocaleString()}`}
                         </strong>
                         {compareAt && (
-                          <div style={{ fontSize: '10.5px', color: '#94a3b8', textDecoration: 'line-through' }}>
+                          <div style={{ fontSize: '11px', color: 'var(--muted-light)', textDecoration: 'line-through' }}>
                             ₹{Number(compareAt).toLocaleString()}
                           </div>
                         )}
@@ -647,9 +656,9 @@ export function Products() {
                           <span
                             className="status-badge"
                             style={{
-                              background: totalStock > 10 ? '#f0fdf4' : totalStock > 0 ? '#fefce8' : '#fef2f2',
-                              color: totalStock > 10 ? '#166534' : totalStock > 0 ? '#854d0e' : '#991b1b',
-                              borderColor: totalStock > 10 ? '#bbf7d0' : totalStock > 0 ? '#fef08a' : '#fecdd3',
+                              background: totalStock > 10 ? 'var(--tone-success-bg)' : totalStock > 0 ? 'var(--tone-warning-bg)' : 'var(--tone-danger-bg)',
+                              color: totalStock > 10 ? 'var(--tone-success-fg)' : totalStock > 0 ? 'var(--tone-warning-fg)' : 'var(--tone-danger-fg)',
+                              borderColor: totalStock > 10 ? 'var(--tone-success-border)' : totalStock > 0 ? 'var(--tone-warning-border)' : 'var(--tone-danger-border)',
                             }}
                           >
                             <span
@@ -675,6 +684,7 @@ export function Products() {
                       {/* Status Dropdown */}
                       <td>
                         <select
+                          aria-label={`Change status for ${prod.title}`}
                           value={prod.status}
                           onChange={(e) =>
                             statusMutation.mutate({
@@ -691,16 +701,16 @@ export function Products() {
                             border: '1px solid var(--line)',
                             background:
                               prod.status === 'active'
-                                ? '#ecfdf5'
+                                ? 'var(--tone-success-bg)'
                                 : prod.status === 'draft'
-                                ? '#fffbeb'
-                                : '#f1f5f9',
+                                ? 'var(--tone-warning-bg)'
+                                : 'var(--tone-neutral-bg)',
                             color:
                               prod.status === 'active'
-                                ? '#065f46'
+                                ? 'var(--tone-success-fg)'
                                 : prod.status === 'draft'
-                                ? '#92400e'
-                                : '#475569',
+                                ? 'var(--tone-warning-fg)'
+                                : 'var(--tone-neutral-fg)',
                             cursor: 'pointer',
                           }}
                         >
@@ -767,7 +777,7 @@ export function Products() {
           <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '500px' }}>
             <div className="modal-header">
               <div className="modal-header-left">
-                <div className="modal-icon-badge" style={{ background: '#dbeafe', color: '#2563eb' }}>
+                <div className="modal-icon-badge" style={{ background: 'var(--tone-info-bg)', color: 'var(--tone-info-fg)' }}>
                   <Icon name="box" size={20} />
                 </div>
                 <div>
@@ -778,14 +788,15 @@ export function Products() {
               <button
                 type="button"
                 className="modal-close-btn"
+                aria-label="Close modal"
                 onClick={() => setStockAdjustProduct(null)}
               >
-                ✕
+                <Icon name="close" size={16} />
               </button>
             </div>
 
             <div className="modal-body">
-              <p style={{ margin: '0 0 12px 0', fontSize: '12px', color: '#475569' }}>
+              <p style={{ margin: '0 0 12px 0', fontSize: '12px', color: 'var(--muted)' }}>
                 Updates available stock levels directly at the primary Surat Warehouse location (<code>70444449991</code>).
               </p>
 
@@ -800,14 +811,15 @@ export function Products() {
                         alignItems: 'center',
                         justifyContent: 'space-between',
                         padding: '10px 12px',
-                        background: '#f8fafc',
+                        background: 'var(--surface-elevated)',
                         border: '1px solid var(--line)',
                         borderRadius: '8px',
+                        gap: '10px',
                       }}
                     >
                       <div>
                         <strong style={{ fontSize: '13px', color: 'var(--ink)' }}>{v.title}</strong>
-                        <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>
+                        <span style={{ fontSize: '11px', color: 'var(--muted)', display: 'block' }}>
                           SKU: {v.sku || 'N/A'} · Price: ₹{v.price}
                         </span>
                       </div>
@@ -815,6 +827,7 @@ export function Products() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <button
                           type="button"
+                          aria-label={`Decrease quantity for ${v.title}`}
                           onClick={() =>
                             setVariantStockInputs((prev) => ({
                               ...prev,
@@ -822,12 +835,14 @@ export function Products() {
                             }))
                           }
                           style={{
-                            width: '28px',
-                            height: '28px',
+                            width: '32px',
+                            height: '32px',
                             borderRadius: '6px',
                             border: '1px solid var(--line)',
-                            background: '#fff',
+                            background: 'var(--panel)',
+                            color: 'var(--ink)',
                             fontWeight: 700,
+                            cursor: 'pointer',
                           }}
                         >
                           -
@@ -836,6 +851,7 @@ export function Products() {
                         <input
                           type="number"
                           min="0"
+                          aria-label={`Quantity for ${v.title}`}
                           value={currentQty}
                           onChange={(e) =>
                             setVariantStockInputs((prev) => ({
@@ -845,16 +861,19 @@ export function Products() {
                           }
                           style={{
                             width: '65px',
-                            height: '28px',
+                            height: '32px',
                             textAlign: 'center',
                             fontWeight: 700,
                             borderRadius: '6px',
                             border: '1px solid var(--line)',
+                            background: 'var(--panel)',
+                            color: 'var(--ink)',
                           }}
                         />
 
                         <button
                           type="button"
+                          aria-label={`Increase quantity for ${v.title}`}
                           onClick={() =>
                             setVariantStockInputs((prev) => ({
                               ...prev,
@@ -862,12 +881,14 @@ export function Products() {
                             }))
                           }
                           style={{
-                            width: '28px',
-                            height: '28px',
+                            width: '32px',
+                            height: '32px',
                             borderRadius: '6px',
                             border: '1px solid var(--line)',
-                            background: '#fff',
+                            background: 'var(--panel)',
+                            color: 'var(--ink)',
                             fontWeight: 700,
+                            cursor: 'pointer',
                           }}
                         >
                           +
@@ -917,18 +938,19 @@ export function Products() {
               <button
                 type="button"
                 className="modal-close-btn"
+                aria-label="Close modal"
                 onClick={() => setDeletingProduct(null)}
               >
-                ✕
+                <Icon name="close" size={16} />
               </button>
             </div>
 
             <div className="modal-body">
-              <p style={{ margin: 0, fontSize: '13px', color: '#334155' }}>
+              <p style={{ margin: 0, fontSize: '13px', color: 'var(--ink-secondary)' }}>
                 Are you sure you want to delete <strong>{deletingProduct.title}</strong>?
               </p>
-              <div style={{ marginTop: '12px', background: '#fff1f2', border: '1px solid #fecdd3', borderRadius: '8px', padding: '10px 12px', fontSize: '11.5px', color: '#9f1239' }}>
-                ⚠️ This will permanently remove the product and all its variants from your Shopify store (<code>youthnic2024.myshopify.com</code>).
+              <div style={{ marginTop: '12px', background: 'var(--tone-danger-bg)', border: '1px solid var(--tone-danger-border)', borderRadius: '8px', padding: '10px 12px', fontSize: '11.5px', color: 'var(--tone-danger-fg)' }}>
+                This will permanently remove the product and all its variants from your Shopify store (<code>youthnic2024.myshopify.com</code>).
               </div>
             </div>
 
@@ -1036,10 +1058,10 @@ function AddProductModal({
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '680px' }}>
+      <div className="modal-card" role="dialog" aria-modal="true" aria-label="Create New Shopify Listing" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '680px' }}>
         <div className="modal-header">
           <div className="modal-header-left">
-            <div className="modal-icon-badge" style={{ background: '#dbeafe', color: '#2563eb' }}>
+            <div className="modal-icon-badge" style={{ background: 'var(--tone-info-bg)', color: 'var(--tone-info-fg)' }}>
               <Icon name="plus" size={20} />
             </div>
             <div>
@@ -1047,8 +1069,8 @@ function AddProductModal({
               <p className="modal-desc">Publish directly to youthnic2024.myshopify.com</p>
             </div>
           </div>
-          <button type="button" className="modal-close-btn" onClick={onClose}>
-            ✕
+          <button type="button" className="modal-close-btn" aria-label="Close modal" onClick={onClose}>
+            <Icon name="close" size={16} />
           </button>
         </div>
 
@@ -1065,7 +1087,7 @@ function AddProductModal({
               />
             </FormField>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
+            <div className="kpi-grid-3" style={{ gap: '10px' }}>
               <FormField label="Vendor">
                 <input
                   type="text"
@@ -1107,13 +1129,14 @@ function AddProductModal({
             </FormField>
 
             {/* Media / Images */}
-            <div style={{ background: '#f8fafc', border: '1px solid var(--line)', borderRadius: '8px', padding: '12px' }}>
+            <div style={{ background: 'var(--surface-elevated)', border: '1px solid var(--line)', borderRadius: '8px', padding: '12px' }}>
               <span style={{ fontSize: '11.5px', fontWeight: 700, color: 'var(--ink)', display: 'block', marginBottom: '6px' }}>
-                📸 Product Images (URLs)
+                Product Images (URLs)
               </span>
               <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
                 <input
                   type="url"
+                  aria-label="Product image URL"
                   placeholder="https://cdn.shopify.com/s/files/... or image link"
                   value={imageUrl}
                   onChange={(e) => setImageUrl(e.target.value)}
@@ -1146,24 +1169,25 @@ function AddProductModal({
                       <img src={img} alt="Preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                       <button
                         type="button"
+                        aria-label={`Remove image ${i + 1}`}
                         onClick={() => handleRemoveImage(i)}
                         style={{
                           position: 'absolute',
                           top: 2,
                           right: 2,
                           background: 'rgba(0,0,0,0.6)',
-                          color: '#fff',
+                          color: '#ffffff',
                           border: 'none',
                           borderRadius: '50%',
-                          width: '16px',
-                          height: '16px',
+                          width: '18px',
+                          height: '18px',
                           fontSize: '10px',
                           display: 'grid',
                           placeItems: 'center',
                           cursor: 'pointer',
                         }}
                       >
-                        ✕
+                        <Icon name="close" size={10} />
                       </button>
                     </div>
                   ))}
@@ -1172,9 +1196,9 @@ function AddProductModal({
             </div>
 
             {/* Options & Variants Generation */}
-            <div style={{ background: '#f8fafc', border: '1px solid var(--line)', borderRadius: '8px', padding: '12px' }}>
+            <div style={{ background: 'var(--surface-elevated)', border: '1px solid var(--line)', borderRadius: '8px', padding: '12px' }}>
               <span style={{ fontSize: '11.5px', fontWeight: 700, color: 'var(--ink)', display: 'block', marginBottom: '8px' }}>
-                🏷️ Pricing & Size Variants Generator
+                Pricing & Size Variants Generator
               </span>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '8px' }}>
@@ -1320,10 +1344,10 @@ function EditProductModal({
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '680px' }}>
+      <div className="modal-card" role="dialog" aria-modal="true" aria-label={`Edit Listing: ${product.title}`} onClick={(e) => e.stopPropagation()} style={{ maxWidth: '680px' }}>
         <div className="modal-header">
           <div className="modal-header-left">
-            <div className="modal-icon-badge" style={{ background: '#eff6ff', color: '#2563eb' }}>
+            <div className="modal-icon-badge" style={{ background: 'var(--tone-info-bg)', color: 'var(--tone-info-fg)' }}>
               <Icon name="tool" size={20} />
             </div>
             <div>
@@ -1331,8 +1355,8 @@ function EditProductModal({
               <p className="modal-desc">Shopify ID: {product.id}</p>
             </div>
           </div>
-          <button type="button" className="modal-close-btn" onClick={onClose}>
-            ✕
+          <button type="button" className="modal-close-btn" aria-label="Close modal" onClick={onClose}>
+            <Icon name="close" size={16} />
           </button>
         </div>
 
@@ -1348,7 +1372,7 @@ function EditProductModal({
               />
             </FormField>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
+            <div className="kpi-grid-3" style={{ gap: '10px' }}>
               <FormField label="Vendor">
                 <input
                   type="text"
@@ -1373,9 +1397,9 @@ function EditProductModal({
                   onChange={(e) => setStatus(e.target.value as any)}
                   style={{ width: '100%' }}
                 >
-                  <option value="active">🟢 Active (Live Online)</option>
-                  <option value="draft">🟡 Draft (Unpublished)</option>
-                  <option value="archived">⚪ Archived</option>
+                  <option value="active">Active (Live Online)</option>
+                  <option value="draft">Draft (Unpublished)</option>
+                  <option value="archived">Archived</option>
                 </select>
               </FormField>
             </div>
@@ -1390,7 +1414,7 @@ function EditProductModal({
             </FormField>
 
             {/* Variants table */}
-            <div style={{ background: '#f8fafc', border: '1px solid var(--line)', borderRadius: '8px', padding: '12px' }}>
+            <div style={{ background: 'var(--surface-elevated)', border: '1px solid var(--line)', borderRadius: '8px', padding: '12px' }}>
               <span style={{ fontSize: '11.5px', fontWeight: 700, color: 'var(--ink)', display: 'block', marginBottom: '8px' }}>
                 Variants, Pricing & Stock
               </span>
@@ -1403,10 +1427,10 @@ function EditProductModal({
                       key={v.id}
                       style={{
                         display: 'grid',
-                        gridTemplateColumns: '1fr 1fr 1fr 1fr',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))',
                         gap: '8px',
                         alignItems: 'center',
-                        background: '#ffffff',
+                        background: 'var(--panel)',
                         border: '1px solid var(--line)',
                         borderRadius: '6px',
                         padding: '8px 10px',
@@ -1414,11 +1438,11 @@ function EditProductModal({
                     >
                       <div>
                         <strong style={{ fontSize: '12px', color: 'var(--ink)' }}>{v.title}</strong>
-                        <span style={{ fontSize: '10px', color: '#64748b', display: 'block' }}>SKU: {v.sku || 'N/A'}</span>
+                        <span style={{ fontSize: '10px', color: 'var(--muted)', display: 'block' }}>SKU: {v.sku || 'N/A'}</span>
                       </div>
 
                       <div>
-                        <label style={{ fontSize: '9.5px', color: '#64748b', display: 'block' }}>Price (₹)</label>
+                        <label style={{ fontSize: '9.5px', color: 'var(--muted)', display: 'block' }}>Price (₹)</label>
                         <input
                           type="number"
                           value={state?.price ?? v.price}
@@ -1434,7 +1458,7 @@ function EditProductModal({
                       </div>
 
                       <div>
-                        <label style={{ fontSize: '9.5px', color: '#64748b', display: 'block' }}>MRP (₹)</label>
+                        <label style={{ fontSize: '9.5px', color: 'var(--muted)', display: 'block' }}>MRP (₹)</label>
                         <input
                           type="number"
                           value={state?.compare_at_price ?? v.compare_at_price ?? ''}
@@ -1450,7 +1474,7 @@ function EditProductModal({
                       </div>
 
                       <div>
-                        <label style={{ fontSize: '9.5px', color: '#64748b', display: 'block' }}>Stock</label>
+                        <label style={{ fontSize: '9.5px', color: 'var(--muted)', display: 'block' }}>Stock</label>
                         <input
                           type="number"
                           value={state?.inventory_quantity ?? v.inventory_quantity ?? 0}

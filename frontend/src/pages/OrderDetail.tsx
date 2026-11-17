@@ -1025,7 +1025,7 @@ export function OrderDetail() {
                             style={{ marginTop: '2px', cursor: 'pointer' }}
                             title="Click to copy GoKwik ID"
                           >
-                            <span className="mono" style={{ fontSize: '11px', fontWeight: 700, color: '#034694' }}>
+                            <span className="mono" style={{ fontSize: '11px', fontWeight: 700, color: 'var(--tone-info-fg)' }}>
                               {order.gokwikPaymentId}
                             </span>
                             <Icon name="copy" size={11} />
@@ -1044,7 +1044,7 @@ export function OrderDetail() {
                             style={{ marginTop: '2px', cursor: 'pointer' }}
                             title="Click to copy Bank UTR"
                           >
-                            <span className="mono" style={{ fontSize: '11px', fontWeight: 700, color: '#15803d' }}>
+                            <span className="mono" style={{ fontSize: '11px', fontWeight: 700, color: 'var(--tone-success-fg)' }}>
                               {order.paymentReference}
                             </span>
                             <Icon name="copy" size={11} />
@@ -1161,10 +1161,10 @@ export function OrderDetail() {
 
                 {/* Direct Shopify Refund Option */}
                 {canRefund && (
-                  <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: '1px dashed #e2e8f0', display: 'flex', flexDirection: 'column', gap: '7px' }}>
+                  <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: '1px dashed var(--line)', display: 'flex', flexDirection: 'column', gap: '7px' }}>
                     <Button
                       className="button-secondary full-button"
-                      style={{ borderColor: '#fca5a5', color: '#b91c1c', background: '#fff5f5' }}
+                      style={{ borderColor: 'var(--tone-danger-border)', color: 'var(--tone-danger-fg)', background: 'var(--tone-danger-bg)' }}
                       loading={refundMutation.isPending}
                       onClick={() => refundMutation.mutate()}
                     >
@@ -1177,14 +1177,14 @@ export function OrderDetail() {
                   </div>
                 )}
                 {isCodOrder && !isRefundedOrder && (
-                  <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: '1px dashed #e2e8f0', display: 'flex', flexDirection: 'column', gap: '7px' }}>
-                    <div style={{ background: '#fef3c7', border: '1px solid #fde68a', borderRadius: '6px', padding: '10px 12px', fontSize: '12px', color: '#92400e' }}>
+                  <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: '1px dashed var(--line)', display: 'flex', flexDirection: 'column', gap: '7px' }}>
+                    <div style={{ background: 'var(--tone-warning-bg)', border: '1px solid var(--tone-warning-border)', borderRadius: '6px', padding: '10px 12px', fontSize: '12px', color: 'var(--tone-warning-fg)' }}>
                       <strong>COD Order:</strong> Refunds cannot be processed via Shopify online gateway. Send money manually via UPI/Bank transfer and log it in the Financial Audit panel below with payment proof (UTR / screenshot).
                     </div>
                   </div>
                 )}
                 {isRefundedOrder && (
-                  <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: '1px dashed #e2e8f0', display: 'flex', alignItems: 'center', gap: '8px', color: '#15803d', fontSize: '12px', fontWeight: 600 }}>
+                  <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: '1px dashed var(--line)', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--tone-success-fg)', fontSize: '12px', fontWeight: 600 }}>
                     <Icon name="check" size={16} />
                     <span>Order has been refunded (Single refund completed).</span>
                   </div>
@@ -2009,7 +2009,7 @@ export function OrderDetail() {
             </div>
 
             {order.shipment && (
-              <div style={{ background: '#fff1f2', border: '1px solid #fecdd3', borderRadius: '8px', padding: '12px', fontSize: '12px' }}>
+              <div style={{ background: 'var(--tone-danger-bg)', border: '1px solid var(--tone-danger-border)', color: 'var(--tone-danger-fg)', borderRadius: '8px', padding: '12px', fontSize: '12px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
                   <span style={{ fontWeight: 700, color: '#9f1239' }}>
                     Courier Status: {order.shipment.courier || 'Delhivery'} (AWB: {order.shipment.waybillNumber})
@@ -2221,7 +2221,7 @@ export function OrderDetail() {
               </div>
             )}
 
-            <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: '8px', padding: '10px 12px', fontSize: '11px', color: '#065f46', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div style={{ background: 'var(--tone-success-bg)', border: '1px solid var(--tone-success-border)', borderRadius: '8px', padding: '10px 12px', fontSize: '11px', color: 'var(--tone-success-fg)', display: 'flex', alignItems: 'center', gap: '8px' }}>
               <Icon name="check" size={16} />
               <span>Sent via KwikEngage Official WhatsApp Cloud & synced with OMS Notification history.</span>
             </div>
@@ -2239,7 +2239,7 @@ export function OrderDetail() {
             <button
               type="button"
               className="button-primary"
-              style={{ background: '#16a34a', borderColor: '#15803d' }}
+              style={{ background: 'var(--emerald-solid)', borderColor: 'var(--emerald-solid)' }}
               disabled={isSendingWhatsApp || (!order.customerPhone && whatsAppTrigger !== 'CUSTOM')}
               onClick={handleSendWhatsApp}
             >
@@ -2268,6 +2268,7 @@ export function OrderDetail() {
             <button
               type="button"
               className="modal-close-btn"
+              aria-label="Close modal"
               disabled={action.isPending}
               onClick={() => setShowCarrierModal(false)}
             >
@@ -2287,17 +2288,15 @@ export function OrderDetail() {
                 {shippingOptions.map((opt, idx) => {
                   const isSelected = selectedOptionIndex === idx
                   return (
-                    <div
+                    <label
                       key={idx}
-                      onClick={() => opt.serviceable && setSelectedOptionIndex(idx)}
+                      className={`carrier-choice-card ${isSelected ? 'selected' : ''}`}
                       style={{
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'space-between',
+                        flexDirection: 'row',
                         padding: '12px 16px',
-                        borderRadius: '8px',
-                        border: `2px solid ${isSelected ? 'var(--color-primary, #6366f1)' : 'var(--color-border, #e2e8f0)'}`,
-                        background: isSelected ? 'var(--color-primary-light, #f5f7ff)' : opt.serviceable ? 'var(--color-bg-card, #ffffff)' : 'var(--color-bg-subtle, #f8fafc)',
                         cursor: opt.serviceable ? 'pointer' : 'not-allowed',
                         opacity: opt.serviceable ? 1 : 0.6,
                       }}
@@ -2311,22 +2310,24 @@ export function OrderDetail() {
                           onChange={() => setSelectedOptionIndex(idx)}
                           style={{ margin: 0 }}
                         />
-                        <img
-                          src={getCourierLogoUrl(opt.carrierName || opt.courier)}
-                          alt=""
-                          style={{ height: '20px', maxWidth: '75px', objectFit: 'contain' }}
-                          onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none' }}
-                        />
+                        <div className="logo-well-sm">
+                          <img
+                            src={getCourierLogoUrl(opt.carrierName || opt.courier)}
+                            alt=""
+                            style={{ height: '18px', maxWidth: '70px', objectFit: 'contain' }}
+                            onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none' }}
+                          />
+                        </div>
                         <div>
                           <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
                             {opt.carrierName || opt.courier}
                             {opt.isRecommended && (
-                              <span style={{ fontSize: '11px', background: '#dcfce7', color: '#166534', padding: '2px 6px', borderRadius: '4px', fontWeight: 500 }}>
+                              <span className="tone-chip tone-chip-success">
                                 Recommended
                               </span>
                             )}
                           </div>
-                          <div style={{ fontSize: '12px', color: 'var(--color-text-muted, #64748b)' }}>
+                          <div style={{ fontSize: '12px', color: 'var(--muted)' }}>
                             {opt.description}
                             {opt.estimatedDays ? ` · SLA: ~${opt.estimatedDays} days` : ''}
                           </div>
@@ -2335,16 +2336,16 @@ export function OrderDetail() {
                       <div style={{ textAlign: 'right' }}>
                         {opt.serviceable ? (
                           <>
-                            <div style={{ fontWeight: 700, fontSize: '15px' }}>
+                            <div style={{ fontWeight: 700, fontSize: '15px', color: 'var(--ink)' }}>
                               {opt.rate > 0 ? formatMoney(opt.rate) : 'Live Rate'}
                             </div>
-                            <span style={{ fontSize: '11px', color: '#16a34a' }}>● Serviceable</span>
+                            <span style={{ fontSize: '11px', color: 'var(--tone-success-fg)' }}>Serviceable</span>
                           </>
                         ) : (
-                          <span style={{ fontSize: '11px', color: '#dc2626' }}>● Unserviceable</span>
+                          <span style={{ fontSize: '11px', color: 'var(--tone-danger-fg)' }}>Unserviceable</span>
                         )}
                       </div>
-                    </div>
+                    </label>
                   )
                 })}
               </div>
@@ -2820,9 +2821,9 @@ function OrderReturnRefundOverviewCard({
       style={{
         marginBottom: '18px',
         borderRadius: '12px',
-        border: '1px solid #c7d2fe',
-        background: 'linear-gradient(to bottom, #f8faff, #ffffff)',
-        boxShadow: '0 2px 10px rgba(99, 102, 241, 0.06)',
+        border: '1px solid var(--tone-info-border)',
+        background: 'var(--panel)',
+        boxShadow: 'var(--shadow-sm)',
         overflow: 'hidden',
       }}
     >
@@ -2832,8 +2833,8 @@ function OrderReturnRefundOverviewCard({
           alignItems: 'center',
           justifyContent: 'space-between',
           padding: '14px 18px',
-          background: '#eef2ff',
-          borderBottom: '1px solid #e0e7ff',
+          background: 'var(--tone-info-bg)',
+          borderBottom: '1px solid var(--tone-info-border)',
           flexWrap: 'wrap',
           gap: '8px',
         }}
@@ -2845,7 +2846,7 @@ function OrderReturnRefundOverviewCard({
               height: '32px',
               borderRadius: '8px',
               background: '#4f46e5',
-              color: '#fff',
+              color: '#ffffff',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -2854,27 +2855,19 @@ function OrderReturnRefundOverviewCard({
             <Icon name="return" size={18} />
           </div>
           <div>
-            <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: '#1e1b4b' }}>
+            <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: 'var(--ink)' }}>
               Reverse Logistics & Refund Details
             </h3>
-            <span style={{ fontSize: '11px', color: '#4338ca' }}>
+            <span style={{ fontSize: '11px', color: 'var(--tone-info-fg)' }}>
               {returns.length === 1 ? '1 Return Record linked to this order' : `${returns.length} Return Records linked`}
             </span>
           </div>
         </div>
         <button
           type="button"
+          className="button button-secondary button-small"
           onClick={onOpenReturns}
-          style={{
-            fontSize: '11.5px',
-            fontWeight: 600,
-            color: '#4f46e5',
-            background: '#fff',
-            border: '1px solid #c7d2fe',
-            padding: '4px 10px',
-            borderRadius: '6px',
-            cursor: 'pointer',
-          }}
+          style={{ fontSize: '11.5px', fontWeight: 600 }}
         >
           View in Returns Tab →
         </button>
@@ -2891,16 +2884,16 @@ function OrderReturnRefundOverviewCard({
             <div
               key={ret.id}
               style={{
-                border: '1px solid #e2e8f0',
+                border: '1px solid var(--line)',
                 borderRadius: '9px',
                 padding: '14px',
-                background: '#ffffff',
+                background: 'var(--surface-elevated)',
               }}
             >
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px', marginBottom: '12px' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontSize: '10.5px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: '#64748b' }}>
+                    <span style={{ fontSize: '10.5px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--muted)' }}>
                       Reverse AWB ({carrier}):
                     </span>
                     {ret.returnWaybillNumber ? (
@@ -2909,32 +2902,24 @@ function OrderReturnRefundOverviewCard({
                         target="_blank"
                         rel="noreferrer"
                         className="mono"
-                        style={{ fontSize: '13px', fontWeight: 700, color: '#4f46e5', textDecoration: 'underline' }}
+                        style={{ fontSize: '13px', fontWeight: 700, color: 'var(--tone-info-fg)', textDecoration: 'underline' }}
                         title="Track reverse shipment with carrier"
                       >
                         {ret.returnWaybillNumber}
                       </a>
                     ) : (
-                      <span className="mono" style={{ fontSize: '12px', color: '#94a3b8' }}>Waybill pending</span>
+                      <span className="mono" style={{ fontSize: '12px', color: 'var(--muted)' }}>Waybill pending</span>
                     )}
                   </div>
-                  <div style={{ fontSize: '11px', color: '#64748b' }}>
+                  <div style={{ fontSize: '11px', color: 'var(--muted)' }}>
                     Reason: <strong>{ret.returnReason || 'Customer return'}</strong>
                     {ret.receivedAt && ` · Arrived at Surat warehouse: ${formatDate(ret.receivedAt)}`}
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                   <span
-                    style={{
-                      fontSize: '11px',
-                      fontWeight: 600,
-                      padding: '3px 8px',
-                      borderRadius: '5px',
-                      background: isCod ? '#fef3c7' : '#ecfdf5',
-                      color: isCod ? '#92400e' : '#065f46',
-                      border: `1px solid ${isCod ? '#fde68a' : '#a7f3d0'}`,
-                    }}
+                    className={`tone-chip ${isCod ? 'tone-chip-warning' : 'tone-chip-success'}`}
                   >
                     {isCod ? 'Cash on Delivery (COD)' : `Prepaid (${order.paymentProvider || order.paymentGateway || 'Easebuzz'})`}
                   </span>
@@ -2943,8 +2928,8 @@ function OrderReturnRefundOverviewCard({
               </div>
 
               {returnedItems.length > 0 && (
-                <div style={{ marginBottom: '12px', background: '#f8fafc', border: '1px solid #f1f5f9', borderRadius: '7px', padding: '10px 12px' }}>
-                  <div style={{ fontSize: '10.5px', fontWeight: 700, textTransform: 'uppercase', color: '#475569', marginBottom: '8px' }}>
+                <div style={{ marginBottom: '12px', background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '7px', padding: '10px 12px' }}>
+                  <div style={{ fontSize: '10.5px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted)', marginBottom: '8px' }}>
                     Returned Item(s)
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -2957,24 +2942,24 @@ function OrderReturnRefundOverviewCard({
                               <img
                                 src={orderItem.imageUrl}
                                 alt={orderItem.title}
-                                style={{ width: '36px', height: '36px', objectFit: 'cover', borderRadius: '4px', border: '1px solid #e2e8f0' }}
+                                style={{ width: '36px', height: '36px', objectFit: 'cover', borderRadius: '4px', border: '1px solid var(--line)' }}
                               />
                             )}
                             <div>
-                              <div style={{ fontSize: '12px', fontWeight: 600, color: '#1e293b' }}>
+                              <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--ink)' }}>
                                 {orderItem?.title || 'Returned Item'}
                               </div>
-                              <div style={{ fontSize: '11px', color: '#64748b' }}>
+                              <div style={{ fontSize: '11px', color: 'var(--muted)' }}>
                                 SKU: <span className="mono">{orderItem?.sku || 'N/A'}</span>
                                 {orderItem?.variantTitle && ` · Size: ${orderItem.variantTitle}`}
                               </div>
                             </div>
                           </div>
                           <div style={{ textAlign: 'right' }}>
-                            <div style={{ fontSize: '12px', fontWeight: 700, color: '#0f172a' }}>
+                            <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--ink)' }}>
                               {item.quantity} pc{item.quantity > 1 ? 's' : ''}
                             </div>
-                            <div style={{ fontSize: '11px', color: '#64748b' }}>
+                            <div style={{ fontSize: '11px', color: 'var(--muted)' }}>
                               {orderItem?.price ? formatMoney(orderItem.price, order.currency) : ''}
                             </div>
                           </div>
@@ -2987,8 +2972,8 @@ function OrderReturnRefundOverviewCard({
 
               <div
                 style={{
-                  background: isRefunded ? '#f0fdf4' : isReceived ? '#fffbeb' : '#f8fafc',
-                  border: `1px solid ${isRefunded ? '#bbf7d0' : isReceived ? '#fde68a' : '#e2e8f0'}`,
+                  background: isRefunded ? 'var(--tone-success-bg)' : isReceived ? 'var(--tone-warning-bg)' : 'var(--panel)',
+                  border: `1px solid ${isRefunded ? 'var(--tone-success-border)' : isReceived ? 'var(--tone-warning-border)' : 'var(--line)'}`,
                   borderRadius: '8px',
                   padding: '12px 14px',
                 }}
@@ -2996,26 +2981,26 @@ function OrderReturnRefundOverviewCard({
                 {isRefunded ? (
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
                     <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#15803d', fontWeight: 700, fontSize: '13px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--tone-success-fg)', fontWeight: 700, fontSize: '13px' }}>
                         <Icon name="check" size={16} />
                         <span>Refund Processed: {formatMoney(ret.refundAmount || order.totalAmount, order.currency)}</span>
                       </div>
-                      <div style={{ fontSize: '11px', color: '#166534', marginTop: '3px' }}>
+                      <div style={{ fontSize: '11px', color: 'var(--tone-success-fg)', marginTop: '3px' }}>
                         {ret.shopifyRefundId && <span>Shopify Refund ID: <strong className="mono">{ret.shopifyRefundId}</strong> · </span>}
                         {ret.refundProcessedAt && <span>Date: {formatDate(ret.refundProcessedAt)}</span>}
                       </div>
                     </div>
-                    <span style={{ fontSize: '11px', color: '#166534', fontWeight: 600 }}>
-                      ✓ Credited to customer payment source
+                    <span style={{ fontSize: '11px', color: 'var(--tone-success-fg)', fontWeight: 600 }}>
+                      Credited to customer payment source
                     </span>
                   </div>
                 ) : (
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
                     <div>
-                      <div style={{ fontSize: '12.5px', fontWeight: 700, color: isReceived ? '#92400e' : '#475569' }}>
-                        {isReceived ? '📦 Return Received at Warehouse · Refund Pending' : '🚚 Return in Transit'}
+                      <div style={{ fontSize: '12.5px', fontWeight: 700, color: isReceived ? 'var(--tone-warning-fg)' : 'var(--ink-secondary)' }}>
+                        {isReceived ? 'Return Received at Warehouse · Refund Pending' : 'Return in Transit'}
                       </div>
-                      <div style={{ fontSize: '11px', color: isReceived ? '#b45309' : '#64748b', marginTop: '2px' }}>
+                      <div style={{ fontSize: '11px', color: isReceived ? 'var(--tone-warning-fg)' : 'var(--muted)', marginTop: '2px' }}>
                         {isCod
                           ? 'Cash on Delivery order: Collect customer bank/UPI details and transfer refund manually.'
                           : 'Prepaid order: When QC passes, refund is processed automatically via Shopify to customer’s original payment method.'}
@@ -3029,7 +3014,7 @@ function OrderReturnRefundOverviewCard({
                             type="button"
                             className="button button-secondary"
                             onClick={onOpenPayments}
-                            style={{ fontSize: '11.5px', padding: '6px 12px', background: '#fff' }}
+                            style={{ fontSize: '11.5px', padding: '6px 12px' }}
                           >
                             Record Manual Bank Transfer
                           </button>
@@ -3042,16 +3027,16 @@ function OrderReturnRefundOverviewCard({
                             style={{
                               fontSize: '12px',
                               padding: '6px 14px',
-                              background: '#16a34a',
-                              borderColor: '#15803d',
-                              color: '#fff',
+                              background: 'var(--emerald-solid)',
+                              borderColor: 'var(--emerald-solid)',
+                              color: '#ffffff',
                               display: 'inline-flex',
                               alignItems: 'center',
                               gap: '6px',
                               cursor: 'pointer',
                             }}
                           >
-                            {processingId === ret.id ? 'Processing Refund…' : '⚡ Approve QC & Issue Shopify Refund'}
+                            {processingId === ret.id ? 'Processing Refund…' : 'Approve QC & Issue Shopify Refund'}
                           </button>
                         )}
                       </div>
@@ -3318,7 +3303,7 @@ function ReturnForm({
           {!delivered ? <p className="field-hint">Available once the forward shipment is delivered.</p> : null}
         </div>
       ) : allReturns.length > 0 ? (
-        <div style={{ padding: '12px 14px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', fontSize: '12.5px', color: '#475569' }}>
+        <div style={{ padding: '12px 14px', background: 'var(--surface-elevated)', border: '1px solid var(--line)', borderRadius: '8px', fontSize: '12.5px', color: 'var(--ink-secondary)' }}>
           ✓ All eligible items from this order have been returned and processed.
         </div>
       ) : null}
@@ -3445,8 +3430,8 @@ function ActiveReturnCard({ record, order }: { record: ReturnRecord; order?: Ord
       )}
 
       <div style={{
-        background: isRefunded ? '#f0fdf4' : isReceived ? '#fffbeb' : '#f8fafc',
-        border: `1px solid ${isRefunded ? '#bbf7d0' : isReceived ? '#fde68a' : '#e2e8f0'}`,
+        background: isRefunded ? 'var(--tone-success-bg)' : isReceived ? 'var(--tone-warning-bg)' : 'var(--surface-elevated)',
+        border: `1px solid ${isRefunded ? 'var(--tone-success-border)' : isReceived ? 'var(--tone-warning-border)' : 'var(--line)'}`,
         borderRadius: '6px',
         padding: '10px 12px',
         display: 'flex',
@@ -3457,11 +3442,11 @@ function ActiveReturnCard({ record, order }: { record: ReturnRecord; order?: Ord
       }}>
         {isRefunded ? (
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#15803d', fontWeight: 700, fontSize: '12.5px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--tone-success-fg)', fontWeight: 700, fontSize: '12.5px' }}>
               <Icon name="check" size={15} />
               <span>Refund Processed: {formatMoney(record.refundAmount || order?.totalAmount || 0)}</span>
             </div>
-            <div style={{ fontSize: '11px', color: '#166534', marginTop: '2px' }}>
+            <div style={{ fontSize: '11px', color: 'var(--tone-success-fg)', marginTop: '2px' }}>
               {record.shopifyRefundId && <span>Shopify Refund ID: <strong className="mono">{record.shopifyRefundId}</strong> · </span>}
               {record.refundProcessedAt && <span>Date: {formatDate(record.refundProcessedAt)}</span>}
             </div>
@@ -3469,10 +3454,10 @@ function ActiveReturnCard({ record, order }: { record: ReturnRecord; order?: Ord
         ) : (
           <>
             <div>
-              <div style={{ fontSize: '12px', fontWeight: 700, color: isReceived ? '#92400e' : '#475569' }}>
+              <div style={{ fontSize: '12px', fontWeight: 700, color: isReceived ? 'var(--tone-warning-fg)' : 'var(--ink-secondary)' }}>
                 {isReceived ? 'Return Received at Warehouse · Refund Pending' : 'Return in Transit'}
               </div>
-              <div style={{ fontSize: '11px', color: isReceived ? '#b45309' : '#64748b' }}>
+              <div style={{ fontSize: '11px', color: isReceived ? 'var(--tone-warning-fg)' : 'var(--muted)' }}>
                 {isCod
                   ? 'COD Order: Transfer refund manually to customer UPI/Bank.'
                   : 'Prepaid Order: Automatic refund will credit customer payment source.'}
@@ -3484,9 +3469,9 @@ function ActiveReturnCard({ record, order }: { record: ReturnRecord; order?: Ord
                 className="button button-primary"
                 disabled={refunding}
                 onClick={handleProcessRefund}
-                style={{ fontSize: '11.5px', padding: '5px 12px', background: '#16a34a', borderColor: '#15803d', color: '#fff', cursor: 'pointer' }}
+                style={{ fontSize: '11.5px', padding: '5px 12px', background: 'var(--emerald-solid)', borderColor: 'var(--emerald-solid)', color: '#ffffff', cursor: 'pointer' }}
               >
-                {refunding ? 'Refunding…' : '⚡ Approve QC & Issue Refund'}
+                {refunding ? 'Refunding…' : 'Approve QC & Issue Refund'}
               </button>
             )}
           </>
@@ -3652,7 +3637,7 @@ function ExchangeModal({
       <div className="modal-card" role="dialog" aria-modal="true" aria-label={isSkuExchange ? 'Create SKU Exchange' : 'Create Size Exchange'} onClick={(e) => e.stopPropagation()} style={{ maxWidth: '580px' }}>
         <div className="modal-header">
           <div className="modal-header-left">
-            <div className="modal-icon-badge" style={{ background: '#ede9fe', color: '#7c3aed' }}>
+            <div className="modal-icon-badge" style={{ background: 'var(--tone-purple-bg)', color: 'var(--tone-purple-fg)' }}>
               <Icon name="refresh" size={20} />
             </div>
             <div>
@@ -3664,14 +3649,14 @@ function ExchangeModal({
               </p>
             </div>
           </div>
-          <button type="button" className="modal-close-btn" disabled={submitting} onClick={onClose}>
+          <button type="button" className="modal-close-btn" aria-label="Close modal" disabled={submitting} onClick={onClose}>
             <Icon name="close" size={16} />
           </button>
         </div>
 
         <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           {/* Exchange Mode Switcher */}
-          <div style={{ display: 'flex', gap: '6px', padding: '4px', background: '#f1f5f9', borderRadius: '8px' }}>
+          <div style={{ display: 'flex', gap: '6px', padding: '4px', background: 'var(--surface-elevated)', borderRadius: '8px', border: '1px solid var(--line)' }}>
             <button
               type="button"
               onClick={() => setExchangeType('SIZE')}
@@ -3683,9 +3668,9 @@ function ExchangeModal({
                 fontSize: '13px',
                 fontWeight: 600,
                 cursor: 'pointer',
-                background: exchangeType === 'SIZE' ? '#ffffff' : 'transparent',
-                color: exchangeType === 'SIZE' ? '#7c3aed' : '#64748b',
-                boxShadow: exchangeType === 'SIZE' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                background: exchangeType === 'SIZE' ? 'var(--panel)' : 'transparent',
+                color: exchangeType === 'SIZE' ? 'var(--tone-purple-fg)' : 'var(--muted)',
+                boxShadow: exchangeType === 'SIZE' ? 'var(--shadow-xs)' : 'none',
                 transition: 'all 0.15s ease',
               }}
             >
@@ -3702,9 +3687,9 @@ function ExchangeModal({
                 fontSize: '13px',
                 fontWeight: 600,
                 cursor: 'pointer',
-                background: exchangeType === 'SKU' ? '#ffffff' : 'transparent',
-                color: exchangeType === 'SKU' ? '#7c3aed' : '#64748b',
-                boxShadow: exchangeType === 'SKU' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                background: exchangeType === 'SKU' ? 'var(--panel)' : 'transparent',
+                color: exchangeType === 'SKU' ? 'var(--tone-purple-fg)' : 'var(--muted)',
+                boxShadow: exchangeType === 'SKU' ? 'var(--shadow-xs)' : 'none',
                 transition: 'all 0.15s ease',
               }}
             >
@@ -3713,7 +3698,7 @@ function ExchangeModal({
           </div>
 
           {!isDelivered && (
-            <div style={{ padding: '10px 14px', borderRadius: '8px', background: '#fffbeb', border: '1px solid #fde68a', color: '#b45309', fontSize: '12.5px', lineHeight: 1.4 }}>
+            <div style={{ padding: '10px 14px', borderRadius: '8px', background: 'var(--tone-warning-bg)', border: '1px solid var(--tone-warning-border)', color: 'var(--tone-warning-fg)', fontSize: '12.5px', lineHeight: 1.4 }}>
               <strong>Notice:</strong> Order status is currently <strong>{order.status}</strong>. Logistics courier exchange requires the parcel to be delivered to the customer first.
             </div>
           )}
@@ -3861,16 +3846,16 @@ function ExchangeModal({
                       left: 0,
                       right: 0,
                       zIndex: 50,
-                      background: '#ffffff',
+                      background: 'var(--panel)',
                       borderRadius: '8px',
-                      border: '1px solid #cbd5e1',
-                      boxShadow: '0 10px 25px -5px rgba(0,0,0,0.15)',
+                      border: '1px solid var(--border-strong)',
+                      boxShadow: 'var(--shadow-lg)',
                       maxHeight: '260px',
                       overflowY: 'auto',
                       marginTop: '4px',
                     }}>
                       {skuResults.length === 0 ? (
-                        <div style={{ padding: '12px 14px', fontSize: '12.5px', color: '#64748b', textAlign: 'center' }}>
+                        <div style={{ padding: '12px 14px', fontSize: '12.5px', color: 'var(--muted)', textAlign: 'center' }}>
                           {loadingSkus ? 'Searching product listings…' : skuQuery.trim().length < 2 ? 'Type at least 2 characters…' : 'No matching SKUs found in listings.'}
                         </div>
                       ) : (
@@ -3885,11 +3870,11 @@ function ExchangeModal({
                             style={{
                               width: '100%',
                               textAlign: 'left',
-                              background: '#ffffff',
+                              background: 'var(--panel)',
                               border: 'none',
                               padding: '9px 12px',
                               cursor: 'pointer',
-                              borderBottom: '1px solid #f1f5f9',
+                              borderBottom: '1px solid var(--line)',
                               display: 'flex',
                               alignItems: 'center',
                               justifyContent: 'space-between',
@@ -3897,34 +3882,34 @@ function ExchangeModal({
                               transition: 'background 0.1s ease',
                               fontFamily: 'inherit',
                             }}
-                            onMouseEnter={(e) => (e.currentTarget.style.background = '#f8fafc')}
-                            onMouseLeave={(e) => (e.currentTarget.style.background = '#ffffff')}
-                            onFocus={(e) => (e.currentTarget.style.background = '#f8fafc')}
-                            onBlur={(e) => (e.currentTarget.style.background = '#ffffff')}
+                            onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--surface-elevated)')}
+                            onMouseLeave={(e) => (e.currentTarget.style.background = 'var(--panel)')}
+                            onFocus={(e) => (e.currentTarget.style.background = 'var(--surface-elevated)')}
+                            onBlur={(e) => (e.currentTarget.style.background = 'var(--panel)')}
                           >
                             <div style={{ minWidth: 0, flex: 1 }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                <span className="mono" style={{ background: '#ede9fe', color: '#6d28d9', padding: '1px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: 700 }}>
+                                <span className="mono" style={{ background: 'var(--tone-purple-bg)', color: 'var(--tone-purple-fg)', padding: '1px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: 700 }}>
                                   {item.sku}
                                 </span>
                                 {item.variantTitle && item.variantTitle !== 'Default Title' && (
-                                  <span style={{ fontSize: '11.5px', color: '#475569', fontWeight: 600 }}>
+                                  <span style={{ fontSize: '11.5px', color: 'var(--muted)', fontWeight: 600 }}>
                                     Size: {item.variantTitle}
                                   </span>
                                 )}
                               </div>
-                              <div style={{ fontSize: '12.5px', color: '#1e293b', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              <div style={{ fontSize: '12.5px', color: 'var(--ink)', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                 {item.title}
                               </div>
                             </div>
                             <div style={{ textAlign: 'right', flexShrink: 0 }}>
                               {item.price ? (
-                                <div style={{ fontSize: '12px', fontWeight: 600, color: '#059669' }}>
+                                <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--tone-success-fg)' }}>
                                   ₹{item.price}
                                 </div>
                               ) : null}
                               {typeof item.inventoryQuantity === 'number' && (
-                                <div style={{ fontSize: '10.5px', color: item.inventoryQuantity > 0 ? '#16a34a' : '#dc2626' }}>
+                                <div style={{ fontSize: '10.5px', color: item.inventoryQuantity > 0 ? 'var(--tone-success-fg)' : 'var(--tone-danger-fg)' }}>
                                   {item.inventoryQuantity > 0 ? `${item.inventoryQuantity} left` : 'Out of stock'}
                                 </div>
                               )}
@@ -4003,7 +3988,6 @@ function ExchangeModal({
             className="button button-primary"
             disabled={submitting || !isFormValid}
             onClick={handleSubmit}
-            style={{ background: '#7c3aed', borderColor: '#6d28d9' }}
           >
             {submitting ? 'Creating Exchange…' : isSkuExchange ? 'Confirm SKU Exchange' : 'Confirm Size Exchange'}
           </button>
@@ -4019,26 +4003,26 @@ function ActiveExchangeCard({ record, orderName }: { record: ReturnRecord; order
   const exchangeOrderName = `${(orderName || '').replace('#', '')}-EX-FWD`
   const isSkuExchange = record.exchangeType === 'SKU'
   return (
-    <div className="active-return-card" style={{ borderLeft: '4px solid #7c3aed' }}>
+    <div className="active-return-card" style={{ borderLeft: '4px solid var(--tone-purple-fg)' }}>
       <div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-          <span className="eyebrow" style={{ color: '#7c3aed', background: '#ede9fe', padding: '2px 8px', borderRadius: '4px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px', flexWrap: 'wrap' }}>
+          <span className="tone-chip tone-chip-purple">
             {isSkuExchange ? 'SKU Exchange in Progress' : 'Size Exchange in Progress'}
           </span>
           {record.exchangeTitle && (
-            <span style={{ fontSize: '12px', fontWeight: 600, color: '#475569' }}>
+            <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--ink-secondary)' }}>
               Replacement: <strong>{record.exchangeTitle}</strong> {record.exchangeSku ? `(${record.exchangeSku})` : ''}
             </span>
           )}
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginTop: '10px', padding: '10px 14px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+        <div className="split-layout-2" style={{ gap: '16px', marginTop: '10px', padding: '10px 14px', background: 'var(--surface-elevated)', borderRadius: '8px', border: '1px solid var(--line)' }}>
           <div>
-            <div style={{ fontSize: '11px', textTransform: 'uppercase', color: '#64748b', fontWeight: 600 }}>1. Reverse Pickup (Old Item)</div>
+            <div style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 600 }}>1. Reverse Pickup (Old Item)</div>
             <div style={{ marginTop: '4px' }}>
-              <strong className="mono" style={{ fontSize: '13px' }}>{record.returnWaybillNumber || 'Pending AWB'}</strong>
-              <div style={{ fontSize: '12px', color: '#475569', marginTop: '2px' }}>
-                Status: <span style={{ fontWeight: 600, color: reverseDelivered ? '#059669' : '#d97706' }}>{record.trackingStatus || record.returnShipmentStatus || record.returnStatus}</span>
+              <strong className="mono" style={{ fontSize: '13px', color: 'var(--ink)' }}>{record.returnWaybillNumber || 'Pending AWB'}</strong>
+              <div style={{ fontSize: '12px', color: 'var(--ink-secondary)', marginTop: '2px' }}>
+                Status: <span style={{ fontWeight: 600, color: reverseDelivered ? 'var(--tone-success-fg)' : 'var(--tone-warning-fg)' }}>{record.trackingStatus || record.returnShipmentStatus || record.returnStatus}</span>
               </div>
             </div>
             {record.returnWaybillNumber && (
@@ -4056,11 +4040,11 @@ function ActiveExchangeCard({ record, orderName }: { record: ReturnRecord; order
           </div>
 
           <div>
-            <div style={{ fontSize: '11px', textTransform: 'uppercase', color: '#64748b', fontWeight: 600 }}>2. Forward Dispatch (Replacement)</div>
+            <div style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 600 }}>2. Forward Dispatch (Replacement)</div>
             <div style={{ marginTop: '4px' }}>
-              <strong className="mono" style={{ fontSize: '13px' }}>{record.exchangeForwardAwb || (record.exchangeDispatchMode === 'ON_PICKUP' ? 'Dispatches on Pickup' : 'Pending')}</strong>
-              <div style={{ fontSize: '12px', color: '#475569', marginTop: '2px' }}>
-                Status: <span style={{ fontWeight: 600, color: forwardDelivered ? '#059669' : '#2563eb' }}>{record.exchangeForwardStatus || 'PENDING'}</span>
+              <strong className="mono" style={{ fontSize: '13px', color: 'var(--ink)' }}>{record.exchangeForwardAwb || (record.exchangeDispatchMode === 'ON_PICKUP' ? 'Dispatches on Pickup' : 'Pending')}</strong>
+              <div style={{ fontSize: '12px', color: 'var(--ink-secondary)', marginTop: '2px' }}>
+                Status: <span style={{ fontWeight: 600, color: forwardDelivered ? 'var(--tone-success-fg)' : 'var(--tone-info-fg)' }}>{record.exchangeForwardStatus || 'PENDING'}</span>
               </div>
             </div>
             <div style={{ display: 'flex', gap: '6px', marginTop: '8px', flexWrap: 'wrap' }}>
@@ -4082,7 +4066,7 @@ function ActiveExchangeCard({ record, orderName }: { record: ReturnRecord; order
                   target="_blank"
                   rel="noopener noreferrer"
                   className="button button-primary"
-                  style={{ fontSize: '11px', padding: '3px 8px', background: '#7c3aed', borderColor: '#7c3aed', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                  style={{ fontSize: '11px', padding: '3px 8px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
                 >
                   <Icon name="download" size={13} />
                   <span>Print Label</span>
@@ -4091,7 +4075,7 @@ function ActiveExchangeCard({ record, orderName }: { record: ReturnRecord; order
             </div>
             {record.exchangeForwardAwb && (
               <div style={{ marginTop: '8px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span style={{ color: '#64748b' }}>Exchange Order:</span>
+                <span style={{ color: 'var(--muted)' }}>Exchange Order:</span>
                 <Link
                   to={`/orders?search=${encodeURIComponent(exchangeOrderName)}`}
                   className="link-primary"

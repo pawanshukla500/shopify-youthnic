@@ -209,8 +209,8 @@ export async function markCodCollected(payload: {
   return response.data
 }
 
-export async function getDashboardStats(): Promise<import('./types').DashboardStats> {
-  const response = await api.get<import('./types').DashboardStats>('/api/dashboard/stats')
+export async function getDashboardStats(params?: { period?: string; fresh?: boolean }): Promise<import('./types').DashboardStats> {
+  const response = await api.get<import('./types').DashboardStats>('/api/dashboard/stats', { params })
   return response.data
 }
 

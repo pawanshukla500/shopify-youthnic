@@ -479,6 +479,21 @@ export interface ShippingPreferences {
 export interface DashboardStats {
   success: boolean
   timestamp: string
+  period?: string
+  latestSettlement?: {
+    batchId: string
+    gateway: string
+    settlementDate: string
+    netAmount: number
+    grossAmount: number
+    feeAmount: number
+    gstAmount: number
+    bankUtr?: string | null
+    orderCount: number
+    refundCount: number
+    refundAmount: number
+    verificationStatus: string
+  } | null
   carriers?: ShippingCarriersStats
   kpis: {
     totalRevenue: number

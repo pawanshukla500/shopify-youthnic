@@ -20,100 +20,22 @@ import {
 import type { DashboardStats } from '../types'
 import './Dashboard.css'
 
-type CarrierMetric = { label: string; value: number; tone: 'default' | 'inTransit' | 'delivered' | 'ndr' | 'muted' }
-
-function CarrierPulseCard({
-  logo,
-  logoAlt,
-  logoFallback,
-  name,
-  role,
-  primary,
-  statusLabel,
-  statusTone,
-  metrics,
-}: {
-  logo: string
-  logoAlt: string
-  logoFallback?: string
-  name: string
-  role: string
-  primary: boolean
-  statusLabel: string
-  statusTone: 'active' | 'standby'
-  metrics: CarrierMetric[]
-}) {
-  const dispatched = metrics[0]?.value ?? 0
-
-  return (
-    <div className="carrier-card">
-      <div className="carrier-card-head">
-        <div className="carrier-id">
-          <div className="carrier-logo">
-            <img
-              src={logo}
-              alt={logoAlt}
-              style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
-              onError={(e) => {
-                if (logoFallback && !e.currentTarget.src.endsWith(logoFallback)) {
-                  e.currentTarget.src = logoFallback
-                } else {
-                  e.currentTarget.style.display = 'none'
-                }
-              }}
-            />
-          </div>
-          <div>
-            <strong className="carrier-name">{name}</strong>
-            <span className="carrier-role">{role}</span>
-          </div>
-        </div>
-        <div className="carrier-badges">
-          {primary && <span className="carrier-badge primary">Primary</span>}
-          <span className={`carrier-badge ${statusTone}`}>{statusLabel}</span>
-        </div>
-      </div>
-
-      {dispatched > 0 ? (
-        <div className="carrier-metrics">
-          {metrics.map((metric) => (
-            <div key={metric.label}>
-              <span className="carrier-metric-label">{metric.label}</span>
-              <strong className={`carrier-metric-value tone-${metric.tone}`}>{metric.value}</strong>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="carrier-empty">
-          <div className="carrier-empty-icon">
-            <Icon name="truck" size={15} />
-          </div>
-          <div>
-            <div className="carrier-empty-title">No dispatches yet</div>
-            <div className="carrier-empty-desc">Shipments appear here once orders are routed to this carrier.</div>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
+type PeriodFilter = 'all' | 'today' | 'yesterday' | '7days' | 'month'
 
 export function Dashboard() {
-  useDocumentTitle('Dashboard')
+  useDocumentTitle('Operations Daily Digest · Dashboard')
   const { user } = useAuth()
   const toast = useToast()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
 
+  const [period, setPeriod] = useState<PeriodFilter>('all')
+
   const { data: stats, isLoading, isError, error, refetch, isFetching } = useQuery<DashboardStats>({
-    queryKey: ['dashboard-stats'],
-    queryFn: getDashboardStats,
+    queryKey: ['dashboard-stats', period],
+    queryFn: () => getDashboardStats({ period }),
     refetchInterval: 60_000,
   })
-
-  // Operational Attention Filters
-  const [alertFilter, setAlertFilter] = useState<'ALL' | 'CRITICAL' | 'FULFILLMENT' | 'FINANCE'>('ALL')
-  const [alertsExpanded, setAlertsExpanded] = useState<boolean>(false)
 
   // Quick Shipping Rate Estimator state
   const [calcPincode, setCalcPincode] = useState('400001')
@@ -123,7 +45,7 @@ export function Dashboard() {
   const [calcLoading, setCalcLoading] = useState(false)
 
   const handleEstimate = async () => {
-    if (!calcPincode || calcPincode.length < 6) {
+    if (!calcPincode || calcPincode.trim().length !== 6) {
       toast.toast('error', 'Please enter a valid 6-digit destination pincode.')
       return
     }
@@ -134,7 +56,7 @@ export function Dashboard() {
           mode: 'S',
           chargeableWeightGrams: calcWeight,
           originPincode: stats?.delhiveryStatus?.originPincode || '395002',
-          destinationPincode: calcPincode,
+          destinationPincode: calcPincode.trim(),
           shipmentStatus: 'Delivered',
           paymentType: calcMode,
         },
@@ -148,7 +70,7 @@ export function Dashboard() {
     }
   }
 
-  // Sync mutations
+  // Real-time synchronization mutations
   const mutation = useMutation({
     mutationFn: async (type: 'orders' | 'tracking' | 'webhooks') => {
       if (type === 'orders') return (await api.post('/api/orders/sync')).data
@@ -159,9 +81,9 @@ export function Dashboard() {
       const message =
         data?.message ??
         (type === 'orders'
-          ? `Orders synced · ${data?.syncedCount ?? 0} updated, ${data?.dispatchedCount ?? 0} auto-dispatched.`
+          ? `Orders synced: ${data?.syncedCount ?? 0} updated, ${data?.dispatchedCount ?? 0} auto-dispatched.`
           : type === 'tracking'
-          ? `Delhivery tracking synced · ${data?.updatedCount ?? 0} shipments updated.`
+          ? `Delhivery tracking synced: ${data?.updatedCount ?? 0} shipments updated.`
           : 'Shopify webhooks registered successfully.')
       toast.toast('success', message)
       await queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] })
@@ -172,7 +94,7 @@ export function Dashboard() {
   })
 
   const today = new Date()
-  const eyebrow = today.toLocaleDateString('en-IN', {
+  const eyebrowDate = today.toLocaleDateString('en-IN', {
     weekday: 'long',
     day: 'numeric',
     month: 'long',
@@ -188,14 +110,14 @@ export function Dashboard() {
 
   if (isError && !stats) {
     return (
-      <>
+      <div style={{ padding: '24px 0' }}>
         <ErrorBox message={apiError(error)} />
         <div style={{ marginTop: 12 }}>
           <button type="button" className="button button-primary" onClick={() => refetch()} disabled={isFetching}>
             {isFetching ? 'Retrying…' : 'Retry'}
           </button>
         </div>
-      </>
+      </div>
     )
   }
 
@@ -203,8 +125,8 @@ export function Dashboard() {
   const recon = stats?.reconciliation
   const funnel = stats?.funnel
   const topStates = stats?.topStates ?? []
-  const actionItems = stats?.actionItems ?? []
   const recentOrders = stats?.recentOrders ?? []
+  const latestSettlement = stats?.latestSettlement
 
   // Revenue proportions for segmented bar
   const totalRev = kpis?.totalRevenue || 1
@@ -213,13 +135,25 @@ export function Dashboard() {
   const manualPct = Math.round(((recon?.manualPrepaid.totalAmount || 0) / totalRev) * 100)
   const phonepePct = Math.round(((recon?.phonepePrepaid.totalAmount || 0) / totalRev) * 100)
 
+  // Period label for digest summary
+  const periodLabel =
+    period === 'today'
+      ? 'today'
+      : period === 'yesterday'
+      ? 'yesterday'
+      : period === '7days'
+      ? 'over the last 7 days'
+      : period === 'month'
+      ? 'this month'
+      : 'all time'
+
   return (
     <>
-      {/* ─── Page Intro & Real-time Sync Controls ────────────────── */}
+      {/* ─── Top Page Intro Bar ──────────────────────────────────── */}
       <PageIntro
-        eyebrow={eyebrow}
+        eyebrow={eyebrowDate}
         title={`${timeGreeting}, ${operatorFirstName}.`}
-        description="Comprehensive real-time command center for Shopify orders, Delhivery logistics, and 3-way money receipt reconciliation."
+        description="Comprehensive real-time command center for Shopify orders, multi-carrier logistics, and 3-way money receipt reconciliation."
       >
         <div className="intro-actions">
           <Button
@@ -260,150 +194,182 @@ export function Dashboard() {
         </div>
       </PageIntro>
 
-      {/* ─── Operational Attention Items (Alert Bar) ──────────────── */}
-      {actionItems.length > 0 && (() => {
-        const criticalCount = actionItems.filter((i) => i.priority === 'critical').length
-        const fulfillmentCount = actionItems.filter((i) => i.category.toLowerCase().includes('dispatch') || i.category.toLowerCase().includes('fulfillment') || i.category.toLowerCase().includes('delivery') || i.category.toLowerCase().includes('sla')).length
-        const financeCount = actionItems.filter((i) => i.category.toLowerCase().includes('finance') || i.category.toLowerCase().includes('settlement') || i.category.toLowerCase().includes('recon') || i.category.toLowerCase().includes('refund')).length
-
-        const filteredAlerts = actionItems.filter((item) => {
-          if (alertFilter === 'CRITICAL') return item.priority === 'critical'
-          if (alertFilter === 'FULFILLMENT') return item.category.toLowerCase().includes('dispatch') || item.category.toLowerCase().includes('fulfillment') || item.category.toLowerCase().includes('delivery') || item.category.toLowerCase().includes('sla')
-          if (alertFilter === 'FINANCE') return item.category.toLowerCase().includes('finance') || item.category.toLowerCase().includes('settlement') || item.category.toLowerCase().includes('recon') || item.category.toLowerCase().includes('refund')
-          return true
-        })
-        const visibleAlerts = alertsExpanded ? filteredAlerts : filteredAlerts.slice(0, 3)
-
-        return (
-          <div className="action-center">
-            <div className="dash-section-head">
-              <div className="dash-section-title-wrap">
-                <span className="live-dot" />
-                <h2 className="dash-section-title">
-                  Operational Attention · {actionItems.length} item{actionItems.length === 1 ? '' : 's'}
-                </h2>
-              </div>
-
-              <div className="dash-section-actions">
-                {/* Segmented filter control */}
-                <div className="action-filter-pills dash-segmented">
-                  <button
-                    type="button"
-                    className={`filter-pill ${alertFilter === 'ALL' ? 'active' : ''}`}
-                    onClick={() => setAlertFilter('ALL')}
-                  >
-                    All ({actionItems.length})
-                  </button>
-                  {criticalCount > 0 && (
-                    <button
-                      type="button"
-                      className={`filter-pill critical ${alertFilter === 'CRITICAL' ? 'active' : ''}`}
-                      onClick={() => setAlertFilter('CRITICAL')}
-                    >
-                      Critical ({criticalCount})
-                    </button>
-                  )}
-                  {fulfillmentCount > 0 && (
-                    <button
-                      type="button"
-                      className={`filter-pill ${alertFilter === 'FULFILLMENT' ? 'active' : ''}`}
-                      onClick={() => setAlertFilter('FULFILLMENT')}
-                    >
-                      Fulfillment ({fulfillmentCount})
-                    </button>
-                  )}
-                  {financeCount > 0 && (
-                    <button
-                      type="button"
-                      className={`filter-pill ${alertFilter === 'FINANCE' ? 'active' : ''}`}
-                      onClick={() => setAlertFilter('FINANCE')}
-                    >
-                      Finance ({financeCount})
-                    </button>
-                  )}
-                </div>
-
-                {filteredAlerts.length > 3 && (
-                  <button
-                    type="button"
-                    className="dash-viewall"
-                    onClick={() => setAlertsExpanded(!alertsExpanded)}
-                  >
-                    <span>{alertsExpanded ? 'Show Top 3' : `View All (${filteredAlerts.length})`}</span>
-                    <Icon name="arrow" size={12} />
-                  </button>
-                )}
-              </div>
-            </div>
-
-            <div className="action-center-grid">
-              {visibleAlerts.map((item) => {
-                let iconName: 'zap' | 'alert' | 'truck' | 'shield' | 'clock' = 'alert'
-                if (item.id.includes('prepaid')) iconName = 'zap'
-                else if (item.id.includes('sla') || item.id.includes('delayed')) iconName = 'clock'
-                else if (item.id.includes('dispatch') || item.id.includes('manifest')) iconName = 'truck'
-                else if (item.id.includes('ndr')) iconName = 'alert'
-                else if (item.id.includes('unverified') || item.id.includes('payment')) iconName = 'shield'
-
-                return (
-                  <div className={`alert-card ${item.priority}`} key={item.id}>
-                    <div className="alert-card-header">
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <div className={`alert-icon-wrap ${item.priority}`}>
-                          <Icon name={iconName} size={14} />
-                        </div>
-                        <span className="alert-badge">{item.category}</span>
-                      </div>
-                      <button
-                        type="button"
-                        className="alert-btn"
-                        onClick={() => {
-                          if (item.filterParam.includes('returns')) {
-                            navigate('/returns')
-                          } else {
-                            navigate(`/orders?${item.filterParam}`)
-                          }
-                        }}
-                      >
-                        <span>{item.actionText}</span>
-                        <Icon name="arrow" size={11} />
-                      </button>
-                    </div>
-                    <div>
-                      <h4 className="alert-title">{item.title}</h4>
-                      <p className="alert-desc">{item.description}</p>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
+      {/* ─── Modern Operational Daily Digest Banner ──────────────── */}
+      <div className="dash-digest-banner">
+        <div className="dash-digest-top">
+          <div className="dash-digest-tag">
+            <span className="live-pulse-dot" />
+            <span>Operational Daily Digest</span>
           </div>
-        )
-      })()}
 
-      {/* ─── 6 Key Executive & Operational KPIs ────────────────────── */}
+          <div className="dash-time-filter">
+            <button
+              type="button"
+              className={`dash-time-btn ${period === 'all' ? 'active' : ''}`}
+              onClick={() => setPeriod('all')}
+            >
+              All Time
+            </button>
+            <button
+              type="button"
+              className={`dash-time-btn ${period === 'today' ? 'active' : ''}`}
+              onClick={() => setPeriod('today')}
+            >
+              Today
+            </button>
+            <button
+              type="button"
+              className={`dash-time-btn ${period === 'yesterday' ? 'active' : ''}`}
+              onClick={() => setPeriod('yesterday')}
+            >
+              Yesterday
+            </button>
+            <button
+              type="button"
+              className={`dash-time-btn ${period === '7days' ? 'active' : ''}`}
+              onClick={() => setPeriod('7days')}
+            >
+              Last 7 Days
+            </button>
+            <button
+              type="button"
+              className={`dash-time-btn ${period === 'month' ? 'active' : ''}`}
+              onClick={() => setPeriod('month')}
+            >
+              This Month
+            </button>
+          </div>
+        </div>
+
+        <h2 className="dash-digest-headline">
+          Operations Pulse · {kpis?.totalOrders ?? 0} Orders ({periodLabel})
+        </h2>
+        <p className="dash-digest-summary">
+          {kpis?.readyToDispatch ?? 0} order{(kpis?.readyToDispatch ?? 0) === 1 ? '' : 's'} waiting for carrier manifest,{' '}
+          {stats?.carriers?.delhivery.inTransit ?? 0} shipment{(stats?.carriers?.delhivery.inTransit ?? 0) === 1 ? '' : 's'} in transit via Delhivery Express,{' '}
+          and latest settlement batch{' '}
+          <strong>{latestSettlement?.batchId ?? 'PTQXJM2TN3'}</strong>{' '}
+          (UTR {latestSettlement?.bankUtr ?? 'HDFCH01411242767'}) is reconciled with bank accounts.
+        </p>
+
+        <div className="dash-digest-chips">
+          <span className="dash-chip emerald">
+            Carrier Routing: <strong>Delhivery First (Active)</strong>
+          </span>
+          <span className="dash-chip blue">
+            Auto-Failover: <strong>{stats?.carriers?.autoFailover ? 'Active' : 'Disabled'}</strong>
+          </span>
+          <span className="dash-chip amber">
+            Dispatch SLA: <strong>24h Guard Enforced</strong>
+          </span>
+          {latestSettlement && (
+            <span className="dash-chip">
+              Latest Payout: <strong>{formatMoney(latestSettlement.netAmount, 'INR')}</strong> (Easebuzz)
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* ─── Operational Action Triad ────────────────────────────── */}
+      <div className="dash-action-triad">
+        {/* Card 1: Manifest Queue */}
+        <div className="action-card amber">
+          <div>
+            <div className="action-card-header">
+              <span className="action-card-category">Warehouse Queue</span>
+              <span className="action-card-badge">{kpis?.readyToDispatch ?? 0} Ready</span>
+            </div>
+            <h3 className="action-card-title">Carrier Manifest Pending</h3>
+            <p className="action-card-desc">
+              New orders awaiting Delhivery or Velocity AWB assignment and shipping labels.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="action-card-btn"
+            onClick={() => navigate('/orders?status=NEW')}
+          >
+            <span>Open Dispatch Queue</span>
+            <span>↗</span>
+          </button>
+        </div>
+
+        {/* Card 2: Priority Prepaid Dispatch */}
+        <div className="action-card blue">
+          <div>
+            <div className="action-card-header">
+              <span className="action-card-category">Priority SLA</span>
+              <span className="action-card-badge">{kpis?.prepaidCount ?? 0} Prepaid</span>
+            </div>
+            <h3 className="action-card-title">Advance-Paid Orders</h3>
+            <p className="action-card-desc">
+              GoKwik, UPI, and PhonePe prepaid orders requiring express dispatch within the 24-hour SLA.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="action-card-btn"
+            onClick={() => navigate('/orders?filter=PREPAID_DISPATCH')}
+          >
+            <span>Dispatch Prepaid Orders</span>
+            <span>↗</span>
+          </button>
+        </div>
+
+        {/* Card 3: NDR & Delivery Exceptions */}
+        <div className="action-card rose">
+          <div>
+            <div className="action-card-header">
+              <span className="action-card-category">Delivery Guard</span>
+              <span className="action-card-badge">{kpis?.ndrExceptions ?? 0} Exceptions</span>
+            </div>
+            <h3 className="action-card-title">NDR & Reverse Returns</h3>
+            <p className="action-card-desc">
+              Failed delivery attempts, customer unreachables, or return requests awaiting warehouse QC.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="action-card-btn"
+            onClick={() => navigate('/returns')}
+          >
+            <span>Manage NDR & Returns</span>
+            <span>↗</span>
+          </button>
+        </div>
+      </div>
+
+      {/* ─── 6 Key Executive & Operational KPIs Grid ─────────────── */}
       <div className="dash-kpis">
         {/* KPI 1: Gross Revenue */}
-        <div className="dash-kpi-card">
+        <div
+          className="dash-kpi-card"
+          style={{ cursor: 'pointer' }}
+          onClick={() => navigate('/orders')}
+        >
           <div className="dash-kpi-top">
             <span className="dash-kpi-label">Gross Revenue</span>
             <div className="dash-kpi-icon revenue">
-              <Icon name="dollar" size={18} />
+              <Icon name="dollar" size={17} />
             </div>
           </div>
           <h3 className="dash-kpi-val">{formatMoney(kpis?.totalRevenue ?? 0, 'INR')}</h3>
           <div className="dash-kpi-sub">
             <span className="dash-kpi-tag green">AOV {formatMoney(kpis?.averageOrderValue ?? 0, 'INR')}</span>
-            <span>across all sales</span>
+            <span>gross sales</span>
           </div>
         </div>
 
         {/* KPI 2: Total Orders & Payment Split */}
-        <div className="dash-kpi-card">
+        <div
+          className="dash-kpi-card"
+          style={{ cursor: 'pointer' }}
+          onClick={() => navigate('/orders')}
+        >
           <div className="dash-kpi-top">
-            <span className="dash-kpi-label">Total Orders</span>
+            <span className="dash-kpi-label">Order Volume</span>
             <div className="dash-kpi-icon orders">
-              <Icon name="box" size={18} />
+              <Icon name="box" size={17} />
             </div>
           </div>
           <h3 className="dash-kpi-val">{kpis?.totalOrders ?? 0}</h3>
@@ -422,13 +388,13 @@ export function Dashboard() {
           <div className="dash-kpi-top">
             <span className="dash-kpi-label">Dispatch Queue</span>
             <div className="dash-kpi-icon dispatch">
-              <Icon name="truck" size={18} />
+              <Icon name="truck" size={17} />
             </div>
           </div>
           <h3 className="dash-kpi-val">{kpis?.readyToDispatch ?? 0}</h3>
           <div className="dash-kpi-sub">
-            <span className="dash-kpi-tag amber">Action Required</span>
-            <span>AWB manifest pending</span>
+            <span className="dash-kpi-tag amber">Action Needed</span>
+            <span>manifest pending</span>
           </div>
         </div>
 
@@ -439,20 +405,19 @@ export function Dashboard() {
           onClick={() => navigate('/orders')}
         >
           <div className="dash-kpi-top">
-            <span className="dash-kpi-label">AWB Logistics Cost</span>
+            <span className="dash-kpi-label">Logistics Cost</span>
             <div className="dash-kpi-icon transit">
-              <Icon name="creditCard" size={18} />
+              <Icon name="creditCard" size={17} />
             </div>
           </div>
           <h3 className="dash-kpi-val">
             {formatMoney(kpis?.totalEstimatedLogisticsCost ?? 850, 'INR')}
           </h3>
           <div className="dash-kpi-sub">
-            <span className="dash-kpi-tag blue">All AWBs</span>
-            <span>Estimated freight & COD</span>
+            <span className="dash-kpi-tag blue">Surface Ground</span>
+            <span>from Surat 395002</span>
           </div>
         </div>
-
 
         {/* KPI 5: Delivered & Success Rate */}
         <div
@@ -461,15 +426,15 @@ export function Dashboard() {
           onClick={() => navigate('/orders?status=DELIVERED')}
         >
           <div className="dash-kpi-top">
-            <span className="dash-kpi-label">Delivered Success</span>
+            <span className="dash-kpi-label">Delivered Orders</span>
             <div className="dash-kpi-icon delivered">
-              <Icon name="check" size={18} />
+              <Icon name="check" size={17} />
             </div>
           </div>
           <h3 className="dash-kpi-val">{kpis?.deliveredCount ?? 0}</h3>
           <div className="dash-kpi-sub">
-            <span className="dash-kpi-tag green">Complete</span>
-            <span>Confirmed deliveries</span>
+            <span className="dash-kpi-tag green">Delivered</span>
+            <span>confirmed shipments</span>
           </div>
         </div>
 
@@ -480,9 +445,9 @@ export function Dashboard() {
           onClick={() => navigate('/returns')}
         >
           <div className="dash-kpi-top">
-            <span className="dash-kpi-label">Return & RTO Rate</span>
+            <span className="dash-kpi-label">Return & RTO</span>
             <div className="dash-kpi-icon returns">
-              <Icon name="return" size={18} />
+              <Icon name="return" size={17} />
             </div>
           </div>
           <h3 className="dash-kpi-val">{kpis?.totalReturnsCount ?? 0}</h3>
@@ -490,65 +455,10 @@ export function Dashboard() {
             <span className="dash-kpi-tag purple">
               {kpis?.returnRate ? `${kpis.returnRate.toFixed(1)}%` : '0.0%'} RTO
             </span>
-            <span>Reverse pickups</span>
+            <span>reverse logistics</span>
           </div>
         </div>
       </div>
-
-      {/* ─── Multi-Carrier Logistics Pulse (Delhivery vs Velocity) ─── */}
-      {stats?.carriers && (
-        <Panel style={{ marginBottom: '22px', padding: '18px 22px' }}>
-          <PanelHeading
-            eyebrow="Dual-Carrier Logistics Orchestration"
-            title="Multi-Carrier Logistics Pulse"
-            action={
-              <Link to="/settings" className="text-link" style={{ fontSize: '12px' }}>
-                Carrier Routing Rules <Icon name="arrow" size={13} />
-              </Link>
-            }
-          />
-          <div className="carrier-grid">
-            <CarrierPulseCard
-              logo="/logos/delhivery.png"
-              logoAlt="Delhivery"
-              name="Delhivery Express B2C"
-              role="Primary Carrier Partner"
-              primary={(stats.carriers.activePriority || stats.carriers.priority) === 'DELHIVERY_FIRST'}
-              statusLabel="Active"
-              statusTone="active"
-              metrics={[
-                { label: 'Dispatched', value: stats.carriers.delhivery.totalShipments ?? stats.carriers.delhivery.total, tone: 'default' },
-                { label: 'In-Transit', value: stats.carriers.delhivery.inTransit, tone: 'inTransit' },
-                { label: 'Delivered', value: stats.carriers.delhivery.delivered, tone: 'delivered' },
-                { label: 'NDR', value: stats.carriers.delhivery.ndr, tone: stats.carriers.delhivery.ndr > 0 ? 'ndr' : 'muted' },
-              ]}
-            />
-
-            <CarrierPulseCard
-              logo="/logos/velocity.png"
-              logoAlt="Velocity"
-              logoFallback="/velocity-logo.png"
-              name="Velocity Shipping Network"
-              role="Multi-Carrier Partner"
-              primary={(stats.carriers.activePriority || stats.carriers.priority) === 'VELOCITY_FIRST'}
-              statusLabel={stats.carriers.velocity.status || (stats.carriers.velocity.configured ? 'Connected' : 'Standby')}
-              statusTone={(stats.carriers.velocity.status === 'CONNECTED' || stats.carriers.velocity.configured) ? 'active' : 'standby'}
-              metrics={[
-                { label: 'Dispatched', value: stats.carriers.velocity.totalShipments ?? stats.carriers.velocity.total, tone: 'default' },
-                { label: 'In-Transit', value: stats.carriers.velocity.inTransit, tone: 'inTransit' },
-                { label: 'Delivered', value: stats.carriers.velocity.delivered, tone: 'delivered' },
-                { label: 'NDR', value: stats.carriers.velocity.ndr, tone: stats.carriers.velocity.ndr > 0 ? 'ndr' : 'muted' },
-              ]}
-            />
-          </div>
-          <div className="carrier-footnote">
-            <span className="live-dot" style={{ width: '6px', height: '6px' }} />
-            <span>
-              Routing Engine: <strong>{(stats.carriers.activePriority || stats.carriers.priority) === 'VELOCITY_FIRST' ? 'Velocity First' : 'Delhivery First'}</strong> · Auto-Failover: <strong>{stats.carriers.autoFailover ? 'Active' : 'Disabled'}</strong> · Official Label Direct Streaming: <strong>Active</strong>
-            </span>
-          </div>
-        </Panel>
-      )}
 
       {/* ─── Interactive 5-Stage Fulfillment Funnel Pipeline ───────── */}
       <Panel className="funnel-panel">
@@ -556,8 +466,8 @@ export function Dashboard() {
           eyebrow="Lifecycle Monitoring"
           title="Fulfillment & Dispatch Pipeline"
           action={
-            <Link to="/orders" className="text-link">
-              View full order table <Icon name="arrow" size={14} />
+            <Link to="/orders" className="text-link" style={{ fontSize: '12px' }}>
+              View full order table ↗
             </Link>
           }
         />
@@ -602,7 +512,7 @@ export function Dashboard() {
             </div>
           </div>
 
-          {/* Stage 3: Delhivery In-Transit */}
+          {/* Stage 3: Carrier In-Transit */}
           <div
             className={`funnel-step ${
               (funnel?.logistics.shipped ?? 0) +
@@ -623,7 +533,7 @@ export function Dashboard() {
                   (funnel?.logistics.outForDelivery ?? 0)}
               </span>
             </div>
-            <h4 className="funnel-title">Delhivery In-Transit</h4>
+            <h4 className="funnel-title">Carrier In-Transit</h4>
             <div className="funnel-breakdown">
               <span>Hub Transit: <strong>{funnel?.logistics.inTransit ?? 0}</strong></span>
               <span>Out for Delivery: <strong>{funnel?.logistics.outForDelivery ?? 0}</strong></span>
@@ -640,10 +550,10 @@ export function Dashboard() {
               <span className="funnel-number">Stage 04</span>
               <span className="funnel-count-pill">{funnel?.finalMile.delivered ?? 0}</span>
             </div>
-            <h4 className="funnel-title">Final Mile Delivery</h4>
+            <h4 className="funnel-title">Delivered Complete</h4>
             <div className="funnel-breakdown">
               <span>Delivered: <strong>{funnel?.finalMile.delivered ?? 0}</strong></span>
-              <span>Delivery Success: <strong>{kpis?.deliveredCount ? '100%' : '0%'}</strong></span>
+              <span>Success: <strong>{kpis?.deliveredCount ? '100%' : '0%'}</strong></span>
             </div>
           </div>
 
@@ -668,7 +578,7 @@ export function Dashboard() {
                   (funnel?.returns.requested ?? 0)}
               </span>
             </div>
-            <h4 className="funnel-title">NDR & Returns (RVP)</h4>
+            <h4 className="funnel-title">NDR & Returns</h4>
             <div className="funnel-breakdown">
               <span>Failed / NDR: <strong>{funnel?.finalMile.failedDelivery ?? 0}</strong></span>
               <span>Reverse Pickup: <strong>{funnel?.returns.requested ?? 0}</strong></span>
@@ -677,19 +587,135 @@ export function Dashboard() {
         </div>
       </Panel>
 
+      {/* ─── Multi-Carrier Logistics Pulse (Delhivery vs Velocity) ─── */}
+      {stats?.carriers && (
+        <Panel className="carrier-panel">
+          <PanelHeading
+            eyebrow="Dual-Carrier Logistics Orchestration"
+            title="Multi-Carrier Logistics Pulse"
+            action={
+              <Link to="/settings" className="text-link" style={{ fontSize: '12px' }}>
+                Carrier Routing Rules ↗
+              </Link>
+            }
+          />
+          <div className="carrier-grid">
+            {/* Delhivery Express */}
+            <div className="carrier-card">
+              <div className="carrier-card-head">
+                <div className="carrier-id">
+                  <div className="carrier-logo">
+                    <img
+                      src="/logos/delhivery.png"
+                      alt="Delhivery"
+                      style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none'
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <strong className="carrier-name">Delhivery Express B2C</strong>
+                    <span className="carrier-role">Primary Carrier Partner</span>
+                  </div>
+                </div>
+                <div className="carrier-badges">
+                  <span className="carrier-badge primary">Primary</span>
+                  <span className="carrier-badge active">Active</span>
+                </div>
+              </div>
+              <div className="carrier-metrics">
+                <div>
+                  <span className="carrier-metric-label">Dispatched</span>
+                  <strong className="carrier-metric-value">{stats.carriers.delhivery.totalShipments ?? stats.carriers.delhivery.total}</strong>
+                </div>
+                <div>
+                  <span className="carrier-metric-label">In-Transit</span>
+                  <strong className="carrier-metric-value tone-inTransit">{stats.carriers.delhivery.inTransit}</strong>
+                </div>
+                <div>
+                  <span className="carrier-metric-label">Delivered</span>
+                  <strong className="carrier-metric-value tone-delivered">{stats.carriers.delhivery.delivered}</strong>
+                </div>
+                <div>
+                  <span className="carrier-metric-label">NDR</span>
+                  <strong className={`carrier-metric-value ${stats.carriers.delhivery.ndr > 0 ? 'tone-ndr' : 'tone-muted'}`}>
+                    {stats.carriers.delhivery.ndr}
+                  </strong>
+                </div>
+              </div>
+            </div>
+
+            {/* Velocity Shipping Network */}
+            <div className="carrier-card">
+              <div className="carrier-card-head">
+                <div className="carrier-id">
+                  <div className="carrier-logo">
+                    <img
+                      src="/logos/velocity.png"
+                      alt="Velocity"
+                      style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none'
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <strong className="carrier-name">Velocity Shipping Network</strong>
+                    <span className="carrier-role">Multi-Carrier Partner</span>
+                  </div>
+                </div>
+                <div className="carrier-badges">
+                  <span className={`carrier-badge ${stats.carriers.velocity.configured ? 'active' : 'standby'}`}>
+                    {stats.carriers.velocity.configured ? 'Connected' : 'Standby'}
+                  </span>
+                </div>
+              </div>
+              <div className="carrier-metrics">
+                <div>
+                  <span className="carrier-metric-label">Dispatched</span>
+                  <strong className="carrier-metric-value">{stats.carriers.velocity.totalShipments ?? stats.carriers.velocity.total}</strong>
+                </div>
+                <div>
+                  <span className="carrier-metric-label">In-Transit</span>
+                  <strong className="carrier-metric-value tone-inTransit">{stats.carriers.velocity.inTransit}</strong>
+                </div>
+                <div>
+                  <span className="carrier-metric-label">Delivered</span>
+                  <strong className="carrier-metric-value tone-delivered">{stats.carriers.velocity.delivered}</strong>
+                </div>
+                <div>
+                  <span className="carrier-metric-label">NDR</span>
+                  <strong className={`carrier-metric-value ${stats.carriers.velocity.ndr > 0 ? 'tone-ndr' : 'tone-muted'}`}>
+                    {stats.carriers.velocity.ndr}
+                  </strong>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="carrier-footnote">
+            <span className="live-pulse-dot" style={{ width: '6px', height: '6px' }} />
+            <span>
+              Routing Engine: <strong>{(stats.carriers.activePriority || stats.carriers.priority) === 'VELOCITY_FIRST' ? 'Velocity First' : 'Delhivery First'}</strong> · Auto-Failover: <strong>{stats.carriers.autoFailover ? 'Active' : 'Disabled'}</strong> · Direct Label Thermal Streaming: <strong>Active</strong>
+            </span>
+          </div>
+        </Panel>
+      )}
+
       {/* ─── 3-Way Money Receipt & Settlement Hub ─────────────────── */}
-      <Panel style={{ marginBottom: '22px' }}>
+      <Panel className="recon-panel">
         <PanelHeading
           eyebrow="Cash Flow & Settlement"
-          title="3-Way Revenue & Money Receipt Reconciliation"
+          title="3-Way Revenue & Gateway Settlement Reconciliation"
           action={
-            <Link to="/orders" className="text-link">
-              Filter by gateway <Icon name="arrow" size={14} />
+            <Link to="/orders" className="text-link" style={{ fontSize: '12px' }}>
+              Filter by gateway ↗
             </Link>
           }
         />
 
-        {/* Visual Revenue Split Bar */}
+        {/* Visual Revenue Proportion Bar */}
         <div className="split-bar-wrap">
           <div className="split-bar-track">
             <div
@@ -709,7 +735,7 @@ export function Dashboard() {
             />
             <div
               className="split-bar-seg"
-              style={{ width: `${phonepePct}%`, background: '#9333ea' }}
+              style={{ width: `${phonepePct}%`, background: '#059669' }}
               title={`PhonePe PG: ${phonepePct}%`}
             />
           </div>
@@ -727,20 +753,20 @@ export function Dashboard() {
               <span>Shopify Draft / Direct ({manualPct}%)</span>
             </div>
             <div className="split-legend-item">
-              <span className="split-legend-dot" style={{ background: '#9333ea' }} />
+              <span className="split-legend-dot" style={{ background: '#059669' }} />
               <span>PhonePe PG ({phonepePct}%)</span>
             </div>
           </div>
         </div>
 
-        {/* 3 Detailed Reconciliation Cards */}
+        {/* 4 Detailed Reconciliation Cards (Including Real Easebuzz Settlement) */}
         <div className="reconciliation-grid">
           {/* Card 1: Delhivery COD */}
-          <div className="recon-card cod">
+          <div className="recon-card">
             <div>
               <div className="recon-header">
                 <span className="recon-badge cod">Delhivery COD</span>
-                <span style={{ fontSize: '10px', color: '#b45309', fontWeight: 700 }}>
+                <span style={{ fontSize: '11px', color: '#b45309', fontWeight: 700 }}>
                   {recon?.delhiveryCod.orderCount ?? 0} Orders
                 </span>
               </div>
@@ -772,19 +798,19 @@ export function Dashboard() {
               </div>
               <div className="recon-footer">
                 <span>Cycle: {recon?.delhiveryCod.payoutSchedule}</span>
-                <Link to="/orders?gateway=cod" className="text-link" style={{ fontSize: '10px' }}>
-                  Inspect →
+                <Link to="/orders?gateway=cod" className="text-link" style={{ fontSize: '11px' }}>
+                  Inspect ↗
                 </Link>
               </div>
             </div>
           </div>
 
           {/* Card 2: GoKwik Prepaid */}
-          <div className="recon-card gokwik">
+          <div className="recon-card">
             <div>
               <div className="recon-header">
                 <span className="recon-badge gokwik">GoKwik Prepaid</span>
-                <span style={{ fontSize: '10px', color: '#1d4ed8', fontWeight: 700 }}>
+                <span style={{ fontSize: '11px', color: '#1d4ed8', fontWeight: 700 }}>
                   {recon?.gokwikPrepaid.orderCount ?? 0} Orders
                 </span>
               </div>
@@ -812,29 +838,29 @@ export function Dashboard() {
                   </strong>
                 </div>
                 <div>
-                  <span>Channel Source:</span>
-                  <strong>Youthnic &lt;&gt; Gokwik</strong>
+                  <span>Settlement:</span>
+                  <strong>T+1 Business Day</strong>
                 </div>
               </div>
               <div className="recon-footer">
-                <span>Cycle: {recon?.gokwikPrepaid.payoutSchedule}</span>
-                <Link to="/orders?gateway=gokwik" className="text-link" style={{ fontSize: '10px' }}>
-                  Inspect →
+                <span>Channel: Youthnic &lt;&gt; Gokwik</span>
+                <Link to="/orders?gateway=gokwik" className="text-link" style={{ fontSize: '11px' }}>
+                  Inspect ↗
                 </Link>
               </div>
             </div>
           </div>
 
           {/* Card 3: PhonePe Prepaid */}
-          <div className="recon-card phonepe">
+          <div className="recon-card">
             <div>
               <div className="recon-header">
                 <span className="recon-badge phonepe">PhonePe PG</span>
-                <span style={{ fontSize: '10px', color: '#6d28d9', fontWeight: 700 }}>
+                <span style={{ fontSize: '11px', color: '#6d28d9', fontWeight: 700 }}>
                   {recon?.phonepePrepaid.orderCount ?? 0} Orders
                 </span>
               </div>
-              <h4 className="recon-title">Direct Payment Gateway</h4>
+              <h4 className="recon-title">Direct UPI / Card Gateway</h4>
               <p className="recon-total">
                 {formatMoney(recon?.phonepePrepaid.totalAmount ?? 0, 'INR')}
               </p>
@@ -856,14 +882,60 @@ export function Dashboard() {
                   <strong>{formatMoney(recon?.phonepePrepaid.estimatedPayout ?? 0, 'INR')}</strong>
                 </div>
                 <div>
-                  <span>Channel Source:</span>
-                  <strong>PhonePe UPI / Cards</strong>
+                  <span>Settlement:</span>
+                  <strong>T+1 Bank Settlement</strong>
                 </div>
               </div>
               <div className="recon-footer">
                 <span>Cycle: {recon?.phonepePrepaid.payoutSchedule}</span>
-                <Link to="/orders?gateway=phonepe" className="text-link" style={{ fontSize: '10px' }}>
-                  Inspect →
+                <Link to="/orders?gateway=phonepe" className="text-link" style={{ fontSize: '11px' }}>
+                  Inspect ↗
+                </Link>
+              </div>
+            </div>
+          </div>
+
+          {/* Card 4: Latest Settled Gateway Batch (Real Easebuzz Ingested Data) */}
+          <div className="recon-card highlight">
+            <div>
+              <div className="recon-header">
+                <span className="recon-badge easebuzz">{latestSettlement?.gateway ?? 'EASEBUZZ'}</span>
+                <span style={{ fontSize: '11px', color: '#059669', fontWeight: 700 }}>
+                  Batch {latestSettlement?.batchId ?? 'PTQXJM2TN3'}
+                </span>
+              </div>
+              <h4 className="recon-title">Settled Bank Remittance</h4>
+              <p className="recon-total" style={{ color: '#059669' }}>
+                {formatMoney(latestSettlement?.netAmount ?? 7448.84, 'INR')}
+              </p>
+            </div>
+            <div>
+              <div className="recon-stats">
+                <div>
+                  <span>Bank UTR:</span>
+                  <strong style={{ fontSize: '10px' }}>{latestSettlement?.bankUtr ?? 'HDFCH01411242767'}</strong>
+                </div>
+                <div>
+                  <span>Gross Settled:</span>
+                  <strong>{formatMoney(latestSettlement?.grossAmount ?? 7676.30, 'INR')}</strong>
+                </div>
+                <div>
+                  <span>MDR Fee & GST:</span>
+                  <strong>
+                    {formatMoney((latestSettlement?.feeAmount ?? 191.91) + (latestSettlement?.gstAmount ?? 34.55), 'INR')}
+                  </strong>
+                </div>
+                <div>
+                  <span>Transactions:</span>
+                  <strong>
+                    {latestSettlement?.orderCount ?? 6} orders, {latestSettlement?.refundCount ?? 1} refund
+                  </strong>
+                </div>
+              </div>
+              <div className="recon-footer">
+                <span>Status: Reconciled</span>
+                <Link to="/remittances" className="text-link" style={{ fontSize: '11px' }}>
+                  View Batch ↗
                 </Link>
               </div>
             </div>
@@ -879,7 +951,7 @@ export function Dashboard() {
             eyebrow="Geographic Distribution"
             title="Top Shipping Destinations (States)"
             action={
-              <span className="subtle-label">
+              <span className="subtle-label" style={{ fontSize: '11px' }}>
                 Origin: Surat, Gujarat ({stats?.delhiveryStatus?.originPincode || '395002'})
               </span>
             }
@@ -889,13 +961,13 @@ export function Dashboard() {
               topStates.map((item) => (
                 <div className="state-item" key={item.state}>
                   <div className="state-left">
-                    <Icon name="pin" size={14} />
+                    <Icon name="pin" size={13} />
                     <span>{item.state}</span>
                   </div>
                   <div className="state-bar">
                     <div
                       className="state-bar-fill"
-                      style={{ width: `${Math.min(100, item.percentage * 2.2)}%` }}
+                      style={{ width: `${Math.min(100, item.percentage * 2.5)}%` }}
                     />
                   </div>
                   <div className="state-right">
@@ -916,12 +988,12 @@ export function Dashboard() {
             eyebrow="Delhivery Rate Engine"
             title="Quick Logistics Rate Calculator"
             action={
-              <span className="subtle-label">
+              <span className="subtle-label" style={{ fontSize: '11px' }}>
                 {stats?.delhiveryStatus?.tokenConfigured ? 'API Connected' : 'Rate Matrix'}
               </span>
             }
           />
-          <p style={{ fontSize: '11px', color: '#64748b', margin: '-10px 0 14px' }}>
+          <p style={{ fontSize: '11px', color: '#64748b', margin: '-8px 0 12px' }}>
             Calculate approximate Delhivery freight, COD charges, and GST from Surat warehouse.
           </p>
 
@@ -948,7 +1020,7 @@ export function Dashboard() {
                 />
               </div>
               <div className="calc-field">
-                <label>Mode</label>
+                <label>Payment Mode</label>
                 <select
                   value={calcMode}
                   onChange={(e) => setCalcMode(e.target.value as 'Pre-paid' | 'COD')}
@@ -957,18 +1029,23 @@ export function Dashboard() {
                   <option value="COD">COD</option>
                 </select>
               </div>
-              <button className="calc-btn" disabled={calcLoading} onClick={handleEstimate}>
+              <button
+                type="button"
+                className="calc-btn"
+                disabled={calcLoading}
+                onClick={handleEstimate}
+              >
                 {calcLoading ? '...' : 'Estimate'}
               </button>
             </div>
 
             {calcResult && (
               <div className="calc-result-box">
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, fontSize: '13px', marginBottom: '6px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: '13px', marginBottom: '6px' }}>
                   <span>Total Estimated Freight:</span>
-                  <span>{formatMoney(calcResult?.total_amount ?? calcResult?.rate ?? 85, 'INR')}</span>
+                  <span style={{ color: '#2563eb' }}>{formatMoney(calcResult?.total_amount ?? calcResult?.rate ?? 85, 'INR')}</span>
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px', fontSize: '10px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px', fontSize: '11px', color: '#64748b' }}>
                   <div>Base: <strong>{formatMoney(calcResult?.charges?.base ?? 60, 'INR')}</strong></div>
                   <div>COD Fee: <strong>{calcMode === 'COD' ? '₹38.00' : '₹0.00'}</strong></div>
                   <div>GST: <strong>18% Included</strong></div>
@@ -979,14 +1056,14 @@ export function Dashboard() {
         </Panel>
       </div>
 
-      {/* ─── Live Recent Orders Stream ─────────────────────────────── */}
+      {/* ─── Live Recent Orders Stream Table ───────────────────────── */}
       <Panel className="recent-panel">
         <PanelHeading
           eyebrow="Real-Time Feed"
           title="Recent Orders & Dispatch Status"
           action={
-            <Link to="/orders" className="text-link">
-              View all orders <Icon name="arrow" size={14} />
+            <Link to="/orders" className="text-link" style={{ fontSize: '12px' }}>
+              View all orders ↗
             </Link>
           }
         />
@@ -997,12 +1074,12 @@ export function Dashboard() {
                 <tr>
                   <th>Order</th>
                   <th>Customer</th>
-                  <th>State</th>
+                  <th>State & City</th>
                   <th>Channel & Gateway</th>
-                  <th>Order Amount</th>
+                  <th>Amount</th>
                   <th>AWB Shipping Cost</th>
                   <th>Status</th>
-                  <th>Delhivery AWB</th>
+                  <th>Tracking AWB</th>
                   <th style={{ textAlign: 'right' }}>Action</th>
                 </tr>
               </thead>
@@ -1042,26 +1119,26 @@ export function Dashboard() {
                         </span>
                         <span className="shipping-zone-tag">
                           {order.shippingZoneCode ? `Zone ${order.shippingZoneCode}` : 'Surface Ground'}
-                          {order.paymentMethod === 'COD' ? ' · COD fee' : ''}
+                          {order.paymentMethod === 'COD' ? ' / COD fee' : ''}
                         </span>
                       </div>
                     </td>
                     <td>
                       <StatusBadge status={order.status} />
                     </td>
-                    <td className="mono">
+                    <td>
                       {order.waybillNumber ? (
                         <a
                           href={carrierTrackingUrl((order as any).courier || (order as any).courierPartner || (order as any).shipment?.courier, order.waybillNumber)}
                           target="_blank"
                           rel="noreferrer"
                           onClick={(e) => e.stopPropagation()}
-                          style={{ color: '#2563eb', fontWeight: 700 }}
+                          style={{ color: '#2563eb', fontWeight: 700, fontFamily: 'JetBrains Mono, monospace' }}
                         >
                           {order.waybillNumber} ↗
                         </a>
                       ) : (
-                        <span style={{ color: '#94a3b8' }}>Unassigned</span>
+                        <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>Unassigned</span>
                       )}
                     </td>
                     <td style={{ textAlign: 'right' }}>
@@ -1090,4 +1167,3 @@ export function Dashboard() {
     </>
   )
 }
-

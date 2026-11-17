@@ -121,12 +121,33 @@ export function invalidateDashboardStatsCache(): void {
 
 router.get('/dashboard/stats', async (req: Request, res: Response): Promise<void> => {
   try {
-    if (cachedDashboardStats && Date.now() < cachedDashboardStats.expiresAt && req.query.fresh !== 'true') {
+    const period = typeof req.query.period === 'string' ? req.query.period.toLowerCase() : 'all';
+
+    if (period === 'all' && cachedDashboardStats && Date.now() < cachedDashboardStats.expiresAt && req.query.fresh !== 'true') {
       res.json(cachedDashboardStats.data);
       return;
     }
-    const [allOrders, shipments, returns] = await Promise.all([
+
+    let orderWhere: any = {};
+    const now = new Date();
+    if (period === 'today') {
+      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      orderWhere = { shopifyCreatedAt: { gte: startOfToday } };
+    } else if (period === 'yesterday') {
+      const startOfYesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      orderWhere = { shopifyCreatedAt: { gte: startOfYesterday, lt: startOfToday } };
+    } else if (period === '7days') {
+      const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      orderWhere = { shopifyCreatedAt: { gte: sevenDaysAgo } };
+    } else if (period === 'month') {
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      orderWhere = { shopifyCreatedAt: { gte: startOfMonth } };
+    }
+
+    const [allOrders, shipments, returns, latestSettlement] = await Promise.all([
       prisma.order.findMany({
+        where: orderWhere,
         include: { items: true, shipment: true, returns: true },
         orderBy: { shopifyCreatedAt: 'desc' },
       }),
@@ -135,6 +156,23 @@ router.get('/dashboard/stats', async (req: Request, res: Response): Promise<void
       }),
       prisma.return.findMany({
         include: { items: true },
+      }),
+      prisma.gatewaySettlementBatch.findFirst({
+        orderBy: { settlementDate: 'desc' },
+        select: {
+          batchId: true,
+          gateway: true,
+          settlementDate: true,
+          netAmount: true,
+          grossAmount: true,
+          feeAmount: true,
+          gstAmount: true,
+          bankUtr: true,
+          orderCount: true,
+          refundCount: true,
+          refundAmount: true,
+          verificationStatus: true,
+        },
       }),
     ]);
 
@@ -166,7 +204,6 @@ router.get('/dashboard/stats', async (req: Request, res: Response): Promise<void
     const activeShipments = transitOrders.length;
     const readyToDispatch = allOrders.filter((o) => tabOf(o) === 'dispatch').length;
     const readyToShip = allOrders.filter((o) => tabOf(o) === 'ready').length;
-    const now = new Date();
     const delayedDispatchOrders = allOrders.filter((o) => {
       if (tabOf(o) !== 'dispatch') return false;
       if (o.dispatchDelayed) return true;
@@ -438,9 +475,26 @@ router.get('/dashboard/stats', async (req: Request, res: Response): Promise<void
       },
     };
 
-    res.json({
+    const payload = {
       success: true,
       timestamp: new Date().toISOString(),
+      period,
+      latestSettlement: latestSettlement
+        ? {
+            batchId: latestSettlement.batchId,
+            gateway: latestSettlement.gateway,
+            settlementDate: latestSettlement.settlementDate.toISOString(),
+            netAmount: Number(latestSettlement.netAmount),
+            grossAmount: Number(latestSettlement.grossAmount),
+            feeAmount: Number(latestSettlement.feeAmount),
+            gstAmount: Number(latestSettlement.gstAmount),
+            bankUtr: latestSettlement.bankUtr,
+            orderCount: latestSettlement.orderCount,
+            refundCount: latestSettlement.refundCount,
+            refundAmount: Number(latestSettlement.refundAmount),
+            verificationStatus: latestSettlement.verificationStatus,
+          }
+        : null,
       carriers,
       kpis: {
         totalRevenue,
@@ -543,7 +597,16 @@ router.get('/dashboard/stats', async (req: Request, res: Response): Promise<void
         originCity: config.delhivery.seller.city,
         originState: config.delhivery.seller.state,
       },
-    });
+    };
+
+    if (period === 'all') {
+      cachedDashboardStats = {
+        data: payload,
+        expiresAt: Date.now() + DASHBOARD_STATS_TTL_MS,
+      };
+    }
+
+    res.json(payload);
   } catch (error: any) {
     logger.error('Error calculating dashboard stats', { error: error.message });
     res.status(500).json({ error: error.message });

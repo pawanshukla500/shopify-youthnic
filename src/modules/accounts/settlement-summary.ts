@@ -23,3 +23,30 @@ export function istDateRange(startDate: string, endDate: string) {
   if (lastDay < start) throw new Error('End date must not be before start date.');
   return { start, end: new Date(lastDay.getTime() + 24 * 3600 * 1000) };
 }
+
+const IST_OFFSET_MS = 5.5 * 3600 * 1000;
+
+/** Convert `period` into IST (+05:30) boundaries so server timezone (UTC on VPS) never shifts "today". */
+export function dashboardPeriodRange(period: string, now = new Date()): { gte?: Date; lt?: Date } {
+  const key = period.toLowerCase();
+  if (!key || key === 'all') return {};
+  const istDay = (d: Date) => new Date(d.getTime() + IST_OFFSET_MS).toISOString().slice(0, 10);
+  const todayStr = istDay(now);
+  if (key === 'today') {
+    const r = istDateRange(todayStr, todayStr);
+    return { gte: r.start, lt: r.end };
+  }
+  if (key === 'yesterday') {
+    const yStr = istDay(new Date(now.getTime() - 24 * 3600 * 1000));
+    const r = istDateRange(yStr, yStr);
+    return { gte: r.start, lt: r.end };
+  }
+  if (key === '7days') {
+    const sevenStr = istDay(new Date(now.getTime() - 6 * 24 * 3600 * 1000));
+    return { gte: istDateRange(sevenStr, todayStr).start };
+  }
+  if (key === 'month') {
+    return { gte: istDateRange(`${todayStr.slice(0, 7)}-01`, todayStr).start };
+  }
+  return {};
+}

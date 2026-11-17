@@ -1,48 +1,64 @@
 import { describe, it, expect } from 'vitest';
+import { dashboardPeriodRange } from '../src/modules/accounts/settlement-summary';
+import { classifyOrderTab, isPrepaidOrder } from '../src/modules/orders/order-tabs';
 
-describe('Dashboard Digest & Period Filtering Logic', () => {
-  it('correctly calculates period boundaries for today, yesterday, 7days, and month', () => {
-    const fixedNow = new Date('2026-11-17T12:00:00.000Z');
+describe('Dashboard Digest IST Period Ranges & Queue Accuracy', () => {
+  it('computes today and yesterday in IST (+05:30) even when the server clock is in UTC', () => {
+    // 2026-11-17T20:00:00Z is 2026-11-18 01:30 AM IST (next calendar day in India).
+    const utcEveningIstNextMorning = new Date('2026-11-17T20:00:00.000Z');
 
-    // Today
-    const startOfToday = new Date(fixedNow.getFullYear(), fixedNow.getMonth(), fixedNow.getDate());
-    expect(startOfToday.getDate()).toBe(fixedNow.getDate());
+    const today = dashboardPeriodRange('today', utcEveningIstNextMorning);
+    expect(today.gte?.toISOString()).toBe('2026-11-17T18:30:00.000Z'); // 2026-11-18 00:00 IST
+    expect(today.lt?.toISOString()).toBe('2026-11-18T18:30:00.000Z');
 
-    // Yesterday
-    const startOfYesterday = new Date(fixedNow.getFullYear(), fixedNow.getMonth(), fixedNow.getDate() - 1);
-    expect(startOfYesterday.getDate()).toBe(fixedNow.getDate() - 1);
+    const yesterday = dashboardPeriodRange('yesterday', utcEveningIstNextMorning);
+    expect(yesterday.gte?.toISOString()).toBe('2026-11-16T18:30:00.000Z');
+    expect(yesterday.lt?.toISOString()).toBe('2026-11-17T18:30:00.000Z');
 
-    // 7 Days
-    const sevenDaysAgo = new Date(fixedNow.getTime() - 7 * 24 * 60 * 60 * 1000);
-    expect(sevenDaysAgo.getTime()).toBeLessThan(fixedNow.getTime());
-    expect(Math.round((fixedNow.getTime() - sevenDaysAgo.getTime()) / (24 * 3600 * 1000))).toBe(7);
+    const month = dashboardPeriodRange('month', utcEveningIstNextMorning);
+    expect(month.gte?.toISOString()).toBe('2026-10-31T18:30:00.000Z'); // 2026-11-01 00:00 IST
+    expect(month.lt).toBeUndefined();
 
-    // Month
-    const startOfMonth = new Date(fixedNow.getFullYear(), fixedNow.getMonth(), 1);
-    expect(startOfMonth.getDate()).toBe(1);
-    expect(startOfMonth.getMonth()).toBe(fixedNow.getMonth());
+    expect(dashboardPeriodRange('all', utcEveningIstNextMorning)).toEqual({});
   });
 
-  it('formats real settlement batch information for dashboard presentation', () => {
-    const mockBatch = {
-      batchId: 'PTQXJM2TN3',
-      gateway: 'EASEBUZZ',
-      settlementDate: new Date('2026-11-17T00:00:00.000Z'),
-      grossAmount: 7676.3,
-      feeAmount: 191.91,
-      gstAmount: 34.55,
-      netAmount: 7448.84,
-      bankUtr: 'HDFCH01411242767',
-      orderCount: 6,
-      refundCount: 1,
-      refundAmount: 1,
-      verificationStatus: 'UNVERIFIED',
-    };
+  it('counts only unshipped approved prepaid orders in the dispatch queue rather than all historical prepaid orders', () => {
+    const orders = [
+      {
+        status: 'DELIVERED',
+        paymentMethod: 'GoKwik',
+        paymentGateway: 'gokwik',
+        financialStatus: 'paid',
+        tags: 'prepaid',
+        shipment: { status: 'DELIVERED', waybillNumber: 'AWB100' },
+        returns: [],
+      },
+      {
+        status: 'DISPATCH_PENDING',
+        paymentMethod: 'PREPAID',
+        paymentGateway: 'gokwik',
+        financialStatus: 'paid',
+        tags: '',
+        shipment: null,
+        returns: [],
+      },
+      {
+        status: 'DISPATCH_PENDING',
+        paymentMethod: 'COD',
+        paymentGateway: 'Cash on Delivery (COD)',
+        financialStatus: 'pending',
+        tags: 'COD_CONFIRMED',
+        shipment: null,
+        returns: [],
+      },
+    ];
 
-    expect(mockBatch.batchId).toBe('PTQXJM2TN3');
-    expect(mockBatch.bankUtr).toBe('HDFCH01411242767');
-    expect(mockBatch.netAmount).toBe(7448.84);
-    expect(mockBatch.orderCount).toBe(6);
-    expect(mockBatch.refundCount).toBe(1);
+    const readyToDispatch = orders.filter((o) => classifyOrderTab(o) === 'dispatch').length;
+    const prepaidPendingDispatchCount = orders.filter(
+      (o) => classifyOrderTab(o) === 'dispatch' && isPrepaidOrder(o)
+    ).length;
+
+    expect(readyToDispatch).toBe(2);
+    expect(prepaidPendingDispatchCount).toBe(1);
   });
 });

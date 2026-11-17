@@ -9,6 +9,7 @@ import shopifyService from '../modules/shopify/shopify.service';
 import paymentService from '../modules/payments/payment.service';
 import delhiveryService from '../modules/delhivery/delhivery.service';
 import { readSpreadsheet } from '../modules/accounts/spreadsheet';
+import { dashboardPeriodRange } from '../modules/accounts/settlement-summary';
 import { importDelhiveryRemittance, recordPaymentReceived, syncVelocityRemittance } from '../modules/accounts/reconciliation.service';
 import { getOrderAccountTrail, presentAccountTrailEvent, recordAccountTrailEvent, recordManualRefund, type RefundMode } from '../modules/accounts/account-trail.service';
 import { config } from '../config';
@@ -128,22 +129,9 @@ router.get('/dashboard/stats', async (req: Request, res: Response): Promise<void
       return;
     }
 
-    let orderWhere: any = {};
     const now = new Date();
-    if (period === 'today') {
-      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      orderWhere = { shopifyCreatedAt: { gte: startOfToday } };
-    } else if (period === 'yesterday') {
-      const startOfYesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
-      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      orderWhere = { shopifyCreatedAt: { gte: startOfYesterday, lt: startOfToday } };
-    } else if (period === '7days') {
-      const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-      orderWhere = { shopifyCreatedAt: { gte: sevenDaysAgo } };
-    } else if (period === 'month') {
-      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-      orderWhere = { shopifyCreatedAt: { gte: startOfMonth } };
-    }
+    const range = dashboardPeriodRange(period, now);
+    const orderWhere: any = range.gte || range.lt ? { shopifyCreatedAt: range } : {};
 
     const [allOrders, shipments, returns, latestSettlement] = await Promise.all([
       prisma.order.findMany({
@@ -195,6 +183,10 @@ router.get('/dashboard/stats', async (req: Request, res: Response): Promise<void
     const prepaidRatio = totalOrders > 0 ? (prepaidCount / totalOrders) * 100 : 0;
     const codRatio = totalOrders > 0 ? (codCount / totalOrders) * 100 : 0;
 
+    const orderIdSet = period === 'all' ? null : new Set(allOrders.map((o) => o.id));
+    const periodShipments = orderIdSet ? shipments.filter((s) => orderIdSet.has(s.orderId)) : shipments;
+    const periodReturns = orderIdSet ? returns.filter((r) => orderIdSet.has(r.orderId)) : returns;
+
     // Delivery & Dispatches — same queues as the Orders page tabs.
     const tabOf = (order: (typeof allOrders)[number]) => classifyOrderTab(order);
     // "Payment Received" orders are delivered orders that also closed for accounts.
@@ -203,6 +195,7 @@ router.get('/dashboard/stats', async (req: Request, res: Response): Promise<void
     const transitOrders = allOrders.filter((o) => tabOf(o) === 'transit');
     const activeShipments = transitOrders.length;
     const readyToDispatch = allOrders.filter((o) => tabOf(o) === 'dispatch').length;
+    const prepaidPendingDispatch = allOrders.filter((o) => tabOf(o) === 'dispatch' && isPrepaidOrder(o));
     const readyToShip = allOrders.filter((o) => tabOf(o) === 'ready').length;
     const delayedDispatchOrders = allOrders.filter((o) => {
       if (tabOf(o) !== 'dispatch') return false;
@@ -216,15 +209,15 @@ router.get('/dashboard/stats', async (req: Request, res: Response): Promise<void
       ['FAILED_DELIVERY', 'RTO_INITIATED'].includes(o.status) ||
       Boolean(o.shipment?.trackingStatus && /fail|attempt|undeliver|ndr/i.test(o.shipment.trackingStatus))
     ).length;
-    const totalReturnsCount = returns.length;
+    const totalReturnsCount = periodReturns.length;
     const returnRate = totalOrders > 0 ? (totalReturnsCount / totalOrders) * 100 : 0;
 
     // 3-Way Reconciliation
     // 1. Delhivery COD
-    const codCollected = shipments
+    const codCollected = periodShipments
       .filter((s) => s.paymentMode === 'COD' && s.codCollected)
       .reduce((sum, s) => sum + (s.codAmount || 0), 0);
-    const codRemitted = shipments
+    const codRemitted = periodShipments
       .filter((s) => s.paymentMode === 'COD' && s.codRemitted)
       .reduce((sum, s) => sum + (s.codRemittedAmount ?? s.codAmount ?? 0), 0);
     const codPendingRemittance = Math.max(0, codCollected - codRemitted);
@@ -358,7 +351,6 @@ router.get('/dashboard/stats', async (req: Request, res: Response): Promise<void
     }
 
     // Priority 1: Prepaid orders needing immediate dispatch
-    const prepaidPendingDispatch = allOrders.filter((o) => tabOf(o) === 'dispatch' && isPrepaidOrder(o));
     if (prepaidPendingDispatch.length > 0) {
       actionItems.push({
         id: 'prepaid_dispatch_needed',
@@ -396,7 +388,7 @@ router.get('/dashboard/stats', async (req: Request, res: Response): Promise<void
         filterParam: 'verified=false',
       });
     }
-    const qcPendingReturns = returns.filter(
+    const qcPendingReturns = periodReturns.filter(
       (r) => r.returnStatus === 'RECEIVED' || (r.returnStatus as string) === 'QC_PENDING'
     );
     if (qcPendingReturns.length > 0) {
@@ -442,10 +434,10 @@ router.get('/dashboard/stats', async (req: Request, res: Response): Promise<void
       shippingRouterService.getCarrierPriority(),
       prisma.setting.findUnique({ where: { key: 'shipping_auto_failover' } }),
     ]);
-    const delhiveryShipments = shipments.filter(
+    const delhiveryShipments = periodShipments.filter(
       (s) => !isVelocityCourier(s.courier, s.labelUrl, s.waybillNumber)
     );
-    const velocityShipments = shipments.filter(
+    const velocityShipments = periodShipments.filter(
       (s) => isVelocityCourier(s.courier, s.labelUrl, s.waybillNumber)
     );
 
@@ -507,6 +499,7 @@ router.get('/dashboard/stats', async (req: Request, res: Response): Promise<void
         codRevenue,
         codRatio,
         readyToDispatch,
+        prepaidPendingDispatchCount: prepaidPendingDispatch.length,
         delayedDispatchCount,
         activeShipments,
         deliveredCount,
@@ -965,6 +958,7 @@ router.post('/orders/:id/dispatch', async (req: Request, res: Response): Promise
       courierChoice,
       velocityCarrierId ? { velocityCarrierId } : undefined
     );
+    invalidateDashboardStatsCache();
     res.json({ success: true, waybillNumber: result.waybillNumber, courier: result.courier });
   } catch (error: any) {
     res.status(400).json({ error: error.message });
@@ -1023,6 +1017,7 @@ router.post('/orders/bulk-dispatch', async (req: Request, res: Response): Promis
     const successfulCount = results.filter((r) => r.success).length;
     const prepaidDispatched = results.filter((r) => r.success && r.paymentMode === 'Prepaid').length;
     const codDispatched = results.filter((r) => r.success && r.paymentMode === 'COD').length;
+    if (successfulCount > 0) invalidateDashboardStatsCache();
 
     res.json({
       success: true,
@@ -1902,6 +1897,7 @@ router.post('/orders/:id/confirm-cod', async (req: AuthenticatedRequest, res: Re
       });
     });
 
+    invalidateDashboardStatsCache();
     logger.info('COD order confirmed and moved to dispatch queue', { orderId, orderName: order.shopifyOrderName, approvedBy: req.user?.email });
     res.json({
       success: true,

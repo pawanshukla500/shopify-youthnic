@@ -1074,3 +1074,37 @@ select:focus-visible {
     transition-duration: 0.01ms !important;
   }
 }
+
+
+/* ─── Phase 2 Design System: Contrast & Mobile Targets ─── */
+.dash-carrier-stat strong.tone-green { color: var(--tone-success-fg); }
+.dash-carrier-stat strong.tone-blue { color: var(--tone-info-fg); }
+.dash-carrier-stat strong.tone-red { color: var(--tone-danger-fg); }
+
+[data-theme="dark"] .dash-subtitle-link,
+[data-theme="dark"] .dash-link-btn,
+.app-shell.theme-dark .dash-subtitle-link,
+.app-shell.theme-dark .dash-link-btn {
+  color: var(--tone-info-fg);
+}
+[data-theme="dark"] .dash-subtitle-link:hover,
+[data-theme="dark"] .dash-link-btn:hover,
+.app-shell.theme-dark .dash-subtitle-link:hover,
+.app-shell.theme-dark .dash-link-btn:hover {
+  color: #bfdbfe;
+}
+[data-theme="dark"] .dash-badge.green,
+.app-shell.theme-dark .dash-badge.green {
+  background: var(--tone-success-bg);
+  color: var(--tone-success-fg);
+}
+[data-theme="dark"] .dash-badge.blue,
+.app-shell.theme-dark .dash-badge.blue {
+  background: var(--tone-info-bg);
+  color: var(--tone-info-fg);
+}
+[data-theme="dark"] .dash-badge.amber,
+.app-shell.theme-dark .dash-badge.amber {
+  background: var(--tone-warning-bg);
+  color: var(--tone-warning-fg);
+}

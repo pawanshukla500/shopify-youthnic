@@ -917,3 +917,62 @@
 .orders-page .bulk-spacer {
   height: 90px;
   }
+
+
+/* ─── Phase 2 Design System: Accessibility, Dark Mode & Responsive ─── */
+.kpi-card:focus-visible,
+.tab-pill:focus-visible,
+.sla-strip-action:focus-visible,
+.filter-select:focus-visible,
+.row-action-btn:focus-visible,
+.bulk-btn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+[data-theme='dark'] .sla-strip-action:hover {
+  background: var(--tone-warning-bg);
+  border-color: var(--tone-warning-border);
+  color: var(--tone-warning-fg);
+}
+
+@media (max-width: 768px) {
+  .tab-pill,
+  .sla-strip-action,
+  .filter-select,
+  .row-action-btn,
+  .bulk-btn,
+  .page-btn {
+    min-height: 44px;
+  }
+  .orders-toolbar,
+  .orders-filter-row,
+  .bulk-action-bar {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+}
+
+
+.kpi-stat-sub {
+  color: var(--muted);
+}
+
+.orders-table .pay-pill-via { color: var(--muted); }
+.orders-table .pay-sub.is-ok { color: var(--tone-success-fg); }
+[data-theme='dark'] .orders-table .order-state-pill.is-pending,
+[data-theme='dark'] .orders-table .pay-pill.is-gokwik {
+  background: var(--tone-info-bg);
+  color: var(--tone-info-fg);
+  border-color: var(--tone-info-border);
+}
+[data-theme='dark'] .orders-table .order-state-pill.is-cancelled {
+  background: var(--tone-neutral-bg);
+  color: var(--tone-neutral-fg);
+}
+[data-theme='dark'] .orders-table .mono:not(.waybill-track-link) {
+  color: var(--ink-secondary);
+}
+[data-theme='dark'] .orders-table .waybill-track-link {
+  color: var(--tone-info-fg);
+}

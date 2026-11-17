@@ -271,7 +271,7 @@ def run():
                 # Tab 3: Settled / Refunded
                 page.get_by_role("button", name="Settled / Refunded").click()
                 expect(page.get_by_text("#26YOU2004")).to_be_visible()
-                expect(page.get_by_text("✓ Settled")).to_be_visible()
+                expect(page.get_by_role("cell", name="Settled", exact=True)).to_be_visible()
 
                 # Tab 4: Back to All
                 page.get_by_role("button", name="All Returns").click()

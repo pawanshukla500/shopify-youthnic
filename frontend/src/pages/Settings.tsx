@@ -28,7 +28,7 @@ import {
   testVelocityConnection,
   checkVelocityServiceability,
 } from '../api'
-import { ErrorBox, Icon, LoadingState, PageIntro, Panel, PanelHeading, useDocumentTitle, useToast } from '../components/UI'
+import { ErrorBox, FormField, Icon, LoadingState, Modal, PageIntro, Panel, PanelHeading, useDocumentTitle, useToast } from '../components/UI'
 import type { SystemUser, CarrierPriority, ShippingPreferences } from '../types'
 
 type SettingsTab = 'stack' | 'shipping' | 'users'
@@ -107,16 +107,6 @@ export function Settings() {
     email: '',
   })
   const [whBusy, setWhBusy] = useState(false)
-
-  // Esc closes the operator modal (focus-trap lite: autofocus first field via required input).
-  useEffect(() => {
-    if (!isAddModalOpen) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setIsAddModalOpen(false)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [isAddModalOpen])
 
   // Queries
   const statusQuery = useQuery({
@@ -525,7 +515,7 @@ export function Settings() {
             <button
               type="button"
               className="btn-export"
-              style={{ background: '#10b981', color: '#ffffff', borderColor: '#059669' }}
+              style={{ background: 'var(--emerald-solid)', color: '#ffffff', borderColor: 'var(--emerald-solid-hover)' }}
               onClick={handleOpenAdd}
               title="Add a new team operator or admin"
             >
@@ -585,7 +575,7 @@ export function Settings() {
                 <div>Shopify → <code>{webhookStatus.shopify?.expectedAddress}</code> · registered: {webhookStatus.shopify?.registered?.length ?? 0}/5 · secret: {webhookStatus.shopify?.webhookSecretConfigured ? 'set' : 'missing'}</div>
                 <div>Delhivery → <code>{webhookStatus.delhivery?.expectedAddress}</code> · {webhookStatus.delhivery?.setup} · token: {webhookStatus.delhivery?.apiTokenConfigured ? 'set' : 'missing'} · pickup: <code>{webhookStatus.delhivery?.pickupLocation}</code></div>
                 <div>WhatsApp → <code>{webhookStatus.whatsapp?.expectedAddress}</code> · public GET+POST</div>
-                <div style={{ color: '#64748b' }}>Limits: {webhookStatus.delhivery?.limits?.trackingCronBatch} · {webhookStatus.delhivery?.limits?.trackBulk} · CLI: <code>npm run delhivery:check</code></div>
+                <div style={{ color: 'var(--muted)' }}>Limits: {webhookStatus.delhivery?.limits?.trackingCronBatch} · {webhookStatus.delhivery?.limits?.trackBulk} · CLI: <code>npm run delhivery:check</code></div>
               </div>
             )}
           </Panel>
@@ -593,7 +583,7 @@ export function Settings() {
             <PanelHeading title="Delhivery Pickup Warehouse" eyebrow="One-time registration · avoids ClientWarehouse-mismatch manifest failures" />
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px', marginTop: 12 }}>
               {(['name', 'phone', 'city', 'pin', 'address', 'email'] as const).map((field) => (
-                <label key={field} style={{ display: 'grid', gap: 4, fontSize: 11, color: '#64748b', textTransform: 'capitalize' }}>
+                <label key={field} style={{ display: 'grid', gap: 4, fontSize: 11, color: 'var(--muted)', textTransform: 'capitalize' }}>
                   {field}
                   <input
                     value={whForm[field]}
@@ -654,7 +644,7 @@ export function Settings() {
           {statusData && (
             <>
               {/* Top Architecture Grid */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '16px' }}>
+              <div className="kpi-grid-4" style={{ marginBottom: 0 }}>
                 {/* 1. Hostinger PostgreSQL Database */}
                 <Panel style={{ padding: '18px 20px', position: 'relative' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
@@ -669,29 +659,29 @@ export function Settings() {
                       </div>
                       <div>
                         <strong style={{ fontSize: '13px', display: 'block', color: 'var(--ink)' }}>PostgreSQL VPS</strong>
-                        <span style={{ fontSize: '10.5px', color: '#64748b' }}>Hostinger 31.97.234.18</span>
+                        <span style={{ fontSize: '10.5px', color: 'var(--muted)' }}>Hostinger 31.97.234.18</span>
                       </div>
                     </div>
                     <span className="status-badge status-success">
                       <span className="status-dot" /> LIVE
                     </span>
                   </div>
-                  <div style={{ fontSize: '11.5px', display: 'grid', gap: '6px', color: '#475569' }}>
+                  <div style={{ fontSize: '11.5px', display: 'grid', gap: '6px', color: 'var(--muted)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: '#64748b' }}>Port & DB:</span>
+                      <span style={{ color: 'var(--muted)' }}>Port & DB:</span>
                       <strong style={{ color: 'var(--ink)' }}>5433 · shopify_express</strong>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: '#64748b' }}>Total Orders:</span>
-                      <strong style={{ color: '#059669', fontWeight: 800 }}>{statusData.database.totalOrders} Synced</strong>
+                      <span style={{ color: 'var(--muted)' }}>Total Orders:</span>
+                      <strong style={{ color: 'var(--tone-success-fg)', fontWeight: 800 }}>{statusData.database.totalOrders} Synced</strong>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: '#64748b' }}>Shipments & Returns:</span>
+                      <span style={{ color: 'var(--muted)' }}>Shipments & Returns:</span>
                       <strong style={{ color: 'var(--ink)' }}>{statusData.database.totalShipments} / {statusData.database.totalReturns}</strong>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: '#64748b' }}>Connection Pool:</span>
-                      <span style={{ color: '#059669', fontWeight: 700 }}>Prisma Active</span>
+                      <span style={{ color: 'var(--muted)' }}>Connection Pool:</span>
+                      <span style={{ color: 'var(--tone-success-fg)', fontWeight: 700 }}>Prisma Active</span>
                     </div>
                   </div>
                 </Panel>
@@ -710,29 +700,29 @@ export function Settings() {
                       </div>
                       <div>
                         <strong style={{ fontSize: '13px', display: 'block', color: 'var(--ink)' }}>Shopify API</strong>
-                        <span style={{ fontSize: '10.5px', color: '#64748b' }}>v{statusData.shopify.apiVersion} (2026-07)</span>
+                        <span style={{ fontSize: '10.5px', color: 'var(--muted)' }}>v{statusData.shopify.apiVersion} (2026-07)</span>
                       </div>
                     </div>
                     <span className="status-badge status-info">
                       <span className="status-dot" /> CONNECTED
                     </span>
                   </div>
-                  <div style={{ fontSize: '11.5px', display: 'grid', gap: '6px', color: '#475569' }}>
+                  <div style={{ fontSize: '11.5px', display: 'grid', gap: '6px', color: 'var(--muted)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: '#64748b' }}>Store Domain:</span>
+                      <span style={{ color: 'var(--muted)' }}>Store Domain:</span>
                       <strong style={{ color: 'var(--ink)', fontSize: '10.5px' }}>youthnic2024.myshopify.com</strong>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: '#64748b' }}>Ingestion Floor:</span>
-                      <strong style={{ color: '#2563eb' }}>1-July-2026 Onward</strong>
+                      <span style={{ color: 'var(--muted)' }}>Ingestion Floor:</span>
+                      <strong style={{ color: 'var(--tone-info-fg)' }}>1-July-2026 Onward</strong>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: '#64748b' }}>Auth Mode:</span>
+                      <span style={{ color: 'var(--muted)' }}>Auth Mode:</span>
                       <span style={{ color: 'var(--ink)', fontWeight: 600 }}>Custom App Token</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: '#64748b' }}>Sync Frequency:</span>
-                      <span style={{ color: '#059669', fontWeight: 700 }}>Continuous / Live</span>
+                      <span style={{ color: 'var(--muted)' }}>Sync Frequency:</span>
+                      <span style={{ color: 'var(--tone-success-fg)', fontWeight: 700 }}>Continuous / Live</span>
                     </div>
                   </div>
                 </Panel>
@@ -751,29 +741,29 @@ export function Settings() {
                       </div>
                       <div>
                         <strong style={{ fontSize: '13px', display: 'block', color: 'var(--ink)' }}>Delhivery Express</strong>
-                        <span style={{ fontSize: '10.5px', color: '#64748b' }}>Production Express API</span>
+                        <span style={{ fontSize: '10.5px', color: 'var(--muted)' }}>Production Express API</span>
                       </div>
                     </div>
                     <span className="status-badge status-warning">
                       <span className="status-dot" /> ACTIVE
                     </span>
                   </div>
-                  <div style={{ fontSize: '11.5px', display: 'grid', gap: '6px', color: '#475569' }}>
+                  <div style={{ fontSize: '11.5px', display: 'grid', gap: '6px', color: 'var(--muted)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: '#64748b' }}>Surat Origin Hub:</span>
+                      <span style={{ color: 'var(--muted)' }}>Surat Origin Hub:</span>
                       <strong style={{ color: 'var(--ink)' }}>{statusData.delhivery.originHub}</strong>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: '#64748b' }}>Origin Pincode:</span>
-                      <strong style={{ color: '#d97706' }}>{statusData.delhivery.originPincode} (Surat)</strong>
+                      <span style={{ color: 'var(--muted)' }}>Origin Pincode:</span>
+                      <strong style={{ color: 'var(--tone-warning-fg)' }}>{statusData.delhivery.originPincode} (Surat)</strong>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: '#64748b' }}>Shipping Mode:</span>
+                      <span style={{ color: 'var(--muted)' }}>Shipping Mode:</span>
                       <span style={{ color: 'var(--ink)', fontWeight: 600 }}>{statusData.delhivery.shippingMode} ({statusData.delhivery.labelSize})</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: '#64748b' }}>Wallet Ledger:</span>
-                      <span style={{ color: '#64748b', fontWeight: 600 }}>ONE panel only (no API)</span>
+                      <span style={{ color: 'var(--muted)' }}>Wallet Ledger:</span>
+                      <span style={{ color: 'var(--muted)', fontWeight: 600 }}>ONE panel only (no API)</span>
                     </div>
                   </div>
                 </Panel>
@@ -792,35 +782,35 @@ export function Settings() {
                       </div>
                       <div>
                         <strong style={{ fontSize: '13px', display: 'block', color: 'var(--ink)' }}>Node & Express</strong>
-                        <span style={{ fontSize: '10.5px', color: '#64748b' }}>{statusData.stack.nodeVersion} · {statusData.stack.platform}</span>
+                        <span style={{ fontSize: '10.5px', color: 'var(--muted)' }}>{statusData.stack.nodeVersion} · {statusData.stack.platform}</span>
                       </div>
                     </div>
                     <span className="status-badge status-purple">
                       <span className="status-dot" /> PORT {statusData.stack.port}
                     </span>
                   </div>
-                  <div style={{ fontSize: '11.5px', display: 'grid', gap: '6px', color: '#475569' }}>
+                  <div style={{ fontSize: '11.5px', display: 'grid', gap: '6px', color: 'var(--muted)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: '#64748b' }}>Uptime:</span>
+                      <span style={{ color: 'var(--muted)' }}>Uptime:</span>
                       <strong style={{ color: 'var(--ink)' }}>{Math.floor(statusData.stack.uptimeSeconds / 60)} mins</strong>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: '#64748b' }}>Memory RSS:</span>
-                      <strong style={{ color: '#7c3aed' }}>{statusData.stack.memoryRssMb} MB</strong>
+                      <span style={{ color: 'var(--muted)' }}>Memory RSS:</span>
+                      <strong style={{ color: 'var(--tone-purple-fg)' }}>{statusData.stack.memoryRssMb} MB</strong>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: '#64748b' }}>Heap Allocated:</span>
+                      <span style={{ color: 'var(--muted)' }}>Heap Allocated:</span>
                       <span style={{ color: 'var(--ink)', fontWeight: 600 }}>{statusData.stack.memoryHeapUsedMb} MB</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: '#64748b' }}>Environment:</span>
-                      <span style={{ textTransform: 'uppercase', color: '#059669', fontWeight: 700 }}>{statusData.stack.env}</span>
+                      <span style={{ color: 'var(--muted)' }}>Environment:</span>
+                      <span style={{ textTransform: 'uppercase', color: 'var(--tone-success-fg)', fontWeight: 700 }}>{statusData.stack.env}</span>
                     </div>
                   </div>
                 </Panel>
 
                 {/* Resend Email Gateway Integration */}
-                <Panel>
+                <Panel style={{ gridColumn: '1 / -1' }}>
                   <PanelHeading
                     eyebrow="Automated Customer Email Gateway"
                     title={
@@ -841,7 +831,6 @@ export function Settings() {
                         <button
                           type="button"
                           className="btn-table-action"
-                          style={{ background: '#f5f3ff', borderColor: '#ddd6fe', color: '#6366f1' }}
                           onClick={() => {
                             setResendApiKey('')
                             setResendFromEmail(resendQuery.data?.fromEmail || 'Youthnic Logistics <onboarding@resend.dev>')
@@ -855,7 +844,6 @@ export function Settings() {
                         <button
                           type="button"
                           className="btn-table-action"
-                          style={{ background: '#ecfdf5', borderColor: '#a7f3d0', color: '#047857' }}
                           onClick={() => setIsTestEmailModalOpen(true)}
                           title="Send a test email notification"
                         >
@@ -865,9 +853,9 @@ export function Settings() {
                       </div>
                     }
                   />
-                  <div style={{ fontSize: '12px', display: 'grid', gap: '10px', color: '#475569' }}>
+                  <div style={{ fontSize: '12px', display: 'grid', gap: '10px', color: 'var(--muted)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '8px', borderBottom: '1px solid var(--line)' }}>
-                      <span style={{ color: '#64748b' }}>Platform Status:</span>
+                      <span style={{ color: 'var(--muted)' }}>Platform Status:</span>
                       {resendQuery.data?.status === 'ok' ? (
                         <span className="status-badge status-success">
                           <span className="status-dot" /> LIVE CONNECTED ({resendQuery.data.latencyMs}ms)
@@ -883,41 +871,41 @@ export function Settings() {
                       )}
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '8px', borderBottom: '1px solid var(--line)' }}>
-                      <span style={{ color: '#64748b' }}>Endpoint:</span>
-                      <code style={{ fontSize: '10.5px', background: 'var(--line-subtle)', padding: '2px 6px', borderRadius: '4px', color: '#6366f1' }}>
+                      <span style={{ color: 'var(--muted)' }}>Endpoint:</span>
+                      <code style={{ fontSize: '10.5px', background: 'var(--line-subtle)', padding: '2px 6px', borderRadius: '4px', color: 'var(--tone-info-fg)' }}>
                         https://api.resend.com/emails
                       </code>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '8px', borderBottom: '1px solid var(--line)' }}>
-                      <span style={{ color: '#64748b' }}>Configured Sender:</span>
+                      <span style={{ color: 'var(--muted)' }}>Configured Sender:</span>
                       <strong style={{ color: 'var(--ink)' }}>
                         {resendQuery.data?.fromEmail || 'Youthnic Logistics <onboarding@resend.dev>'}
                       </strong>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '8px', borderBottom: '1px solid var(--line)' }}>
-                      <span style={{ color: '#64748b' }}>Conversion Tracking:</span>
-                      <span style={{ color: '#059669', fontWeight: 700, fontSize: '11.5px' }}>
+                      <span style={{ color: 'var(--muted)' }}>Conversion Tracking:</span>
+                      <span style={{ color: 'var(--tone-success-fg)', fontWeight: 700, fontSize: '11.5px' }}>
                         Active (Click-to-Convert Redirect Endpoint Enabled)
                       </span>
                     </div>
                     <div>
-                      <span style={{ color: '#64748b', fontSize: '11px', display: 'block', marginBottom: '6px' }}>Supported Customer Delay & Transit Templates:</span>
+                      <span style={{ color: 'var(--muted)', fontSize: '11px', display: 'block', marginBottom: '6px' }}>Supported Customer Delay & Transit Templates:</span>
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px', background: 'var(--canvas)', padding: '5px 8px', borderRadius: '6px' }}>
                           <span>⏱️ <strong>In-Transit Weather / Route Delay</strong></span>
-                          <span style={{ color: '#d97706', fontSize: '10px', fontWeight: 700 }}>Proactive Alert</span>
+                          <span style={{ color: 'var(--tone-warning-fg)', fontSize: '10px', fontWeight: 700 }}>Proactive Alert</span>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px', background: 'var(--canvas)', padding: '5px 8px', borderRadius: '6px' }}>
                           <span>🏭 <strong>Warehouse SLA Dispatch Delay</strong></span>
-                          <span style={{ color: '#ef4444', fontSize: '10px', fontWeight: 700 }}>QC Priority</span>
+                          <span style={{ color: 'var(--tone-danger-fg)', fontSize: '10px', fontWeight: 700 }}>QC Priority</span>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px', background: 'var(--canvas)', padding: '5px 8px', borderRadius: '6px' }}>
                           <span>🚚 <strong>Out For Delivery Alert</strong></span>
-                          <span style={{ color: '#2563eb', fontSize: '10px', fontWeight: 700 }}>COD Readiness</span>
+                          <span style={{ color: 'var(--tone-info-fg)', fontSize: '10px', fontWeight: 700 }}>COD Readiness</span>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px', background: 'var(--canvas)', padding: '5px 8px', borderRadius: '6px' }}>
                           <span>⚠️ <strong>NDR Delivery Reschedule</strong></span>
-                          <span style={{ color: '#9333ea', fontSize: '10px', fontWeight: 700 }}>RTO Prevention</span>
+                          <span style={{ color: 'var(--tone-purple-fg)', fontSize: '10px', fontWeight: 700 }}>RTO Prevention</span>
                         </div>
                       </div>
                     </div>
@@ -931,7 +919,7 @@ export function Settings() {
                   eyebrow="Payment Rails & Settlement Partners"
                   title="Checkout Aggregators & Reconciliation Status"
                   action={
-                    <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>
+                    <span style={{ fontSize: '11px', color: 'var(--muted)', fontWeight: 600 }}>
                       Configured for 100% 3-Way Order Reconciliation
                     </span>
                   }
@@ -950,10 +938,10 @@ export function Settings() {
                       </div>
                       <div>
                         <strong style={{ fontSize: '12px', display: 'block', color: 'var(--ink)' }}>GoKwik</strong>
-                        <span style={{ fontSize: '10px', color: '#64748b' }}>Checkout Aggregator</span>
+                        <span style={{ fontSize: '10px', color: 'var(--muted)' }}>Checkout Aggregator</span>
                       </div>
                     </div>
-                    <div style={{ fontSize: '10.5px', color: '#475569', display: 'grid', gap: '4px' }}>
+                    <div style={{ fontSize: '10.5px', color: 'var(--muted)', display: 'grid', gap: '4px' }}>
                       <div>• Automated COD Confirmation tags</div>
                       <div>• RTO Risk scores & delivery history</div>
                       <div>• Headless checkout routing</div>
@@ -973,10 +961,10 @@ export function Settings() {
                       </div>
                       <div>
                         <strong style={{ fontSize: '12px', display: 'block', color: 'var(--ink)' }}>Easebuzz</strong>
-                        <span style={{ fontSize: '10px', color: '#64748b' }}>Settlement Partner</span>
+                        <span style={{ fontSize: '10px', color: 'var(--muted)' }}>Settlement Partner</span>
                       </div>
                     </div>
-                    <div style={{ fontSize: '10.5px', color: '#475569', display: 'grid', gap: '4px' }}>
+                    <div style={{ fontSize: '10.5px', color: 'var(--muted)', display: 'grid', gap: '4px' }}>
                       <div>• Primary UPI & NetBanking collection</div>
                       <div>• Direct bank settlement verification</div>
                       <div>• Transaction ID matching (E2609...)</div>
@@ -996,10 +984,10 @@ export function Settings() {
                       </div>
                       <div>
                         <strong style={{ fontSize: '12px', display: 'block', color: 'var(--ink)' }}>PhonePe</strong>
-                        <span style={{ fontSize: '10px', color: '#64748b' }}>Secondary UPI Rail</span>
+                        <span style={{ fontSize: '10px', color: 'var(--muted)' }}>Secondary UPI Rail</span>
                       </div>
                     </div>
-                    <div style={{ fontSize: '10.5px', color: '#475569', display: 'grid', gap: '4px' }}>
+                    <div style={{ fontSize: '10.5px', color: 'var(--muted)', display: 'grid', gap: '4px' }}>
                       <div>• Instant UPI Intent & QR Gateway</div>
                       <div>• UTR reconciliation mapping</div>
                       <div>• High-traffic backup gateway</div>
@@ -1019,10 +1007,10 @@ export function Settings() {
                       </div>
                       <div>
                         <strong style={{ fontSize: '12px', display: 'block', color: 'var(--ink)' }}>Delhivery COD</strong>
-                        <span style={{ fontSize: '10px', color: '#64748b' }}>Cash Remittance</span>
+                        <span style={{ fontSize: '10px', color: 'var(--muted)' }}>Cash Remittance</span>
                       </div>
                     </div>
-                    <div style={{ fontSize: '10.5px', color: '#475569', display: 'grid', gap: '4px' }}>
+                    <div style={{ fontSize: '10.5px', color: 'var(--muted)', display: 'grid', gap: '4px' }}>
                       <div>• Cash on Delivery collection</div>
                       <div>• Live rate-API freight estimates</div>
                       <div>• Automated discrepancy flagging</div>
@@ -1042,10 +1030,10 @@ export function Settings() {
                       </div>
                       <div>
                         <strong style={{ fontSize: '12px', display: 'block', color: 'var(--ink)' }}>Razorpay</strong>
-                        <span style={{ fontSize: '10px', color: '#64748b' }}>Cards & Subscriptions</span>
+                        <span style={{ fontSize: '10px', color: 'var(--muted)' }}>Cards & Subscriptions</span>
                       </div>
                     </div>
-                    <div style={{ fontSize: '10.5px', color: '#475569', display: 'grid', gap: '4px' }}>
+                    <div style={{ fontSize: '10.5px', color: 'var(--muted)', display: 'grid', gap: '4px' }}>
                       <div>• Instant refunds via Razorpay API</div>
                       <div>• Multi-bank netbanking aggregator</div>
                       <div>• 3D secure international card rail</div>
@@ -1065,10 +1053,10 @@ export function Settings() {
                       </div>
                       <div>
                         <strong style={{ fontSize: '12px', display: 'block', color: 'var(--ink)' }}>Cashfree</strong>
-                        <span style={{ fontSize: '10px', color: '#64748b' }}>Payouts & API Banking</span>
+                        <span style={{ fontSize: '10px', color: 'var(--muted)' }}>Payouts & API Banking</span>
                       </div>
                     </div>
-                    <div style={{ fontSize: '10.5px', color: '#475569', display: 'grid', gap: '4px' }}>
+                    <div style={{ fontSize: '10.5px', color: 'var(--muted)', display: 'grid', gap: '4px' }}>
                       <div>• Automated instant vendor payouts</div>
                       <div>• 24x7 IMPS/UPI customer refund engine</div>
                       <div>• Bank account verification validation</div>
@@ -1107,10 +1095,10 @@ export function Settings() {
                               </code>
                             </td>
                             <td>
-                              <span style={{ fontSize: '10px', fontWeight: 800, color: '#2563eb' }}>{w.method}</span>
+                              <span style={{ fontSize: '10px', fontWeight: 800, color: 'var(--tone-info-fg)' }}>{w.method}</span>
                             </td>
                             <td>
-                              <span style={{ fontSize: '11px', color: '#059669', fontWeight: 700 }}>{w.latency || '10ms'}</span>
+                              <span style={{ fontSize: '11px', color: 'var(--tone-success-fg)', fontWeight: 700 }}>{w.latency || '10ms'}</span>
                             </td>
                             <td>
                               <span className="status-badge status-success">
@@ -1133,7 +1121,6 @@ export function Settings() {
                         <button
                           type="button"
                           className="btn-table-action"
-                          style={{ background: '#eff6ff', borderColor: '#bfdbfe', color: '#2563eb' }}
                           onClick={() => {
                             if (kwikEngageQuery.data?.senderPhone) {
                               setKwikEngageSenderPhone(kwikEngageQuery.data.senderPhone)
@@ -1154,7 +1141,6 @@ export function Settings() {
                         <button
                           type="button"
                           className="btn-table-action"
-                          style={{ background: '#ecfdf5', borderColor: '#a7f3d0', color: '#047857' }}
                           onClick={() => setIsWhatsAppTestModalOpen(true)}
                           title="Send a live test trigger to your WhatsApp number"
                         >
@@ -1164,9 +1150,9 @@ export function Settings() {
                       </div>
                     }
                   />
-                  <div style={{ fontSize: '12px', display: 'grid', gap: '10px', color: '#475569' }}>
+                  <div style={{ fontSize: '12px', display: 'grid', gap: '10px', color: 'var(--muted)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '8px', borderBottom: '1px solid var(--line)' }}>
-                      <span style={{ color: '#64748b' }}>Platform Status:</span>
+                      <span style={{ color: 'var(--muted)' }}>Platform Status:</span>
                       {kwikEngageQuery.data?.status === 'ok' ? (
                         <span className="status-badge status-success">
                           <span className="status-dot" /> LIVE CONNECTED ({kwikEngageQuery.data.latencyMs}ms)
@@ -1182,53 +1168,53 @@ export function Settings() {
                       )}
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '8px', borderBottom: '1px solid var(--line)' }}>
-                      <span style={{ color: '#64748b' }}>API Endpoint:</span>
-                      <code style={{ fontSize: '10.5px', background: 'var(--line-subtle)', padding: '2px 6px', borderRadius: '4px', color: '#2563eb' }}>
+                      <span style={{ color: 'var(--muted)' }}>API Endpoint:</span>
+                      <code style={{ fontSize: '10.5px', background: 'var(--line-subtle)', padding: '2px 6px', borderRadius: '4px', color: 'var(--tone-info-fg)' }}>
                         https://api.kwikengage.ai/send-message/v2
                       </code>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '8px', borderBottom: '1px solid var(--line)' }}>
-                      <span style={{ color: '#64748b' }}>Authorization:</span>
+                      <span style={{ color: 'var(--muted)' }}>Authorization:</span>
                       <strong style={{ color: 'var(--ink)', fontSize: '11px' }}>
                         {kwikEngageQuery.data?.apiKeyConfigured ? 'Bearer [CONFIGURED]' : 'Bearer ${env:KWIKENGAGE_API_KEY}'}
                       </strong>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '8px', borderBottom: '1px solid var(--line)' }}>
-                      <span style={{ color: '#64748b' }}>Merchant ID:</span>
+                      <span style={{ color: 'var(--muted)' }}>Merchant ID:</span>
                       <strong style={{ color: 'var(--ink)' }}>
                         {kwikEngageQuery.data?.merchantId || 'youthnic'}
                       </strong>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '8px', borderBottom: '1px solid var(--line)' }}>
-                      <span style={{ color: '#64748b' }}>Registered Sender:</span>
+                      <span style={{ color: 'var(--muted)' }}>Registered Sender:</span>
                       <strong style={{ color: 'var(--ink)' }}>
                         {kwikEngageQuery.data?.senderPhone || '+91 79849 84563'}
                       </strong>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '8px', borderBottom: '1px solid var(--line)' }}>
-                      <span style={{ color: '#64748b' }}>WABA Account ID:</span>
+                      <span style={{ color: 'var(--muted)' }}>WABA Account ID:</span>
                       <strong style={{ color: 'var(--ink)' }}>
                         {kwikEngageQuery.data?.wabaId || '1173075567986214'}
                       </strong>
                     </div>
                     <div>
-                      <span style={{ color: '#64748b', fontSize: '11px', display: 'block', marginBottom: '6px' }}>Critical Trigger Automations:</span>
+                      <span style={{ color: 'var(--muted)', fontSize: '11px', display: 'block', marginBottom: '6px' }}>Critical Trigger Automations:</span>
                       <div style={{ display: 'grid', gap: '5px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px', background: 'var(--canvas)', padding: '5px 8px', borderRadius: '6px' }}>
                           <span>⚡ <strong>COD Confirmation</strong></span>
-                          <span style={{ color: '#059669', fontSize: '10px', fontWeight: 700 }}>Auto Tag Sync</span>
+                          <span style={{ color: 'var(--tone-success-fg)', fontSize: '10px', fontWeight: 700 }}>Auto Tag Sync</span>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px', background: 'var(--canvas)', padding: '5px 8px', borderRadius: '6px' }}>
                           <span>🚀 <strong>Delhivery Dispatched</strong></span>
-                          <span style={{ color: '#2563eb', fontSize: '10px', fontWeight: 700 }}>Click-to-Track</span>
+                          <span style={{ color: 'var(--tone-info-fg)', fontSize: '10px', fontWeight: 700 }}>Click-to-Track</span>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px', background: 'var(--canvas)', padding: '5px 8px', borderRadius: '6px' }}>
                           <span>🚚 <strong>Out for Delivery</strong></span>
-                          <span style={{ color: '#d97706', fontSize: '10px', fontWeight: 700 }}>COD Cash Alert</span>
+                          <span style={{ color: 'var(--tone-warning-fg)', fontSize: '10px', fontWeight: 700 }}>COD Cash Alert</span>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px', background: 'var(--canvas)', padding: '5px 8px', borderRadius: '6px' }}>
                           <span>⚠️ <strong>NDR Reschedule Help</strong></span>
-                          <span style={{ color: '#ef4444', fontSize: '10px', fontWeight: 700 }}>RTO Prevent Link</span>
+                          <span style={{ color: 'var(--tone-danger-fg)', fontSize: '10px', fontWeight: 700 }}>RTO Prevent Link</span>
                         </div>
                       </div>
                     </div>
@@ -1251,7 +1237,7 @@ export function Settings() {
               title="Shipping Carrier Priority & Smart Routing Engine"
               eyebrow="Configure primary shipping partner with automated failover and destination serviceability check"
             />
-            <p style={{ fontSize: '13px', color: '#64748b', marginTop: '6px', marginBottom: '20px' }}>
+            <p style={{ fontSize: '13px', color: 'var(--muted)', marginTop: '6px', marginBottom: '20px' }}>
               During single and bulk dispatch, the system automatically queries the destination pincode against the primary carrier.
               If the primary partner is unserviceable or credentials are down, it seamlessly routes the shipment to the secondary partner without halting your fulfillment queue.
             </p>
@@ -1260,26 +1246,20 @@ export function Settings() {
             {(() => {
               const currentPriority = shippingPrefForm.priority || shippingPriorityQuery.data?.priority || 'DELHIVERY_FIRST'
               return (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px' }}>
+                <div className="split-layout-2">
                   {/* Option 1: Delhivery First */}
-                  <div
+                  <button
+                    type="button"
+                    className={`carrier-choice-card ${currentPriority === 'DELHIVERY_FIRST' ? 'is-delhivery-active' : ''}`}
+                    disabled={setPriorityMutation.isPending}
                     onClick={() => {
                       setShippingPrefForm((prev) => ({ ...prev, priority: 'DELHIVERY_FIRST' }))
                       setPriorityMutation.mutate('DELHIVERY_FIRST')
                     }}
-                    style={{
-                      cursor: 'pointer',
-                      border: currentPriority === 'DELHIVERY_FIRST' ? '2px solid #2563eb' : '1px solid #e2e8f0',
-                      borderRadius: '12px',
-                      padding: '18px 20px',
-                      background: currentPriority === 'DELHIVERY_FIRST' ? '#eff6ff' : '#ffffff',
-                      transition: 'all 0.15s ease-in-out',
-                      position: 'relative',
-                    }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px', gap: '8px', flexWrap: 'wrap' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                        <div style={{ width: '40px', height: '40px', borderRadius: '8px', background: '#ffffff', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '6px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+                        <div className="logo-well-md">
                           <img
                             src="/logos/delhivery.png"
                             alt="Delhivery"
@@ -1288,49 +1268,36 @@ export function Settings() {
                           />
                         </div>
                         <div>
-                          <strong style={{ fontSize: '15px', color: '#1e293b' }}>Delhivery First</strong>
-                          <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>Primary Carrier (Default)</span>
+                          <strong style={{ fontSize: '15px', color: 'var(--ink)' }}>Delhivery First</strong>
+                          <span style={{ fontSize: '11.5px', color: 'var(--muted)', display: 'block' }}>Primary Carrier (Default)</span>
                         </div>
                       </div>
                       {currentPriority === 'DELHIVERY_FIRST' ? (
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#2563eb', color: '#ffffff', fontSize: '11px', fontWeight: 600, padding: '3px 10px', borderRadius: '12px' }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#1d4ed8', color: '#ffffff', fontSize: '11px', fontWeight: 700, padding: '4px 10px', borderRadius: '12px' }}>
                           <Icon name="check" size={12} /> ACTIVE
                         </span>
                       ) : (
-                        <button
-                          type="button"
-                          className="button button-secondary"
-                          style={{ fontSize: '11px', padding: '4px 10px' }}
-                          disabled={setPriorityMutation.isPending}
-                        >
-                          Select Priority
-                        </button>
+                        <span className="tone-chip">Select Priority</span>
                       )}
                     </div>
-                    <p style={{ fontSize: '12px', color: '#475569', lineHeight: 1.5, margin: 0 }}>
+                    <p style={{ fontSize: '12.5px', color: 'var(--ink-secondary)', lineHeight: 1.5, margin: 0 }}>
                       Orders are dispatched via <strong>Delhivery Express</strong> first. If destination pincode is unserviceable or wallet balance is exhausted, automatically falls back to <strong>Velocity Shipping</strong>.
                     </p>
-                  </div>
+                  </button>
 
                   {/* Option 2: Velocity First */}
-                  <div
+                  <button
+                    type="button"
+                    className={`carrier-choice-card ${currentPriority === 'VELOCITY_FIRST' ? 'is-velocity-active' : ''}`}
+                    disabled={setPriorityMutation.isPending}
                     onClick={() => {
                       setShippingPrefForm((prev) => ({ ...prev, priority: 'VELOCITY_FIRST' }))
                       setPriorityMutation.mutate('VELOCITY_FIRST')
                     }}
-                    style={{
-                      cursor: 'pointer',
-                      border: currentPriority === 'VELOCITY_FIRST' ? '2px solid #7c3aed' : '1px solid #e2e8f0',
-                      borderRadius: '12px',
-                      padding: '18px 20px',
-                      background: currentPriority === 'VELOCITY_FIRST' ? '#f5f3ff' : '#ffffff',
-                      transition: 'all 0.15s ease-in-out',
-                      position: 'relative',
-                    }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px', gap: '8px', flexWrap: 'wrap' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                        <div style={{ width: '40px', height: '40px', borderRadius: '8px', background: '#ffffff', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+                        <div className="logo-well-md">
                           <img
                             src="/logos/velocity.png"
                             alt="Velocity"
@@ -1339,29 +1306,22 @@ export function Settings() {
                           />
                         </div>
                         <div>
-                          <strong style={{ fontSize: '15px', color: '#1e293b' }}>Velocity First</strong>
-                          <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>Primary Carrier (Velocity)</span>
+                          <strong style={{ fontSize: '15px', color: 'var(--ink)' }}>Velocity First</strong>
+                          <span style={{ fontSize: '11.5px', color: 'var(--muted)', display: 'block' }}>Primary Carrier (Velocity)</span>
                         </div>
                       </div>
                       {currentPriority === 'VELOCITY_FIRST' ? (
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#7c3aed', color: '#ffffff', fontSize: '11px', fontWeight: 600, padding: '3px 10px', borderRadius: '12px' }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#6d28d9', color: '#ffffff', fontSize: '11px', fontWeight: 700, padding: '4px 10px', borderRadius: '12px' }}>
                           <Icon name="check" size={12} /> ACTIVE
                         </span>
                       ) : (
-                        <button
-                          type="button"
-                          className="button button-secondary"
-                          style={{ fontSize: '11px', padding: '4px 10px' }}
-                          disabled={setPriorityMutation.isPending}
-                        >
-                          Select Priority
-                        </button>
+                        <span className="tone-chip">Select Priority</span>
                       )}
                     </div>
-                    <p style={{ fontSize: '12px', color: '#475569', lineHeight: 1.5, margin: 0 }}>
+                    <p style={{ fontSize: '12.5px', color: 'var(--ink-secondary)', lineHeight: 1.5, margin: 0 }}>
                       Orders are dispatched via <strong>Velocity Shipping</strong> first. If destination pincode is unserviceable, automatically falls back to <strong>Delhivery Express</strong>.
                     </p>
-                  </div>
+                  </button>
                 </div>
               )
             })()}
@@ -1383,7 +1343,7 @@ export function Settings() {
                       {shippingPrefForm.autoFailover ? 'ENABLED' : 'DISABLED'}
                     </span>
                   </div>
-                  <span style={{ fontSize: '12px', color: '#64748b', display: 'block', marginTop: '3px' }}>
+                  <span style={{ fontSize: '12px', color: 'var(--muted)', display: 'block', marginTop: '3px' }}>
                     When enabled, if the preferred carrier fails destination pincode serviceability or API authentication, the dispatcher instantly routes through the alternate carrier with zero manual delay.
                   </span>
                 </div>
@@ -1398,51 +1358,54 @@ export function Settings() {
               </label>
 
               {/* Payment-Mode Carrier Preferences */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px' }}>
                 <div style={{ display: 'grid', gap: '6px' }}>
-                  <label style={{ fontSize: '12px', fontWeight: 650, color: '#334155' }}>
+                  <label htmlFor="pref-cod-courier" style={{ fontSize: '12px', fontWeight: 650, color: 'var(--ink-secondary)' }}>
                     COD Orders Courier Rule:
                   </label>
                   <select
+                    id="pref-cod-courier"
                     value={shippingPrefForm.codCourier}
                     onChange={(e) => setShippingPrefForm((prev) => ({ ...prev, codCourier: e.target.value as any }))}
-                    style={{ fontSize: '13px', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#ffffff', color: '#1e293b' }}
+                    style={{ fontSize: '13px', padding: '9px 12px', borderRadius: '8px', border: '1px solid var(--line)', background: 'var(--surface-elevated)', color: 'var(--ink)' }}
                   >
                     <option value="AUTO">AUTO (Follow Global Carrier Priority)</option>
                     <option value="DELHIVERY">DELHIVERY (Always Delhivery Express for COD)</option>
                     <option value="VELOCITY">VELOCITY (Always Velocity Shipping for COD)</option>
                   </select>
-                  <span style={{ fontSize: '11px', color: '#64748b' }}>Route Cash-on-Delivery packages to specific carrier rates or remittance windows.</span>
+                  <span style={{ fontSize: '11px', color: 'var(--muted)' }}>Route Cash-on-Delivery packages to specific carrier rates or remittance windows.</span>
                 </div>
 
                 <div style={{ display: 'grid', gap: '6px' }}>
-                  <label style={{ fontSize: '12px', fontWeight: 650, color: '#334155' }}>
+                  <label htmlFor="pref-prepaid-courier" style={{ fontSize: '12px', fontWeight: 650, color: 'var(--ink-secondary)' }}>
                     Prepaid Orders Courier Rule:
                   </label>
                   <select
+                    id="pref-prepaid-courier"
                     value={shippingPrefForm.prepaidCourier}
                     onChange={(e) => setShippingPrefForm((prev) => ({ ...prev, prepaidCourier: e.target.value as any }))}
-                    style={{ fontSize: '13px', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#ffffff', color: '#1e293b' }}
+                    style={{ fontSize: '13px', padding: '9px 12px', borderRadius: '8px', border: '1px solid var(--line)', background: 'var(--surface-elevated)', color: 'var(--ink)' }}
                   >
                     <option value="AUTO">AUTO (Follow Global Carrier Priority)</option>
                     <option value="DELHIVERY">DELHIVERY (Always Delhivery Express for Prepaid)</option>
                     <option value="VELOCITY">VELOCITY (Always Velocity Shipping for Prepaid)</option>
                   </select>
-                  <span style={{ fontSize: '11px', color: '#64748b' }}>Route verified prepaid packages through lowest weight slab carrier.</span>
+                  <span style={{ fontSize: '11px', color: 'var(--muted)' }}>Route verified prepaid packages through lowest weight slab carrier.</span>
                 </div>
               </div>
 
               {/* Velocity Warehouse Selection & Auto Remittance */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px', paddingTop: '8px', borderTop: '1px solid #f1f5f9' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', paddingTop: '8px', borderTop: '1px solid var(--line)' }}>
                 <div style={{ display: 'grid', gap: '6px' }}>
-                  <label style={{ fontSize: '12px', fontWeight: 650, color: '#334155' }}>
+                  <label htmlFor="pref-vel-wh" style={{ fontSize: '12px', fontWeight: 650, color: 'var(--ink-secondary)' }}>
                     Velocity Registered Warehouse / FC:
                   </label>
                   {velocityWarehousesQuery.data?.warehouses && velocityWarehousesQuery.data.warehouses.length > 0 ? (
                     <select
+                      id="pref-vel-wh"
                       value={shippingPrefForm.velocityWarehouseId}
                       onChange={(e) => setShippingPrefForm((prev) => ({ ...prev, velocityWarehouseId: e.target.value }))}
-                      style={{ fontSize: '13px', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#ffffff', color: '#1e293b' }}
+                      style={{ fontSize: '13px', padding: '9px 12px', borderRadius: '8px', border: '1px solid var(--line)', background: 'var(--surface-elevated)', color: 'var(--ink)' }}
                     >
                       <option value="">Default Warehouse (Surat Hub)</option>
                       {velocityWarehousesQuery.data.warehouses.map((wh: any) => (
@@ -1453,25 +1416,27 @@ export function Settings() {
                     </select>
                   ) : (
                     <input
+                      id="pref-vel-wh"
                       type="text"
                       placeholder="e.g. Surat FC or Warehouse ID"
                       value={shippingPrefForm.velocityWarehouseId}
                       onChange={(e) => setShippingPrefForm((prev) => ({ ...prev, velocityWarehouseId: e.target.value }))}
-                      style={{ fontSize: '13px', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#ffffff', color: '#1e293b' }}
+                      style={{ fontSize: '13px', padding: '9px 12px', borderRadius: '8px', border: '1px solid var(--line)', background: 'var(--surface-elevated)', color: 'var(--ink)' }}
                     />
                   )}
-                  <span style={{ fontSize: '11px', color: '#64748b' }}>Matched with Velocity origin pickup address for manifests.</span>
+                  <span style={{ fontSize: '11px', color: 'var(--muted)' }}>Matched with Velocity origin pickup address for manifests.</span>
                 </div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', background: 'var(--panel-subtle, #f8fafc)', borderRadius: '8px', border: '1px solid #e2e8f0', cursor: 'pointer' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', background: 'var(--surface-elevated)', borderRadius: '8px', border: '1px solid var(--line)', cursor: 'pointer' }}>
                     <div style={{ maxWidth: '80%' }}>
-                      <strong style={{ fontSize: '12.5px', color: 'var(--ink, #1e293b)', display: 'block' }}>Direct Live Remittance Sync</strong>
-                      <span style={{ fontSize: '11px', color: '#64748b' }}>Reconcile Velocity COD settlements directly via API without downloading CSVs.</span>
+                      <strong style={{ fontSize: '12.5px', color: 'var(--ink)', display: 'block' }}>Direct Live Remittance Sync</strong>
+                      <span style={{ fontSize: '11px', color: 'var(--muted)' }}>Reconcile Velocity COD settlements directly via API without downloading CSVs.</span>
                     </div>
                     <input
                       type="checkbox"
                       role="switch"
+                      aria-label="Direct Live Remittance Sync"
                       aria-checked={shippingPrefForm.velocityAutoRemittance}
                       checked={shippingPrefForm.velocityAutoRemittance}
                       onChange={(e) => setShippingPrefForm((prev) => ({ ...prev, velocityAutoRemittance: e.target.checked }))}
@@ -1498,12 +1463,12 @@ export function Settings() {
           </Panel>
 
           {/* Integrated Carriers Overview (2-Column Grid) */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '20px' }}>
+          <div className="split-layout-2" style={{ gap: '20px' }}>
             {/* Delhivery Express Card */}
             <Panel style={{ padding: '20px' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: '#ffffff', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px' }}>
+                  <div className="logo-well-sm">
                     <img
                       src="/logos/delhivery.png"
                       alt="Delhivery"
@@ -1513,29 +1478,29 @@ export function Settings() {
                   </div>
                   <div>
                     <strong style={{ fontSize: '14px', color: 'var(--ink)' }}>Delhivery Express B2C</strong>
-                    <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>Primary Carrier Partner</span>
+                    <span style={{ fontSize: '11px', color: 'var(--muted)', display: 'block' }}>Primary Carrier Partner</span>
                   </div>
                 </div>
                 <span className="status-badge status-warning">
                   <span className="status-dot" /> ACTIVE
                 </span>
               </div>
-              <div style={{ fontSize: '12px', display: 'grid', gap: '8px', color: '#475569' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#64748b' }}>Origin Hub:</span>
+              <div style={{ fontSize: '12px', display: 'grid', gap: '8px', color: 'var(--ink-secondary)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
+                  <span style={{ color: 'var(--muted)' }}>Origin Hub:</span>
                   <strong style={{ color: 'var(--ink)' }}>{statusData?.delhivery.originHub || 'Surat Hub'}</strong>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#64748b' }}>Origin Pincode:</span>
-                  <strong style={{ color: '#d97706' }}>{statusData?.delhivery.originPincode || '395002'} (Surat)</strong>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
+                  <span style={{ color: 'var(--muted)' }}>Origin Pincode:</span>
+                  <strong style={{ color: 'var(--tone-warning-fg)' }}>{statusData?.delhivery.originPincode || '395002'} (Surat)</strong>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#64748b' }}>Shipping Mode:</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
+                  <span style={{ color: 'var(--muted)' }}>Shipping Mode:</span>
                   <span style={{ color: 'var(--ink)', fontWeight: 600 }}>{statusData?.delhivery.shippingMode || 'Surface'} ({statusData?.delhivery.labelSize || '4x6'})</span>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#64748b' }}>Tracking Base:</span>
-                  <span style={{ color: '#64748b' }}>https://delhivery.com/track/package/</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
+                  <span style={{ color: 'var(--muted)' }}>Tracking Base:</span>
+                  <span style={{ color: 'var(--muted)', wordBreak: 'break-all', textAlign: 'right' }}>https://delhivery.com/track/package/</span>
                 </div>
               </div>
             </Panel>
@@ -1544,7 +1509,7 @@ export function Settings() {
             <Panel style={{ padding: '20px' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: '#ffffff', border: '1px solid #ddd6fe', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px' }}>
+                  <div className="logo-well-sm" style={{ borderColor: 'var(--tone-purple-border)' }}>
                     <img
                       src="/logos/velocity.png"
                       alt="Velocity"
@@ -1554,29 +1519,29 @@ export function Settings() {
                   </div>
                   <div>
                     <strong style={{ fontSize: '14px', color: 'var(--ink)' }}>Velocity Shipping</strong>
-                    <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>Multi-Carrier Logistics Aggregator</span>
+                    <span style={{ fontSize: '11px', color: 'var(--muted)', display: 'block' }}>Multi-Carrier Logistics Aggregator</span>
                   </div>
                 </div>
                 <span className={`status-badge ${velocityStatusQuery.data?.configured ? 'status-success' : 'status-warning'}`}>
                   <span className="status-dot" /> {velocityStatusQuery.data?.configured ? 'CONNECTED' : 'STANDBY'}
                 </span>
               </div>
-              <div style={{ fontSize: '12px', display: 'grid', gap: '8px', color: '#475569' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#64748b' }}>Base URL:</span>
-                  <strong style={{ color: 'var(--ink)' }}>{velocityStatusQuery.data?.baseUrl || 'https://shazam.velocity.in'}</strong>
+              <div style={{ fontSize: '12px', display: 'grid', gap: '8px', color: 'var(--ink-secondary)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
+                  <span style={{ color: 'var(--muted)' }}>Base URL:</span>
+                  <strong style={{ color: 'var(--ink)', wordBreak: 'break-all', textAlign: 'right' }}>{velocityStatusQuery.data?.baseUrl || 'https://shazam.velocity.in'}</strong>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#64748b' }}>Warehouse ID:</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
+                  <span style={{ color: 'var(--muted)' }}>Warehouse ID:</span>
                   <strong style={{ color: 'var(--ink)' }}>{shippingPrefForm.velocityWarehouseId || velocityStatusQuery.data?.warehouseId || 'Surat FC'}</strong>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#64748b' }}>API Token:</span>
-                  <span style={{ color: '#64748b', fontWeight: 600 }}>{velocityStatusQuery.data?.maskedToken || 'Configured via .env'}</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
+                  <span style={{ color: 'var(--muted)' }}>API Token:</span>
+                  <span style={{ color: 'var(--muted)', fontWeight: 600 }}>{velocityStatusQuery.data?.maskedToken || 'Configured via .env'}</span>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#64748b' }}>Webhook Ingestion:</span>
-                  <span style={{ color: '#16a34a', fontWeight: 600 }}>/webhooks/velocity (HMAC Active)</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
+                  <span style={{ color: 'var(--muted)' }}>Webhook Ingestion:</span>
+                  <span style={{ color: 'var(--tone-success-fg)', fontWeight: 600 }}>/webhooks/velocity (HMAC Active)</span>
                 </div>
               </div>
               <div style={{ marginTop: '14px', display: 'flex', gap: '8px' }}>
@@ -1601,7 +1566,7 @@ export function Settings() {
               eyebrow="Test live destination pincodes against Velocity shipping network & available carriers"
             />
             <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end', flexWrap: 'wrap', marginTop: 14 }}>
-              <label style={{ display: 'grid', gap: 4, fontSize: 12, color: '#64748b' }}>
+              <label style={{ display: 'grid', gap: 4, fontSize: 12, color: 'var(--muted)' }}>
                 Destination Pincode:
                 <input
                   type="text"
@@ -1611,7 +1576,7 @@ export function Settings() {
                   style={{ fontSize: 13, padding: '8px 12px', borderRadius: 6, border: '1px solid #cbd5e1', width: 200 }}
                 />
               </label>
-              <label style={{ display: 'grid', gap: 4, fontSize: 12, color: '#64748b' }}>
+              <label style={{ display: 'grid', gap: 4, fontSize: 12, color: 'var(--muted)' }}>
                 Payment Mode:
                 <select
                   value={velTestPaymentMode}
@@ -1649,23 +1614,23 @@ export function Settings() {
               </button>
             </div>
             {velServiceabilityResult && (
-              <div style={{ marginTop: 16, padding: 14, borderRadius: 8, background: velServiceabilityResult.serviceable ? '#f0fdf4' : '#fef2f2', border: `1px solid ${velServiceabilityResult.serviceable ? '#bbf7d0' : '#fecaca'}` }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, color: velServiceabilityResult.serviceable ? '#166534' : '#991b1b' }}>
+              <div style={{ marginTop: 16, padding: 14, borderRadius: 8, background: velServiceabilityResult.serviceable ? 'var(--tone-success-bg)' : 'var(--tone-danger-bg)', border: `1px solid ${velServiceabilityResult.serviceable ? 'var(--tone-success-border)' : 'var(--tone-danger-border)'}` }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, color: velServiceabilityResult.serviceable ? 'var(--tone-success-fg)' : 'var(--tone-danger-fg)' }}>
                   <Icon name={velServiceabilityResult.serviceable ? 'check' : 'close'} size={18} />
                   <span>{velServiceabilityResult.serviceable ? 'Serviceable by Velocity Network' : 'Unserviceable for this Pincode'}</span>
                 </div>
                 {velServiceabilityResult.remark && (
-                  <div style={{ fontSize: 12, color: '#475569', marginTop: 4 }}>Remark: {velServiceabilityResult.remark}</div>
+                  <div style={{ fontSize: 12, color: 'var(--ink-secondary)', marginTop: 4 }}>Remark: {velServiceabilityResult.remark}</div>
                 )}
                 {velServiceabilityResult.zone && (
-                  <div style={{ fontSize: 12, color: '#475569', marginTop: 2 }}>Zone: {velServiceabilityResult.zone}</div>
+                  <div style={{ fontSize: 12, color: 'var(--ink-secondary)', marginTop: 2 }}>Zone: {velServiceabilityResult.zone}</div>
                 )}
                 {velServiceabilityResult.couriers && velServiceabilityResult.couriers.length > 0 && (
                   <div style={{ marginTop: 10 }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: '#334155', textTransform: 'uppercase' }}>Available Couriers ({velServiceabilityResult.couriers.length}):</div>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-secondary)', textTransform: 'uppercase' }}>Available Couriers ({velServiceabilityResult.couriers.length}):</div>
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
                       {velServiceabilityResult.couriers.map((c: any, idx: number) => (
-                        <span key={idx} style={{ background: '#ffffff', padding: '3px 8px', borderRadius: 4, fontSize: 11, border: '1px solid #cbd5e1', color: '#1e293b' }}>
+                        <span key={idx} className="tone-chip tone-chip-neutral">
                           {c.carrier_name || c.carrier_id}
                         </span>
                       ))}
@@ -1681,7 +1646,7 @@ export function Settings() {
             <PanelHeading title="Pickup Warehouse Registration" eyebrow="One-time registration · avoids ClientWarehouse-mismatch manifest failures" />
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px', marginTop: 12 }}>
               {(['name', 'phone', 'city', 'pin', 'address', 'email'] as const).map((field) => (
-                <label key={field} style={{ display: 'grid', gap: 4, fontSize: 11, color: '#64748b', textTransform: 'capitalize' }}>
+                <label key={field} style={{ display: 'grid', gap: 4, fontSize: 11, color: 'var(--muted)', textTransform: 'capitalize' }}>
                   {field}
                   <input
                     value={whForm[field]}
@@ -1741,10 +1706,11 @@ export function Settings() {
         <div style={{ display: 'grid', gap: '20px' }}>
           {/* Filters & Actions Bar */}
           <Panel style={{ padding: '16px 20px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '14px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '14px', flexWrap: 'wrap' }}>
               <div className="search-field" style={{ maxWidth: '380px' }}>
                 <Icon name="search" size={15} />
                 <input
+                  aria-label="Filter operators by name, email, or role"
                   placeholder="Filter operators by name, email, or role…"
                   value={userSearch}
                   onChange={(e) => setUserSearch(e.target.value)}
@@ -1752,7 +1718,7 @@ export function Settings() {
               </div>
 
               <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                <span style={{ fontSize: '11.5px', color: '#64748b', fontWeight: 600 }}>
+                <span style={{ fontSize: '11.5px', color: 'var(--muted)', fontWeight: 600 }}>
                   Showing {filteredUsers.length} of {usersQuery.data?.length ?? 0} active console accounts
                 </span>
                 <button
@@ -1772,7 +1738,7 @@ export function Settings() {
             {usersQuery.isLoading ? (
               <LoadingState label="Loading team operators and permissions…" />
             ) : filteredUsers.length === 0 ? (
-              <div style={{ padding: '40px', textAlign: 'center', color: '#64748b' }}>
+              <div style={{ padding: '40px', textAlign: 'center', color: 'var(--muted)' }}>
                 <Icon name="users" size={32} />
                 <p style={{ marginTop: '8px', fontSize: '13px' }}>No operators match your filter.</p>
               </div>
@@ -1813,7 +1779,7 @@ export function Settings() {
                             </div>
                             <div>
                               <strong style={{ fontSize: '12px', color: 'var(--ink)' }}>{user.name}</strong>
-                              <span style={{ fontSize: '10.5px', color: '#64748b' }}>{user.email}</span>
+                              <span style={{ fontSize: '10.5px', color: 'var(--muted)' }}>{user.email}</span>
                             </div>
                           </div>
                         </td>
@@ -1835,10 +1801,10 @@ export function Settings() {
                           </span>
                         </td>
                         <td>
-                          <span style={{ fontSize: '11px', color: '#475569' }}>{user.department}</span>
+                          <span style={{ fontSize: '11px', color: 'var(--muted)' }}>{user.department}</span>
                         </td>
                         <td>
-                          <span style={{ fontSize: '11px', color: '#64748b' }}>{user.phone || '—'}</span>
+                          <span style={{ fontSize: '11px', color: 'var(--muted)' }}>{user.phone || '—'}</span>
                         </td>
                         <td>
                           <button
@@ -1853,7 +1819,7 @@ export function Settings() {
                           </button>
                         </td>
                         <td>
-                          <span style={{ fontSize: '10.5px', color: '#64748b' }}>{user.lastActive || 'Never'}</span>
+                          <span style={{ fontSize: '10.5px', color: 'var(--muted)' }}>{user.lastActive || 'Never'}</span>
                         </td>
                         <td style={{ textAlign: 'right' }}>
                           <div style={{ display: 'inline-flex', gap: '6px' }}>
@@ -1868,7 +1834,7 @@ export function Settings() {
                             <button
                               type="button"
                               className="btn-table-action"
-                              style={{ color: '#ef4444' }}
+                              style={{ color: 'var(--tone-danger-fg)' }}
                               onClick={() => handleDeleteUser(user)}
                               title="Remove operator account"
                             >
@@ -1889,53 +1855,14 @@ export function Settings() {
       {/* ─────────────────────────────────────────────────────────────
           CREATE / EDIT OPERATOR MODAL
           ───────────────────────────────────────────────────────────── */}
-      {isAddModalOpen && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 1000,
-            background: 'rgba(15, 23, 42, 0.65)',
-            backdropFilter: 'blur(4px)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '20px',
-          }}
-          onClick={() => setIsAddModalOpen(false)}
-        >
-          <div
-            style={{
-              background: 'var(--panel)',
-              border: '1px solid var(--line)',
-              borderRadius: '16px',
-              padding: '28px',
-              width: '100%',
-              maxWidth: '520px',
-              boxShadow: '0 20px 40px rgba(0, 0, 0, 0.25)',
-              position: 'relative',
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 800, color: 'var(--ink)' }}>
-                  {editingUser ? 'Edit Operator Account' : 'Create New Team Operator'}
-                </h3>
-                <p style={{ margin: '4px 0 0', fontSize: '11.5px', color: '#64748b' }}>
-                  Assign role permissions for Surat fulfillment, QC scans, or finance auditing.
-                </p>
-              </div>
-              <button
-                type="button"
-                style={{ background: 'transparent', border: 0, color: '#64748b', cursor: 'pointer', padding: '4px' }}
-                onClick={() => setIsAddModalOpen(false)}
-              >
-                <Icon name="close" size={18} />
-              </button>
-            </div>
-
-            <form onSubmit={handleSubmitForm} style={{ display: 'grid', gap: '14px' }}>
+      <Modal
+        isOpen={isAddModalOpen}
+        onClose={() => setIsAddModalOpen(false)}
+        title={editingUser ? 'Edit Operator Account' : 'Create New Team Operator'}
+        description="Assign role permissions for Surat fulfillment, QC scans, or finance auditing."
+        maxWidth={520}
+      >
+        <form onSubmit={handleSubmitForm} style={{ display: 'grid', gap: '14px' }}>
               <div className="form-field">
                 <label className="field-label">Full Name</label>
                 <input
@@ -2017,7 +1944,7 @@ export function Settings() {
                     value={formData.password}
                     onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                   />
-                  <span style={{ fontSize: '11px', color: '#64748b' }}>Admin sets this now — operator signs in with email + this password.</span>
+                  <span style={{ fontSize: '11px', color: 'var(--muted)' }}>Admin sets this now — operator signs in with email + this password.</span>
                 </div>
               ) : (
                 <>
@@ -2044,7 +1971,7 @@ export function Settings() {
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    <span style={{ fontSize: '11px', color: '#64748b' }}>Login: {editingUser.loginEnabled === false ? 'disabled (roster-only)' : editingUser.firebaseUid ? `Firebase linked` : 'roster-only'}</span>
+                    <span style={{ fontSize: '11px', color: 'var(--muted)' }}>Login: {editingUser.loginEnabled === false ? 'disabled (roster-only)' : editingUser.firebaseUid ? `Firebase linked` : 'roster-only'}</span>
                     <button
                       type="button"
                       className="button button-secondary"
@@ -2073,95 +2000,52 @@ export function Settings() {
                   {editingUser ? 'Save Changes' : 'Create Operator Account'}
                 </button>
               </div>
-            </form>
-          </div>
-        </div>
-      )}
+        </form>
+      </Modal>
 
       {/* ─────────────────────────────────────────────────────────────
           KWIKENGAGE WHATSAPP TEST MODAL
           ───────────────────────────────────────────────────────────── */}
-      {isWhatsAppTestModalOpen && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 1000,
-            background: 'rgba(15, 23, 42, 0.65)',
-            backdropFilter: 'blur(4px)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '20px',
+      <Modal
+        isOpen={isWhatsAppTestModalOpen}
+        onClose={() => setIsWhatsAppTestModalOpen(false)}
+        title="Test KwikEngage WhatsApp Trigger"
+        description="Send a live or test trigger to any phone number via official KwikEngage WhatsApp messaging API."
+        maxWidth={520}
+      >
+        <form
+          onSubmit={(e) => {
+            e.preventDefault()
+            testWhatsAppMutation.mutate({
+              phone: testPhone,
+              trigger: testTrigger,
+              customMessage: testCustomMsg,
+            })
           }}
-          onClick={() => setIsWhatsAppTestModalOpen(false)}
+          style={{ display: 'grid', gap: '14px' }}
         >
-          <div
-            style={{
-              background: 'var(--panel)',
-              border: '1px solid var(--line)',
-              borderRadius: '16px',
-              padding: '28px',
-              width: '100%',
-              maxWidth: '520px',
-              boxShadow: '0 20px 40px rgba(0, 0, 0, 0.25)',
-              position: 'relative',
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 800, color: 'var(--ink)' }}>
-                  Test KwikEngage WhatsApp Trigger
-                </h3>
-                <p style={{ margin: '4px 0 0', fontSize: '11.5px', color: '#64748b' }}>
-                  Send a live or test trigger to any phone number via official KwikEngage WhatsApp messaging API.
-                </p>
-              </div>
-              <button
-                type="button"
-                style={{ background: 'transparent', border: 0, color: '#64748b', cursor: 'pointer', padding: '4px' }}
-                onClick={() => setIsWhatsAppTestModalOpen(false)}
-              >
-                <Icon name="close" size={18} />
-              </button>
-            </div>
-
-            <form
-              onSubmit={(e) => {
-                e.preventDefault()
-                testWhatsAppMutation.mutate({
-                  phone: testPhone,
-                  trigger: testTrigger,
-                  customMessage: testCustomMsg,
-                })
-              }}
-              style={{ display: 'grid', gap: '14px' }}
-            >
-              <div className="form-field">
-                <label className="field-label">Recipient Mobile Number (E.164 / 10 Digits)</label>
+              <FormField label="Recipient Mobile Number (E.164 / 10 Digits)">
                 <input
                   required
                   placeholder="e.g. 9825012345 or +919825012345"
                   value={testPhone}
                   onChange={(e) => setTestPhone(e.target.value)}
                 />
-              </div>
+              </FormField>
 
-              <div className="form-field">
-                <label className="field-label">Critical Trigger Type</label>
+              <FormField label="Critical Trigger Type">
                 <select
                   value={testTrigger}
                   onChange={(e) => setTestTrigger(e.target.value)}
                 >
-                  <option value="COD_CONFIRMATION">⚡ COD Confirmation (1-Click Customer Verification)</option>
-                  <option value="ORDER_SHIPPED">🚀 Delhivery Dispatched (Live AWB Tracking Link)</option>
-                  <option value="OUT_FOR_DELIVERY">🚚 Out for Delivery Alert (COD Cash Readiness)</option>
-                  <option value="NDR_ALERT">⚠️ NDR Delivery Help (Urgent Reschedule to avoid RTO)</option>
-                  <option value="DELIVERED">🎉 Order Delivered (Feedback & Size Exchange)</option>
-                  <option value="CUSTOM">💬 Custom Message Body</option>
+                  <option value="COD_CONFIRMATION">COD Confirmation (1-Click Customer Verification)</option>
+                  <option value="ORDER_SHIPPED">Delhivery Dispatched (Live AWB Tracking Link)</option>
+                  <option value="OUT_FOR_DELIVERY">Out for Delivery Alert (COD Cash Readiness)</option>
+                  <option value="NDR_ALERT">NDR Delivery Help (Urgent Reschedule to avoid RTO)</option>
+                  <option value="DELIVERED">Order Delivered (Feedback & Size Exchange)</option>
+                  <option value="CUSTOM">Custom Message Body</option>
                 </select>
-              </div>
+              </FormField>
 
               {testTrigger === 'CUSTOM' && (
                 <div className="form-field">
@@ -2175,7 +2059,7 @@ export function Settings() {
                 </div>
               )}
 
-              <div style={{ background: 'var(--canvas)', border: '1px solid var(--line)', borderRadius: '8px', padding: '12px', fontSize: '11px', color: '#475569' }}>
+              <div style={{ background: 'var(--canvas)', border: '1px solid var(--line)', borderRadius: '8px', padding: '12px', fontSize: '11px', color: 'var(--muted)' }}>
                 <div style={{ fontWeight: 700, color: 'var(--ink)', marginBottom: '4px' }}>📡 KwikEngage WhatsApp REST API:</div>
                 <div>Configured endpoint: <code>https://api.kwikengage.ai/send-message/v2</code></div>
                 <div style={{ marginTop: '2px' }}>Bearer Token: <code>&#36;{'{env:KWIKENGAGE_API_KEY}'}</code></div>
@@ -2192,128 +2076,91 @@ export function Settings() {
                 <button
                   type="submit"
                   className="button button-primary"
-                  style={{ background: '#10b981', borderColor: '#059669' }}
+                  style={{ background: 'var(--emerald-solid)', borderColor: 'var(--emerald-solid-hover)' }}
                   disabled={testWhatsAppMutation.isPending}
                 >
                   {testWhatsAppMutation.isPending ? 'Dispatching…' : 'Send WhatsApp Message'}
                 </button>
               </div>
-            </form>
-          </div>
-        </div>
-      )}
+        </form>
+      </Modal>
 
       {/* ─────────────────────────────────────────────────────────────
           KWIKENGAGE WHATSAPP CONFIGURATION MODAL
           ───────────────────────────────────────────────────────────── */}
-      {isKwikEngageConfigModalOpen && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 1000,
-            background: 'rgba(15, 23, 42, 0.65)',
-            backdropFilter: 'blur(4px)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '20px',
+      <Modal
+        isOpen={isKwikEngageConfigModalOpen}
+        onClose={() => setIsKwikEngageConfigModalOpen(false)}
+        title="Configure KwikEngage WhatsApp REST API"
+        description="Update live credentials for official GoKwik KwikEngage WhatsApp triggers (COD verification, shipping updates, NDR alerts)."
+        maxWidth={540}
+      >
+        <form
+          onSubmit={(e) => {
+            e.preventDefault()
+            updateKwikEngageMutation.mutate({
+              apiKey: kwikEngageApiKey.trim(),
+              merchantId: kwikEngageMerchantId.trim() || undefined,
+              senderPhone: kwikEngageSenderPhone.trim() || undefined,
+              wabaId: kwikEngageWabaId.trim() || undefined,
+            })
           }}
-          onClick={() => setIsKwikEngageConfigModalOpen(false)}
+          style={{ display: 'grid', gap: '14px' }}
         >
-          <div
-            style={{
-              background: 'var(--panel)',
-              border: '1px solid var(--line)',
-              borderRadius: '16px',
-              padding: '28px',
-              width: '100%',
-              maxWidth: '540px',
-              boxShadow: '0 20px 40px rgba(0, 0, 0, 0.25)',
-              position: 'relative',
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 800, color: 'var(--ink)' }}>
-                  Configure KwikEngage WhatsApp REST API
-                </h3>
-                <p style={{ margin: '4px 0 0', fontSize: '11.5px', color: '#64748b' }}>
-                  Update live credentials for official GoKwik KwikEngage WhatsApp triggers (COD verification, shipping updates, NDR alerts).
-                </p>
-              </div>
-              <button
-                type="button"
-                style={{ background: 'transparent', border: 0, color: '#64748b', cursor: 'pointer', padding: '4px' }}
-                onClick={() => setIsKwikEngageConfigModalOpen(false)}
-              >
-                <Icon name="close" size={18} />
-              </button>
-            </div>
-
-            <form
-              onSubmit={(e) => {
-                e.preventDefault()
-                updateKwikEngageMutation.mutate({
-                  apiKey: kwikEngageApiKey.trim(),
-                  merchantId: kwikEngageMerchantId.trim() || undefined,
-                  senderPhone: kwikEngageSenderPhone.trim() || undefined,
-                  wabaId: kwikEngageWabaId.trim() || undefined,
-                })
-              }}
-              style={{ display: 'grid', gap: '14px' }}
-            >
               <div className="form-field">
-                <label className="field-label">KwikEngage API Key (Bearer Token)</label>
+                <label htmlFor="kwik-api-key" className="field-label">KwikEngage API Key (Bearer Token)</label>
                 <input
+                  id="kwik-api-key"
                   type="password"
                   placeholder="Enter your KwikEngage API key (e.g. kwik_...)"
                   value={kwikEngageApiKey}
                   onChange={(e) => setKwikEngageApiKey(e.target.value)}
                 />
-                <span style={{ fontSize: '10.5px', color: '#64748b', marginTop: '3px' }}>
+                <span style={{ fontSize: '10.5px', color: 'var(--muted)', marginTop: '3px' }}>
                   Supplied in Authorization header: <code>Bearer [YOUR_KEY]</code> and <code>x-api-key</code>.
                 </span>
               </div>
 
               <div className="form-field">
-                <label className="field-label">Merchant ID</label>
+                <label htmlFor="kwik-merchant-id" className="field-label">Merchant ID</label>
                 <input
+                  id="kwik-merchant-id"
                   placeholder="e.g. youthnic or your GoKwik Merchant ID"
                   value={kwikEngageMerchantId}
                   onChange={(e) => setKwikEngageMerchantId(e.target.value)}
                 />
-                <span style={{ fontSize: '10.5px', color: '#64748b', marginTop: '3px' }}>
+                <span style={{ fontSize: '10.5px', color: 'var(--muted)', marginTop: '3px' }}>
                   GoKwik / KwikEngage assigned Merchant identifier.
                 </span>
               </div>
 
               <div className="form-field">
-                <label className="field-label">WhatsApp Sender Phone Number</label>
+                <label htmlFor="kwik-sender-phone" className="field-label">WhatsApp Sender Phone Number</label>
                 <input
+                  id="kwik-sender-phone"
                   placeholder="e.g. +91 79849 84563"
                   value={kwikEngageSenderPhone}
                   onChange={(e) => setKwikEngageSenderPhone(e.target.value)}
                 />
-                <span style={{ fontSize: '10.5px', color: '#64748b', marginTop: '3px' }}>
+                <span style={{ fontSize: '10.5px', color: 'var(--muted)', marginTop: '3px' }}>
                   Official display phone number registered in KwikEngage.
                 </span>
               </div>
 
               <div className="form-field">
-                <label className="field-label">WABA Account ID (Optional)</label>
+                <label htmlFor="kwik-waba-id" className="field-label">WABA Account ID (Optional)</label>
                 <input
+                  id="kwik-waba-id"
                   placeholder="e.g. 1173075567986214"
                   value={kwikEngageWabaId}
                   onChange={(e) => setKwikEngageWabaId(e.target.value)}
                 />
-                <span style={{ fontSize: '10.5px', color: '#64748b', marginTop: '3px' }}>
+                <span style={{ fontSize: '10.5px', color: 'var(--muted)', marginTop: '3px' }}>
                   Meta WhatsApp Business Account ID registered under GoKwik.
                 </span>
               </div>
 
-              <div style={{ background: 'var(--canvas)', border: '1px solid var(--line)', borderRadius: '8px', padding: '12px', fontSize: '11px', color: '#475569' }}>
+              <div style={{ background: 'var(--canvas)', border: '1px solid var(--line)', borderRadius: '8px', padding: '12px', fontSize: '11px', color: 'var(--muted)' }}>
                 <div style={{ fontWeight: 700, color: 'var(--ink)', marginBottom: '4px' }}>🔐 Persistence & MCP Sync:</div>
                 <div>Updating these values immediately updates the active runtime service and persists <code>KWIKENGAGE_API_KEY</code>, <code>KWIKENGAGE_MERCHANT_ID</code>, <code>KWIKENGAGE_SENDER_PHONE</code>, and <code>KWIKENGAGE_WABA_ID</code> to your local <code>.env</code> file.</div>
               </div>
@@ -2334,69 +2181,56 @@ export function Settings() {
                   {updateKwikEngageMutation.isPending ? 'Verifying & Saving…' : 'Save & Verify KwikEngage Connection'}
                 </button>
               </div>
-            </form>
-          </div>
-        </div>
-      )}
+        </form>
+      </Modal>
 
       {/* Configure Resend Modal */}
-      {isResendModalOpen && (
-        <div className="modal-backdrop" onClick={() => setIsResendModalOpen(false)}>
-          <div className="modal-card" style={{ maxWidth: '540px' }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700 }}>Configure Resend Mail Integration</h3>
-                <p style={{ margin: '3px 0 0', fontSize: '12px', color: '#64748b' }}>
-                  Provide your Resend API credentials to send live branded customer notifications.
-                </p>
-              </div>
-              <button
-                type="button"
-                className="button button-ghost"
-                onClick={() => setIsResendModalOpen(false)}
-                style={{ padding: '4px' }}
-              >
-                ✕
-              </button>
-            </div>
-
-            <form
-              onSubmit={(e: FormEvent) => {
-                e.preventDefault()
-                updateResendMutation.mutate({
-                  apiKey: resendApiKey,
-                  fromEmail: resendFromEmail,
-                })
-              }}
-              style={{ display: 'grid', gap: '14px' }}
-            >
+      <Modal
+        isOpen={isResendModalOpen}
+        onClose={() => setIsResendModalOpen(false)}
+        title="Configure Resend Mail Integration"
+        description="Provide your Resend API credentials to send live branded customer notifications."
+        maxWidth={540}
+      >
+        <form
+          onSubmit={(e: FormEvent) => {
+            e.preventDefault()
+            updateResendMutation.mutate({
+              apiKey: resendApiKey,
+              fromEmail: resendFromEmail,
+            })
+          }}
+          style={{ display: 'grid', gap: '14px' }}
+        >
               <div className="form-field">
-                <label className="field-label">Resend API Key</label>
+                <label htmlFor="resend-api-key" className="field-label">Resend API Key</label>
                 <input
+                  id="resend-api-key"
                   type="password"
                   placeholder="re_xxxxxxxxxxxxxxxxxxxxxxxx"
                   value={resendApiKey}
                   onChange={(e) => setResendApiKey(e.target.value)}
                 />
-                <span style={{ fontSize: '10.5px', color: '#64748b', marginTop: '3px' }}>
-                  From your <a href="https://resend.com/api-keys" target="_blank" rel="noreferrer" style={{ color: '#6366f1' }}>Resend Console</a>. If left empty, system operates in high-fidelity simulated sandbox mode.
+                <span style={{ fontSize: '10.5px', color: 'var(--muted)', marginTop: '3px' }}>
+                  From your <a href="https://resend.com/api-keys" target="_blank" rel="noreferrer" style={{ color: 'var(--tone-info-fg)' }}>Resend Console</a>. If left empty, system operates in high-fidelity simulated sandbox mode.
                 </span>
               </div>
 
               <div className="form-field">
-                <label className="field-label">From Email Address & Name</label>
+                <label htmlFor="resend-from-email" className="field-label">From Email Address & Name</label>
                 <input
+                  id="resend-from-email"
                   placeholder="Youthnic Logistics <onboarding@resend.dev>"
                   value={resendFromEmail}
                   onChange={(e) => setResendFromEmail(e.target.value)}
                 />
-                <span style={{ fontSize: '10.5px', color: '#64748b', marginTop: '3px' }}>
+                <span style={{ fontSize: '10.5px', color: 'var(--muted)', marginTop: '3px' }}>
                   Use <code>Youthnic Logistics &lt;onboarding@resend.dev&gt;</code> for testing or your verified sending domain (e.g., <code>orders@youthnic.com</code>).
                 </span>
               </div>
 
-              <div style={{ background: 'var(--canvas)', border: '1px solid var(--line)', borderRadius: '8px', padding: '12px', fontSize: '11px', color: '#475569' }}>
-                <div style={{ fontWeight: 700, color: 'var(--ink)', marginBottom: '4px' }}>🔐 Persistence & Security:</div>
+              <div className="surface-well" style={{ borderRadius: '8px', padding: '12px', fontSize: '11px', color: 'var(--ink-secondary)' }}>
+                <div style={{ fontWeight: 700, color: 'var(--ink)', marginBottom: '4px' }}>Persistence & Security:</div>
                 <div>Updating these values immediately updates the active runtime email service and persists <code>RESEND_API_KEY</code> and <code>RESEND_FROM_EMAIL</code> to your <code>.env</code> file.</div>
               </div>
 
@@ -2416,44 +2250,28 @@ export function Settings() {
                   {updateResendMutation.isPending ? 'Verifying & Saving…' : 'Save & Verify Resend Configuration'}
                 </button>
               </div>
-            </form>
-          </div>
-        </div>
-      )}
+        </form>
+      </Modal>
 
       {/* Test Email Modal */}
-      {isTestEmailModalOpen && (
-        <div className="modal-backdrop" onClick={() => setIsTestEmailModalOpen(false)}>
-          <div className="modal-card" style={{ maxWidth: '500px' }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700 }}>Send Test Notification Email</h3>
-                <p style={{ margin: '3px 0 0', fontSize: '12px', color: '#64748b' }}>
-                  Validate Resend dispatch, layout rendering, and click-to-convert tracking.
-                </p>
-              </div>
-              <button
-                type="button"
-                className="button button-ghost"
-                onClick={() => setIsTestEmailModalOpen(false)}
-                style={{ padding: '4px' }}
-              >
-                ✕
-              </button>
-            </div>
-
-            <form
-              onSubmit={(e: FormEvent) => {
-                e.preventDefault()
-                testEmailMutation.mutate({
-                  to: testEmailTo,
-                  templateType: testEmailTemplate,
-                })
-              }}
-              style={{ display: 'grid', gap: '14px' }}
-            >
-              <div className="form-field">
-                <label className="field-label">Recipient Email</label>
+      <Modal
+        isOpen={isTestEmailModalOpen}
+        onClose={() => setIsTestEmailModalOpen(false)}
+        title="Send Test Notification Email"
+        description="Validate Resend dispatch, layout rendering, and click-to-convert tracking."
+        maxWidth={500}
+      >
+        <form
+          onSubmit={(e: FormEvent) => {
+            e.preventDefault()
+            testEmailMutation.mutate({
+              to: testEmailTo,
+              templateType: testEmailTemplate,
+            })
+          }}
+          style={{ display: 'grid', gap: '14px' }}
+        >
+              <FormField label="Recipient Email">
                 <input
                   type="email"
                   required
@@ -2461,23 +2279,22 @@ export function Settings() {
                   value={testEmailTo}
                   onChange={(e) => setTestEmailTo(e.target.value)}
                 />
-              </div>
+              </FormField>
 
-              <div className="form-field">
-                <label className="field-label">Email Notification Template</label>
+              <FormField label="Email Notification Template">
                 <select
                   value={testEmailTemplate}
                   onChange={(e) => setTestEmailTemplate(e.target.value)}
                 >
-                  <option value="TRANSIT_DELAY">⏱️ Transit Delay Alert (Bad Weather/Route Delay)</option>
-                  <option value="DISPATCH_DELAY">🏭 Warehouse Dispatch SLA Delay</option>
-                  <option value="IN_TRANSIT">🚚 In-Transit Journey Tracking</option>
-                  <option value="OUT_FOR_DELIVERY">📦 Out For Delivery (Cash Alert)</option>
-                  <option value="NDR_ATTEMPT">⚠️ NDR Delivery Reschedule (RTO Prevent)</option>
-                  <option value="DELIVERED">🎉 Order Delivered & Feedback</option>
-                  <option value="ORDER_CONFIRMED">✅ Order Confirmed & Dispatch Preparation</option>
+                  <option value="TRANSIT_DELAY">Transit Delay Alert (Bad Weather/Route Delay)</option>
+                  <option value="DISPATCH_DELAY">Warehouse Dispatch SLA Delay</option>
+                  <option value="IN_TRANSIT">In-Transit Journey Tracking</option>
+                  <option value="OUT_FOR_DELIVERY">Out For Delivery (Cash Alert)</option>
+                  <option value="NDR_ATTEMPT">NDR Delivery Reschedule (RTO Prevent)</option>
+                  <option value="DELIVERED">Order Delivered & Feedback</option>
+                  <option value="ORDER_CONFIRMED">Order Confirmed & Dispatch Preparation</option>
                 </select>
-              </div>
+              </FormField>
 
               <div style={{ display: 'flex', gap: '10px', marginTop: '10px', justifyContent: 'flex-end' }}>
                 <button
@@ -2495,10 +2312,8 @@ export function Settings() {
                   {testEmailMutation.isPending ? 'Sending Test…' : 'Send Test Notification'}
                 </button>
               </div>
-            </form>
-          </div>
-        </div>
-      )}
+        </form>
+      </Modal>
 
     </div>
   )

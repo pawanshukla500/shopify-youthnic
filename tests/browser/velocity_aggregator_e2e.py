@@ -569,7 +569,7 @@ def run():
                 # ─────────────────────────────────────────────────────────────
                 print("[*] Step 8: Toggling Dark Mode and verifying UI contrast...")
                 page.set_viewport_size({"width": 1440, "height": 1000})
-                page.get_by_role("button", name="🌙 Dark", exact=True).click()
+                page.get_by_role("button", name="Dark", exact=True).click()
                 page.wait_for_timeout(200)
 
                 page.screenshot(path=str(ARTIFACTS_DIR / "08_dark_mode_velocity.png"), full_page=True)

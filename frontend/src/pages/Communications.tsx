@@ -299,45 +299,45 @@ export function Communications() {
       {/* ─────────────────────────────────────────────────────────────
           1. TOP ANALYTICS & CONVERSION KPI CARDS
           ───────────────────────────────────────────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '16px', marginBottom: '24px' }}>
+      <div className="kpi-grid-4">
         {/* KPI 1: Total Emails Sent */}
         <Panel style={{ padding: '18px 20px', position: 'relative' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
-            <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: '#eff6ff', color: '#2563eb', display: 'grid', placeItems: 'center' }}>
+            <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'var(--tone-info-bg)', color: 'var(--tone-info-fg)', display: 'grid', placeItems: 'center' }}>
               <Icon name="mail" size={18} />
             </div>
             <span className="status-badge status-info">
               {stats?.deliveryRatePercent ?? 100}% Delivered
             </span>
           </div>
-          <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>
+          <div style={{ fontSize: '11px', color: 'var(--muted)', fontWeight: 700, textTransform: 'uppercase' }}>
             Total Consumer Emails
           </div>
           <div style={{ fontSize: '26px', fontWeight: 900, color: 'var(--ink)', margin: '4px 0 2px' }}>
             {stats?.totalSent ?? 0}
           </div>
-          <div style={{ fontSize: '11.5px', color: '#64748b' }}>
-            Delivered: <strong style={{ color: '#059669' }}>{stats?.deliveredCount ?? 0}</strong>
+          <div style={{ fontSize: '11.5px', color: 'var(--muted)' }}>
+            Delivered: <strong style={{ color: 'var(--tone-success-fg)' }}>{stats?.deliveredCount ?? 0}</strong>
           </div>
         </Panel>
 
         {/* KPI 2: In-Transit Delay Notices */}
         <Panel style={{ padding: '18px 20px', position: 'relative' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
-            <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: '#fffbeb', color: '#d97706', display: 'grid', placeItems: 'center' }}>
+            <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'var(--tone-warning-bg)', color: 'var(--tone-warning-fg)', display: 'grid', placeItems: 'center' }}>
               <Icon name="clock" size={18} />
             </div>
             <span className="status-badge status-warning">
               Route Updates
             </span>
           </div>
-          <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>
+          <div style={{ fontSize: '11px', color: 'var(--muted)', fontWeight: 700, textTransform: 'uppercase' }}>
             Transit Delay Notices
           </div>
-          <div style={{ fontSize: '26px', fontWeight: 900, color: '#d97706', margin: '4px 0 2px' }}>
+          <div style={{ fontSize: '26px', fontWeight: 900, color: 'var(--tone-warning-fg)', margin: '4px 0 2px' }}>
             {stats?.transitDelaysCount ?? 0}
           </div>
-          <div style={{ fontSize: '11.5px', color: '#64748b' }}>
+          <div style={{ fontSize: '11.5px', color: 'var(--muted)' }}>
             Dispatch Delays: <strong>{stats?.dispatchDelaysCount ?? 0}</strong>
           </div>
         </Panel>
@@ -345,21 +345,21 @@ export function Communications() {
         {/* KPI 3: Customer Conversion & RTO Prevented */}
         <Panel style={{ padding: '18px 20px', position: 'relative' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
-            <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: '#ecfdf5', color: '#059669', display: 'grid', placeItems: 'center' }}>
+            <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'var(--tone-success-bg)', color: 'var(--tone-success-fg)', display: 'grid', placeItems: 'center' }}>
               <Icon name="check" size={18} />
             </div>
             <span className="status-badge status-success">
               RTO Prevention
             </span>
           </div>
-          <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>
+          <div style={{ fontSize: '11px', color: 'var(--muted)', fontWeight: 600, textTransform: 'uppercase' }}>
             Conversion / Engaged Rate
           </div>
-          <div style={{ fontSize: '26px', fontWeight: 900, color: '#059669', margin: '4px 0 2px' }}>
+          <div style={{ fontSize: '26px', fontWeight: 900, color: 'var(--tone-success-fg)', margin: '4px 0 2px' }}>
             {stats?.conversionRatePercent ?? 0}%
           </div>
-          <div style={{ fontSize: '11.5px', color: '#64748b' }}>
-            Total Engaged: <strong style={{ color: '#059669' }}>{stats?.convertedCount ?? 0}</strong>
+          <div style={{ fontSize: '11.5px', color: 'var(--muted)' }}>
+            Total Engaged: <strong style={{ color: 'var(--tone-success-fg)' }}>{stats?.convertedCount ?? 0}</strong>
           </div>
         </Panel>
 
@@ -373,13 +373,13 @@ export function Communications() {
               Delhivery Live
             </span>
           </div>
-          <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>
+          <div style={{ fontSize: '11px', color: 'var(--muted)', fontWeight: 600, textTransform: 'uppercase' }}>
             In-Transit Monitored
           </div>
-          <div style={{ fontSize: '26px', fontWeight: 900, color: '#7c3aed', margin: '4px 0 2px' }}>
+          <div style={{ fontSize: '26px', fontWeight: 900, color: 'var(--tone-purple-fg)', margin: '4px 0 2px' }}>
             {inTransitCount}
           </div>
-          <div style={{ fontSize: '11.5px', color: '#64748b' }}>
+          <div style={{ fontSize: '11.5px', color: 'var(--muted)' }}>
             Live packages moving in network
           </div>
         </Panel>
@@ -390,10 +390,10 @@ export function Communications() {
           ───────────────────────────────────────────────────────────── */}
       <Panel style={{ marginBottom: '24px' }}>
         <PanelHeading
-          eyebrow="21st.dev UI/UX Template Architecture"
+          eyebrow="Email Template Architecture"
           title="Interactive Logistics Email Template Showcase"
           action={
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
               <div style={{ display: 'flex', background: 'var(--line-subtle)', borderRadius: '6px', padding: '2px' }}>
                 <button
                   type="button"
@@ -404,9 +404,9 @@ export function Communications() {
                     fontSize: '11px',
                     fontWeight: 700,
                     cursor: 'pointer',
-                    background: previewViewport === 'desktop' ? '#ffffff' : 'transparent',
-                    color: previewViewport === 'desktop' ? '#0f172a' : '#64748b',
-                    boxShadow: previewViewport === 'desktop' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                    background: previewViewport === 'desktop' ? 'var(--panel)' : 'transparent',
+                    color: previewViewport === 'desktop' ? 'var(--ink)' : 'var(--muted)',
+                    boxShadow: previewViewport === 'desktop' ? 'var(--shadow-xs)' : 'none',
                   }}
                   onClick={() => setPreviewViewport('desktop')}
                 >
@@ -421,9 +421,9 @@ export function Communications() {
                     fontSize: '11px',
                     fontWeight: 700,
                     cursor: 'pointer',
-                    background: previewViewport === 'mobile' ? '#ffffff' : 'transparent',
-                    color: previewViewport === 'mobile' ? '#0f172a' : '#64748b',
-                    boxShadow: previewViewport === 'mobile' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                    background: previewViewport === 'mobile' ? 'var(--panel)' : 'transparent',
+                    color: previewViewport === 'mobile' ? 'var(--ink)' : 'var(--muted)',
+                    boxShadow: previewViewport === 'mobile' ? 'var(--shadow-xs)' : 'none',
                   }}
                   onClick={() => setPreviewViewport('mobile')}
                 >
@@ -433,8 +433,7 @@ export function Communications() {
 
               <button
                 type="button"
-                className="btn-table-action"
-                style={{ background: '#eff6ff', borderColor: '#bfdbfe', color: '#2563eb' }}
+                className="button button-primary button-small"
                 onClick={() => {
                   setSendTemplate(previewTemplate)
                   setIsSendModalOpen(true)
@@ -447,7 +446,7 @@ export function Communications() {
         />
 
         {/* Template Selector Bar */}
-        <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '12px', borderBottom: '1px solid var(--line)', marginBottom: '16px' }}>
+        <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '12px', borderBottom: '1px solid var(--line)', marginBottom: '16px', maxWidth: '100%' }}>
           {(Object.keys(TEMPLATE_PREVIEWS) as EmailTemplateType[]).map((t) => {
             const item = TEMPLATE_PREVIEWS[t]
             const active = previewTemplate === t
@@ -455,20 +454,18 @@ export function Communications() {
               <button
                 key={t}
                 type="button"
+                className={`tool-pill-btn ${active ? 'active' : ''}`}
                 style={{
-                  display: 'flex',
+                  display: 'inline-flex',
                   alignItems: 'center',
                   gap: '6px',
-                  padding: '7px 14px',
+                  padding: '8px 14px',
                   borderRadius: '8px',
                   fontSize: '12px',
                   fontWeight: 700,
                   whiteSpace: 'nowrap',
-                  cursor: 'pointer',
-                  border: active ? `1.5px solid ${item.color}` : '1px solid var(--line)',
-                  background: active ? '#ffffff' : 'var(--canvas)',
-                  color: active ? item.color : 'var(--ink)',
-                  boxShadow: active ? '0 2px 6px rgba(0,0,0,0.06)' : 'none',
+                  borderColor: active ? item.color : undefined,
+                  boxShadow: active ? 'var(--shadow-xs)' : 'none',
                 }}
                 onClick={() => setPreviewTemplate(t)}
               >
@@ -479,7 +476,7 @@ export function Communications() {
         </div>
 
         {/* Live Preview Container */}
-        <div style={{ background: '#f8fafc', border: '1px solid var(--line)', borderRadius: '12px', padding: '24px', display: 'flex', justifyContent: 'center' }}>
+        <div style={{ background: 'var(--surface-elevated)', border: '1px solid var(--line)', borderRadius: '12px', padding: '16px', display: 'flex', justifyContent: 'center' }}>
           <div
             style={{
               width: previewViewport === 'desktop' ? '100%' : '375px',
@@ -503,7 +500,7 @@ export function Communications() {
                 <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#10b981' }} />
               </div>
               <span style={{ fontWeight: 600 }}>Youthnic Logistics Client Preview</span>
-              <span style={{ fontSize: '10px', color: '#64748b' }}>Resend 2026-09</span>
+              <span style={{ fontSize: '10px', color: '#cbd5e1' }}>Resend 2026-09</span>
             </div>
 
             {/* Iframe View */}
@@ -519,21 +516,21 @@ export function Communications() {
       {/* ─────────────────────────────────────────────────────────────
           2.5. IN-TRANSIT DELAYED SHIPMENTS QUEUE & PROACTIVE NOTIFICATIONS
           ───────────────────────────────────────────────────────────── */}
-      <Panel style={{ marginBottom: '24px', border: '1px solid #fde68a', background: '#fffdf5' }}>
-        <div style={{ padding: '18px 20px', borderBottom: '1px solid #fef3c7', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
+      <Panel style={{ marginBottom: '24px', borderColor: 'var(--tone-warning-border)', background: 'var(--panel)' }}>
+        <div style={{ padding: '18px 20px', borderBottom: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <div style={{ width: '28px', height: '28px', borderRadius: '8px', background: '#fef3c7', color: '#b45309', display: 'grid', placeItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <div style={{ width: '28px', height: '28px', borderRadius: '8px', background: 'var(--tone-warning-bg)', color: 'var(--tone-warning-fg)', display: 'grid', placeItems: 'center' }}>
                 <Icon name="truck" size={16} />
               </div>
-              <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 800, color: '#92400e' }}>
+              <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 800, color: 'var(--ink)' }}>
                 In-Transit Overdue & Route Delay Watchlist
               </h3>
-              <span style={{ background: '#fef3c7', color: '#b45309', border: '1px solid #fde68a', padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 750 }}>
+              <span className="tone-chip tone-chip--warning">
                 {delayedShipmentsQuery.data?.totalDelayed ?? 0} Shipments Flagged
               </span>
             </div>
-            <p style={{ margin: '4px 0 0', fontSize: '11.5px', color: '#b45309' }}>
+            <p style={{ margin: '4px 0 0', fontSize: '12px', color: 'var(--muted)' }}>
               Packages exceeding expected delivery date or experiencing prolonged regional routing. Dispatches official delay notice from <strong>delivery@youthnic.com</strong>.
             </p>
           </div>
@@ -565,10 +562,10 @@ export function Communications() {
             <LoadingState label="Scanning Delhivery active transit telemetry…" />
           </div>
         ) : !delayedShipmentsQuery.data?.shipments || delayedShipmentsQuery.data.shipments.length === 0 ? (
-          <div style={{ padding: '24px', textAlign: 'center', color: '#047857', background: '#ecfdf5', borderRadius: '0 0 12px 12px' }}>
-            <span style={{ fontSize: '18px', display: 'block', marginBottom: '4px' }}>✅</span>
-            <strong style={{ fontSize: '13px' }}>All Dispatched Shipments Are On Schedule</strong>
-            <p style={{ margin: '3px 0 0', fontSize: '11.5px', color: '#065f46' }}>
+          <div style={{ padding: '24px', textAlign: 'center', color: 'var(--tone-success-fg)', background: 'var(--tone-success-bg)', borderRadius: '10px', border: '1px solid var(--tone-success-border)' }}>
+            <div style={{ marginBottom: '6px', display: 'inline-flex' }}><Icon name="check" size={20} /></div>
+            <strong style={{ fontSize: '13px', display: 'block' }}>All Dispatched Shipments Are On Schedule</strong>
+            <p style={{ margin: '4px 0 0', fontSize: '12px', color: 'var(--ink-secondary)' }}>
               Zero shipments have exceeded expected delivery dates. Live Delhivery telemetry is operating within nominal transit SLA.
             </p>
           </div>
@@ -594,7 +591,7 @@ export function Communications() {
                       <strong style={{ fontSize: '12.5px', color: 'var(--ink)' }}>
                         {shipment.shopifyOrderName}
                       </strong>
-                      <div style={{ fontSize: '11px', color: '#64748b' }}>
+                      <div style={{ fontSize: '11px', color: 'var(--muted)' }}>
                         ₹{shipment.totalAmount.toLocaleString('en-IN')}
                       </div>
                     </td>
@@ -619,7 +616,7 @@ export function Communications() {
                       ) : (
                         <span style={{ color: '#94a3b8' }}>Pending AWB</span>
                       )}
-                      <div style={{ fontSize: '10.5px', color: '#64748b' }}>
+                      <div style={{ fontSize: '10.5px', color: 'var(--muted)' }}>
                         {isVelocityCourier(shipment.courier, undefined, shipment.waybillNumber) ? 'Velocity' : 'Delhivery'}
                       </div>
                     </td>
@@ -632,7 +629,7 @@ export function Communications() {
                       <strong style={{ fontSize: '11.5px', color: '#92400e', display: 'block' }}>
                         {shipment.flaggedReason}
                       </strong>
-                      <span style={{ fontSize: '11px', color: '#475569', display: 'block', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={shipment.latestRemark || undefined}>
+                      <span style={{ fontSize: '11px', color: 'var(--muted)', display: 'block', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={shipment.latestRemark || undefined}>
                         {shipment.latestRemark || 'No courier remark received yet'}
                       </span>
                       {shipment.latestScanAt && (
@@ -690,12 +687,12 @@ export function Communications() {
             <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 800, color: 'var(--ink)' }}>
               Customer Communication Logs & Conversion Audit
             </h3>
-            <p style={{ margin: '3px 0 0', fontSize: '11px', color: '#64748b' }}>
+            <p style={{ margin: '3px 0 0', fontSize: '11px', color: 'var(--muted)' }}>
               Every sent email is persistently tracked with delivery status, tracking link clicks, and customer engagement.
             </p>
           </div>
 
-          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
             {/* Filter Tabs */}
             <div className="segmented-tabs-container">
               <button
@@ -727,6 +724,7 @@ export function Communications() {
             <div className="search-field" style={{ maxWidth: '280px' }}>
               <Icon name="search" size={14} />
               <input
+                aria-label="Search communications by recipient, order, or AWB"
                 placeholder="Search recipient, order, AWB…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -742,7 +740,7 @@ export function Communications() {
             <ErrorBox message={logsQuery.error instanceof Error ? logsQuery.error.message : 'Failed to query email logs'} />
           </div>
         ) : logs.length === 0 ? (
-          <div style={{ padding: '40px', textAlign: 'center', color: '#64748b' }}>
+          <div style={{ padding: '40px', textAlign: 'center', color: 'var(--muted)' }}>
             <Icon name="mail" size={32} />
             <p style={{ marginTop: '8px', fontSize: '13px' }}>
               No communications found. Click "Send Customer Email" to dispatch your first logistics notice.
@@ -766,7 +764,7 @@ export function Communications() {
                 {logs.map((log) => (
                   <tr key={log.id}>
                     <td>
-                      <span style={{ fontSize: '11.5px', color: '#475569', fontWeight: 600 }}>
+                      <span style={{ fontSize: '11.5px', color: 'var(--muted)', fontWeight: 600 }}>
                         {new Date(log.createdAt).toLocaleDateString('en-IN', {
                           day: '2-digit',
                           month: 'short',
@@ -781,7 +779,7 @@ export function Communications() {
                           {log.shopifyOrderName || (log.orderId ? `#${log.orderId}` : '—')}
                         </strong>
                         {log.waybillNumber && (
-                          <div style={{ fontSize: '10px', color: '#64748b', marginTop: '1px' }}>
+                          <div style={{ fontSize: '10px', color: 'var(--muted)', marginTop: '1px' }}>
                             AWB: <code>{log.waybillNumber}</code>
                           </div>
                         )}
@@ -792,38 +790,25 @@ export function Communications() {
                         <strong style={{ fontSize: '12px', color: 'var(--ink)', display: 'block' }}>
                           {log.recipientName || 'Customer'}
                         </strong>
-                        <span style={{ fontSize: '11px', color: '#2563eb' }}>{log.recipientEmail}</span>
+                        <span style={{ fontSize: '11px', color: 'var(--tone-info-fg)' }}>{log.recipientEmail}</span>
                       </div>
                     </td>
                     <td>
                       <span
-                        className="status-badge"
-                        style={{
-                          background:
-                            log.templateType === 'TRANSIT_DELAY'
-                              ? '#fffbeb'
-                              : log.templateType === 'DISPATCH_DELAY'
-                              ? '#f5f3ff'
-                              : log.templateType === 'NDR_ALERT'
-                              ? '#fef2f2'
-                              : '#ecfdf5',
-                          color:
-                            log.templateType === 'TRANSIT_DELAY'
-                              ? '#d97706'
-                              : log.templateType === 'DISPATCH_DELAY'
-                              ? '#7c3aed'
-                              : log.templateType === 'NDR_ALERT'
-                              ? '#dc2626'
-                              : '#059669',
-                          borderColor: 'transparent',
-                          fontSize: '11px',
-                          fontWeight: 750,
-                        }}
+                        className={`status-badge ${
+                          log.templateType === 'TRANSIT_DELAY'
+                            ? 'status-warning'
+                            : log.templateType === 'DISPATCH_DELAY'
+                            ? 'status-purple'
+                            : log.templateType === 'NDR_ALERT'
+                            ? 'status-danger'
+                            : 'status-success'
+                        }`}
                       >
                         {TEMPLATE_PREVIEWS[log.templateType]?.label || log.templateType}
                       </span>
                       {log.delayReason && (
-                        <div style={{ fontSize: '10px', color: '#64748b', marginTop: '2px', maxWidth: '240px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <div style={{ fontSize: '10px', color: 'var(--muted)', marginTop: '2px', maxWidth: '240px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {log.delayReason}
                         </div>
                       )}
@@ -847,12 +832,12 @@ export function Communications() {
                           <span className="status-badge status-success">
                             <span className="status-dot" /> CONVERTED
                           </span>
-                          <span style={{ fontSize: '10px', color: '#059669', fontWeight: 600 }}>
+                          <span style={{ fontSize: '10px', color: 'var(--tone-success-fg)', fontWeight: 600 }}>
                             {log.conversionAction || 'Clicked Tracking'} ({log.clickCount} clicks)
                           </span>
                         </div>
                       ) : (
-                        <span className="status-badge" style={{ background: '#f1f5f9', color: '#64748b' }}>
+                        <span className="tone-chip">
                           Pending Engagement
                         </span>
                       )}
@@ -863,7 +848,6 @@ export function Communications() {
                           <button
                             type="button"
                             className="btn-table-action"
-                            style={{ background: '#eff6ff', color: '#2563eb' }}
                             onClick={() => setViewingLog(log)}
                             title="View exact rendered HTML email"
                           >
@@ -874,7 +858,7 @@ export function Communications() {
                           <button
                             type="button"
                             className="btn-table-action"
-                            style={{ background: '#ecfdf5', color: '#059669' }}
+                            style={{ background: 'var(--tone-success-bg)', color: 'var(--tone-success-fg)' }}
                             onClick={() =>
                               convertMutation.mutate({
                                 id: log.id,
@@ -934,13 +918,14 @@ export function Communications() {
                 <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 800, color: 'var(--ink)' }}>
                   Dispatch Logistics Customer Email
                 </h3>
-                <p style={{ margin: '4px 0 0', fontSize: '11.5px', color: '#64748b' }}>
+                <p style={{ margin: '4px 0 0', fontSize: '11.5px', color: 'var(--muted)' }}>
                   Send branded delivery alerts, in-transit delay notices, or custom updates to consumers via Resend.
                 </p>
               </div>
               <button
                 type="button"
-                style={{ background: 'transparent', border: 0, color: '#64748b', cursor: 'pointer', padding: '4px' }}
+                className="modal-close-btn"
+                aria-label="Close modal"
                 onClick={() => setIsSendModalOpen(false)}
               >
                 <Icon name="close" size={18} />
@@ -1100,7 +1085,7 @@ export function Communications() {
                 </div>
               )}
 
-              <div style={{ background: 'var(--canvas)', border: '1px solid var(--line)', borderRadius: '8px', padding: '12px', fontSize: '11px', color: '#475569' }}>
+              <div style={{ background: 'var(--canvas)', border: '1px solid var(--line)', borderRadius: '8px', padding: '12px', fontSize: '11px', color: 'var(--muted)' }}>
                 <div style={{ fontWeight: 700, color: 'var(--ink)', marginBottom: '3px' }}>🔗 Live Click & Conversion Tracking:</div>
                 <div>A unique tracking link will be embedded in this email. When the customer opens and clicks the tracking button, it will automatically record a conversion and redirect them to Delhivery live tracking.</div>
               </div>
@@ -1166,13 +1151,14 @@ export function Communications() {
                 <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 800, color: 'var(--ink)' }}>
                   Rendered Email: {viewingLog.subject}
                 </h3>
-                <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
+                <div style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '2px' }}>
                   To: <strong>{viewingLog.recipientEmail}</strong> · Status: <span className="status-badge status-success">{viewingLog.status}</span> · Resend ID: <code>{viewingLog.resendId || 'simulated'}</code>
                 </div>
               </div>
               <button
                 type="button"
-                style={{ background: 'transparent', border: 0, color: '#64748b', cursor: 'pointer', padding: '4px' }}
+                className="modal-close-btn"
+                aria-label="Close modal"
                 onClick={() => setViewingLog(null)}
               >
                 <Icon name="close" size={18} />

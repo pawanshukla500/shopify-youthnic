@@ -14,7 +14,7 @@ export function OrderActivityFeed({ orderId, currency }: { orderId: number; curr
   const toast = useToast(), cache = useQueryClient()
   const [note, setNote] = useState(''), [writing, setWriting] = useState(false), [all, setAll] = useState(false)
   const requestId = useRef(crypto.randomUUID())
-  const query = useQuery({ queryKey: ['order-activity', String(orderId)], queryFn: async () => (await api.get<{ events: Activity[] }>(`/api/orders/${orderId}/activity`)).data.events, retry: false })
+  const query = useQuery({ queryKey: ['order-activity', String(orderId)], queryFn: async () => (await api.get<{ events: Activity[] }>(`/api/orders/${orderId}/activity`)).data.events ?? [], retry: false })
   const add = useMutation({
     mutationFn: () => api.post(`/api/orders/${orderId}/activity/notes`, { text: note.trim(), requestId: requestId.current }),
     onSuccess: async () => { setNote(''); setWriting(false); requestId.current = crypto.randomUUID(); toast.toast('success', 'Internal note added.'); await cache.invalidateQueries({ queryKey: ['order-activity', String(orderId)] }) },

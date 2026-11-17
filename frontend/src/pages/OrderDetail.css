@@ -326,3 +326,23 @@
 @media (prefers-reduced-motion: reduce) {
   .shopify-order-page.order-workspace *, .order-workspace *::before { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+
+
+/* ─── Phase 2 Design System: Focus Ring Consistency ─── */
+.shopify-order-page.order-workspace button:focus-visible,
+.shopify-order-page.order-workspace a:focus-visible,
+.shopify-order-page.order-workspace input:focus-visible,
+.shopify-order-page.order-workspace select:focus-visible,
+.shopify-order-page.order-workspace textarea:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+@media (max-width: 768px) {
+  .shopify-order-page.order-workspace .shopify-back,
+  .shopify-order-page.order-workspace .shopify-btn,
+  .shopify-order-page.order-workspace .order-copy-chip {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}

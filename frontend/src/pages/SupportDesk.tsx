@@ -17,7 +17,7 @@ import {
   updateMetaAgentConfig,
   apiError,
 } from '../api'
-import { ErrorBox, Icon, LoadingState, PageIntro, Panel, PanelHeading, useDocumentTitle, useToast } from '../components/UI'
+import { ErrorBox, Icon, LoadingState, Modal, PageIntro, Panel, PanelHeading, useDocumentTitle, useToast } from '../components/UI'
 import type { InboundEmail, CustomerHistoryEvent } from '../types'
 import { formatDate, formatMoney, carrierTrackingUrl, isVelocityCourier } from '../lib'
 
@@ -245,57 +245,51 @@ export function SupportDesk() {
       {/* ─── Page Intro & Real-time Diagnostics ──────────────────── */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px', marginBottom: '20px' }}>
         <PageIntro
-          eyebrow="21st.dev Support Desk · AI-Powered Triage"
+          eyebrow="Support Desk · AI-Powered Triage"
           title="Customer Inbound & Returns Mail Hub"
           description="Automated triage using Muse Spark 1.3 Contributor model, order urgency flagging, zero-token resolution patterns, and official dispatch from return@youthnic.com."
         />
 
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
           {/* Delhivery Diagnostic */}
-          <div className="status-badge" style={{ background: '#ecfdf5', borderColor: '#a7f3d0', color: '#047857' }} title={diag?.delhivery?.message}>
-            <span className="status-dot" style={{ background: '#10b981' }} />
+          <span className="tone-chip tone-chip--success" title={diag?.delhivery?.message}>
+            <span className="status-dot" />
             <span>Delhivery: {diag?.delhivery?.status === 'ok' ? `Live (${diag.delhivery.latencyMs}ms)` : 'Error'}</span>
-          </div>
+          </span>
 
           {/* KwikEngage WhatsApp Diagnostic */}
-          <div className="status-badge" style={{ background: '#f0fdf4', borderColor: '#bbf7d0', color: '#15803d' }} title={diag?.kwikengage?.message || diag?.whatsapp?.message}>
-            <span className="status-dot" style={{ background: '#22c55e' }} />
-            <span>KwikEngage WhatsApp: {(diag?.kwikengage?.status === 'ok' || diag?.whatsapp?.status === 'ok') ? 'Live Connected' : 'Simulated'}</span>
-          </div>
+          <span className="tone-chip tone-chip--success" title={diag?.kwikengage?.message || diag?.whatsapp?.message}>
+            <span className="status-dot" />
+            <span>KwikEngage: {(diag?.kwikengage?.status === 'ok' || diag?.whatsapp?.status === 'ok') ? 'Live Connected' : 'Simulated'}</span>
+          </span>
 
           {/* Firebase RTDB Diagnostic */}
-          <div className="status-badge" style={{ background: '#f5f3ff', borderColor: '#ddd6fe', color: '#6d28d9' }} title="Firebase Realtime Database: shopify-134b9">
-            <span className="status-dot" style={{ background: '#8b5cf6' }} />
+          <span className="tone-chip tone-chip--purple" title="Firebase Realtime Database: shopify-134b9">
+            <span className="status-dot" />
             <span>Firebase RTDB: shopify-134b9</span>
-          </div>
+          </span>
 
           {/* Resend Diagnostic */}
-          <div className="status-badge" style={{ background: '#eff6ff', borderColor: '#bfdbfe', color: '#1d4ed8' }} title="Sender: return@youthnic.com">
-            <span className="status-dot" style={{ background: '#3b82f6' }} />
+          <span className="tone-chip tone-chip--info" title="Sender: return@youthnic.com">
+            <span className="status-dot" />
             <span>Resend: return@youthnic.com</span>
-          </div>
+          </span>
 
-          {/* Meta Model API Diagnostic (muse-spark-1.3-contributor) */}
-          <div
-            className="status-badge"
-            style={{
-              background: '#faf5ff',
-              borderColor: '#e9d5ff',
-              color: '#7e22ce',
-              cursor: 'pointer',
-            }}
+          {/* Meta Model API Diagnostic */}
+          <button
+            type="button"
+            className="tone-chip tone-chip--purple"
             onClick={() => setIsMetaModalOpen(true)}
-            title="Click to configure Meta Model API key"
+            title="Configure Meta Model API key"
           >
-            <span className="status-dot" style={{ background: '#a855f7' }} />
+            <span className="status-dot" />
             <span>Meta LLM: muse-spark-1.3-contributor</span>
-            <span style={{ fontSize: '10px', marginLeft: '4px', textDecoration: 'underline' }}>⚙</span>
-          </div>
+            <Icon name="settings" size={12} />
+          </button>
 
           <button
             type="button"
             className="button button-primary"
-            style={{ height: '32px', fontSize: '12px', padding: '0 12px' }}
             onClick={() => setIsSimulateModalOpen(true)}
           >
             <Icon name="plus" size={14} />
@@ -305,56 +299,54 @@ export function SupportDesk() {
       </div>
 
       {/* ─── Metric KPI Cards ────────────────────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px', marginBottom: '22px' }}>
-        <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '10px', padding: '16px' }}>
-          <span style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+      <div className="kpi-grid-4">
+        <div className="surface-card">
+          <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
             Open Support Tickets
           </span>
           <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--ink)', marginTop: '4px' }}>
             {emailsQuery.data?.openCount ?? 0}
           </div>
-          <span style={{ fontSize: '11px', color: '#64748b', marginTop: '2px', display: 'block' }}>
+          <span style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '2px', display: 'block' }}>
             Awaiting response or reverse pickup
           </span>
         </div>
 
-        <div style={{ background: 'var(--panel)', border: '1px solid #fecaca', borderRadius: '10px', padding: '16px' }}>
+        <div className="surface-card" style={{ borderColor: 'var(--tone-danger-border)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '11px', fontWeight: 700, color: '#dc2626', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-              🚨 Urgent Claims & Defects
+            <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--tone-danger-fg)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+              <Icon name="alert" size={13} /> Urgent Claims & Defects
             </span>
-            <span style={{ background: '#fee2e2', color: '#b91c1c', fontSize: '10px', padding: '1px 6px', borderRadius: '4px', fontWeight: 700 }}>
-              Flagged
-            </span>
+            <span className="tone-chip tone-chip--danger">Flagged</span>
           </div>
-          <div style={{ fontSize: '24px', fontWeight: 800, color: '#b91c1c', marginTop: '4px' }}>
+          <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--tone-danger-fg)', marginTop: '4px' }}>
             {emailsQuery.data?.urgentCount ?? 0}
           </div>
-          <span style={{ fontSize: '11px', color: '#dc2626', marginTop: '2px', display: 'block' }}>
+          <span style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '2px', display: 'block' }}>
             High-priority returns & damage reports
           </span>
         </div>
 
-        <div style={{ background: 'var(--panel)', border: '1px solid #ddd6fe', borderRadius: '10px', padding: '16px' }}>
-          <span style={{ fontSize: '11px', fontWeight: 700, color: '#6d28d9', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-            🔄 Return Requests
+        <div className="surface-card" style={{ borderColor: 'var(--tone-purple-border)' }}>
+          <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--tone-purple-fg)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+            <Icon name="return" size={13} /> Return Requests
           </span>
-          <div style={{ fontSize: '24px', fontWeight: 800, color: '#6d28d9', marginTop: '4px' }}>
+          <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--tone-purple-fg)', marginTop: '4px' }}>
             {emailsQuery.data?.returnCount ?? 0}
           </div>
-          <span style={{ fontSize: '11px', color: '#7c3aed', marginTop: '2px', display: 'block' }}>
+          <span style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '2px', display: 'block' }}>
             Doorstep pickup requests
           </span>
         </div>
 
-        <div style={{ background: 'var(--panel)', border: '1px solid #a7f3d0', borderRadius: '10px', padding: '16px' }}>
-          <span style={{ fontSize: '11px', fontWeight: 700, color: '#047857', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-            ⚡ Self-Learned Resolution Cache
+        <div className="surface-card" style={{ borderColor: 'var(--tone-success-border)' }}>
+          <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--tone-success-fg)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+            <Icon name="zap" size={13} /> Self-Learned Resolution Cache
           </span>
-          <div style={{ fontSize: '24px', fontWeight: 800, color: '#047857', marginTop: '4px' }}>
+          <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--tone-success-fg)', marginTop: '4px' }}>
             {patternsQuery.data?.patterns?.length ?? 5} Patterns
           </div>
-          <span style={{ fontSize: '11px', color: '#059669', marginTop: '2px', display: 'block' }}>
+          <span style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '2px', display: 'block' }}>
             0-token offline pattern matching active
           </span>
         </div>
@@ -373,37 +365,38 @@ export function SupportDesk() {
           <button
             type="button"
             className={`tab-trigger-21st ${activeTab === 'URGENT' ? 'active' : ''}`}
-            style={{ color: activeTab === 'URGENT' ? '#ef4444' : undefined }}
+            style={{ color: activeTab === 'URGENT' ? 'var(--tone-danger-fg)' : undefined }}
             onClick={() => setActiveTab('URGENT')}
           >
-            🚨 Urgent <span className="tab-badge" style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#ef4444' }}>{emailsQuery.data?.urgentCount ?? 0}</span>
+            <Icon name="alert" size={13} /> Urgent <span className="tab-badge" style={{ background: 'var(--tone-danger-bg)', color: 'var(--tone-danger-fg)' }}>{emailsQuery.data?.urgentCount ?? 0}</span>
           </button>
           <button
             type="button"
             className={`tab-trigger-21st ${activeTab === 'RETURNS' ? 'active' : ''}`}
             onClick={() => setActiveTab('RETURNS')}
           >
-            🔄 Returns <span className="tab-badge">{emailsQuery.data?.returnCount ?? 0}</span>
+            <Icon name="return" size={13} /> Returns <span className="tab-badge">{emailsQuery.data?.returnCount ?? 0}</span>
           </button>
           <button
             type="button"
             className={`tab-trigger-21st ${activeTab === 'DELAYS' ? 'active' : ''}`}
             onClick={() => setActiveTab('DELAYS')}
           >
-            ⏱️ Transit Delays
+            <Icon name="clock" size={13} /> Transit Delays
           </button>
           <button
             type="button"
             className={`tab-trigger-21st ${activeTab === 'RESOLVED' ? 'active' : ''}`}
             onClick={() => setActiveTab('RESOLVED')}
           >
-            ✓ Resolved
+            <Icon name="check" size={13} /> Resolved
           </button>
         </div>
 
         <div className="search-field" style={{ maxWidth: '340px' }}>
           <Icon name="search" size={14} />
           <input
+            aria-label="Search support tickets by customer, email, or order"
             placeholder="Search by customer, email, order #…"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
@@ -412,13 +405,13 @@ export function SupportDesk() {
       </div>
 
       {/* ─── Two-Column Support Workspace ──────────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(340px, 1fr) minmax(500px, 1.6fr)', gap: '20px', alignItems: 'start' }}>
+      <div className="support-workspace-grid">
         {/* LEFT COLUMN: Inbound Ticket Feed */}
         <Panel style={{ maxHeight: 'calc(100vh - 280px)', overflowY: 'auto', padding: '8px' }}>
           <div style={{ display: 'grid', gap: '8px' }}>
             {emailsQuery.isLoading && <LoadingState label="Loading support tickets…" />}
             {tickets.length === 0 && !emailsQuery.isLoading && (
-              <div style={{ textAlign: 'center', padding: '40px 20px', color: '#64748b' }}>
+              <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--muted)' }}>
                 <Icon name="mail" size={32} />
                 <p style={{ marginTop: '8px', fontSize: '13px', fontWeight: 600 }}>No support tickets in this queue</p>
                 <button
@@ -437,35 +430,23 @@ export function SupportDesk() {
               const isUrgent = ticket.urgency === 'URGENT'
 
               return (
-                <div
+                <button
                   key={ticket.id}
+                  type="button"
                   onClick={() => setSelectedTicketId(ticket.id)}
-                  style={{
-                    padding: '12px 14px',
-                    borderRadius: '8px',
-                    border: isSelected ? '2px solid #2563eb' : isUrgent ? '1px solid #fecaca' : '1px solid var(--line)',
-                    background: isSelected ? 'var(--canvas)' : isUrgent ? '#fff5f5' : 'var(--panel)',
-                    cursor: 'pointer',
-                    transition: 'all 0.15s ease',
-                  }}
+                  className={`ticket-card-btn ${isUrgent ? 'is-urgent' : ''} ${isSelected ? 'is-selected' : ''}`}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px', marginBottom: '6px' }}>
                     <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
                       {isUrgent ? (
-                        <span style={{ background: '#fee2e2', color: '#b91c1c', fontSize: '10px', fontWeight: 800, padding: '1px 6px', borderRadius: '4px' }}>
-                          🚨 URGENT
-                        </span>
+                        <span className="tone-chip tone-chip--danger">URGENT</span>
                       ) : ticket.urgency === 'HIGH' ? (
-                        <span style={{ background: '#fef3c7', color: '#b45309', fontSize: '10px', fontWeight: 800, padding: '1px 6px', borderRadius: '4px' }}>
-                          ⚡ HIGH
-                        </span>
+                        <span className="tone-chip tone-chip--warning">HIGH</span>
                       ) : (
-                        <span style={{ background: '#f1f5f9', color: '#475569', fontSize: '10px', fontWeight: 600, padding: '1px 6px', borderRadius: '4px' }}>
-                          NORMAL
-                        </span>
+                        <span className="tone-chip">NORMAL</span>
                       )}
 
-                      <span style={{ fontSize: '10.5px', color: '#2563eb', fontWeight: 700, background: '#eff6ff', padding: '1px 6px', borderRadius: '4px' }}>
+                      <span className="tone-chip tone-chip--info">
                         {ticket.category.replace('_', ' ')}
                       </span>
 
@@ -476,7 +457,7 @@ export function SupportDesk() {
                       )}
                     </div>
 
-                    <span style={{ fontSize: '10px', color: '#64748b', whiteSpace: 'nowrap' }}>
+                    <span style={{ fontSize: '10px', color: 'var(--muted)', whiteSpace: 'nowrap' }}>
                       {formatDate(ticket.createdAt)}
                     </span>
                   </div>
@@ -485,22 +466,22 @@ export function SupportDesk() {
                     {ticket.subject}
                   </div>
 
-                  <div style={{ fontSize: '11px', color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <div style={{ fontSize: '11px', color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {ticket.bodyText}
                   </div>
 
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px', fontSize: '10.5px', color: '#475569' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px', fontSize: '11px', color: 'var(--muted)' }}>
                     <span>{ticket.fromName || ticket.fromEmail}</span>
                     <span
                       style={{
-                        color: ticket.status === 'RESOLVED' ? '#059669' : ticket.status === 'REPLIED' ? '#2563eb' : '#d97706',
+                        color: ticket.status === 'RESOLVED' ? 'var(--tone-success-fg)' : ticket.status === 'REPLIED' ? 'var(--tone-info-fg)' : 'var(--tone-warning-fg)',
                         fontWeight: 700,
                       }}
                     >
-                      {ticket.status === 'RESOLVED' ? '✓ Resolved' : ticket.status === 'REPLIED' ? '💬 Replied' : '● Open'}
+                      {ticket.status === 'RESOLVED' ? 'Resolved' : ticket.status === 'REPLIED' ? 'Replied' : 'Open'}
                     </span>
                   </div>
-                </div>
+                </button>
               )
             })}
           </div>
@@ -523,7 +504,7 @@ export function SupportDesk() {
                       </span>
                     )}
                   </div>
-                  <div style={{ fontSize: '11.5px', color: '#64748b', marginTop: '3px' }}>
+                  <div style={{ fontSize: '11.5px', color: 'var(--muted)', marginTop: '3px' }}>
                     From: <strong>{activeTicket.fromEmail}</strong> · Received: {formatDate(activeTicket.createdAt)}
                   </div>
                 </div>
@@ -542,7 +523,7 @@ export function SupportDesk() {
                     <button
                       type="button"
                       className="button button-secondary"
-                      style={{ fontSize: '11px', height: '30px', padding: '0 10px', color: '#2563eb' }}
+                      style={{ fontSize: '11px', height: '30px', padding: '0 10px', color: 'var(--tone-info-fg)' }}
                       onClick={() => navigate(`/orders/${activeTicket.order?.id}`)}
                     >
                       <Icon name="external" size={13} />
@@ -556,26 +537,26 @@ export function SupportDesk() {
               {activeTicket.order ? (
                 <div style={{ background: 'var(--canvas)', border: '1px solid var(--line)', borderRadius: '8px', padding: '12px 14px', marginTop: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
                   <div>
-                    <span style={{ fontSize: '11px', color: '#64748b' }}>Linked Order:</span>
+                    <span style={{ fontSize: '11px', color: 'var(--muted)' }}>Linked Order:</span>
                     <div style={{ fontWeight: 800, fontSize: '13px', color: 'var(--ink)' }}>
                       {activeTicket.order.shopifyOrderName} · {formatMoney(activeTicket.order.totalAmount)}
                     </div>
                   </div>
                   <div>
-                    <span style={{ fontSize: '11px', color: '#64748b' }}>Shipment Status:</span>
-                    <div style={{ fontWeight: 700, fontSize: '12px', color: '#2563eb' }}>
+                    <span style={{ fontSize: '11px', color: 'var(--muted)' }}>Shipment Status:</span>
+                    <div style={{ fontWeight: 700, fontSize: '12px', color: 'var(--tone-info-fg)' }}>
                       {activeTicket.order.status}
                     </div>
                   </div>
                   {activeTicket.order.shipment?.waybillNumber && (
                     <div>
-                      <span style={{ fontSize: '11px', color: '#64748b' }}>{isVelocityCourier(activeTicket.order.shipment?.courier, activeTicket.order.shipment?.waybillNumber) ? 'Velocity' : 'Delhivery'} Waybill:</span>
+                      <span style={{ fontSize: '11px', color: 'var(--muted)' }}>{isVelocityCourier(activeTicket.order.shipment?.courier, activeTicket.order.shipment?.waybillNumber) ? 'Velocity' : 'Delhivery'} Waybill:</span>
                       <div>
                         <a
                           href={carrierTrackingUrl(activeTicket.order.shipment?.courier || (activeTicket.order as any).courierPartner, activeTicket.order.shipment.waybillNumber)}
                           target="_blank"
                           rel="noreferrer"
-                          style={{ color: '#2563eb', fontWeight: 700, fontSize: '12px', textDecoration: 'none' }}
+                          style={{ color: 'var(--tone-info-fg)', fontWeight: 700, fontSize: '12px', textDecoration: 'none' }}
                         >
                           {activeTicket.order.shipment.waybillNumber} ↗
                         </a>
@@ -589,7 +570,7 @@ export function SupportDesk() {
                   )}
                 </div>
               ) : (
-                <div style={{ fontSize: '11.5px', color: '#64748b', marginTop: '10px', background: 'var(--canvas)', padding: '8px 12px', borderRadius: '6px' }}>
+                <div style={{ fontSize: '11.5px', color: 'var(--muted)', marginTop: '10px', background: 'var(--canvas)', padding: '8px 12px', borderRadius: '6px' }}>
                   ℹ️ No exact order linked automatically. You can specify order number in reply.
                 </div>
               )}
@@ -601,101 +582,93 @@ export function SupportDesk() {
                 <span style={{ fontSize: '12px', fontWeight: 750, color: 'var(--ink)' }}>
                   Customer Message: "{activeTicket.subject}"
                 </span>
-                <span style={{ fontSize: '11px', color: '#64748b' }}>
+                <span style={{ fontSize: '11px', color: 'var(--muted)' }}>
                   Sent to: <code>return@youthnic.com</code>
                 </span>
               </div>
-              <div style={{ background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '14px', fontSize: '13px', lineHeight: '1.6', color: '#1e293b', whiteSpace: 'pre-wrap' }}>
+              <div style={{ background: 'var(--surface-elevated)', border: '1px solid var(--border-strong)', borderRadius: '8px', padding: '14px', fontSize: '13px', lineHeight: '1.6', color: 'var(--ink)', whiteSpace: 'pre-wrap' }}>
                 {activeTicket.bodyText}
               </div>
             </Panel>
 
             {/* 3. AI Triage & Sentiment Analysis ("Muse Spark 1.3 Contributor") */}
-            <Panel style={{ padding: '16px', background: '#f8fafc', borderColor: '#e2e8f0' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+            <Panel style={{ padding: '16px', background: 'var(--surface-elevated)', borderColor: 'var(--line)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '10px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span style={{ fontSize: '14px' }}>✨</span>
-                  <strong style={{ fontSize: '13px', color: '#0f172a' }}>Muse Spark 1.3 Triage Analysis</strong>
+                  <Icon name="zap" size={15} />
+                  <strong style={{ fontSize: '13px', color: 'var(--ink)' }}>Muse Spark 1.3 Triage Analysis</strong>
                 </div>
                 {activeTicket.aiAnalysis?.isLearnedMatch ? (
-                  <span style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', fontSize: '10.5px', padding: '2px 8px', borderRadius: '4px', fontWeight: 700 }}>
-                    ⚡ 0-Token Knowledge Base Match (100% Cache)
+                  <span className="tone-chip tone-chip--success">
+                    0-Token Knowledge Base Match (100% Cache)
                   </span>
                 ) : (
-                  <span style={{ background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', fontSize: '10.5px', padding: '2px 8px', borderRadius: '4px', fontWeight: 700 }}>
-                    ✨ AI Heuristic Inference
+                  <span className="tone-chip tone-chip--info">
+                    AI Heuristic Inference
                   </span>
                 )}
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '8px', marginBottom: '10px', fontSize: '11.5px' }}>
-                <div style={{ background: '#ffffff', padding: '8px 10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
-                  <span style={{ color: '#64748b', display: 'block', fontSize: '10px' }}>INTENT CATEGORY</span>
-                  <strong style={{ color: '#0f172a' }}>{activeTicket.category.replace('_', ' ')}</strong>
+                <div style={{ background: 'var(--panel)', padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--line)' }}>
+                  <span style={{ color: 'var(--muted)', display: 'block', fontSize: '10px' }}>INTENT CATEGORY</span>
+                  <strong style={{ color: 'var(--ink)' }}>{activeTicket.category.replace('_', ' ')}</strong>
                 </div>
-                <div style={{ background: '#ffffff', padding: '8px 10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
-                  <span style={{ color: '#64748b', display: 'block', fontSize: '10px' }}>URGENCY</span>
-                  <strong style={{ color: activeTicket.urgency === 'URGENT' ? '#b91c1c' : '#047857' }}>{activeTicket.urgency}</strong>
+                <div style={{ background: 'var(--panel)', padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--line)' }}>
+                  <span style={{ color: 'var(--muted)', display: 'block', fontSize: '10px' }}>URGENCY</span>
+                  <strong style={{ color: activeTicket.urgency === 'URGENT' ? 'var(--tone-danger-fg)' : 'var(--tone-success-fg)' }}>{activeTicket.urgency}</strong>
                 </div>
-                <div style={{ background: '#ffffff', padding: '8px 10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
-                  <span style={{ color: '#64748b', display: 'block', fontSize: '10px' }}>DETECTED SENTIMENT</span>
-                  <strong style={{ color: activeTicket.sentiment === 'FRUSTRATED' || activeTicket.sentiment === 'URGENT' ? '#b91c1c' : '#334155' }}>
+                <div style={{ background: 'var(--panel)', padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--line)' }}>
+                  <span style={{ color: 'var(--muted)', display: 'block', fontSize: '10px' }}>DETECTED SENTIMENT</span>
+                  <strong style={{ color: activeTicket.sentiment === 'FRUSTRATED' || activeTicket.sentiment === 'URGENT' ? 'var(--tone-danger-fg)' : 'var(--ink-secondary)' }}>
                     {activeTicket.sentiment}
                   </strong>
                 </div>
-                <div style={{ background: '#ffffff', padding: '8px 10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
-                  <span style={{ color: '#64748b', display: 'block', fontSize: '10px' }}>CONFIDENCE</span>
-                  <strong style={{ color: '#047857' }}>{Math.round((activeTicket.aiAnalysis?.confidence ?? 0.95) * 100)}%</strong>
+                <div style={{ background: 'var(--panel)', padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--line)' }}>
+                  <span style={{ color: 'var(--muted)', display: 'block', fontSize: '10px' }}>CONFIDENCE</span>
+                  <strong style={{ color: 'var(--tone-success-fg)' }}>{Math.round((activeTicket.aiAnalysis?.confidence ?? 0.95) * 100)}%</strong>
                 </div>
               </div>
 
-              <div style={{ fontSize: '12px', color: '#475569', lineHeight: '1.5', marginBottom: '12px' }}>
+              <div style={{ fontSize: '12px', color: 'var(--ink-secondary)', lineHeight: '1.5', marginBottom: '12px' }}>
                 <strong>Recommendation:</strong> {activeTicket.aiAnalysis?.suggestedAction || activeTicket.flagReason}
               </div>
 
               {/* Action Button: Re-analyze with Meta LLM */}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid #e2e8f0', paddingTop: '10px' }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid var(--line)', paddingTop: '10px' }}>
                 <button
                   type="button"
                   className="button button-secondary"
-                  style={{
-                    fontSize: '11.5px',
-                    height: '28px',
-                    padding: '0 12px',
-                    background: '#ffffff',
-                    color: '#7e22ce',
-                    borderColor: '#d8b4fe',
-                  }}
                   disabled={isReanalyzing}
                   onClick={handleReanalyzeWithMetaLlm}
                 >
-                  <Icon name="refresh" size={12} />
-                  <span>{isReanalyzing ? 'Analyzing with Meta LLM...' : '⚡ Re-analyze with Muse Spark 1.3 Contributor'}</span>
+                  <Icon name="refresh" size={13} />
+                  <span>{isReanalyzing ? 'Analyzing with Meta LLM...' : 'Re-analyze with Muse Spark 1.3'}</span>
                 </button>
               </div>
             </Panel>
 
             {/* 3B. Autonomous Agent Harness Memory (Firebase RTDB) */}
             {agentMemoryQuery.data?.memory && (
-              <Panel style={{ padding: '16px', background: '#faf5ff', borderColor: '#e9d5ff' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <Panel style={{ padding: '16px', background: 'var(--tone-purple-bg)', borderColor: 'var(--tone-purple-border)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontSize: '16px' }}>🧠</span>
+                    <Icon name="workflow" size={18} />
                     <div>
-                      <h4 style={{ margin: 0, fontSize: '13px', fontWeight: 800, color: '#581c87' }}>
+                      <h4 style={{ margin: 0, fontSize: '13px', fontWeight: 800, color: 'var(--tone-purple-fg)' }}>
                         Customer Agent Memory (Firebase Realtime Database)
                       </h4>
-                      <span style={{ fontSize: '10.5px', color: '#7e22ce' }}>
+                      <span style={{ fontSize: '10.5px', color: 'var(--muted)' }}>
                         Node: <code>/agent_memory/customers/{agentMemoryQuery.data.memory.customerIdentifier?.replace(/[^a-zA-Z0-9]/g, '_')}</code>
                       </span>
                     </div>
                   </div>
-                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    <span style={{ background: '#f3e8ff', color: '#6b21a8', fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '4px', border: '1px solid #d8b4fe' }}>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <span className="tone-chip tone-chip-purple">
                       Trust Score: {agentMemoryQuery.data.memory.profile?.trustScore ?? 85}/100
                     </span>
                     {agentMemoryQuery.data.memory.profile?.totalOrders > 0 && (
-                      <span style={{ background: '#ecfdf5', color: '#065f46', fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '4px', border: '1px solid #a7f3d0' }}>
+                      <span className="tone-chip tone-chip-success">
                         Orders: {agentMemoryQuery.data.memory.profile.totalOrders}
                       </span>
                     )}
@@ -704,8 +677,8 @@ export function SupportDesk() {
 
                 {/* Long-Term Learned Facts */}
                 <div style={{ marginBottom: '12px' }}>
-                  <span style={{ fontSize: '11px', fontWeight: 750, color: '#6b21a8', display: 'block', marginBottom: '6px' }}>
-                    📌 EXTRACTED LONG-TERM CUSTOMER FACTS
+                  <span style={{ fontSize: '11px', fontWeight: 750, color: 'var(--tone-purple-fg)', display: 'block', marginBottom: '6px' }}>
+                    EXTRACTED LONG-TERM CUSTOMER FACTS
                   </span>
                   {agentMemoryQuery.data.memory.longTermFacts?.length > 0 ? (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
@@ -713,21 +686,21 @@ export function SupportDesk() {
                         <div
                           key={idx}
                           style={{
-                            background: '#ffffff',
-                            border: '1px solid #d8b4fe',
+                            background: 'var(--panel)',
+                            border: '1px solid var(--tone-purple-border)',
                             borderRadius: '6px',
                             padding: '4px 10px',
                             fontSize: '11px',
-                            color: '#581c87',
+                            color: 'var(--ink)',
                             fontWeight: 500,
                           }}
                         >
-                          ✦ {fact}
+                          {fact}
                         </div>
                       ))}
                     </div>
                   ) : (
-                    <span style={{ fontSize: '11px', color: '#9333ea', fontStyle: 'italic' }}>
+                    <span style={{ fontSize: '11px', color: 'var(--muted)', fontStyle: 'italic' }}>
                       No previous facts recorded yet. The agent harness extracts facts automatically upon receipt of new messages.
                     </span>
                   )}
@@ -736,29 +709,30 @@ export function SupportDesk() {
                 {/* Action Audit History */}
                 {agentMemoryQuery.data.memory.actionHistory?.length > 0 && (
                   <div>
-                    <span style={{ fontSize: '11px', fontWeight: 750, color: '#6b21a8', display: 'block', marginBottom: '6px' }}>
-                      ⚡ TRIGGERED APP ACTIONS AUDIT
+                    <span style={{ fontSize: '11px', fontWeight: 750, color: 'var(--tone-purple-fg)', display: 'block', marginBottom: '6px' }}>
+                      TRIGGERED APP ACTIONS AUDIT
                     </span>
                     <div style={{ display: 'grid', gap: '4px' }}>
                       {agentMemoryQuery.data.memory.actionHistory.slice(-4).map((act: any, idx: number) => (
                         <div
                           key={idx}
                           style={{
-                            background: '#ffffff',
-                            border: '1px solid #e9d5ff',
+                            background: 'var(--panel)',
+                            border: '1px solid var(--line)',
                             borderRadius: '6px',
                             padding: '6px 10px',
                             fontSize: '11px',
                             display: 'flex',
                             justifyContent: 'space-between',
                             alignItems: 'center',
+                            gap: '8px',
                           }}
                         >
                           <div>
-                            <strong style={{ color: '#6b21a8', marginRight: '6px' }}>{act.actionType}</strong>
-                            <span style={{ color: '#4b5563' }}>{act.reason}</span>
+                            <strong style={{ color: 'var(--tone-purple-fg)', marginRight: '6px' }}>{act.actionType}</strong>
+                            <span style={{ color: 'var(--ink-secondary)' }}>{act.reason}</span>
                           </div>
-                          <span style={{ fontSize: '10px', color: '#9ca3af' }}>{formatDate(act.timestamp)}</span>
+                          <span style={{ fontSize: '10px', color: 'var(--muted)' }}>{formatDate(act.timestamp)}</span>
                         </div>
                       ))}
                     </div>
@@ -774,15 +748,15 @@ export function SupportDesk() {
                   <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 800 }}>
                     Official Reply Composer
                   </h4>
-                  <span style={{ fontSize: '11px', color: '#64748b' }}>
-                    Sender configured as: <strong style={{ color: '#6d28d9' }}>Youthnic &lt;return@youthnic.com&gt;</strong>
+                  <span style={{ fontSize: '11px', color: 'var(--muted)' }}>
+                    Sender configured as: <strong style={{ color: 'var(--tone-purple-fg)' }}>Youthnic &lt;return@youthnic.com&gt;</strong>
                   </span>
                 </div>
 
                 <button
                   type="button"
                   className="button button-ghost"
-                  style={{ fontSize: '11px', color: '#2563eb' }}
+                  style={{ fontSize: '11px', color: 'var(--tone-info-fg)' }}
                   onClick={() => setReplyText(activeTicket.suggestedReply || '')}
                 >
                   Reset to AI Suggested Draft
@@ -792,11 +766,11 @@ export function SupportDesk() {
               <div style={{ display: 'grid', gap: '12px' }}>
                 {/* Official Sender Selection */}
                 <div style={{ background: 'var(--canvas)', border: '1px solid var(--line)', borderRadius: '8px', padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
-                  <span style={{ fontSize: '11.5px', color: '#64748b', fontWeight: 750 }}>
+                  <span style={{ fontSize: '11.5px', color: 'var(--muted)', fontWeight: 750 }}>
                     Dispatch Channel:
                   </span>
                   <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', cursor: 'pointer', fontWeight: senderEmail === 'contact@youthnic.com' ? 700 : 500, color: senderEmail === 'contact@youthnic.com' ? '#2563eb' : '#475569' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', cursor: 'pointer', fontWeight: senderEmail === 'contact@youthnic.com' ? 700 : 500, color: senderEmail === 'contact@youthnic.com' ? 'var(--tone-info-fg)' : 'var(--muted)' }}>
                       <input
                         type="radio"
                         name="senderChoice"
@@ -805,7 +779,7 @@ export function SupportDesk() {
                       />
                       <span>Youthnic Support &lt;contact@youthnic.com&gt;</span>
                     </label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', cursor: 'pointer', fontWeight: senderEmail === 'return@youthnic.com' ? 700 : 500, color: senderEmail === 'return@youthnic.com' ? '#7c3aed' : '#475569' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', cursor: 'pointer', fontWeight: senderEmail === 'return@youthnic.com' ? 700 : 500, color: senderEmail === 'return@youthnic.com' ? 'var(--tone-purple-fg)' : 'var(--muted)' }}>
                       <input
                         type="radio"
                         name="senderChoice"
@@ -897,7 +871,7 @@ export function SupportDesk() {
 
                 <div style={{ display: 'grid', gap: '10px', marginTop: '10px' }}>
                   {customerHistoryQuery.data?.firebaseEvents?.length === 0 && (
-                    <div style={{ fontSize: '12px', color: '#64748b', padding: '12px', textAlign: 'center' }}>
+                    <div style={{ fontSize: '12px', color: 'var(--muted)', padding: '12px', textAlign: 'center' }}>
                       No prior Firebase RTDB events for this customer yet.
                     </div>
                   )}
@@ -914,14 +888,14 @@ export function SupportDesk() {
                       }}
                     >
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '3px' }}>
-                        <span style={{ fontWeight: 700, color: ev.channel === 'WHATSAPP' ? '#15803d' : '#2563eb' }}>
+                        <span style={{ fontWeight: 700, color: ev.channel === 'WHATSAPP' ? 'var(--tone-success-fg)' : 'var(--tone-info-fg)' }}>
                           {ev.channel === 'WHATSAPP' ? '📱 WhatsApp' : '✉️ Email'}: {ev.title}
                         </span>
-                        <span style={{ fontSize: '10.5px', color: '#64748b' }}>
+                        <span style={{ fontSize: '10.5px', color: 'var(--muted)' }}>
                           {formatDate(ev.timestamp)}
                         </span>
                       </div>
-                      <div style={{ color: '#475569', fontSize: '11.5px' }}>{ev.description}</div>
+                      <div style={{ color: 'var(--muted)', fontSize: '11.5px' }}>{ev.description}</div>
                     </div>
                   ))}
                 </div>
@@ -929,7 +903,7 @@ export function SupportDesk() {
             )}
           </div>
         ) : (
-          <Panel style={{ padding: '40px', textAlign: 'center', color: '#64748b' }}>
+          <Panel style={{ padding: '40px', textAlign: 'center', color: 'var(--muted)' }}>
             <Icon name="mail" size={32} />
             <h4 style={{ margin: '12px 0 4px', fontSize: '15px', color: 'var(--ink)' }}>Select a Support Ticket</h4>
             <p style={{ margin: 0, fontSize: '12px' }}>Choose a ticket from the left queue to view AI analysis, linked orders, and compose replies.</p>
@@ -938,52 +912,39 @@ export function SupportDesk() {
       </div>
 
       {/* ─── Simulation Modal for Testing Inbound Customer Emails ──── */}
-      {isSimulateModalOpen && (
-        <div className="modal-backdrop" onClick={() => setIsSimulateModalOpen(false)}>
-          <div className="modal-card" style={{ maxWidth: '600px' }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 800 }}>Simulate Inbound Customer Email</h3>
-                <p style={{ margin: '3px 0 0', fontSize: '12px', color: '#64748b' }}>
-                  Inject realistic customer scenarios to test Muse Spark 1.3 AI classification, order flagging, and auto-drafting.
-                </p>
-              </div>
-              <button
-                type="button"
-                className="button button-ghost"
-                onClick={() => setIsSimulateModalOpen(false)}
-              >
-                ✕
-              </button>
-            </div>
+      <Modal
+        isOpen={isSimulateModalOpen}
+        onClose={() => setIsSimulateModalOpen(false)}
+        title="Simulate Inbound Customer Email"
+        description="Inject realistic customer scenarios to test Muse Spark 1.3 AI classification, order flagging, and auto-drafting."
+        maxWidth={600}
+      >
 
             {/* Quick Scenario Buttons */}
             <div style={{ marginBottom: '14px' }}>
-              <span style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', display: 'block', marginBottom: '6px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--muted)', display: 'block', marginBottom: '6px' }}>
                 Select a Realistic Scenario:
               </span>
               <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                 <button
                   type="button"
-                  className="button button-secondary"
-                  style={{ fontSize: '11px', padding: '4px 8px', height: '26px' }}
+                  className="tool-pill-btn"
                   onClick={() => {
                     setSimSubject('Received damaged floral kurti with torn stitch')
                     setSimBody('Hi Youthnic, I opened my package for order #26YOU5752 today and the kurti has torn stitching on the side seam. The fabric is defective. This is very urgent as I need an immediate return or refund.')
                   }}
                 >
-                  🚨 Damaged Kurti (Urgent Return)
+                  Damaged Kurti (Urgent Return)
                 </button>
                 <button
                   type="button"
-                  className="button button-secondary"
-                  style={{ fontSize: '11px', padding: '4px 8px', height: '26px' }}
+                  className="tool-pill-btn"
                   onClick={() => {
                     setSimSubject('Size fitting issue with kurti set, need size exchange')
                     setSimBody('Dear Youthnic, The kurti set I received is Size S and it is very tight around the chest. Can I please exchange it for Size M? Or else arrange pickup for return.')
                   }}
                 >
-                  🔄 Size Exchange / Fitting
+                  Size Exchange / Fitting
                 </button>
                 <button
                   type="button"
@@ -1099,58 +1060,28 @@ export function SupportDesk() {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
+      </Modal>
       {/* ─── Meta LLM API Settings Modal ──────────────────────── */}
-      {isMetaModalOpen && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(15, 23, 42, 0.65)',
-            backdropFilter: 'blur(3px)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 100,
-            padding: '16px',
-          }}
-        >
-          <div
-            style={{
-              background: '#ffffff',
-              borderRadius: '14px',
-              maxWidth: '540px',
-              width: '100%',
-              padding: '24px',
-              boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '20px' }}>⚡</span>
-                <div>
-                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 800 }}>Meta Model API Configuration</h3>
-                  <span style={{ fontSize: '11.5px', color: '#64748b' }}>Configure Muse Spark 1.3 Contributor Agent</span>
-                </div>
-              </div>
-              <button
-                type="button"
-                className="button button-ghost"
-                onClick={() => setIsMetaModalOpen(false)}
-                style={{ fontSize: '16px', padding: '4px 8px' }}
-              >
-                ✕
-              </button>
-            </div>
+      <Modal
+        isOpen={isMetaModalOpen}
+        onClose={() => setIsMetaModalOpen(false)}
+        title={
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+            <Icon name="settings" size={18} />
+            <span>Meta Model API Configuration</span>
+          </span>
+        }
+        description="Configure Muse Spark 1.3 Contributor Agent"
+        maxWidth={540}
+      >
 
             <form onSubmit={handleUpdateMetaConfig} style={{ display: 'grid', gap: '14px' }}>
               <div>
-                <label style={{ fontSize: '12px', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
+                <label htmlFor="meta-api-key-input" style={{ fontSize: '12px', fontWeight: 700, color: 'var(--ink-secondary)', display: 'block', marginBottom: '4px' }}>
                   Meta Model API Key (Bearer Token)
                 </label>
                 <input
+                  id="meta-api-key-input"
                   type="password"
                   className="input"
                   placeholder="Paste your Meta MODEL_API_KEY here"
@@ -1158,29 +1089,30 @@ export function SupportDesk() {
                   onChange={(e) => setMetaApiKeyInput(e.target.value)}
                   style={{ width: '100%', fontSize: '13px' }}
                 />
-                <span style={{ fontSize: '11px', color: '#64748b', marginTop: '4px', display: 'block' }}>
+                <span style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '4px', display: 'block' }}>
                   Current Status: {metaConfigQuery.data?.config?.apiKeySet ? `Configured (${metaConfigQuery.data.config.maskedKey})` : 'Not Set (Using active intelligent offline harness)'}
                 </span>
               </div>
 
               <div>
-                <label style={{ fontSize: '12px', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '4px' }}>
+                <label htmlFor="meta-model-input" style={{ fontSize: '12px', fontWeight: 700, color: 'var(--ink-secondary)', display: 'block', marginBottom: '4px' }}>
                   Active LLM Model
                 </label>
                 <input
+                  id="meta-model-input"
                   type="text"
                   className="input"
                   value={metaModelInput}
                   onChange={(e) => setMetaModelInput(e.target.value)}
-                  style={{ width: '100%', fontSize: '13px', background: '#f8fafc' }}
+                  style={{ width: '100%', fontSize: '13px', background: 'var(--surface-elevated)' }}
                 />
-                <span style={{ fontSize: '11px', color: '#64748b', marginTop: '4px', display: 'block' }}>
+                <span style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '4px', display: 'block' }}>
                   Default: <code>muse-spark-1.3-contributor</code> (1M token context, high-efficiency contributor model)
                 </span>
               </div>
 
-              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px', fontSize: '11.5px', color: '#475569', lineHeight: '1.5' }}>
-                ℹ️ <strong>Agent Harness & Memory Architecture:</strong>
+              <div className="surface-well" style={{ borderRadius: '8px', padding: '12px', fontSize: '11.5px', color: 'var(--ink-secondary)', lineHeight: '1.5' }}>
+                <strong>Agent Harness & Memory Architecture:</strong>
                 <ul style={{ margin: '6px 0 0 16px', padding: 0 }}>
                   <li>Conversation turns are recorded in <strong>Firebase Realtime Database</strong>.</li>
                   <li>Long-term facts and customer profiles persist across turns.</li>
@@ -1205,9 +1137,7 @@ export function SupportDesk() {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
+      </Modal>
     </div>
   )
 }

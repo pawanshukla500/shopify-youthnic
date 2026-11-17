@@ -100,19 +100,10 @@ export function Tools() {
                 <button
                   type="button"
                   key={p.pin}
+                  className={`tool-pill-btn ${pincode === p.pin ? 'active' : ''}`}
                   onClick={() => {
                     setPincode(p.pin)
                     setPincodeRun(p.pin)
-                  }}
-                  style={{
-                    background: pincode === p.pin ? '#dbeafe' : '#f1f5f9',
-                    border: pincode === p.pin ? '1px solid #3b82f6' : '1px solid #e2e8f0',
-                    borderRadius: '4px',
-                    padding: '2px 7px',
-                    fontSize: '9.5px',
-                    cursor: 'pointer',
-                    color: pincode === p.pin ? '#1e3a8a' : '#475569',
-                    fontWeight: 600,
                   }}
                 >
                   {p.city}
@@ -144,14 +135,14 @@ export function Tools() {
                 <div className="result-grid">
                   <div>
                     <span>Cash on Delivery (COD)</span>
-                    <strong style={{ color: serviceability.data.codAvailable ? '#15803d' : '#b91c1c' }}>
-                      {serviceability.data.codAvailable ? '✓ Available' : '✕ Unavailable'}
+                    <strong style={{ color: serviceability.data.codAvailable ? 'var(--tone-success-fg)' : 'var(--tone-danger-fg)' }}>
+                      {serviceability.data.codAvailable ? 'Available' : 'Unavailable'}
                     </strong>
                   </div>
                   <div>
                     <span>Prepaid Delivery</span>
-                    <strong style={{ color: serviceability.data.prepaidAvailable ? '#15803d' : '#b91c1c' }}>
-                      {serviceability.data.prepaidAvailable ? '✓ Available' : '✕ Unavailable'}
+                    <strong style={{ color: serviceability.data.prepaidAvailable ? 'var(--tone-success-fg)' : 'var(--tone-danger-fg)' }}>
+                      {serviceability.data.prepaidAvailable ? 'Available' : 'Unavailable'}
                     </strong>
                   </div>
                 </div>
@@ -365,17 +356,17 @@ function CodReconciliation() {
             <div className="result-grid cod-summary-grid">
               <div>
                 <span>Collected at Customer Delivery</span>
-                <strong style={{ color: '#0f172a' }}>{formatMoney(data.collectedAmount)}</strong>
+                <strong style={{ color: 'var(--ink)' }}>{formatMoney(data.collectedAmount)}</strong>
                 <small>{data.collectedCount} delivered shipment(s)</small>
               </div>
               <div>
                 <span>Remitted to Bank Account</span>
-                <strong style={{ color: '#15803d' }}>{formatMoney(data.remittedAmount)}</strong>
+                <strong style={{ color: 'var(--tone-success-fg)' }}>{formatMoney(data.remittedAmount)}</strong>
                 <small>{data.remittedCount} settled shipment(s)</small>
               </div>
               <div>
                 <span>Outstanding Balance Due</span>
-                <strong style={{ color: '#b45309' }}>{formatMoney(data.outstandingAmount)}</strong>
+                <strong style={{ color: 'var(--tone-warning-fg)' }}>{formatMoney(data.outstandingAmount)}</strong>
                 <small>{data.outstandingCount} shipment(s) awaiting remittance</small>
               </div>
             </div>
@@ -395,7 +386,7 @@ function CodReconciliation() {
                   <tbody>
                     {data.outstanding.map((entry) => (
                       <tr key={entry.waybillNumber ?? entry.orderName}>
-                        <td className="mono" style={{ fontWeight: 700, color: '#1e3a8a' }}>
+                        <td className="mono" style={{ fontWeight: 700, color: 'var(--tone-info-fg)' }}>
                           {entry.waybillNumber ?? '—'}
                         </td>
                         <td>
@@ -423,9 +414,9 @@ function CodReconciliation() {
                 event.preventDefault()
                 remittance.mutate()
               }}
-              style={{ marginTop: '20px', borderTop: '1px solid #e2e8f0', paddingTop: '16px' }}
+              style={{ marginTop: '20px', borderTop: '1px solid var(--line)', paddingTop: '16px' }}
             >
-              <h3 style={{ margin: '0 0 10px', fontSize: '13px', fontWeight: 750, color: '#1e293b' }}>
+              <h3 style={{ margin: '0 0 10px', fontSize: '13px', fontWeight: 750, color: 'var(--ink)' }}>
                 Record Delhivery Remittance Voucher
               </h3>
               <div className="form-grid-two">

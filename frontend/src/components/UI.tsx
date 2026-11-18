@@ -1,5 +1,5 @@
-import { createContext, useContext, useEffect, useId, useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
-import { labelize, statusTone } from '../lib'
+import { createContext, useContext, useEffect, useId, useMemo, useState, type ButtonHTMLAttributes, type CSSProperties, type ReactNode } from 'react'
+import { labelize, sortRows, statusTone, type SortDir } from '../lib'
 
 export type IconName =
   | 'grid'
@@ -452,3 +452,30 @@ export function ProgressStepperPro({
   );
 }
 
+// Click-to-sort table headers (pattern adapted from the 21st.dev data-table, without TanStack/shadcn)
+export function useTableSort<T>(rows: readonly T[], initial: { key: keyof T; dir: SortDir } | null = null) {
+  const [sort, setSort] = useState(initial)
+  const sorted = useMemo(() => (sort ? sortRows(rows, sort.key, sort.dir) : [...rows]), [rows, sort])
+  // First click sorts high-to-low (biggest numbers first is what reports need); second click flips
+  const toggle = (key: keyof T) => setSort((s) => (s?.key === key ? { key, dir: s.dir === 'desc' ? 'asc' : 'desc' } : { key, dir: 'desc' }))
+  return { sorted, sort, toggle }
+}
+
+export function SortTh<T>({ label, sortKey, sort, onSort, numeric, style }: {
+  label: string
+  sortKey: keyof T
+  sort: { key: keyof T; dir: SortDir } | null
+  onSort: (key: keyof T) => void
+  numeric?: boolean
+  style?: CSSProperties
+}) {
+  const active = sort?.key === sortKey
+  return (
+    <th className={numeric ? 'num' : undefined} style={style} aria-sort={active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+      <button type="button" className={`th-sort${active ? ' is-active' : ''}`} onClick={() => onSort(sortKey)}>
+        {label}
+        <span className={`th-sort-icon${active && sort.dir === 'asc' ? ' is-asc' : ''}`} aria-hidden="true"><Icon name="chevron" size={12} /></span>
+      </button>
+    </th>
+  )
+}

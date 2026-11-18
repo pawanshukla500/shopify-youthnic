@@ -288,3 +288,19 @@ export function statusTone(status: string | null | undefined): string {
 export function shipmentTone(status: ShipmentStatus | null | undefined): string {
   return statusTone(status)
 }
+
+export type SortDir = 'asc' | 'desc'
+
+// Sort table rows by one field: numbers numerically, everything else as natural text; missing values sink to the end
+export function sortRows<T>(rows: readonly T[], key: keyof T, dir: SortDir): T[] {
+  const sign = dir === 'asc' ? 1 : -1
+  return [...rows].sort((a, b) => {
+    const x = a[key], y = b[key]
+    if (x == null || x === '') return y == null || y === '' ? 0 : 1
+    if (y == null || y === '') return -1
+    const c = typeof x === 'number' && typeof y === 'number'
+      ? x - y
+      : String(x).localeCompare(String(y), undefined, { numeric: true, sensitivity: 'base' })
+    return c * sign
+  })
+}

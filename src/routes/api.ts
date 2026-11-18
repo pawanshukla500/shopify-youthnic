@@ -1188,10 +1188,6 @@ router.get('/orders/:id/label', async (req: Request, res: Response): Promise<voi
         res.send(pdf);
         return;
       }
-      if (isUsableHttpUrl(order.shipment?.labelUrl)) {
-        res.redirect(order.shipment!.labelUrl!);
-        return;
-      }
       res.status(404).send(`
         <!DOCTYPE html>
         <html>
@@ -1245,10 +1241,6 @@ router.get('/orders/:id/label/download', async (req: Request, res: Response): Pr
       return;
     }
     if (isVelocity) {
-      if (isUsableHttpUrl(order.shipment?.labelUrl)) {
-        res.redirect(order.shipment!.labelUrl!);
-        return;
-      }
       res.status(404).json({ error: 'Official Velocity label not ready yet. Please try again shortly.' });
       return;
     }

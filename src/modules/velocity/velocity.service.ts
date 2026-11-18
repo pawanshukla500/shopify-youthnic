@@ -5,6 +5,7 @@ import logger from '../../utils/logger';
 import prisma from '../../database/prisma';
 import { Order, OrderItem, ShipmentStatus } from '@prisma/client';
 import { isPrepaidOrder } from '../orders/order-tabs';
+import { isExpiredSignedUrl } from '../../utils/signed-url';
 
 export const DEFAULT_VELOCITY_CARRIER_PRIORITY: Record<string, number> = {
   'ekart standard': 1,
@@ -1676,69 +1677,18 @@ export class VelocityService {
   }
 
   /**
-   * Fetch official Velocity shipping label PDF buffer directly from Velocity API or S3 URL
+   * Fetch the official Velocity label PDF.
+   * Stored label_url values are signed S3 links that expire, so an expired one is skipped and
+   * POST /custom/api/v1/order-tracking (tracking_data.label_url, freshly signed) is used instead.
    */
   async fetchOfficialLabelPdf(waybill: string, directUrl?: string | null): Promise<Buffer | null> {
     const cleanWaybill = (waybill || '').trim();
     if (!cleanWaybill) return null;
 
-    const candidates: string[] = [];
-    if (directUrl && directUrl.startsWith('http') && !directUrl.includes('/track/')) candidates.push(directUrl);
+    const isLabelUrl = (u: unknown): u is string =>
+      typeof u === 'string' && u.startsWith('http') && !u.includes('/track/');
 
-    // 1. Probe live order tracking which returns fresh presigned S3 label_url
-    try {
-      const track = await this.trackShipment(cleanWaybill);
-      const trackRaw = track?.raw;
-      const urlsFromTrack = [
-        trackRaw?.label_url,
-        trackRaw?.data?.label_url,
-        trackRaw?.payload?.label_url,
-        trackRaw?.shipment_track?.[0]?.label_url,
-        (track as any)?.labelUrl,
-      ].filter((u): u is string => Boolean(u && typeof u === 'string' && u.startsWith('http') && !u.includes('/track/')));
-
-      for (const u of urlsFromTrack) {
-        if (!candidates.includes(u)) candidates.push(u);
-      }
-    } catch {
-      // ignore
-    }
-
-    // 2. Probe order details
-    try {
-      const details = await this.getForwardOrderDetails({ awb: cleanWaybill });
-      const urlsFromDetails = [
-        details?.label_url,
-        details?.payload?.label_url,
-        details?.data?.label_url,
-        details?.shipment?.label_url,
-        details?.order?.label_url,
-      ].filter((u): u is string => Boolean(u && typeof u === 'string' && u.startsWith('http')));
-
-      for (const u of urlsFromDetails) {
-        if (!candidates.includes(u)) candidates.push(u);
-      }
-    } catch {
-      // ignore
-    }
-
-    // 3. Probe shipments list if candidates still empty
-    if (candidates.length === 0) {
-      try {
-        const shipmentsRes = await this.getShipmentsList({ tracking_number: cleanWaybill, per_page: 5 });
-        const items = shipmentsRes?.data || [];
-        for (const item of items) {
-          const u = item?.attributes?.label_url || item?.label_url;
-          if (u && typeof u === 'string' && u.startsWith('http') && !candidates.includes(u)) {
-            candidates.push(u);
-          }
-        }
-      } catch {
-        // ignore
-      }
-    }
-
-    for (const url of candidates) {
+    const download = async (url: string): Promise<Buffer | null> => {
       try {
         const res = await axios.get<ArrayBuffer>(url, {
           responseType: 'arraybuffer',
@@ -1750,36 +1700,37 @@ export class VelocityService {
           } : undefined,
         });
         const buffer = Buffer.from(res.data);
-        if (buffer.length > 20) {
-          const head = buffer.subarray(0, 10).toString('utf8');
-          if (head.includes('%PDF')) {
-            // Asynchronously update shipment labelUrl in database if different
-            Promise.resolve(
-              prisma.shipment.updateMany({
-                where: { waybillNumber: cleanWaybill },
-                data: { labelUrl: url },
-              })
-            ).catch(() => undefined);
-
-            return buffer;
-          }
-          if (head.startsWith('{')) {
-            try {
-              const json = JSON.parse(buffer.toString('utf8'));
-              const nextUrl = json?.label_url || json?.payload?.label_url || json?.url;
-              if (nextUrl && nextUrl !== url) {
-                return await this.fetchOfficialLabelPdf(cleanWaybill, nextUrl);
-              }
-            } catch {
-              // ignore
-            }
-          }
-        }
+        return buffer.length > 20 && buffer.subarray(0, 10).toString('utf8').includes('%PDF') ? buffer : null;
       } catch (err: any) {
-        logger.warn('Failed to stream official Velocity label candidate', { waybill: cleanWaybill, url, error: err.message });
+        logger.warn('Failed to stream official Velocity label candidate', { waybill: cleanWaybill, error: err.message });
+        return null;
       }
+    };
+
+    if (isLabelUrl(directUrl) && !isExpiredSignedUrl(directUrl)) {
+      const stored = await download(directUrl);
+      if (stored) return stored;
     }
-    return null;
+
+    let freshUrl: unknown;
+    try {
+      freshUrl = (await this.trackShipment(cleanWaybill))?.raw?.label_url;
+    } catch (err: any) {
+      logger.warn('Velocity tracking lookup for label failed', { waybill: cleanWaybill, error: err.message });
+    }
+    if (!isLabelUrl(freshUrl) || freshUrl === directUrl) return null;
+
+    const pdf = await download(freshUrl);
+    if (pdf) {
+      // Save the freshly signed link so the next print skips the tracking call
+      Promise.resolve(
+        prisma.shipment.updateMany({
+          where: { waybillNumber: cleanWaybill },
+          data: { labelUrl: freshUrl },
+        })
+      ).catch(() => undefined);
+    }
+    return pdf;
   }
 
   // ═══════════════════════════════════════════════════════════

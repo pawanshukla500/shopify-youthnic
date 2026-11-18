@@ -525,6 +525,32 @@ describe('Velocity Aggregator Integration & Business Rules', () => {
       });
     });
 
+    it('skips an expired stored label link and downloads the fresh label_url from tracking', async () => {
+      const expired = 'https://velocity-shazam-prod.s3.ap-south-1.amazonaws.com/old?X-Amz-Date=20200101T000000Z&X-Amz-Expires=600';
+      const fresh = 'https://velocity-shazam-prod.s3.ap-south-1.amazonaws.com/new';
+      vi.spyOn(velocityService, 'trackShipment').mockResolvedValueOnce({
+        awb: 'VEL777',
+        shipmentStatus: 'in_transit',
+        currentStatus: 'In Transit',
+        activities: [],
+        raw: { label_url: fresh },
+      });
+      mockAxiosStatic.get.mockResolvedValue({
+        status: 200,
+        data: Buffer.from('%PDF-1.4 fresh label bytes padding 1234567890'),
+      });
+
+      const pdf = await velocityService.fetchOfficialLabelPdf('VEL777', expired);
+
+      expect(pdf!.subarray(0, 4).toString()).toBe('%PDF');
+      expect(mockAxiosStatic.get).toHaveBeenCalledTimes(1);
+      expect(mockAxiosStatic.get.mock.calls[0][0]).toBe(fresh);
+      expect(prismaStub.shipment.updateMany).toHaveBeenCalledWith({
+        where: { waybillNumber: 'VEL777' },
+        data: { labelUrl: fresh },
+      });
+    });
+
     it('generateLabelAndInvoiceHtml renders official PDF canvas and NO custom Delhivery HTML label for Velocity', () => {
       const mockOrder: any = {
         id: 701,

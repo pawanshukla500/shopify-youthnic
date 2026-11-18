@@ -590,7 +590,7 @@ export function OrderDetail() {
     setIsDownloadingLabel(true)
     try {
       await downloadOrderLabelFile(order.id, order.shipment?.waybillNumber || order.shopifyOrderName)
-      toast.toast('success', 'Delhivery shipping label downloaded directly.')
+      toast.toast('success', 'Shipping label downloaded.')
     } catch (err: any) {
       toast.toast('error', apiError(err))
     } finally {

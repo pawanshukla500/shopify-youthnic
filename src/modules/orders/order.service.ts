@@ -2198,17 +2198,14 @@ class OrderService {
     const finalAwb = waybillNumber?.trim() || order.shipment?.waybillNumber || null;
     const isVel = isVelocityCourier(courierName, undefined, finalAwb);
     const normCourier = isVel ? 'Velocity' : normalizeCourierName(courierName, undefined, finalAwb);
-    const trackingUrl = isVel
-      ? (finalAwb ? `https://www.velocityshipping.in/track/${encodeURIComponent(finalAwb)}` : null)
-      : (finalAwb ? `https://www.delhivery.com/track/package/${encodeURIComponent(finalAwb)}` : null);
-
     if (order.shipment) {
       await prisma.shipment.update({
         where: { id: order.shipment.id },
         data: {
           courier: normCourier,
           ...(finalAwb ? { waybillNumber: finalAwb } : {}),
-          ...(trackingUrl ? { labelUrl: trackingUrl } : {}),
+          // The stored label belongs to the old courier/AWB; label routes fetch a fresh one, tracking links come from getTrackingUrl
+          ...(finalAwb ? { labelUrl: null } : {}),
           ...(isVel
             ? {
                 weightMismatch: false,
@@ -2236,7 +2233,6 @@ class OrderService {
           orderId: order.id,
           courier: normCourier,
           waybillNumber: finalAwb,
-          labelUrl: trackingUrl,
           paymentMode: order.paymentMethod === 'COD' ? 'COD' : 'Pre-paid',
           codAmount: order.paymentMethod === 'COD' ? order.totalAmount : 0,
           status: 'CREATED',

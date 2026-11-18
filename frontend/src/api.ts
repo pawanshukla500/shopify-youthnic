@@ -1209,9 +1209,9 @@ export async function downloadSingleLabelAndInvoiceFile(orderId: number, orderNa
   const rawDisposition = response.headers?.['content-disposition']
   const filename = filenameFromDisposition(
     typeof rawDisposition === 'string' ? rawDisposition : undefined,
-    `Label-Invoice-${orderName ? orderName.replace('#', '') : orderId}.html`
+    `Label-Invoice-${orderName ? orderName.replace('#', '') : orderId}.pdf`
   )
-  const blob = new Blob([response.data], { type: 'text/html;charset=utf-8' })
+  const blob = new Blob([response.data], { type: 'application/pdf' })
   const url = window.URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url

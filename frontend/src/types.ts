@@ -695,6 +695,7 @@ export interface ExecutiveInsights {
 }
 
 export interface CustomerAccountItem {
+  accountKey?: string // unique per account; phone is 'N/A' for every customer without one
   phone: string
   name: string
   email: string | null

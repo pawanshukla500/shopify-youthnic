@@ -945,7 +945,7 @@ export function Analytics() {
                   <tr>
                     <SortTh label="Customer Name & Contact" sortKey="name" sort={accountSort.sort} onSort={accountSort.toggle} />
                     <SortTh label="Location" sortKey="state" sort={accountSort.sort} onSort={accountSort.toggle} />
-                    <th style={{ textAlign: 'center' }}>Orders (Del / RTO)</th>
+                    <SortTh label="Orders (Del / RTO)" sortKey="orderCount" sort={accountSort.sort} onSort={accountSort.toggle} style={{ textAlign: 'center' }} />
                     <SortTh label="Lifetime GMV" sortKey="lifetimeGross" sort={accountSort.sort} onSort={accountSort.toggle} numeric />
                     <th style={{ textAlign: 'center' }}>Health</th>
                     <SortTh label="Cohort" sortKey="segment" sort={accountSort.sort} onSort={accountSort.toggle} />
@@ -955,7 +955,7 @@ export function Analytics() {
                 <tbody>
                   {filteredAccounts.length === 0 && <tr><td colSpan={7} className="table-empty">No customer accounts match this view.</td></tr>}
                   {accountSort.sorted.map((a: CustomerAccountItem) => (
-                    <tr key={a.phone}>
+                    <tr key={a.accountKey ?? a.phone}>
                       <td>
                         <div style={{ fontWeight: 700, color: 'var(--ink)' }}>{a.name}</div>
                         <div style={{ fontSize: '12px', color: 'var(--muted)' }}>

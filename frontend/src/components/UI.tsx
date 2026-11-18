@@ -471,7 +471,7 @@ export function SortTh<T>({ label, sortKey, sort, onSort, numeric, style }: {
 }) {
   const active = sort?.key === sortKey
   return (
-    <th className={numeric ? 'num' : undefined} style={style} aria-sort={active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+    <th className={numeric ? 'num' : undefined} style={style} aria-sort={active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : undefined}>
       <button type="button" className={`th-sort${active ? ' is-active' : ''}`} onClick={() => onSort(sortKey)}>
         {label}
         <span className={`th-sort-icon${active && sort.dir === 'asc' ? ' is-asc' : ''}`} aria-hidden="true"><Icon name="chevron" size={12} /></span>

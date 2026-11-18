@@ -291,15 +291,19 @@ export function shipmentTone(status: ShipmentStatus | null | undefined): string 
 
 export type SortDir = 'asc' | 'desc'
 
-// Sort table rows by one field: numbers numerically, everything else as natural text; missing values sink to the end
+// Sort table rows by one field: numbers numerically, everything else as natural text; missing values (incl. NaN) sink to the end
 export function sortRows<T>(rows: readonly T[], key: keyof T, dir: SortDir): T[] {
   const sign = dir === 'asc' ? 1 : -1
+  const missing = (v: unknown) => v == null || v === '' || (typeof v === 'number' && Number.isNaN(v))
   return [...rows].sort((a, b) => {
     const x = a[key], y = b[key]
-    if (x == null || x === '') return y == null || y === '' ? 0 : 1
-    if (y == null || y === '') return -1
-    const c = typeof x === 'number' && typeof y === 'number'
-      ? x - y
+    if (missing(x)) return missing(y) ? 0 : 1
+    if (missing(y)) return -1
+    const xNum = typeof x === 'number', yNum = typeof y === 'number'
+    // Mixed columns: numbers form one group ahead of text so the comparison stays consistent
+    if (xNum !== yNum) return (xNum ? -1 : 1) * sign
+    const c = xNum
+      ? (x as number) - (y as number)
       : String(x).localeCompare(String(y), undefined, { numeric: true, sensitivity: 'base' })
     return c * sign
   })

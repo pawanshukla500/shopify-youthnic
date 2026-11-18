@@ -1107,8 +1107,8 @@ export function Orders() {
             onClick={() => setChannelFilter('ALL')}
             title="Show all orders"
           >
-            <span className="kpi-stat-label">All Orders</span>
-            <span className="kpi-stat-value">{formatMoney(metrics.totalAmt)}</span>
+            <span className="kpi-stat-label"><span className="kpi-stat-label-text">All Orders</span></span>
+            <span className="kpi-stat-value" title={formatMoney(metrics.totalAmt)}>{formatMoney(metrics.totalAmt)}</span>
             <span className="kpi-stat-sub">{metrics.totalCount} orders total</span>
           </button>
 
@@ -1118,8 +1118,8 @@ export function Orders() {
             onClick={() => setChannelFilter(channelFilter === 'COD' ? 'ALL' : 'COD')}
             title="Cash on Delivery orders"
           >
-            <span className="kpi-stat-label">Cash on Delivery</span>
-            <span className="kpi-stat-value">{formatMoney(metrics.codAmt)}</span>
+            <span className="kpi-stat-label"><span className="kpi-stat-label-text">Cash on Delivery</span></span>
+            <span className="kpi-stat-value" title={formatMoney(metrics.codAmt)}>{formatMoney(metrics.codAmt)}</span>
             <span className="kpi-stat-sub">{metrics.codCount} COD orders</span>
           </button>
 
@@ -1129,8 +1129,8 @@ export function Orders() {
             onClick={() => setChannelFilter(channelFilter === 'GOKWIK' ? 'ALL' : 'GOKWIK')}
             title="GoKwik 1-click prepaid orders"
           >
-            <span className="kpi-stat-label">GoKwik Prepaid</span>
-            <span className="kpi-stat-value">{formatMoney(metrics.gokwikAmt)}</span>
+            <span className="kpi-stat-label"><span className="kpi-stat-label-text">GoKwik Prepaid</span></span>
+            <span className="kpi-stat-value" title={formatMoney(metrics.gokwikAmt)}>{formatMoney(metrics.gokwikAmt)}</span>
             <span className="kpi-stat-sub">{metrics.gokwikCount} 1-click orders</span>
           </button>
 
@@ -1140,15 +1140,15 @@ export function Orders() {
             onClick={() => setChannelFilter(channelFilter === 'PHONEPE' ? 'ALL' : 'PHONEPE')}
             title="PhonePe payment gateway orders"
           >
-            <span className="kpi-stat-label">PhonePe Prepaid</span>
-            <span className="kpi-stat-value">{formatMoney(metrics.phonepeAmt)}</span>
+            <span className="kpi-stat-label"><span className="kpi-stat-label-text">PhonePe Prepaid</span></span>
+            <span className="kpi-stat-value" title={formatMoney(metrics.phonepeAmt)}>{formatMoney(metrics.phonepeAmt)}</span>
             <span className="kpi-stat-sub">{metrics.phonepeCount} PG orders</span>
           </button>
 
           {/* AWB logistics cost — informational, not a filter */}
           <div className="kpi-stat kpi-stat-static" title="Total estimated AWB freight across the current order set">
-            <span className="kpi-stat-label">AWB Logistics Cost</span>
-            <span className="kpi-stat-value">{formatMoney(metrics.totalShippingCost, 'INR')}</span>
+            <span className="kpi-stat-label"><span className="kpi-stat-label-text">AWB Logistics Cost</span></span>
+            <span className="kpi-stat-value" title={formatMoney(metrics.totalShippingCost, 'INR')}>{formatMoney(metrics.totalShippingCost, 'INR')}</span>
             <span className="kpi-stat-sub">avg {formatMoney(metrics.avgShippingCost, 'INR')} / AWB</span>
           </div>
           </div>
@@ -1165,7 +1165,7 @@ export function Orders() {
             title="Prepaid & confirmed-COD orders awaiting AWB generation"
           >
             <span className="kpi-stat-label">
-              <span className="kpi-dot is-red" /> Needs Dispatch
+              <span className="kpi-dot is-red" /><span className="kpi-stat-label-text">Needs Dispatch</span>
             </span>
             <span className="kpi-stat-value is-danger">{metrics.needsDispatchCount} pending</span>
             <span className="kpi-stat-sub">Prepaid & confirmed COD</span>
@@ -1179,7 +1179,7 @@ export function Orders() {
             title="Shopify channel orders still awaiting a Delhivery AWB"
           >
             <span className="kpi-stat-label">
-              <span className="kpi-dot is-green" /> Delhivery Channel
+              <span className="kpi-dot is-green" /><span className="kpi-stat-label-text">Delhivery Channel</span>
             </span>
             <span className="kpi-stat-value">{metrics.pendingAwbCount} Pending AWB</span>
             <span className="kpi-stat-sub">Shopify: youthnic2024</span>
@@ -1194,7 +1194,7 @@ export function Orders() {
               title="Orders past the 24-hour dispatch SLA"
             >
               <span className="kpi-stat-label">
-                <span className="kpi-dot is-red" /> SLA Overdue
+                <span className="kpi-dot is-red" /><span className="kpi-stat-label-text">SLA Overdue</span>
               </span>
               <span className="kpi-stat-value is-danger">{metrics.delayedDispatchCount} {metrics.delayedDispatchCount === 1 ? 'order' : 'orders'}</span>
               <span className="kpi-stat-sub">&gt;24h dispatch SLA</span>
@@ -1210,7 +1210,7 @@ export function Orders() {
               title="Non-delivery reports needing action"
             >
               <span className="kpi-stat-label">
-                <span className="kpi-dot is-red" /> NDR Exceptions
+                <span className="kpi-dot is-red" /><span className="kpi-stat-label-text">NDR Exceptions</span>
               </span>
               <span className="kpi-stat-value is-warning">{metrics.ndrCount} failed</span>
               <span className="kpi-stat-sub">Action needed</span>

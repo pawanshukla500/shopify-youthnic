@@ -59,6 +59,19 @@ function parseValidDate(value?: string | Date | null): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+// Split a Velocity bill into the per-leg cost fields the order card adds up. An RTO-only bill must not
+// also land in forwardCharge; net cost is the forward fallback only when nothing was classed as either leg.
+export function velocityCostFields(forwardFreight: number, rtoFreight: number, netCost: number) {
+  const round = (n: number) => Math.round(n * 100) / 100;
+  return {
+    forwardCharge: round(forwardFreight || (rtoFreight ? 0 : netCost)),
+    rtoCharge: round(rtoFreight),
+    ...(rtoFreight > 0 ? { rtoChargeSource: 'ACTUAL' } : {}),
+    shippingCostSource: 'ACTUAL',
+    shippingCostUpdatedAt: new Date(),
+  };
+}
+
 // Shared by the bulk and single-order syncs so the order card's ledger rows match either way
 function toWalletTransactions(awb: string, charges: any[]) {
   return charges.map((c: any, idx: number) => ({
@@ -474,10 +487,7 @@ export class VelocityFinancialSyncService {
               totalDebited: Math.round(debits * 100) / 100,
               totalCredited: Math.round(credits * 100) / 100,
               netBilledCost: netCost,
-              forwardCharge: Math.round((forwardFreight || netCost) * 100) / 100,
-              rtoCharge: Math.round(rtoFreight * 100) / 100,
-              shippingCostSource: 'ACTUAL',
-              shippingCostUpdatedAt: new Date(),
+              ...velocityCostFields(forwardFreight, rtoFreight, netCost),
               walletTransactions,
               billingStatus: 'AUDITED',
               lastBilledAt: new Date(),
@@ -931,10 +941,7 @@ export class VelocityFinancialSyncService {
             totalCredited: chargesSummary.totalCredited,
             billingStatus: 'BILLED',
             // Same cost fields the bulk sync writes; the order card reads these, not netBilledCost
-            forwardCharge: chargesSummary.forwardFreight || chargesSummary.netBilledCost,
-            rtoCharge: chargesSummary.rtoFreight,
-            shippingCostSource: 'ACTUAL',
-            shippingCostUpdatedAt: new Date(),
+            ...velocityCostFields(chargesSummary.forwardFreight, chargesSummary.rtoFreight, chargesSummary.netBilledCost),
             walletTransactions: toWalletTransactions(waybill, item.charges),
           },
         });

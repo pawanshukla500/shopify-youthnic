@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { VelocityService } from '../src/modules/velocity/velocity.service';
-import { VelocityFinancialSyncService } from '../src/modules/velocity/velocity-financial-sync.service';
+import { VelocityFinancialSyncService, velocityCostFields } from '../src/modules/velocity/velocity-financial-sync.service';
 import shippingLabelService from '../src/modules/delhivery/shipping-label.service';
 import axios from 'axios';
 
@@ -558,6 +558,22 @@ describe('Velocity Aggregator Integration & Business Rules', () => {
       // Must contain 100mm 150mm GST Tax Invoice
       expect(html).toContain('GST Tax Invoice');
       expect(html).toContain('100mm 150mm');
+    });
+  });
+
+  describe('Velocity cost legs shown on the order card', () => {
+    it('keeps an RTO-only bill out of the forward leg so the card total is not doubled', () => {
+      const legs = velocityCostFields(0, 50, 50);
+      expect(legs.forwardCharge).toBe(0);
+      expect(legs.rtoCharge).toBe(50);
+      expect(legs.rtoChargeSource).toBe('ACTUAL');
+      expect(legs.forwardCharge + legs.rtoCharge).toBe(50);
+    });
+
+    it('falls back to net cost for forward only when no charge was classed as a leg', () => {
+      expect(velocityCostFields(0, 0, 17.7).forwardCharge).toBe(17.7);
+      expect(velocityCostFields(49.56, 0, 67.26)).toMatchObject({ forwardCharge: 49.56, rtoCharge: 0, shippingCostSource: 'ACTUAL' });
+      expect(velocityCostFields(49.56, 0, 67.26)).not.toHaveProperty('rtoChargeSource');
     });
   });
 

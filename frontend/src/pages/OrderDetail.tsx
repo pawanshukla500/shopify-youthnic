@@ -974,9 +974,9 @@ export function OrderDetail() {
                     {/* Flow Banner */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '8px', padding: '10px 14px', marginBottom: '12px', flexWrap: 'wrap' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <img src="/logos/gokwik.png" alt="GoKwik" style={{ height: '20px', objectFit: 'contain' }} />
+                        <img src="/logos/gokwik-mark.png" alt="GoKwik" style={{ height: '20px', objectFit: 'contain' }} />
                         <div>
-                          <div style={{ fontSize: '12px', fontWeight: 700, color: '#034694' }}>GoKwik Checkout</div>
+                          <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--tone-info-fg)' }}>GoKwik Checkout</div>
                           <div style={{ fontSize: '12px', color: 'var(--muted)' }}>Order & 1-Click Aggregator</div>
                         </div>
                       </div>
@@ -1092,7 +1092,8 @@ export function OrderDetail() {
                       </div>
                     ) : order.paymentAggregator === 'GoKwik' || (order.paymentGateway || '').toLowerCase().includes('gokwik') ? (
                       <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                        <img src="/logos/gokwik.png" alt="GoKwik" style={{ height: '14px', objectFit: 'contain' }} />
+                        <img src="/logos/gokwik-mark.png" alt="" style={{ height: '14px', objectFit: 'contain' }} />
+                        <span style={{ fontWeight: 600, color: 'var(--ink)' }}>GoKwik</span>
                         <span style={{ color: 'var(--muted-light)', fontSize: '12px' }}>via</span>
                         <img src="/logos/easebuzz.png" alt="Easebuzz" style={{ height: '13px', objectFit: 'contain' }} />
                         <span style={{ fontWeight: 600, color: 'var(--ink)' }}>{order.paymentProvider || 'Easebuzz'}</span>
@@ -1113,7 +1114,7 @@ export function OrderDetail() {
                     value={
                       <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
                         {order.paymentAggregator.toLowerCase() === 'gokwik' && (
-                          <img src="/logos/gokwik.png" alt="GoKwik" style={{ height: '13px', objectFit: 'contain' }} />
+                          <img src="/logos/gokwik-mark.png" alt="GoKwik" style={{ height: '13px', objectFit: 'contain' }} />
                         )}
                         <span>{order.paymentAggregator} Checkout</span>
                       </div>

@@ -902,8 +902,27 @@
   height: 38px;
 }
 
+.orders-page .filters-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
 .orders-page .filter-count {
-  padding: 0 4px 4px;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 0;
+}
+
+.orders-page .filter-count strong,
+.orders-page .filter-count span {
+  display: inline;
+  margin: 0;
 }
 
 /* Tab hint line */

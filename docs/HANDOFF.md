@@ -100,6 +100,7 @@ Every agent session uses two core tools. They are wired in so new agents get the
 - **Bootstrap:** `python scripts/agent_bootstrap.py` runs automatically at Claude Code session start (SessionStart hook). Other agents are told to run it in `AGENTS.md` and `.agents/rules/project-upkeep.md`. It is a fast check that sets up whatever is missing in the background: the pinned Graphify CLI, the git hooks (in the directory git actually uses), and the graph. The log is `.git/agent-bootstrap.log`; `--setup` runs the setup in the foreground. The Claude hooks call Graphify through `--guard`. `--self-test` runs its checks.
 - **Upkeep:** after every change, run `graphify update .` and update this file and any doc the change touches (`AGENTS.md` > Project upkeep).
 - **Hooks off:** if `"disableAllHooks": true` is set in `~/.claude/settings.json`, the project hooks don't run. Run `python scripts/agent_bootstrap.py --setup` by hand.
+- **PR review bot:** CodeAnt AI reviews every pull request automatically (it replaced CodeRabbit on 2026-11-18). To ask for another review after pushing fixes, comment `@codeant-ai review` on the PR. Fix valid findings, reply in each thread, and merge only when CI is green.
 
 ---
 

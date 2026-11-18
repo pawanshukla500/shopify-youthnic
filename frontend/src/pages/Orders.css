@@ -22,15 +22,20 @@
 
 /* ---------------------------------------------------------------- KPI strip */
 .kpi-strip {
-  display: grid;
-  gap: 12px;
+  /* Content-based: the two groups share one band when both fit (5 + 4 segments at the 150px minimum), otherwise they stack */
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
   margin-bottom: 14px;
 }
 
-.kpi-group { min-width: 0; } /* grid items default to min-width:auto, which would stretch a phone swipe row instead of letting it scroll */
+.kpi-group { min-width: 0; flex: 1 1 100%; } /* min-width:0 so a phone swipe row scrolls instead of stretching its group */
+.kpi-group:first-child { flex: 5 1 752px; } /* 5 x 150px segments + the bar's 2px of border */
+.kpi-group:last-child { flex: 4 1 602px; } /* 4 x 150px + 2px border */
 
 .kpi-group-title {
-  margin: 0 0 6px;
+  margin: 0 0 4px;
   font-size: 12px;
   font-weight: 700;
   color: var(--muted);
@@ -39,7 +44,7 @@
 /* Equal columns per group: each row fills evenly, nothing scrolls or gets cut */
 .kpi-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 10px;
 }
 
@@ -47,7 +52,38 @@
    Not on phones, where cards size to their content and containment would collapse them. */
 @media (min-width: 641px) {
   .kpi-row > .kpi-stat { container-type: inline-size; }
-  .kpi-row .kpi-stat-value { font-size: clamp(16px, 10.5cqi, 20px); }
+  .kpi-row .kpi-stat-value { font-size: clamp(14px, 9.5cqi, 19px); line-height: 1.25; }
+
+  /* Compact segmented bar (21st.dev "Partition Bar" pattern): one bordered strip per group, thin dividers between stats.
+     Dividers are right/bottom edge shadows clipped by the bar's border, so wrapped rows stay clean with no empty grey cells. */
+  .kpi-row {
+    gap: 0;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .kpi-strip .kpi-row > .kpi-stat {
+    border: 0;
+    border-radius: 0;
+    padding: 7px 12px;
+    gap: 0;
+    background: transparent;
+    box-shadow: 1px 0 0 var(--line), 0 1px 0 var(--line);
+    transform: none;
+  }
+  .kpi-strip .kpi-row > .kpi-stat:hover { background: var(--surface-elevated); }
+  .kpi-strip .kpi-row > .kpi-stat.kpi-stat-static:hover { background: transparent; }
+  .kpi-strip .kpi-row > .kpi-stat.is-active {
+    background: var(--tone-info-bg);
+    box-shadow: inset 0 -2px 0 var(--blue), 1px 0 0 var(--line), 0 1px 0 var(--line);
+  }
+  .kpi-strip .kpi-row > .kpi-stat:focus-visible { outline-offset: -2px; }
+  /* Fixed-width segments: wrap long labels/notes onto a second line rather than cutting words; amounts stay on one line and scale */
+  .kpi-strip .kpi-row .kpi-stat-label { white-space: normal; align-items: flex-start; line-height: 1.35; }
+  .kpi-strip .kpi-row .kpi-stat-label .kpi-dot { margin-top: 5px; }
+  .kpi-strip .kpi-row .kpi-stat-label-text { overflow: visible; text-overflow: clip; }
+  .kpi-strip .kpi-row .kpi-stat-sub { white-space: normal; overflow: visible; line-height: 1.35; }
 }
 
 /* Phones: each group becomes one swipeable row that snaps card by card, with a peek of the next card */

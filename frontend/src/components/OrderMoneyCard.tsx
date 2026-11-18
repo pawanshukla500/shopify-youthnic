@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { accountsStatus, RETURN_WINDOW_DAYS } from '../../../src/modules/orders/order-tabs'
 import { apiError, markPaymentReceived } from '../api'
-import { formatMoney, shortDate } from '../lib'
+import { formatMoney, isVelocityCourier, shortDate } from '../lib'
 import type { Order } from '../types'
 import { Button, FormField, Panel, PanelHeading, useToast } from './UI'
 
@@ -361,14 +361,18 @@ export function OrderMoneyCard({ order, onChanged }: { order: Order; onChanged: 
             color: 'var(--muted)',
           }}
         >
-          Estimated shipping cost {formatMoney(shipment.forwardCharge ?? 0)}. The exact charge appears once the{' '}
-          {shipment.courier || 'courier'} wallet report is uploaded in <em>Payments &amp; Remittance</em>.
+          Estimated shipping cost {formatMoney(shipment.forwardCharge ?? 0)}.{' '}
+          {isVelocityCourier(shipment.courier, shipment.waybillNumber)
+            ? <>Use <em>Sync Velocity Details</em> on the Shipment tab to pull the billed charge.</>
+            : (shipment.courier || '').toLowerCase().includes('delhivery')
+              ? <>The exact charge appears once the Delhivery freight ledger is uploaded in <em>Payments &amp; Remittance</em>.</>
+              : 'The exact charge appears once the carrier bill is recorded.'}
         </div>
       ) : null}
 
       {status.state === 'OPEN' && (
         <Row label="Waiting for">
-          <ul className="money-pending">
+          <ul className="money-pending" role="list">
             {status.pending.map((item) => (
               <li key={item}>
                 {item.startsWith('Return window open until') && status.returnWindowClosesAt

@@ -3270,7 +3270,7 @@ body { min-width: 0; }
 .money-row code { font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace; font-size: 12.5px; }
 .money-muted { color: var(--muted); font-size: 12px; }
 .money-legs { display: flex; flex-direction: column; gap: 2px; }
-.money-pending { margin: 0; padding-left: 18px; }
+.money-pending { margin: 0; padding-left: 0; list-style: none; }
 .money-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
 .money-badge {
   font-size: 12px;

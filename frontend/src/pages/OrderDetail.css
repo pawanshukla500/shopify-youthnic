@@ -107,6 +107,8 @@
   color: var(--ink-secondary); font-size: 12px; font-weight: 750;
   letter-spacing: .06em; text-transform: uppercase; line-height: 1.4; margin: 0;
 }
+/* One heading per card: the title says it, the small eyebrow above it only repeated it */
+.shopify-order-page.order-workspace .panel-heading .eyebrow { display: none; }
 .shopify-order-page.order-workspace .eyebrow { text-transform: uppercase; letter-spacing: .06em; font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 4px; }
 .shopify-order-page.order-workspace .shopify-card-head { padding: 18px 20px 12px; }
 .shopify-order-page.order-workspace .order-item-count {
@@ -190,7 +192,7 @@
 }
 .shopify-order-page.order-workspace .address-card {
   position: relative; background: var(--panel); margin-top: 16px; line-height: 1.6;
-  border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px;
+  border: 1px solid var(--line); border-radius: 10px; padding: 12px 40px 12px 14px; /* room for the copy button */
   box-shadow: var(--shadow-xs);
 }
 .shopify-order-page.order-workspace .address-card > svg { color: var(--muted); flex-shrink: 0; margin-top: 2px; }

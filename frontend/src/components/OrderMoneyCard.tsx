@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { accountsStatus, RETURN_WINDOW_DAYS } from '../../../src/modules/orders/order-tabs'
 import { apiError, markPaymentReceived } from '../api'
-import { formatMoney, shortDate } from '../lib'
+import { formatMoney, isVelocityCourier, shortDate } from '../lib'
 import type { Order } from '../types'
 import { Button, FormField, Panel, PanelHeading, useToast } from './UI'
 
@@ -186,7 +186,7 @@ export function OrderMoneyCard({ order, onChanged }: { order: Order; onChanged: 
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <span style={{ fontSize: '12.5px', fontWeight: 750, color: 'var(--ink)' }}>
-                📦 Delhivery Shipping Fee Ledger
+                {shipment.courier || 'Courier'} shipping fee ledger
               </span>
               <span
                 style={{
@@ -349,7 +349,7 @@ export function OrderMoneyCard({ order, onChanged }: { order: Order; onChanged: 
             </table>
           </div>
         </div>
-      ) : shipment?.waybillNumber ? (
+      ) : shipment?.waybillNumber && shipment.shippingCostSource !== 'ACTUAL' ? (
         <div
           style={{
             marginTop: '8px',
@@ -361,15 +361,18 @@ export function OrderMoneyCard({ order, onChanged }: { order: Order; onChanged: 
             color: 'var(--muted)',
           }}
         >
-          ℹ️ <strong>Delhivery Shipping Fee Ledger:</strong> Showing estimated rate (
-          {formatMoney(shipment.forwardCharge ?? 0)}). Upload your monthly Delhivery Wallet Report
-          in <em>Accounts & Remittances</em> to reconcile exact debits & refunds per AWB.
+          Estimated shipping cost {formatMoney(shipment.forwardCharge ?? 0)}.{' '}
+          {isVelocityCourier(shipment.courier, shipment.waybillNumber)
+            ? <>Use <em>Sync Velocity Details</em> on the Shipment tab to pull the billed charge.</>
+            : (shipment.courier || '').toLowerCase().includes('delhivery')
+              ? <>The exact charge appears once the Delhivery freight ledger is uploaded in <em>Payments &amp; Remittance</em>.</>
+              : 'The exact charge appears once the carrier bill is recorded.'}
         </div>
       ) : null}
 
       {status.state === 'OPEN' && (
         <Row label="Waiting for">
-          <ul className="money-pending">
+          <ul className="money-pending" role="list">
             {status.pending.map((item) => (
               <li key={item}>
                 {item.startsWith('Return window open until') && status.returnWindowClosesAt

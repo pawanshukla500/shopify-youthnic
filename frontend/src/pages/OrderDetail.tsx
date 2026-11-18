@@ -344,6 +344,8 @@ export function OrderDetail() {
 
   const isPrepaid = isPrepaidOrder(order)
   const isCodConf = isCodConfirmed(order)
+  // Prepaid orders carry no COD return risk, so an unscored prepaid order is Low, not Medium
+  const rtoLevel = order.rtoRiskLevel || (order.paymentMethod !== 'COD' ? 'LOW' : 'MEDIUM')
   const isDispatchNeeded = classifyOrderTab(order) === 'dispatch'
 
   const isNdrOrRtoShipment = Boolean(
@@ -1282,7 +1284,7 @@ export function OrderDetail() {
                   }
                   icon="truck"
                   accentColor={isNdrOrRtoShipment ? '#dc2626' : isReturnOrder ? '#7c3aed' : '#059669'}
-                  subtext={order.shipment.status ? `Status: ${order.shipment.status}` : undefined}
+                  subtext={order.shipment.trackingStatus && order.shipment.status ? `Status: ${labelize(order.shipment.status)}` : undefined}
                 />
 
                 <StatCard
@@ -1349,58 +1351,6 @@ export function OrderDetail() {
                   }
                 />
               </div>
-
-              {/* Velocity Aggregator Telemetry: Multi-Courier Partner, Freight Charges & COD Remittance */}
-              {isVelocityCourier(order.shipment?.courier, order.shipment?.waybillNumber) && (
-                <div style={{ background: 'var(--tone-purple-bg)', border: '1px solid var(--tone-purple-border)', borderRadius: '8px', padding: '12px 16px', marginTop: '14px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', fontSize: '12px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <img
-                      src="/logos/velocity.svg"
-                      alt=""
-                      style={{ height: '24px', maxWidth: '80px', objectFit: 'contain' }}
-                      onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none' }}
-                    />
-                    <div>
-                      <div style={{ color: 'var(--tone-purple-fg)', fontWeight: 700, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>⚡ Shipping Aggregator</div>
-                      <div style={{ fontWeight: 800, fontSize: '14px', color: 'var(--ink)', marginTop: '2px' }}>Velocity</div>
-                      <div style={{ color: 'var(--muted-light)', fontSize: '12px' }}>AWB: <span style={{ fontFamily: 'monospace' }}>{order.shipment.waybillNumber}</span></div>
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{ color: 'var(--tone-purple-fg)', fontWeight: 700, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>💰 Freight Billing</div>
-                    <div style={{ fontWeight: 800, fontSize: '14px', color: 'var(--ink)', marginTop: '2px' }}>
-                      {order.shipment.netBilledCost != null && order.shipment.netBilledCost > 0
-                        ? formatMoney(order.shipment.netBilledCost, order.currency)
-                        : order.shipment.forwardCharge != null
-                        ? `${formatMoney(order.shipment.forwardCharge, order.currency)} (Est)`
-                        : 'Pending Audit'}
-                    </div>
-                    <div style={{ color: 'var(--muted-light)', fontSize: '12px' }}>
-                      Status: <strong>{order.shipment.billingStatus || 'ESTIMATED'}</strong>
-                      {order.shipment.totalDebited ? ` · Debited: ${formatMoney(order.shipment.totalDebited, order.currency)}` : ''}
-                    </div>
-                  </div>
-                  {order.shipment.paymentMode === 'COD' && (
-                    <div>
-                      <div style={{ color: 'var(--tone-purple-fg)', fontWeight: 700, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>🏦 COD Remittance & Settlement</div>
-                      <div style={{ fontWeight: 800, fontSize: '14px', color: order.shipment.codRemitted ? 'var(--tone-success-fg)' : 'var(--tone-warning-fg)', marginTop: '2px' }}>
-                        {order.shipment.codRemitted
-                          ? `Remitted: ${formatMoney(order.shipment.codRemittedAmount ?? order.shipment.codAmount ?? 0, order.currency)}`
-                          : order.shipment.codCollected
-                          ? 'Collected · Bank Settlement Pending'
-                          : 'Awaiting Delivery Collection'}
-                      </div>
-                      <div style={{ color: 'var(--muted-light)', fontSize: '12px' }}>
-                        {order.shipment.codRemittanceRef ? (
-                          <>Bank UTR / Ref: <CopyableBadge text={order.shipment.codRemittanceRef} monospace={true} /></>
-                        ) : (
-                          'Bank UTR appears upon Velocity settlement'
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
 
               {/* Shipping Logistics Actions (Document downloads available in More Actions menu) */}
               <div className="shipment-actions" style={{ marginTop: '14px', flexWrap: 'wrap', gap: '8px' }}>
@@ -1616,10 +1566,10 @@ export function OrderDetail() {
               eyebrow="GoKwik Buyer Intelligence"
               title="RTO Risk Assessment"
               action={
-                <span className={`rto-risk-pill ${(order.rtoRiskLevel || 'MEDIUM').toLowerCase()}`} style={{ fontSize: '12px', padding: '2px 8px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                  {order.rtoRiskLevel === 'LOW'
+                <span className={`rto-risk-pill ${rtoLevel.toLowerCase()}`} style={{ fontSize: '12px', padding: '2px 8px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                  {rtoLevel === 'LOW'
                     ? '✓ Low RTO Risk'
-                    : order.rtoRiskLevel === 'HIGH'
+                    : rtoLevel === 'HIGH'
                     ? <><Icon name="alert" size={11} /> High RTO Risk</>
                     : 'Medium RTO Risk'}
                 </span>
@@ -1628,7 +1578,7 @@ export function OrderDetail() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               <div style={{ background: 'var(--line-subtle)', border: '1px solid var(--line)', borderRadius: '7px', padding: '10px 12px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                  <span className="detail-label">GoKwik Delivery Track Record</span>
+                  <span className="detail-label">Delivery track record</span>
                   <span style={{ fontSize: '12px', fontWeight: 800, color: (order.deliverOrderCount || 0) >= 2 ? 'var(--tone-success-fg)' : 'var(--tone-warning-fg)' }}>
                     {order.deliverOrderCount ?? 0} Prior Deliveries
                   </span>
@@ -1698,16 +1648,6 @@ export function OrderDetail() {
                 ) : (
                   <span style={{ fontSize: '12px', color: 'var(--muted-light)' }}>No tags assigned on Shopify</span>
                 )}
-              </div>
-
-              <div style={{ background: 'var(--line-subtle)', border: '1px solid var(--line)', borderRadius: '8px', padding: '10px 12px', fontSize: '12px', color: 'var(--ink-secondary)', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontWeight: 700, color: 'var(--ink)' }}>Delhivery ONE Channel Link</span>
-                  <span style={{ color: 'var(--tone-success-fg)', fontWeight: 700 }}>● Active</span>
-                </div>
-                <p style={{ margin: 0, fontSize: '12px', color: 'var(--muted)', lineHeight: 1.4 }}>
-                  When Shopify is linked in Delhivery ONE, dispatches triggered from this OMS automatically update Shopify fulfillment tracking with carrier <strong>Delhivery</strong> and append the generated AWB to order tags.
-                </p>
               </div>
             </div>
           </Panel>

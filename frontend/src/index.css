@@ -2779,6 +2779,13 @@ body { min-width: 0; }
     radial-gradient(farthest-side at 100% 50%, var(--table-edge-shadow), transparent) right / 10px 100% no-repeat scroll;
 }
 [data-theme="dark"] .table-wrap { --table-edge-shadow: rgba(0, 0, 0, .55); }
+/* Sortable headers (SortTh): the label is a real button so keyboard and screen readers can sort */
+.th-sort { all: unset; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; font: inherit; color: inherit; letter-spacing: inherit; text-transform: inherit; border-radius: 4px; }
+.th-sort:hover, .th-sort.is-active { color: var(--ink); }
+.th-sort:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.th-sort-icon { display: inline-flex; opacity: .35; transition: transform .15s ease, opacity .15s ease; }
+.th-sort:hover .th-sort-icon, .th-sort.is-active .th-sort-icon { opacity: 1; }
+.th-sort-icon.is-asc { transform: rotate(180deg); }
 .modal-overlay { padding: 16px; }
 .modal-panel { max-width: min(520px, calc(100vw - 32px)) !important; width: 100%; }
 

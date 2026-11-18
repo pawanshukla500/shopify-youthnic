@@ -114,6 +114,7 @@ describe('AnalyticsService (Executive Reporter, Account Strategist, Report Distr
 
     // Aarav should be a Champion (2 delivered prepaid orders, >3000 spend)
     const aarav = report.accountStrategist.topAccounts.find((a) => a.phone === '919876543210');
+    expect(aarav?.accountKey).toBe('919876543210');
     expect(aarav).toBeDefined();
     expect(aarav?.segment).toBe('CHAMPION');
     expect(aarav?.healthScore).toBe('GREEN');

@@ -360,6 +360,7 @@ export class AnalyticsService {
     const customerAccountMap = new Map<
       string,
       {
+        accountKey: string; // the grouping key (phone, else email, else order id): unique per account, unlike phone
         phone: string;
         name: string;
         email: string | null;
@@ -378,6 +379,7 @@ export class AnalyticsService {
       const phoneKey = (o.customerPhone || o.customerEmail || String(o.id)).trim();
       if (!customerAccountMap.has(phoneKey)) {
         customerAccountMap.set(phoneKey, {
+          accountKey: phoneKey,
           phone: o.customerPhone || 'N/A',
           name: o.customerName || 'Customer',
           email: o.customerEmail || null,
@@ -478,6 +480,7 @@ export class AnalyticsService {
       }
 
       return {
+        accountKey: c.accountKey,
         phone: c.phone,
         name: c.name,
         email: c.email,

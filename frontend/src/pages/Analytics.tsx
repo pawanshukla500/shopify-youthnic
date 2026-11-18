@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getAnalyticsReport, distributeAnalyticsReport, getDistributionHistory } from '../api'
 import { formatMoney } from '../lib'
-import { ErrorBox, Icon, LoadingState, PageIntro, Panel, PanelHeading, useDocumentTitle, useToast } from '../components/UI'
+import { ErrorBox, Icon, LoadingState, PageIntro, Panel, PanelHeading, SortTh, useDocumentTitle, useTableSort, useToast } from '../components/UI'
 import type { CustomerAccountItem } from '../types'
 
 type ActiveTab = 'monthly' | 'courier' | 'state' | 'accounts' | 'distribution'
@@ -335,6 +335,10 @@ export function Analytics() {
     URL.revokeObjectURL(url)
     toast.toast('success', 'Exported Customer Accounts to CSV!')
   }
+
+  const courierSort = useTableSort(data?.courierReport ?? [])
+  const stateSort = useTableSort(filteredStates)
+  const accountSort = useTableSort(filteredAccounts)
 
   if (isLoading) {
     return <LoadingState label="Computing financial P&L, customer accounts LTV, and distribution matrices…" />
@@ -682,17 +686,17 @@ export function Analytics() {
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Courier Name</th>
-                  <th style={{ textAlign: 'right' }}>Total Orders</th>
-                  <th style={{ textAlign: 'right' }}>Total Freight Cost</th>
-                  <th style={{ textAlign: 'right' }}>Total RTO Orders</th>
-                  <th style={{ textAlign: 'right' }}>Average Per Order Amount</th>
-                  <th style={{ textAlign: 'right' }}>RTO %</th>
+                  <SortTh label="Courier Name" sortKey="courierName" sort={courierSort.sort} onSort={courierSort.toggle} />
+                  <SortTh label="Total Orders" sortKey="totalOrders" sort={courierSort.sort} onSort={courierSort.toggle} numeric />
+                  <SortTh label="Total Freight Cost" sortKey="totalCost" sort={courierSort.sort} onSort={courierSort.toggle} numeric />
+                  <SortTh label="Total RTO Orders" sortKey="totalRtoOrders" sort={courierSort.sort} onSort={courierSort.toggle} numeric />
+                  <SortTh label="Average Per Order Amount" sortKey="avgPerOrderAmount" sort={courierSort.sort} onSort={courierSort.toggle} numeric />
+                  <SortTh label="RTO %" sortKey="rtoPercent" sort={courierSort.sort} onSort={courierSort.toggle} numeric />
                 </tr>
               </thead>
               <tbody>
                 {!data?.courierReport?.length && <tr><td colSpan={6} className="table-empty">No courier shipments in this period yet.</td></tr>}
-                {data?.courierReport?.map((c) => (
+                {courierSort.sorted.map((c) => (
                   <tr key={c.courierName}>
                     <td>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -757,21 +761,21 @@ export function Analytics() {
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>State</th>
-                  <th style={{ textAlign: 'right' }}>Total Orders</th>
-                  <th style={{ minWidth: '140px' }}>Volume Share</th>
-                  <th style={{ textAlign: 'right' }}>Gross Revenue</th>
-                  <th style={{ textAlign: 'right' }}>Prepaid Orders</th>
-                  <th style={{ textAlign: 'right' }}>COD Orders</th>
-                  <th style={{ textAlign: 'right' }}>Prepaid %</th>
-                  <th style={{ textAlign: 'right' }}>Unique Cities</th>
+                  <SortTh label="State" sortKey="state" sort={stateSort.sort} onSort={stateSort.toggle} />
+                  <SortTh label="Total Orders" sortKey="orderCount" sort={stateSort.sort} onSort={stateSort.toggle} numeric />
+                  <SortTh label="Volume Share" sortKey="percentage" sort={stateSort.sort} onSort={stateSort.toggle} style={{ minWidth: '140px' }} />
+                  <SortTh label="Gross Revenue" sortKey="grossRevenue" sort={stateSort.sort} onSort={stateSort.toggle} numeric />
+                  <SortTh label="Prepaid Orders" sortKey="prepaidCount" sort={stateSort.sort} onSort={stateSort.toggle} numeric />
+                  <SortTh label="COD Orders" sortKey="codCount" sort={stateSort.sort} onSort={stateSort.toggle} numeric />
+                  <SortTh label="Prepaid %" sortKey="prepaidPercent" sort={stateSort.sort} onSort={stateSort.toggle} numeric />
+                  <SortTh label="Unique Cities" sortKey="citiesCount" sort={stateSort.sort} onSort={stateSort.toggle} numeric />
                   <th>Top Destination Hubs</th>
-                  <th style={{ textAlign: 'right' }}>Delivered</th>
+                  <SortTh label="Delivered" sortKey="deliveredCount" sort={stateSort.sort} onSort={stateSort.toggle} numeric />
                 </tr>
               </thead>
               <tbody>
                 {filteredStates.length === 0 && <tr><td colSpan={10} className="table-empty">No states to show for this period or search.</td></tr>}
-                {filteredStates.map((s) => (
+                {stateSort.sorted.map((s) => (
                   <tr key={s.state}>
                     <td>
                       <strong>{s.state}</strong>
@@ -939,19 +943,19 @@ export function Analytics() {
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th>Customer Name & Contact</th>
-                    <th>Location</th>
-                    <th style={{ textAlign: 'center' }}>Orders (Del / RTO)</th>
-                    <th style={{ textAlign: 'right' }}>Lifetime GMV</th>
+                    <SortTh label="Customer Name & Contact" sortKey="name" sort={accountSort.sort} onSort={accountSort.toggle} />
+                    <SortTh label="Location" sortKey="state" sort={accountSort.sort} onSort={accountSort.toggle} />
+                    <SortTh label="Orders (Del / RTO)" sortKey="orderCount" sort={accountSort.sort} onSort={accountSort.toggle} style={{ textAlign: 'center' }} />
+                    <SortTh label="Lifetime GMV" sortKey="lifetimeGross" sort={accountSort.sort} onSort={accountSort.toggle} numeric />
                     <th style={{ textAlign: 'center' }}>Health</th>
-                    <th>Cohort</th>
+                    <SortTh label="Cohort" sortKey="segment" sort={accountSort.sort} onSort={accountSort.toggle} />
                     <th style={{ minWidth: '220px' }}>Account Strategy Play (/agency-account-strategist)</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredAccounts.length === 0 && <tr><td colSpan={7} className="table-empty">No customer accounts match this view.</td></tr>}
-                  {filteredAccounts.map((a: CustomerAccountItem) => (
-                    <tr key={a.phone}>
+                  {accountSort.sorted.map((a: CustomerAccountItem) => (
+                    <tr key={a.accountKey ?? a.phone}>
                       <td>
                         <div style={{ fontWeight: 700, color: 'var(--ink)' }}>{a.name}</div>
                         <div style={{ fontSize: '12px', color: 'var(--muted)' }}>

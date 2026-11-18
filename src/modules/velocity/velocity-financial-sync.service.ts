@@ -59,6 +59,21 @@ function parseValidDate(value?: string | Date | null): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+// Shared by the bulk and single-order syncs so the order card's ledger rows match either way
+function toWalletTransactions(awb: string, charges: any[]) {
+  return charges.map((c: any, idx: number) => ({
+    txnId: `VEL-CHG-${awb}-${idx + 1}`,
+    date: new Date().toISOString(),
+    type: (c.amountWithGst >= 0 ? 'debit' : 'credit') as 'debit' | 'credit',
+    amount: Math.abs(c.amountWithGst),
+    amountWithoutGst: c.amountWithoutGst,
+    eventType: c.eventType,
+    transactionType: c.transactionType,
+    description: `Velocity ${c.transactionType || c.eventType}`,
+    source: 'VELOCITY_API',
+  }));
+}
+
 export class VelocityFinancialSyncService {
   constructor(private vService: VelocityService = velocityService) {}
 
@@ -451,17 +466,7 @@ export class VelocityFinancialSyncService {
 
           const netCost = Math.round((debits - credits) * 100) / 100;
 
-          const walletTransactions = charges.map((c: any, idx: number) => ({
-            txnId: `VEL-CHG-${awb}-${idx + 1}`,
-            date: new Date().toISOString(),
-            type: (c.amountWithGst >= 0 ? 'debit' : 'credit') as 'debit' | 'credit',
-            amount: Math.abs(c.amountWithGst),
-            amountWithoutGst: c.amountWithoutGst,
-            eventType: c.eventType,
-            transactionType: c.transactionType,
-            description: `Velocity ${c.transactionType || c.eventType}`,
-            source: 'VELOCITY_API',
-          }));
+          const walletTransactions = toWalletTransactions(awb, charges);
 
           await prisma.shipment.update({
             where: { id: order.shipment.id },
@@ -925,6 +930,12 @@ export class VelocityFinancialSyncService {
             totalDebited: chargesSummary.totalDebited,
             totalCredited: chargesSummary.totalCredited,
             billingStatus: 'BILLED',
+            // Same cost fields the bulk sync writes; the order card reads these, not netBilledCost
+            forwardCharge: chargesSummary.forwardFreight || chargesSummary.netBilledCost,
+            rtoCharge: chargesSummary.rtoFreight,
+            shippingCostSource: 'ACTUAL',
+            shippingCostUpdatedAt: new Date(),
+            walletTransactions: toWalletTransactions(waybill, item.charges),
           },
         });
       }

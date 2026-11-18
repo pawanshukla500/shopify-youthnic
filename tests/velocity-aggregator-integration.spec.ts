@@ -625,6 +625,9 @@ describe('Velocity Aggregator Integration & Business Rules', () => {
           data: expect.objectContaining({
             netBilledCost: 67.26,
             billingStatus: 'BILLED',
+            forwardCharge: 49.56,
+            shippingCostSource: 'ACTUAL',
+            walletTransactions: expect.arrayContaining([expect.objectContaining({ amount: 49.56, type: 'debit' })]),
           }),
         })
       );

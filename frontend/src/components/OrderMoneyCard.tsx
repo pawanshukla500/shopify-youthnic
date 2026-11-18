@@ -349,7 +349,7 @@ export function OrderMoneyCard({ order, onChanged }: { order: Order; onChanged: 
             </table>
           </div>
         </div>
-      ) : shipment?.waybillNumber ? (
+      ) : shipment?.waybillNumber && shipment.shippingCostSource !== 'ACTUAL' ? (
         <div
           style={{
             marginTop: '8px',

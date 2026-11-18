@@ -186,7 +186,7 @@ export function OrderMoneyCard({ order, onChanged }: { order: Order; onChanged: 
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <span style={{ fontSize: '12.5px', fontWeight: 750, color: 'var(--ink)' }}>
-                📦 Delhivery Shipping Fee Ledger
+                {shipment.courier || 'Courier'} shipping fee ledger
               </span>
               <span
                 style={{
@@ -361,9 +361,8 @@ export function OrderMoneyCard({ order, onChanged }: { order: Order; onChanged: 
             color: 'var(--muted)',
           }}
         >
-          ℹ️ <strong>Delhivery Shipping Fee Ledger:</strong> Showing estimated rate (
-          {formatMoney(shipment.forwardCharge ?? 0)}). Upload your monthly Delhivery Wallet Report
-          in <em>Accounts & Remittances</em> to reconcile exact debits & refunds per AWB.
+          Estimated shipping cost {formatMoney(shipment.forwardCharge ?? 0)}. The exact charge appears once the{' '}
+          {shipment.courier || 'courier'} wallet report is uploaded in <em>Payments &amp; Remittance</em>.
         </div>
       ) : null}
 

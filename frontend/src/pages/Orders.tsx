@@ -1096,117 +1096,127 @@ export function Orders() {
         description="Comprehensive order lifecycle, Delhivery dispatch, line item SKUs & imagery, and 3-way payment reconciliation."
       />
 
-      {/* Uniform single-row KPI stat strip — every card shares one typography scale */}
-      <div className="kpi-strip" role="group" aria-label="Order payment stream summary">
-        <button
-          type="button"
-          className={`kpi-stat ${channelFilter === 'ALL' ? 'is-active' : ''}`}
-          onClick={() => setChannelFilter('ALL')}
-          title="Show all orders"
-        >
-          <span className="kpi-stat-label">All Orders</span>
-          <span className="kpi-stat-value">{formatMoney(metrics.totalAmt)}</span>
-          <span className="kpi-stat-sub">{metrics.totalCount} orders total</span>
-        </button>
-
-        {/* ⚡ Urgent Needs Dispatch (Prepaid & Confirmed COD) */}
-        <button
-          type="button"
-          className={`kpi-stat ${channelFilter === 'NEEDS_DISPATCH' || channelFilter === 'PREPAID_PENDING' ? 'is-active' : ''}`}
-          onClick={() => setChannelFilter((channelFilter === 'NEEDS_DISPATCH' || channelFilter === 'PREPAID_PENDING') ? 'ALL' : 'NEEDS_DISPATCH')}
-          title="Prepaid & confirmed-COD orders awaiting AWB generation"
-        >
-          <span className="kpi-stat-label">
-            <span className="kpi-dot is-red" /> Needs Dispatch
-          </span>
-          <span className="kpi-stat-value is-danger">{metrics.needsDispatchCount} pending</span>
-          <span className="kpi-stat-sub">Prepaid & confirmed COD</span>
-        </button>
-
-        {/* 🛍️ Delhivery One Channel: Pending AWB */}
-        <button
-          type="button"
-          className={`kpi-stat ${channelFilter === 'DELHIVERY_PENDING_AWB' ? 'is-active' : ''}`}
-          onClick={() => setChannelFilter(channelFilter === 'DELHIVERY_PENDING_AWB' ? 'ALL' : 'DELHIVERY_PENDING_AWB')}
-          title="Shopify channel orders still awaiting a Delhivery AWB"
-        >
-          <span className="kpi-stat-label">
-            <span className="kpi-dot is-green" /> Delhivery Channel
-          </span>
-          <span className="kpi-stat-value">{metrics.pendingAwbCount} Pending AWB</span>
-          <span className="kpi-stat-sub">Shopify: youthnic2024</span>
-        </button>
-
-        <button
-          type="button"
-          className={`kpi-stat ${channelFilter === 'COD' ? 'is-active' : ''}`}
-          onClick={() => setChannelFilter(channelFilter === 'COD' ? 'ALL' : 'COD')}
-          title="Cash on Delivery orders"
-        >
-          <span className="kpi-stat-label">Cash on Delivery</span>
-          <span className="kpi-stat-value">{formatMoney(metrics.codAmt)}</span>
-          <span className="kpi-stat-sub">{metrics.codCount} COD orders</span>
-        </button>
-
-        <button
-          type="button"
-          className={`kpi-stat ${channelFilter === 'GOKWIK' ? 'is-active' : ''}`}
-          onClick={() => setChannelFilter(channelFilter === 'GOKWIK' ? 'ALL' : 'GOKWIK')}
-          title="GoKwik 1-click prepaid orders"
-        >
-          <span className="kpi-stat-label">GoKwik Prepaid</span>
-          <span className="kpi-stat-value">{formatMoney(metrics.gokwikAmt)}</span>
-          <span className="kpi-stat-sub">{metrics.gokwikCount} 1-click orders</span>
-        </button>
-
-        <button
-          type="button"
-          className={`kpi-stat ${channelFilter === 'PHONEPE' ? 'is-active' : ''}`}
-          onClick={() => setChannelFilter(channelFilter === 'PHONEPE' ? 'ALL' : 'PHONEPE')}
-          title="PhonePe payment gateway orders"
-        >
-          <span className="kpi-stat-label">PhonePe Prepaid</span>
-          <span className="kpi-stat-value">{formatMoney(metrics.phonepeAmt)}</span>
-          <span className="kpi-stat-sub">{metrics.phonepeCount} PG orders</span>
-        </button>
-
-        {/* ⚠️ SLA Overdue (conditional) */}
-        {metrics.delayedDispatchCount > 0 && (
+      {/* KPI cards in two groups: money by payment channel, and work that needs action */}
+      <div className="kpi-strip">
+        <div className="kpi-group" role="group" aria-labelledby="kpi-sales">
+          <p className="kpi-group-title" id="kpi-sales">Sales by payment</p>
+          <div className="kpi-row">
           <button
             type="button"
-            className={`kpi-stat ${channelFilter === 'DELAYED_DISPATCH' ? 'is-active' : ''}`}
-            onClick={() => setChannelFilter(channelFilter === 'DELAYED_DISPATCH' ? 'ALL' : 'DELAYED_DISPATCH')}
-            title="Orders past the 24-hour dispatch SLA"
+            className={`kpi-stat ${channelFilter === 'ALL' ? 'is-active' : ''}`}
+            onClick={() => setChannelFilter('ALL')}
+            title="Show all orders"
           >
-            <span className="kpi-stat-label">
-              <span className="kpi-dot is-red" /> SLA Overdue
-            </span>
-            <span className="kpi-stat-value is-danger">{metrics.delayedDispatchCount} orders</span>
-            <span className="kpi-stat-sub">&gt;24h dispatch SLA</span>
+            <span className="kpi-stat-label">All Orders</span>
+            <span className="kpi-stat-value">{formatMoney(metrics.totalAmt)}</span>
+            <span className="kpi-stat-sub">{metrics.totalCount} orders total</span>
           </button>
-        )}
 
-        {/* 🚨 NDR Exceptions (conditional) */}
-        {metrics.ndrCount > 0 && (
           <button
             type="button"
-            className={`kpi-stat ${channelFilter === 'NDR' ? 'is-active' : ''}`}
-            onClick={() => setChannelFilter(channelFilter === 'NDR' ? 'ALL' : 'NDR')}
-            title="Non-delivery reports needing action"
+            className={`kpi-stat ${channelFilter === 'COD' ? 'is-active' : ''}`}
+            onClick={() => setChannelFilter(channelFilter === 'COD' ? 'ALL' : 'COD')}
+            title="Cash on Delivery orders"
+          >
+            <span className="kpi-stat-label">Cash on Delivery</span>
+            <span className="kpi-stat-value">{formatMoney(metrics.codAmt)}</span>
+            <span className="kpi-stat-sub">{metrics.codCount} COD orders</span>
+          </button>
+
+          <button
+            type="button"
+            className={`kpi-stat ${channelFilter === 'GOKWIK' ? 'is-active' : ''}`}
+            onClick={() => setChannelFilter(channelFilter === 'GOKWIK' ? 'ALL' : 'GOKWIK')}
+            title="GoKwik 1-click prepaid orders"
+          >
+            <span className="kpi-stat-label">GoKwik Prepaid</span>
+            <span className="kpi-stat-value">{formatMoney(metrics.gokwikAmt)}</span>
+            <span className="kpi-stat-sub">{metrics.gokwikCount} 1-click orders</span>
+          </button>
+
+          <button
+            type="button"
+            className={`kpi-stat ${channelFilter === 'PHONEPE' ? 'is-active' : ''}`}
+            onClick={() => setChannelFilter(channelFilter === 'PHONEPE' ? 'ALL' : 'PHONEPE')}
+            title="PhonePe payment gateway orders"
+          >
+            <span className="kpi-stat-label">PhonePe Prepaid</span>
+            <span className="kpi-stat-value">{formatMoney(metrics.phonepeAmt)}</span>
+            <span className="kpi-stat-sub">{metrics.phonepeCount} PG orders</span>
+          </button>
+
+          {/* AWB logistics cost — informational, not a filter */}
+          <div className="kpi-stat kpi-stat-static" title="Total estimated AWB freight across the current order set">
+            <span className="kpi-stat-label">AWB Logistics Cost</span>
+            <span className="kpi-stat-value">{formatMoney(metrics.totalShippingCost, 'INR')}</span>
+            <span className="kpi-stat-sub">avg {formatMoney(metrics.avgShippingCost, 'INR')} / AWB</span>
+          </div>
+          </div>
+        </div>
+
+        <div className="kpi-group" role="group" aria-labelledby="kpi-action">
+          <p className="kpi-group-title" id="kpi-action">Needs action</p>
+          <div className="kpi-row">
+          {/* ⚡ Urgent Needs Dispatch (Prepaid & Confirmed COD) */}
+          <button
+            type="button"
+            className={`kpi-stat ${channelFilter === 'NEEDS_DISPATCH' || channelFilter === 'PREPAID_PENDING' ? 'is-active' : ''}`}
+            onClick={() => setChannelFilter((channelFilter === 'NEEDS_DISPATCH' || channelFilter === 'PREPAID_PENDING') ? 'ALL' : 'NEEDS_DISPATCH')}
+            title="Prepaid & confirmed-COD orders awaiting AWB generation"
           >
             <span className="kpi-stat-label">
-              <span className="kpi-dot is-red" /> NDR Exceptions
+              <span className="kpi-dot is-red" /> Needs Dispatch
             </span>
-            <span className="kpi-stat-value is-warning">{metrics.ndrCount} failed</span>
-            <span className="kpi-stat-sub">Action needed</span>
+            <span className="kpi-stat-value is-danger">{metrics.needsDispatchCount} pending</span>
+            <span className="kpi-stat-sub">Prepaid & confirmed COD</span>
           </button>
-        )}
 
-        {/* AWB logistics cost — informational, not a filter */}
-        <div className="kpi-stat kpi-stat-static" title="Total estimated AWB freight across the current order set">
-          <span className="kpi-stat-label">AWB Logistics Cost</span>
-          <span className="kpi-stat-value">{formatMoney(metrics.totalShippingCost, 'INR')}</span>
-          <span className="kpi-stat-sub">avg {formatMoney(metrics.avgShippingCost, 'INR')} / AWB</span>
+          {/* 🛍️ Delhivery One Channel: Pending AWB */}
+          <button
+            type="button"
+            className={`kpi-stat ${channelFilter === 'DELHIVERY_PENDING_AWB' ? 'is-active' : ''}`}
+            onClick={() => setChannelFilter(channelFilter === 'DELHIVERY_PENDING_AWB' ? 'ALL' : 'DELHIVERY_PENDING_AWB')}
+            title="Shopify channel orders still awaiting a Delhivery AWB"
+          >
+            <span className="kpi-stat-label">
+              <span className="kpi-dot is-green" /> Delhivery Channel
+            </span>
+            <span className="kpi-stat-value">{metrics.pendingAwbCount} Pending AWB</span>
+            <span className="kpi-stat-sub">Shopify: youthnic2024</span>
+          </button>
+
+          {/* ⚠️ SLA Overdue (conditional) */}
+          {metrics.delayedDispatchCount > 0 && (
+            <button
+              type="button"
+              className={`kpi-stat ${channelFilter === 'DELAYED_DISPATCH' ? 'is-active' : ''}`}
+              onClick={() => setChannelFilter(channelFilter === 'DELAYED_DISPATCH' ? 'ALL' : 'DELAYED_DISPATCH')}
+              title="Orders past the 24-hour dispatch SLA"
+            >
+              <span className="kpi-stat-label">
+                <span className="kpi-dot is-red" /> SLA Overdue
+              </span>
+              <span className="kpi-stat-value is-danger">{metrics.delayedDispatchCount} {metrics.delayedDispatchCount === 1 ? 'order' : 'orders'}</span>
+              <span className="kpi-stat-sub">&gt;24h dispatch SLA</span>
+            </button>
+          )}
+
+          {/* 🚨 NDR Exceptions (conditional) */}
+          {metrics.ndrCount > 0 && (
+            <button
+              type="button"
+              className={`kpi-stat ${channelFilter === 'NDR' ? 'is-active' : ''}`}
+              onClick={() => setChannelFilter(channelFilter === 'NDR' ? 'ALL' : 'NDR')}
+              title="Non-delivery reports needing action"
+            >
+              <span className="kpi-stat-label">
+                <span className="kpi-dot is-red" /> NDR Exceptions
+              </span>
+              <span className="kpi-stat-value is-warning">{metrics.ndrCount} failed</span>
+              <span className="kpi-stat-sub">Action needed</span>
+            </button>
+          )}
+          </div>
         </div>
       </div>
 

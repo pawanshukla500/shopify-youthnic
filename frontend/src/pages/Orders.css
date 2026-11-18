@@ -23,13 +23,68 @@
 /* ---------------------------------------------------------------- KPI strip */
 .kpi-strip {
   display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(max-content, 1fr); /* show full amounts; the strip already scrolls sideways */
-  gap: 10px;
+  gap: 12px;
   margin-bottom: 14px;
-  overflow-x: auto;
-  padding-bottom: 2px;
-  scrollbar-width: thin;
+}
+
+.kpi-group { min-width: 0; } /* grid items default to min-width:auto, which would stretch a phone swipe row instead of letting it scroll */
+
+.kpi-group-title {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+/* Equal columns per group: each row fills evenly, nothing scrolls or gets cut */
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+}
+
+/* Phones: each group becomes one swipeable row that snaps card by card, with a peek of the next card */
+@media (max-width: 640px) {
+  .kpi-row {
+    display: flex;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scrollbar-width: none;
+    margin-inline: -16px;
+    padding: 0 16px 2px;
+    scroll-padding-inline: 16px;
+  }
+  .kpi-row::-webkit-scrollbar { display: none; }
+  .kpi-row > .kpi-stat {
+    flex: 0 0 auto; /* size to content so labels and amounts are never cut */
+    min-width: 150px;
+    max-width: 85%;
+    scroll-snap-align: start;
+  }
+}
+
+.kpi-stat {
+  flex: 1 1 168px;
+}
+
+/* Phones: one swipeable row that snaps card by card, showing a peek of the next card */
+@media (max-width: 640px) {
+  .kpi-strip {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scrollbar-width: none;
+    margin-inline: -16px;
+    padding: 0 16px 2px;
+    scroll-padding-inline: 16px;
+  }
+  .kpi-strip::-webkit-scrollbar { display: none; }
+  .kpi-strip > .kpi-stat {
+    flex: 0 0 auto; /* size to content so labels and amounts are never cut */
+    min-width: 150px;
+    max-width: 85%;
+    scroll-snap-align: start;
+  }
 }
 
 .kpi-stat {
@@ -39,10 +94,10 @@
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 10px;
-  padding: 10px 14px 11px;
+  padding: 10px 12px 11px;
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
   min-width: 0;
   white-space: nowrap;
   cursor: pointer;
@@ -50,15 +105,15 @@
 }
 
 .kpi-stat:hover {
-  border-color: #94a3b8;
+  border-color: var(--border-strong);
   box-shadow: var(--shadow-sm);
   transform: translateY(-1px);
 }
 
 .kpi-stat.is-active {
-  border-color: #2563eb;
-  box-shadow: 0 0 0 1px #2563eb;
-  background: #f5f8ff;
+  border-color: var(--blue);
+  box-shadow: 0 0 0 1px var(--blue);
+  background: var(--tone-info-bg);
 }
 
 [data-theme='dark'] .kpi-stat:hover {
@@ -80,13 +135,15 @@
 .kpi-stat-label {
   font-size: 12px;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--muted);
   display: flex;
   align-items: center;
   gap: 6px;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .kpi-stat-value {

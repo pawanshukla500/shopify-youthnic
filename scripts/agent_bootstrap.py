@@ -20,11 +20,14 @@ GRAPHIFY_PIN = f"graphifyy=={GRAPHIFY_VERSION}"
 HOOK_MARKER = "Installed by: graphify hook install"  # the one line all four graphify git hooks share
 GIT_HOOKS = ("post-commit", "post-checkout", "post-merge", "post-rewrite")
 LOG = ROOT / ".git" / "agent-bootstrap.log"
+# Startup does at most two `--version` probes plus one git call, so it stays far inside the 60s SessionStart timeout.
+STARTUP_PROBE_TIMEOUT = 8
+SETUP_PROBE_TIMEOUT = 60  # first run after a fresh install can be slow (bytecode compile)
 
 
-def _version_of(cmd):
+def _version_of(cmd, timeout=STARTUP_PROBE_TIMEOUT):
     try:
-        out = subprocess.run(cmd + ["--version"], capture_output=True, text=True, timeout=60)
+        out = subprocess.run(cmd + ["--version"], capture_output=True, text=True, timeout=timeout)
         return parse_version(out.stdout + out.stderr) if out.returncode == 0 else None
     except Exception:
         return None
@@ -45,25 +48,32 @@ def _module_version():
         return None
 
 
-def graphify_cmd(require_pin: bool = True):
-    """The graphify CLI, or None. Order: this interpreter's module (so an older `graphify` earlier on PATH can't
-    win after a pinned install), then PATH. With require_pin, only the pinned version counts."""
+def graphify_cmd(require_pin: bool = True, probe_timeout: int = STARTUP_PROBE_TIMEOUT):
+    """The graphify CLI, or None. One resolver for bootstrap and the hook guard.
+
+    Both prefer this interpreter's module when its metadata shows the pinned version (instant, and an older
+    `graphify` earlier on PATH can't win after a pinned install).
+    require_pin=True (bootstrap): otherwise only a pinned PATH executable or module counts (verified by probe).
+    require_pin=False (hook guard, runs before every tool call): no subprocess probes; falls back to any available
+    CLI, because `hook-guard` only prints search guidance and never writes the graph. When a pinned CLI exists,
+    both modes select it."""
+    module = [sys.executable, "-m", "graphify"]
     mod = _module_version()
-    if mod and (not require_pin or mod == GRAPHIFY_VERSION):
-        return [sys.executable, "-m", "graphify"]
+    if mod == GRAPHIFY_VERSION:
+        return module
     exe = shutil.which("graphify")
-    if exe and (not require_pin or _version_of([exe]) == GRAPHIFY_VERSION):
-        return [exe]
-    # Installed during this process (e.g. a fresh user site-packages): metadata can't see it yet, so probe.
-    if require_pin and _version_of([sys.executable, "-m", "graphify"]) == GRAPHIFY_VERSION:
-        return [sys.executable, "-m", "graphify"]
-    return None
+    if require_pin:
+        if exe and _version_of([exe], probe_timeout) == GRAPHIFY_VERSION:
+            return [exe]
+        # Installed during this process (e.g. a fresh user site-packages): metadata can't see it yet, so probe.
+        return module if _version_of(module, probe_timeout) == GRAPHIFY_VERSION else None
+    return [exe] if exe else (module if mod else None)
 
 
 def active_hooks_dir():
     """The hooks directory git actually uses (respects core.hooksPath), or None outside a git checkout."""
     try:
-        out = subprocess.run(["git", "rev-parse", "--git-path", "hooks"], cwd=ROOT, capture_output=True, text=True, timeout=20)
+        out = subprocess.run(["git", "rev-parse", "--git-path", "hooks"], cwd=ROOT, capture_output=True, text=True, timeout=5)
         if out.returncode == 0 and out.stdout.strip():
             return (ROOT / out.stdout.strip()).resolve()
     except Exception:
@@ -104,12 +114,12 @@ def run(cmd, timeout):
 def setup() -> list:
     """Slow path: install pinned Graphify, git hooks and graph. Each step reports and moves on."""
     notes = []
-    cmd = graphify_cmd()
+    cmd = graphify_cmd(probe_timeout=SETUP_PROBE_TIMEOUT)
     if not cmd:
         in_venv = sys.prefix != getattr(sys, "base_prefix", sys.prefix)  # pip refuses --user inside a virtualenv
         try:
             r = run([sys.executable, "-m", "pip", "install", "--quiet", GRAPHIFY_PIN] + ([] if in_venv else ["--user"]), timeout=600)
-            cmd = graphify_cmd()
+            cmd = graphify_cmd(probe_timeout=SETUP_PROBE_TIMEOUT)
             notes.append(f"installed {GRAPHIFY_PIN}" if cmd else f"install failed: {r.stderr.strip()[-300:]}")
         except Exception as e:
             notes.append(f"install failed: {e}")
@@ -150,7 +160,7 @@ def start_background_setup():
 
 def guard(kind: str) -> int:
     """Claude Code hook entry: same resolver as bootstrap; hook stdin, stdout and exit code passed straight through."""
-    cmd = graphify_cmd(require_pin=False)  # same resolver, no version probe: this runs before every tool call
+    cmd = graphify_cmd(require_pin=False)  # same resolver without subprocess probes: this runs before every tool call
     if not cmd:
         return 0  # graphify not available yet: no guidance, never block the tool call
     r = subprocess.run(cmd + ["hook-guard", kind], stdin=sys.stdin, capture_output=True, text=True)
@@ -191,6 +201,32 @@ def self_test() -> None:
         (hooks / GIT_HOOKS[0]).mkdir()  # reading a directory as a file raises OSError
         assert hooks_state(hooks) == "unknown", "unreadable hook is unknown, not safe to replace"
     assert GRAPHIFY_PIN == "graphifyy==" + GRAPHIFY_VERSION, "PyPI package is graphifyy (double y), pinned"
+
+    # Resolver: bootstrap and guard agree whenever a pinned CLI exists; guard never runs a version probe.
+    g = globals()
+    saved = (g["_module_version"], g["_version_of"], shutil.which)
+    module = [sys.executable, "-m", "graphify"]
+    probes = []
+    try:
+        def fake(mod_ver, exe, exe_ver, mod_probe=None):
+            g["_module_version"] = lambda: mod_ver
+            shutil.which = lambda name: exe
+            def probe(cmd, timeout=STARTUP_PROBE_TIMEOUT):
+                probes.append(cmd)
+                return exe_ver if cmd == [exe] else mod_probe
+            g["_version_of"] = probe
+        fake(GRAPHIFY_VERSION, "/bin/graphify", "0.1.0")
+        assert graphify_cmd() == module and graphify_cmd(require_pin=False) == module, "pinned module wins in both modes"
+        fake("0.1.0", "/bin/graphify", GRAPHIFY_VERSION)
+        assert graphify_cmd() == ["/bin/graphify"] and graphify_cmd(require_pin=False) == ["/bin/graphify"], "pinned exe chosen by both"
+        fake("0.1.0", None, None, mod_probe="0.1.0")
+        assert graphify_cmd() is None, "no pinned CLI: bootstrap installs"
+        probes.clear()
+        assert graphify_cmd(require_pin=False) == module and not probes, "guard falls back without probing"
+        fake(None, None, None)
+        assert graphify_cmd(require_pin=False) is None, "nothing installed: guard skips"
+    finally:
+        g["_module_version"], g["_version_of"], shutil.which = saved
     print("agent_bootstrap self-test: ok")
 
 

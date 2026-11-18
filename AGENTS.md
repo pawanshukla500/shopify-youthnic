@@ -54,7 +54,7 @@ Rules:
 - Graphify: `pip install graphifyy==0.9.112` (the version pinned in `scripts/agent_bootstrap.py`), `graphify hook install`, then `python scripts/build_graphify.py` for a full build.
 
 **After every change, in the same change:**
-1. Run `graphify update .` so the graph matches the code. The git hooks also rebuild it after commit, checkout and merge.
+1. Run `graphify update .` so the graph matches the code. If `graphify` isn't on PATH (its scripts directory isn't), run `python -m graphify update .` with the interpreter that has Graphify installed. The git hooks also rebuild it after commit, checkout and merge.
 2. Update `docs/HANDOFF.md`: set **Last Verified** to today and record what changed, if it affects behaviour, setup, deployment or a workflow.
 3. Update any other doc the change touches: the spec in `docs/`, `README.md` for setup or commands, `.env.example` for new variables.
 4. When you add or change a tool, rule or agent workflow, update this section, `CLAUDE.md` and `.agents/rules/` together.

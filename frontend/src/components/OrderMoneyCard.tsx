@@ -200,8 +200,8 @@ export function OrderMoneyCard({ order, onChanged }: { order: Order; onChanged: 
                       : 'var(--tone-info-bg)',
                   color:
                     shipment.billingStatus === 'REFUNDED' || (shipment.netBilledCost ?? 0) === 0
-                      ? '#059669'
-                      : '#2563eb',
+                      ? 'var(--tone-success-fg)'
+                      : 'var(--tone-info-fg)',
                   border:
                     shipment.billingStatus === 'REFUNDED' || (shipment.netBilledCost ?? 0) === 0
                       ? '1px solid var(--tone-success-border)'
@@ -237,7 +237,7 @@ export function OrderMoneyCard({ order, onChanged }: { order: Order; onChanged: 
                 <strong
                   style={{
                     color:
-                      (shipment.netBilledCost ?? 0) === 0 ? '#16a34a' : 'var(--ink)',
+                      (shipment.netBilledCost ?? 0) === 0 ? 'var(--tone-success-fg)' : 'var(--ink)',
                   }}
                 >
                   {formatMoney(shipment.netBilledCost ?? 0)}

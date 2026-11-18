@@ -1318,8 +1318,8 @@ export function OrderDetail() {
                         color:
                           order.shipment.shippingCostSource === 'ACTUAL'
                             ? (order.shipment.netBilledCost ?? 0) === 0
-                              ? '#059669'
-                              : '#1e293b'
+                              ? 'var(--tone-success-fg)'
+                              : 'var(--ink)'
                             : 'var(--muted)',
                       }}
                     >
@@ -2352,7 +2352,7 @@ export function OrderDetail() {
             )}
           </div>
 
-          <div className="modal-footer" style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', padding: '16px 20px', borderTop: '1px solid var(--color-border, #e2e8f0)' }}>
+          <div className="modal-footer" style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', padding: '16px 20px', borderTop: '1px solid var(--line)' }}>
             <button
               type="button"
               className="button-secondary"
@@ -2447,7 +2447,7 @@ export function OrderDetail() {
             </div>
           </div>
 
-          <div className="modal-footer" style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', padding: '16px 20px', borderTop: '1px solid var(--color-border, #e2e8f0)' }}>
+          <div className="modal-footer" style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', padding: '16px 20px', borderTop: '1px solid var(--line)' }}>
             <button
               type="button"
               className="button-secondary"

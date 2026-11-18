@@ -980,7 +980,7 @@ export function Analytics() {
                             background:
                               a.healthScore === 'GREEN' ? 'var(--tone-success-bg)' : a.healthScore === 'YELLOW' ? 'var(--tone-warning-bg)' : 'var(--tone-danger-bg)',
                             color:
-                              a.healthScore === 'GREEN' ? '#15803d' : a.healthScore === 'YELLOW' ? '#b45309' : '#b91c1c',
+                              a.healthScore === 'GREEN' ? 'var(--tone-success-fg)' : a.healthScore === 'YELLOW' ? 'var(--tone-warning-fg)' : 'var(--tone-danger-fg)',
                           }}
                         >
                           {a.healthScore}

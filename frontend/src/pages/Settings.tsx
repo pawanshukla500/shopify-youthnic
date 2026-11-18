@@ -1335,7 +1335,7 @@ export function Settings() {
             />
             <div style={{ display: 'grid', gap: '18px', marginTop: '16px' }}>
               {/* Auto-Failover Switch */}
-              <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', background: 'var(--panel-subtle, #f8fafc)', borderRadius: '10px', border: '1px solid var(--border-color, #e2e8f0)', cursor: 'pointer' }}>
+              <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', background: 'var(--surface-elevated)', borderRadius: '10px', border: '1px solid var(--line)', cursor: 'pointer' }}>
                 <div style={{ maxWidth: '85%' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <strong style={{ fontSize: '13.5px', color: 'var(--ink, #1e293b)' }}>Automatic Carrier Failover</strong>

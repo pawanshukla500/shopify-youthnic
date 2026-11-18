@@ -15,8 +15,8 @@
 }
 
 [data-theme='dark'] .orders-page {
-  --ord-hover: rgba(255, 255, 255, 0.03);
-  --ord-selected: rgba(37, 99, 235, 0.16);
+  --ord-hover: color-mix(in srgb, #ffffff 3%, var(--panel)); /* opaque: sticky cells must hide what scrolls under them */
+  --ord-selected: color-mix(in srgb, #2563eb 16%, var(--panel));
   --ord-chip-bg: rgba(255, 255, 255, 0.06);
 }
 
@@ -303,6 +303,16 @@
   left: 0;
   z-index: 7;
 }
+
+/* Sticky right actions column: Dispatch / Print stay reachable while the table scrolls sideways */
+.orders-table th:last-child,
+.orders-table td:last-child {
+  position: sticky;
+  right: 0;
+  box-shadow: -12px 0 12px -12px rgba(15, 23, 42, 0.28);
+}
+.orders-table td:last-child { z-index: 4; }
+.orders-table th:last-child { z-index: 7; }
 
 /* Column width hints */
 .orders-table .col-order {

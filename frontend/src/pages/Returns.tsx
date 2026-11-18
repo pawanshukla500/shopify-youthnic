@@ -449,7 +449,7 @@ export function Returns() {
                   <th>Return Status</th>
                   <th>QC</th>
                   <th>Refund Status</th>
-                  <th>Amount</th>
+                  <th className="num">Amount</th>
                   <th>Created</th>
                   <th style={{ textAlign: 'right' }}>Actions</th>
                 </tr>

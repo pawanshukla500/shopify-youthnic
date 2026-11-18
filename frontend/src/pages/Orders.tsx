@@ -1063,10 +1063,8 @@ export function Orders() {
       return (
         <div className="pay-cell">
           <span className="pay-pill is-gokwik" title="GoKwik 1-click checkout via Easebuzz">
-            <img src="/logos/gokwik.png" alt="GoKwik" />
-            <span className="pay-pill-via">
-              (Easebuzz)
-            </span>
+            <img src="/logos/gokwik-mark.png" alt="" />
+            GoKwik
           </span>
           <span className={`pay-sub ${order.paymentVerified ? 'is-ok' : 'is-warn'}`}>
             {order.paymentVerified ? 'Captured & verified' : 'Verification pending'}
@@ -1242,7 +1240,7 @@ export function Orders() {
       )}
 
       {/* Operational stage tabs — New / Ready to Ship / In Transit / Delivered / Return / Cancel */}
-      <div className="analytics-tabs-bar" style={{ marginBottom: '16px', flexWrap: 'wrap' }} role="tablist" aria-label="Order stages">
+      <div className="analytics-tabs-bar" style={{ marginBottom: '16px' }} role="tablist" aria-label="Order stages">
         {ORDER_TABS.map((tab) => {
           const count = tabCounts[tab.key]
           const isActive = activeTab === tab.key
@@ -1321,12 +1319,15 @@ export function Orders() {
               ))}
             </select>
           </FormField>
+        </div>
 
+        {/* One primary action; the rest stay neutral so the main sync stands out */}
+        <div className="filters-actions">
           {/* Sync Orders from Shopify Button */}
           <button
             type="button"
             className="btn-export"
-            style={{ background: '#2563eb', color: '#ffffff', borderColor: '#1d4ed8' }}
+            style={{ background: 'var(--blue)', color: '#ffffff', borderColor: 'var(--blue-hover)' }}
             onClick={handleSyncShopify}
             disabled={isSyncingShopify}
             title="Fetch new and historical orders directly from Shopify"
@@ -1339,7 +1340,6 @@ export function Orders() {
           <button
             type="button"
             className="btn-export"
-            style={{ background: '#047857', color: '#ffffff', borderColor: '#065f46' }}
             onClick={handleSyncChannel}
             disabled={isSyncingChannel}
             title="Synchronize all unfulfilled orders with Delhivery One Shopify channel"
@@ -1352,7 +1352,6 @@ export function Orders() {
           <button
             type="button"
             className="btn-export"
-            style={{ background: '#6d28d9', color: '#ffffff', borderColor: '#5b21b6' }}
             onClick={handleSyncExternalFulfillments}
             disabled={isSyncingExternal}
             title="Automatically check and fetch fulfillment tracking & carrier for orders manifested via OMS Guru, external apps, or directly in Delhivery ONE panel"

@@ -2285,6 +2285,11 @@ button.shopify-line-sku { border: 0; background: none; padding: 0; text-align: l
   max-width: 100%;
   width: fit-content;
 }
+/* Phones: one swipeable row instead of a tall wrapped block of tabs */
+@media (max-width: 640px) {
+  .analytics-tabs-bar { flex-wrap: nowrap; overflow-x: auto; width: 100%; scrollbar-width: thin; }
+  .analytics-tabs-bar > * { flex: none; }
+}
 .analytics-tab-btn {
   display: inline-flex;
   align-items: center;
@@ -3244,7 +3249,7 @@ body { min-width: 0; }
 .next-step-danger { --tone: var(--red); }
 .next-step-success { --tone: var(--green); }
 .next-step-neutral { --tone: var(--muted); }
-.next-step-copy { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.next-step-copy { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
 .next-step-copy strong { color: var(--ink); font-size: 15px; }
 .next-step-copy span { color: var(--ink-secondary, var(--ink)); font-size: 13px; line-height: 1.45; }
 @media (max-width: 640px) {

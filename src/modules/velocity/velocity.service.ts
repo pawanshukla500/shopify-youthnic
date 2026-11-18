@@ -1722,10 +1722,11 @@ export class VelocityService {
 
     const pdf = await download(freshUrl);
     if (pdf) {
-      // Save the freshly signed link so the next print skips the tracking call
+      // Save the freshly signed link so the next print skips the tracking call.
+      // Scoped to Velocity so a courier switch during the download isn't overwritten.
       Promise.resolve(
         prisma.shipment.updateMany({
-          where: { waybillNumber: cleanWaybill },
+          where: { waybillNumber: cleanWaybill, courier: 'Velocity' },
           data: { labelUrl: freshUrl },
         })
       ).catch(() => undefined);

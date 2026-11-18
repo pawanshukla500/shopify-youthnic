@@ -520,7 +520,7 @@ describe('Velocity Aggregator Integration & Business Rules', () => {
       expect(pdfBuffer).not.toBeNull();
       expect(pdfBuffer!.subarray(0, 4).toString()).toBe('%PDF');
       expect(prismaStub.shipment.updateMany).toHaveBeenCalledWith({
-        where: { waybillNumber: 'VEL123456' },
+        where: { waybillNumber: 'VEL123456', courier: 'Velocity' },
         data: { labelUrl: 'https://s3.amazonaws.com/velocity-labels/VEL123456.pdf' },
       });
     });
@@ -546,7 +546,7 @@ describe('Velocity Aggregator Integration & Business Rules', () => {
       expect(mockAxiosStatic.get).toHaveBeenCalledTimes(1);
       expect(mockAxiosStatic.get.mock.calls[0][0]).toBe(fresh);
       expect(prismaStub.shipment.updateMany).toHaveBeenCalledWith({
-        where: { waybillNumber: 'VEL777' },
+        where: { waybillNumber: 'VEL777', courier: 'Velocity' },
         data: { labelUrl: fresh },
       });
     });

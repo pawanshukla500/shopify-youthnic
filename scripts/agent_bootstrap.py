@@ -1,13 +1,12 @@
-"""Agent bootstrap: make sure every agent session has the project's core tooling.
+"""Agent bootstrap: make sure every agent session has the project's core tooling (Graphify; Ponytail rules are in AGENTS.md).
 
-Run at session start (Claude Code runs it via the SessionStart hook in .claude/settings.json;
-other agents are told to run it in AGENTS.md):
-
-    python scripts/agent_bootstrap.py            # check + install what is missing
+    python scripts/agent_bootstrap.py              # fast check at session start; slow setup runs in the background
+    python scripts/agent_bootstrap.py --setup      # install pinned Graphify, git hooks and graph now (slow)
+    python scripts/agent_bootstrap.py --guard search|read|compact   # Claude Code hook entry: runs `graphify hook-guard`
     python scripts/agent_bootstrap.py --self-test
 
-It is idempotent and never fails the session: every step reports and moves on.
-What it prints is added to the agent's context, so keep it short.
+Claude Code runs the fast check from the SessionStart hook and the guard from the PreToolUse/compact hooks
+(.claude/settings.json). Other agents are told to run it in AGENTS.md. Nothing here ever fails a session.
 """
 import os
 import shutil
@@ -16,91 +15,199 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-GRAPHIFY_PIN = "graphifyy==0.9.112"  # pinned so every agent builds the same graph; bump deliberately
+GRAPHIFY_VERSION = "0.9.112"  # pinned so every agent builds the same graph; bump deliberately
+GRAPHIFY_PIN = f"graphifyy=={GRAPHIFY_VERSION}"
 HOOK_MARKER = "Installed by: graphify hook install"  # the one line all four graphify git hooks share
 GIT_HOOKS = ("post-commit", "post-checkout", "post-merge", "post-rewrite")
+LOG = ROOT / ".git" / "agent-bootstrap.log"
 
 
-def graphify_cmd():
-    """Return a command list for the graphify CLI, or None if it is not installed."""
-    exe = shutil.which("graphify")
-    if exe:
-        return [exe]
-    # Installed as a module but its scripts dir is not on PATH (common right after `pip install --user`).
-    # Probe in a subprocess: this process's sys.path predates the install.
+def _version_of(cmd):
     try:
-        probe = subprocess.run([sys.executable, "-m", "graphify", "--version"], capture_output=True, text=True, timeout=60)
-        return [sys.executable, "-m", "graphify"] if probe.returncode == 0 else None
+        out = subprocess.run(cmd + ["--version"], capture_output=True, text=True, timeout=60)
+        return parse_version(out.stdout + out.stderr) if out.returncode == 0 else None
     except Exception:
         return None
 
 
-def hooks_installed(hooks_dir: Path) -> bool:
-    return all((hooks_dir / h).is_file() and HOOK_MARKER in (hooks_dir / h).read_text(errors="ignore") for h in GIT_HOOKS)
+def parse_version(text: str):
+    """'graphify 0.9.112' -> '0.9.112'; anything else -> None."""
+    parts = text.strip().split()
+    return parts[1] if len(parts) >= 2 and parts[0] == "graphify" else None
+
+
+def _module_version():
+    """Version of the graphifyy package importable by this interpreter, read from its metadata (no subprocess)."""
+    from importlib import metadata, util
+    try:
+        return metadata.version("graphifyy") if util.find_spec("graphify") else None
+    except Exception:
+        return None
+
+
+def graphify_cmd(require_pin: bool = True):
+    """The graphify CLI, or None. Order: this interpreter's module (so an older `graphify` earlier on PATH can't
+    win after a pinned install), then PATH. With require_pin, only the pinned version counts."""
+    mod = _module_version()
+    if mod and (not require_pin or mod == GRAPHIFY_VERSION):
+        return [sys.executable, "-m", "graphify"]
+    exe = shutil.which("graphify")
+    if exe and (not require_pin or _version_of([exe]) == GRAPHIFY_VERSION):
+        return [exe]
+    # Installed during this process (e.g. a fresh user site-packages): metadata can't see it yet, so probe.
+    if require_pin and _version_of([sys.executable, "-m", "graphify"]) == GRAPHIFY_VERSION:
+        return [sys.executable, "-m", "graphify"]
+    return None
+
+
+def active_hooks_dir():
+    """The hooks directory git actually uses (respects core.hooksPath), or None outside a git checkout."""
+    try:
+        out = subprocess.run(["git", "rev-parse", "--git-path", "hooks"], cwd=ROOT, capture_output=True, text=True, timeout=20)
+        if out.returncode == 0 and out.stdout.strip():
+            return (ROOT / out.stdout.strip()).resolve()
+    except Exception:
+        pass
+    # `git` not on PATH: a plain checkout still uses .git/hooks (core.hooksPath can't be read without git)
+    return ROOT / ".git" / "hooks" if (ROOT / ".git").is_dir() else None
+
+
+def hooks_state(hooks_dir: Path) -> str:
+    """'installed', 'missing', or 'unknown' (a hook file exists but can't be read: don't treat it as safe to replace)."""
+    try:
+        for h in GIT_HOOKS:
+            f = hooks_dir / h
+            if not f.exists() or HOOK_MARKER not in f.read_text(errors="ignore"):
+                return "missing"
+        return "installed"
+    except OSError:
+        return "unknown"
+
+
+def needs_setup():
+    """What is missing, as short notes. Fast: version probes and file checks only."""
+    missing = []
+    if not graphify_cmd():
+        missing.append(f"graphify {GRAPHIFY_VERSION} not installed")
+    hooks = active_hooks_dir()
+    if hooks and hooks_state(hooks) != "installed":
+        missing.append("graphify git hooks")
+    if not (ROOT / "graphify-out" / "graph.json").is_file():
+        missing.append("code graph")
+    return missing
 
 
 def run(cmd, timeout):
     return subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=timeout)
 
 
-def main() -> None:
+def setup() -> list:
+    """Slow path: install pinned Graphify, git hooks and graph. Each step reports and moves on."""
     notes = []
-
     cmd = graphify_cmd()
-    if cmd is None:
+    if not cmd:
+        in_venv = sys.prefix != getattr(sys, "base_prefix", sys.prefix)  # pip refuses --user inside a virtualenv
         try:
-            in_venv = sys.prefix != getattr(sys, "base_prefix", sys.prefix)  # pip refuses --user inside a virtualenv
-            r = run([sys.executable, "-m", "pip", "install", "--quiet", GRAPHIFY_PIN] + ([] if in_venv else ["--user"]), timeout=240)
+            r = run([sys.executable, "-m", "pip", "install", "--quiet", GRAPHIFY_PIN] + ([] if in_venv else ["--user"]), timeout=600)
             cmd = graphify_cmd()
-            notes.append(f"graphify: installed {GRAPHIFY_PIN}" if cmd else f"graphify: install failed ({r.stderr.strip()[-200:]}); run `pip install {GRAPHIFY_PIN}`")
-        except Exception as e:  # never block the session
-            notes.append(f"graphify: install failed ({e}); run `pip install {GRAPHIFY_PIN}`")
+            notes.append(f"installed {GRAPHIFY_PIN}" if cmd else f"install failed: {r.stderr.strip()[-300:]}")
+        except Exception as e:
+            notes.append(f"install failed: {e}")
+    if not cmd:
+        return notes + [f"run `pip install {GRAPHIFY_PIN}` by hand"]
+
+    hooks = active_hooks_dir()
+    if hooks:
+        state = hooks_state(hooks)
+        if state == "unknown":
+            notes.append(f"git hooks in {hooks} could not be read; left untouched")
+        elif state == "missing":
+            try:
+                r = run(cmd + ["hook", "install"], timeout=120)
+                if r.returncode == 0 and hooks_state(hooks) == "installed":
+                    notes.append("git hooks installed")
+                else:
+                    notes.append(f"git hook install did not take effect in {hooks} (exit {r.returncode}); if core.hooksPath is set, install the hooks there by hand")
+            except Exception as e:
+                notes.append(f"git hook install failed: {e}")
+
+    if not (ROOT / "graphify-out" / "graph.json").is_file():
+        try:
+            r = run(cmd + ["update", "."], timeout=1800)
+            notes.append("code graph built" if r.returncode == 0 else "graph build failed; run `python scripts/build_graphify.py`")
+        except Exception as e:
+            notes.append(f"graph build failed ({e}); run `python scripts/build_graphify.py`")
+    return notes
+
+
+def start_background_setup():
+    """Detach `--setup` so the session starts now; its log lands in .git/agent-bootstrap.log."""
+    log = open(LOG, "a", encoding="utf-8") if LOG.parent.is_dir() else subprocess.DEVNULL
+    # Windows: DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP so the setup outlives the hook process
+    kwargs = {"creationflags": 0x00000008 | 0x00000200} if os.name == "nt" else {"start_new_session": True}
+    subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "--setup"], cwd=ROOT, stdout=log, stderr=log, stdin=subprocess.DEVNULL, **kwargs)
+
+
+def guard(kind: str) -> int:
+    """Claude Code hook entry: same resolver as bootstrap; hook stdin, stdout and exit code passed straight through."""
+    cmd = graphify_cmd(require_pin=False)  # same resolver, no version probe: this runs before every tool call
+    if not cmd:
+        return 0  # graphify not available yet: no guidance, never block the tool call
+    r = subprocess.run(cmd + ["hook-guard", kind], stdin=sys.stdin, capture_output=True, text=True)
+    sys.stdout.write(r.stdout)
+    sys.stderr.write(r.stderr)
+    return r.returncode
+
+
+def main() -> None:
+    missing = needs_setup()
+    if missing:
+        start_background_setup()
+        status = f"setting up in the background ({', '.join(missing)}); log: .git/agent-bootstrap.log"
     else:
-        notes.append("graphify: ready")
-
-    if cmd:
-        git_dir = ROOT / ".git"
-        if git_dir.is_dir() and not hooks_installed(git_dir / "hooks"):
-            try:
-                run(cmd + ["hook", "install"], timeout=60)
-                notes.append("graphify: git hooks installed (graph rebuilds after commit/checkout/merge)")
-            except Exception as e:
-                notes.append(f"graphify: hook install failed ({e}); run `graphify hook install`")
-        if not (ROOT / "graphify-out" / "graph.json").is_file():
-            try:
-                r = run(cmd + ["update", "."], timeout=240)
-                notes.append("graphify: graph built" if r.returncode == 0 else "graphify: graph build failed; run `python scripts/build_graphify.py`")
-            except Exception as e:
-                notes.append(f"graphify: graph build skipped ({e}); run `python scripts/build_graphify.py`")
-
-    print("Project tooling check - " + "; ".join(notes))
+        hooks_note = "git hooks" if active_hooks_dir() else "git hooks unchecked (not a git checkout)"
+        status = f"graphify {GRAPHIFY_VERSION} ready, {hooks_note} and code graph present"
+    print(f"Project tooling check - {status}.")
     print("Rules: follow AGENTS.md (Ponytail lazy-senior-dev rules + graphify-first code search).")
-    print("After every change: run `graphify update .`, then update docs/HANDOFF.md and any doc the change touches (see AGENTS.md > Project upkeep).")
+    print("After every change: run `graphify update .`, and update docs per AGENTS.md > Project upkeep.")
 
 
 def self_test() -> None:
     import tempfile
 
+    assert parse_version("graphify 0.9.112\n") == "0.9.112"
+    assert parse_version("command not found") is None
     with tempfile.TemporaryDirectory() as d:
         hooks = Path(d)
-        assert not hooks_installed(hooks), "empty hooks dir must not count as installed"
+        assert hooks_state(hooks) == "missing", "empty hooks dir"
         for h in GIT_HOOKS[:-1]:
             (hooks / h).write_text(f"#!/bin/sh\n# {HOOK_MARKER}\n")
-        assert not hooks_installed(hooks), "a missing hook must not count as installed"
+        assert hooks_state(hooks) == "missing", "one hook missing"
         (hooks / GIT_HOOKS[-1]).write_text("#!/bin/sh\necho other tool\n")
-        assert not hooks_installed(hooks), "a hook without the graphify marker must not count"
+        assert hooks_state(hooks) == "missing", "hook without the graphify marker"
         (hooks / GIT_HOOKS[-1]).write_text(f"#!/bin/sh\n# {HOOK_MARKER}\n")
-        assert hooks_installed(hooks), "all four marked hooks count as installed"
-    assert GRAPHIFY_PIN.startswith("graphifyy=="), "PyPI package is graphifyy (double y), pinned"
+        assert hooks_state(hooks) == "installed", "all four marked hooks"
+        (hooks / GIT_HOOKS[0]).unlink()
+        (hooks / GIT_HOOKS[0]).mkdir()  # reading a directory as a file raises OSError
+        assert hooks_state(hooks) == "unknown", "unreadable hook is unknown, not safe to replace"
+    assert GRAPHIFY_PIN == "graphifyy==" + GRAPHIFY_VERSION, "PyPI package is graphifyy (double y), pinned"
     print("agent_bootstrap self-test: ok")
 
 
 if __name__ == "__main__":
-    if "--self-test" in sys.argv:
+    args = sys.argv[1:]
+    if args[:1] == ["--self-test"]:
         self_test()
+    elif args[:1] == ["--guard"] and len(args) == 2:
+        try:
+            sys.exit(guard(args[1]))
+        except Exception:
+            sys.exit(0)  # a broken guard must never block a tool call
+    elif args[:1] == ["--setup"]:
+        print("\n".join(["agent_bootstrap --setup:"] + setup()), flush=True)
     else:
         try:
             main()
         except Exception as e:  # the session must start even if something unexpected breaks
-            print(f"Project tooling check failed: {e}. Run `python scripts/agent_bootstrap.py` manually.")
+            print(f"Project tooling check failed: {e}. Run `python scripts/agent_bootstrap.py --setup` manually.")
         sys.exit(0)

@@ -47,7 +47,7 @@ Rules:
 
 ## Project upkeep (every agent, every session)
 
-**Start of session.** Run `python scripts/agent_bootstrap.py` (Claude Code does this automatically through `.claude/settings.json`). It installs the pinned Graphify CLI (`graphifyy`), the git hooks and the knowledge graph when any is missing, and never blocks. Then follow the Ponytail rules at the top of this file and the graphify rules above.
+**Start of session.** Run `python scripts/agent_bootstrap.py` (Claude Code does this automatically through `.claude/settings.json`). It checks quickly and sets up whatever is missing in the background: the pinned Graphify CLI (`graphifyy`), the git hooks and the knowledge graph. Use `--setup` to do it now. It never blocks. Then follow the Ponytail rules at the top of this file and the graphify rules above.
 
 **Tools that must be available.**
 - Ponytail: these rules (from `DietrichGebert/ponytail`, kept verbatim above). Claude Code also enables the `ponytail@ponytail` plugin. Codex: `codex plugin marketplace add DietrichGebert/ponytail` then `codex plugin add ponytail@ponytail`.
@@ -60,3 +60,5 @@ Rules:
 4. When you add or change a tool, rule or agent workflow, update this section, `CLAUDE.md` and `.agents/rules/` together.
 
 Docs that say something the code no longer does are bugs. Fix them in the same pull request.
+
+**When the graph can't answer.** Graphify comes first, but it is not a gate. If the CLI isn't available yet, or a query doesn't locate the answer (for example a file added since the last graph build), use a targeted search and read the source directly.

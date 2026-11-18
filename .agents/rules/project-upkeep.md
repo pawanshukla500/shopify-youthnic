@@ -5,6 +5,6 @@ description: Bootstrap core agent tooling (Graphify, Ponytail) each session and 
 
 ## Project upkeep
 
-- At the start of a session run `python scripts/agent_bootstrap.py`. It installs the pinned Graphify CLI, git hooks and graph when missing, and never blocks.
+- At the start of a session run `python scripts/agent_bootstrap.py` (fast check; missing tooling is set up in the background) or `python scripts/agent_bootstrap.py --setup` to set it up now. It never blocks.
 - Follow the Ponytail rules and the graphify rules in `AGENTS.md`.
-- After every change, in the same change: run `graphify update .`, update `docs/HANDOFF.md` (Last Verified + what changed) and any doc the change touches. Full checklist: `AGENTS.md` > Project upkeep.
+- After every change, in the same change: run `graphify update .` and update the docs that `AGENTS.md` > Project upkeep says the change needs (it defines when `docs/HANDOFF.md` must change).

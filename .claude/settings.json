@@ -18,7 +18,7 @@
           {
             "type": "command",
             "command": "python \"$CLAUDE_PROJECT_DIR/scripts/agent_bootstrap.py\"",
-            "timeout": 300
+            "timeout": 60
           }
         ]
       },
@@ -27,8 +27,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "graphify hook-guard compact",
-            "timeout": 10
+            "command": "python \"$CLAUDE_PROJECT_DIR/scripts/agent_bootstrap.py\" --guard compact",
+            "timeout": 20
           }
         ]
       }
@@ -39,8 +39,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "graphify hook-guard search",
-            "timeout": 10
+            "command": "python \"$CLAUDE_PROJECT_DIR/scripts/agent_bootstrap.py\" --guard search",
+            "timeout": 20
           }
         ]
       },
@@ -49,8 +49,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "graphify hook-guard read",
-            "timeout": 10
+            "command": "python \"$CLAUDE_PROJECT_DIR/scripts/agent_bootstrap.py\" --guard read",
+            "timeout": 20
           }
         ]
       }

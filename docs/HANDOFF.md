@@ -97,9 +97,9 @@ Every agent session uses two core tools. They are wired in so new agents get the
 | **Ponytail** (`DietrichGebert/ponytail`) | Lazy-senior-dev rules: smallest complete change, reuse first, no speculative code, checks for new logic | `AGENTS.md` (rules kept verbatim from upstream); Claude Code plugin `ponytail@ponytail` enabled in `.claude/settings.json` |
 | **Graphify** (`graphifyy==0.9.112`) | Code knowledge graph in `graphify-out/` (`graphify query / path / explain`), rebuilt after commit, checkout and merge | Skill in `.claude/skills/graphify/` and `.agents/skills/graphify/`; rules in `AGENTS.md` and `.agents/rules/graphify.md`; Claude PreToolUse hooks in `.claude/settings.json`; git hooks via `graphify hook install` |
 
-- **Bootstrap:** `python scripts/agent_bootstrap.py` runs automatically at Claude Code session start (SessionStart hook). Other agents are told to run it in `AGENTS.md` and `.agents/rules/project-upkeep.md`. It installs the pinned Graphify CLI, the git hooks and the graph when missing, and never blocks a session. `--self-test` runs its checks.
+- **Bootstrap:** `python scripts/agent_bootstrap.py` runs automatically at Claude Code session start (SessionStart hook). Other agents are told to run it in `AGENTS.md` and `.agents/rules/project-upkeep.md`. It is a fast check that sets up whatever is missing in the background: the pinned Graphify CLI, the git hooks (in the directory git actually uses), and the graph. The log is `.git/agent-bootstrap.log`; `--setup` runs the setup in the foreground. The Claude hooks call Graphify through `--guard`. `--self-test` runs its checks.
 - **Upkeep:** after every change, run `graphify update .` and update this file and any doc the change touches (`AGENTS.md` > Project upkeep).
-- **Hooks off:** if `"disableAllHooks": true` is set in `~/.claude/settings.json`, the project hooks don't run. Run the bootstrap by hand.
+- **Hooks off:** if `"disableAllHooks": true` is set in `~/.claude/settings.json`, the project hooks don't run. Run `python scripts/agent_bootstrap.py --setup` by hand.
 
 ---
 

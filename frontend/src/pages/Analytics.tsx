@@ -600,6 +600,7 @@ export function Analytics() {
                   </tr>
                 </thead>
                 <tbody>
+                  {!data?.monthlyReport?.length && <tr><td colSpan={17} className="table-empty">No monthly figures for this period yet.</td></tr>}
                   {data?.monthlyReport?.map((row) => (
                     <tr key={row.monthKey}>
                       <td><strong>{row.month}</strong></td>
@@ -690,6 +691,7 @@ export function Analytics() {
                 </tr>
               </thead>
               <tbody>
+                {!data?.courierReport?.length && <tr><td colSpan={6} className="table-empty">No courier shipments in this period yet.</td></tr>}
                 {data?.courierReport?.map((c) => (
                   <tr key={c.courierName}>
                     <td>
@@ -768,6 +770,7 @@ export function Analytics() {
                 </tr>
               </thead>
               <tbody>
+                {filteredStates.length === 0 && <tr><td colSpan={10} className="table-empty">No states to show for this period or search.</td></tr>}
                 {filteredStates.map((s) => (
                   <tr key={s.state}>
                     <td>
@@ -946,6 +949,7 @@ export function Analytics() {
                   </tr>
                 </thead>
                 <tbody>
+                  {filteredAccounts.length === 0 && <tr><td colSpan={7} className="table-empty">No customer accounts match this view.</td></tr>}
                   {filteredAccounts.map((a: CustomerAccountItem) => (
                     <tr key={a.phone}>
                       <td>

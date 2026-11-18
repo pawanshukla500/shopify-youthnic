@@ -379,7 +379,7 @@ function CodReconciliation() {
                       <th>Waybill</th>
                       <th>Order</th>
                       <th>Customer</th>
-                      <th>COD Amount</th>
+                      <th className="num">COD Amount</th>
                       <th>Delivered / Collected</th>
                     </tr>
                   </thead>

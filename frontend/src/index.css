@@ -191,7 +191,7 @@ a { color: inherit; text-decoration: none; }
 .status-dot, .pipeline-dot { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
 .status-success { color: var(--tone-success-fg); background: var(--tone-success-bg); border: 1px solid var(--tone-success-border); }.status-info { color: var(--tone-info-fg); background: var(--tone-info-bg); border: 1px solid var(--tone-info-border); }.status-warning { color: var(--tone-warning-fg); background: var(--tone-warning-bg); border: 1px solid var(--tone-warning-border); }.status-danger { color: var(--tone-danger-fg); background: var(--tone-danger-bg); border: 1px solid var(--tone-danger-border); }.status-purple { color: var(--tone-purple-fg); background: var(--tone-purple-bg); border: 1px solid var(--tone-purple-border); }
 .pipeline-dot { width: 6px; height: 6px; }.pipeline-dot.status-success, .pipeline-fill.status-success { color: #43b68b; background: #43b68b; }.pipeline-dot.status-info, .pipeline-fill.status-info { color: #6b91ea; background: #6b91ea; }.pipeline-dot.status-warning, .pipeline-fill.status-warning { color: #e4ae51; background: #e4ae51; }.pipeline-dot.status-danger, .pipeline-fill.status-danger { color: #df747d; background: #df747d; }.pipeline-dot.status-purple, .pipeline-fill.status-purple { color: #9e87db; background: #9e87db; }
-.table-wrap { width: 100%; overflow-x: auto; }.data-table { width: 100%; min-width: 780px; border-collapse: collapse; text-align: left; }.data-table th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; font-weight: 750; padding: 0 12px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }.data-table td { color: var(--ink-secondary); font-size: 12px; padding: 10px 12px; border-bottom: 1px solid var(--line-subtle); vertical-align: middle; }.data-table tbody tr:last-child td { border-bottom: 0; }.data-table td strong, .data-table td > span:not(.status-badge):not(.verified-badge) { display: block; }.cell-muted { color: var(--muted-light); font-size: 12px; margin-top: 2px; }.order-link { color: var(--blue); font-weight: 750; }.amount-cell { color: var(--ink) !important; font-weight: 750; white-space: nowrap; }.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px !important; }.clickable-row { cursor: pointer; transition: background .15s; }.clickable-row:hover { background: #f9fbff; }.location-cell { display: flex !important; align-items: center; gap: 4px; }.payment-cell { display: block; }.verified-badge { display: inline-block; font-size: 12px; margin-top: 5px; padding: 3px 5px; border-radius: 4px; font-weight: 700; }.verified-badge.verified { color: #258c6c; background: #e7f6f0; }.verified-badge.unverified { color: #b0771f; background: #fff5e2; }.recent-panel { overflow: hidden; }.recent-panel .data-table { min-width: 700px; }
+.table-wrap { width: 100%; overflow-x: auto; }.data-table { width: 100%; min-width: 780px; border-collapse: collapse; text-align: left; }.data-table th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; font-weight: 750; padding: 0 12px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }.data-table td { color: var(--ink-secondary); font-size: 12px; padding: 10px 12px; border-bottom: 1px solid var(--line-subtle); vertical-align: middle; }.data-table tbody tr:last-child td { border-bottom: 0; }.data-table td strong, .data-table td > span:not(.status-badge):not(.verified-badge) { display: block; }.cell-muted { color: var(--muted-light); font-size: 12px; margin-top: 2px; }.order-link { color: var(--blue); font-weight: 750; }.amount-cell { color: var(--ink); font-weight: 750; white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; }.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px !important; }.clickable-row { cursor: pointer; transition: background .15s; }.clickable-row:hover { background: #f9fbff; }.location-cell { display: flex !important; align-items: center; gap: 4px; }.payment-cell { display: block; }.verified-badge { display: inline-block; font-size: 12px; margin-top: 5px; padding: 3px 5px; border-radius: 4px; font-weight: 700; }.verified-badge.verified { color: #258c6c; background: #e7f6f0; }.verified-badge.unverified { color: #b0771f; background: #fff5e2; }.recent-panel { overflow: hidden; }.recent-panel .data-table { min-width: 700px; }
 .micro-badge { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; font-weight: 650; line-height: 1; padding: 2px 5px; border-radius: 4px; border: 1px solid; white-space: nowrap; letter-spacing: 0.01em; }
 .micro-badge-channel { background: #f8fafc; color: #334155; border-color: #cbd5e1; }
 .micro-badge-blue { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
@@ -2763,6 +2763,26 @@ body { min-width: 0; }
 .main-content { min-width: 0; }
 .page-content { min-width: 0; }
 .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+/* Shared table polish: every .data-table in the app gets these */
+.data-table th.num { text-align: right; }
+.data-table thead th { position: sticky; top: 0; z-index: 1; background: var(--panel); }
+.data-table tbody tr:hover td { background: var(--surface-elevated); }
+.data-table td.table-empty { text-align: left; /* wide tables: centred text would sit off-screen */ padding: 28px 16px; color: var(--muted); font-size: 13px; }
+/* Edge shadows appear only while more columns are hidden off-screen (background-attachment trick, no JS) */
+.table-wrap {
+  background:
+    linear-gradient(to right, var(--panel) 30%, transparent) left / 24px 100% no-repeat local,
+    linear-gradient(to left, var(--panel) 30%, transparent) right / 24px 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%, rgba(15, 23, 42, .14), transparent) left / 10px 100% no-repeat scroll,
+    radial-gradient(farthest-side at 100% 50%, rgba(15, 23, 42, .14), transparent) right / 10px 100% no-repeat scroll;
+}
+[data-theme="dark"] .table-wrap {
+  background:
+    linear-gradient(to right, var(--panel) 30%, transparent) left / 24px 100% no-repeat local,
+    linear-gradient(to left, var(--panel) 30%, transparent) right / 24px 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%, rgba(0, 0, 0, .55), transparent) left / 10px 100% no-repeat scroll,
+    radial-gradient(farthest-side at 100% 50%, rgba(0, 0, 0, .55), transparent) right / 10px 100% no-repeat scroll;
+}
 .modal-overlay { padding: 16px; }
 .modal-panel { max-width: min(520px, calc(100vw - 32px)) !important; width: 100%; }
 

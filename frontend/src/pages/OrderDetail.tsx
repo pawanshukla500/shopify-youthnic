@@ -822,7 +822,7 @@ export function OrderDetail() {
         <span className={`shopify-pill ${fulfillmentPill.tone}`}>{fulfillmentPill.label}</span>
         <span className="shopify-order-stage" title={stageTab?.hint}>{stageTab?.label || labelize(order.status)}</span>
         {(order.tags?.includes('EXCHANGE_FORWARD') || order.shopifyOrderName.includes('-EX-FWD')) && (
-          <span className="shopify-pill" style={{ background: '#ede9fe', color: '#6d28d9', borderColor: '#c4b5fd' }}>
+          <span className="shopify-pill" style={{ background: 'var(--tone-purple-bg)', color: 'var(--tone-purple-fg)', borderColor: 'var(--tone-purple-border)' }}>
             Exchange Replacement
           </span>
         )}
@@ -839,7 +839,7 @@ export function OrderDetail() {
         <>
           <span className="meta-sep" aria-hidden="true">·</span>
           <span>
-            Parent order: <Link to={`/orders?search=${encodeURIComponent(parentTag)}`} style={{ color: '#6d28d9', fontWeight: 600 }}>{parentTag}</Link>
+            Parent order: <Link to={`/orders?search=${encodeURIComponent(parentTag)}`} style={{ color: 'var(--tone-purple-fg)', fontWeight: 600 }}>{parentTag}</Link>
           </span>
         </>
       )}
@@ -963,7 +963,7 @@ export function OrderDetail() {
                   order.paymentProvider) && (
                   <div style={{ background: 'var(--line-subtle)', border: '1px solid var(--line)', borderRadius: '10px', padding: '14px', marginBottom: '14px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px', flexWrap: 'wrap', gap: '6px' }}>
-                      <span style={{ fontSize: '11px', fontWeight: 800, color: 'var(--ink)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                      <span style={{ fontSize: '12px', fontWeight: 800, color: 'var(--ink)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                         Payment Routing & Partner Settlement
                       </span>
                       <span className={`verified-badge ${order.paymentVerified ? 'verified' : 'unverified'}`}>
@@ -976,18 +976,18 @@ export function OrderDetail() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <img src="/logos/gokwik.png" alt="GoKwik" style={{ height: '20px', objectFit: 'contain' }} />
                         <div>
-                          <div style={{ fontSize: '11.5px', fontWeight: 700, color: '#034694' }}>GoKwik Checkout</div>
-                          <div style={{ fontSize: '9.5px', color: 'var(--muted)' }}>Order & 1-Click Aggregator</div>
+                          <div style={{ fontSize: '12px', fontWeight: 700, color: '#034694' }}>GoKwik Checkout</div>
+                          <div style={{ fontSize: '12px', color: 'var(--muted)' }}>Order & 1-Click Aggregator</div>
                         </div>
                       </div>
-                      <span style={{ color: '#94a3b8', fontSize: '13px', fontWeight: 700 }} aria-hidden="true">→</span>
+                      <span style={{ color: 'var(--muted-light)', fontSize: '13px', fontWeight: 700 }} aria-hidden="true">→</span>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <img src="/logos/easebuzz.png" alt="Easebuzz" style={{ height: '18px', objectFit: 'contain' }} />
                         <div>
-                          <div style={{ fontSize: '11.5px', fontWeight: 700, color: 'var(--ink)' }}>
+                          <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--ink)' }}>
                             {order.paymentProvider || 'Easebuzz'}
                           </div>
-                          <div style={{ fontSize: '9.5px', color: '#059669', fontWeight: 600 }}>Acquiring Payment Partner</div>
+                          <div style={{ fontSize: '12px', color: 'var(--tone-success-fg)', fontWeight: 600 }}>Acquiring Payment Partner</div>
                         </div>
                       </div>
                     </div>
@@ -996,7 +996,7 @@ export function OrderDetail() {
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '8px' }}>
                       {order.paymentProviderPaymentId && (
                         <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '6px', padding: '7px 9px' }}>
-                          <span className="detail-label" style={{ fontSize: '10px', color: 'var(--muted)' }}>Easebuzz Payment ID</span>
+                          <span className="detail-label" style={{ fontSize: '12px', color: 'var(--muted)' }}>Easebuzz Payment ID</span>
                           <div
                             className="waybill-chip"
                             onClick={() => {
@@ -1006,7 +1006,7 @@ export function OrderDetail() {
                             style={{ marginTop: '2px', cursor: 'pointer' }}
                             title="Click to copy Easebuzz ID"
                           >
-                            <span className="mono" style={{ fontSize: '11px', fontWeight: 700, color: 'var(--ink)' }}>
+                            <span className="mono" style={{ fontSize: '12px', fontWeight: 700, color: 'var(--ink)' }}>
                               {order.paymentProviderPaymentId}
                             </span>
                             <Icon name="copy" size={11} />
@@ -1015,7 +1015,7 @@ export function OrderDetail() {
                       )}
                       {order.gokwikPaymentId && (
                         <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '6px', padding: '7px 9px' }}>
-                          <span className="detail-label" style={{ fontSize: '10px', color: 'var(--muted)' }}>GoKwik Payment ID</span>
+                          <span className="detail-label" style={{ fontSize: '12px', color: 'var(--muted)' }}>GoKwik Payment ID</span>
                           <div
                             className="waybill-chip"
                             onClick={() => {
@@ -1025,7 +1025,7 @@ export function OrderDetail() {
                             style={{ marginTop: '2px', cursor: 'pointer' }}
                             title="Click to copy GoKwik ID"
                           >
-                            <span className="mono" style={{ fontSize: '11px', fontWeight: 700, color: 'var(--tone-info-fg)' }}>
+                            <span className="mono" style={{ fontSize: '12px', fontWeight: 700, color: 'var(--tone-info-fg)' }}>
                               {order.gokwikPaymentId}
                             </span>
                             <Icon name="copy" size={11} />
@@ -1034,7 +1034,7 @@ export function OrderDetail() {
                       )}
                       {order.paymentReference && (
                         <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '6px', padding: '7px 9px' }}>
-                          <span className="detail-label" style={{ fontSize: '10px', color: 'var(--muted)' }}>Customer checkout reference</span>
+                          <span className="detail-label" style={{ fontSize: '12px', color: 'var(--muted)' }}>Customer checkout reference</span>
                           <div
                             className="waybill-chip"
                             onClick={() => {
@@ -1044,7 +1044,7 @@ export function OrderDetail() {
                             style={{ marginTop: '2px', cursor: 'pointer' }}
                             title="Click to copy Bank UTR"
                           >
-                            <span className="mono" style={{ fontSize: '11px', fontWeight: 700, color: 'var(--tone-success-fg)' }}>
+                            <span className="mono" style={{ fontSize: '12px', fontWeight: 700, color: 'var(--tone-success-fg)' }}>
                               {order.paymentReference}
                             </span>
                             <Icon name="copy" size={11} />
@@ -1053,7 +1053,7 @@ export function OrderDetail() {
                       )}
                       {order.paymentAuthorizationKey && (
                         <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '6px', padding: '7px 9px' }}>
-                          <span className="detail-label" style={{ fontSize: '10px', color: 'var(--muted)' }}>Authorization Key</span>
+                          <span className="detail-label" style={{ fontSize: '12px', color: 'var(--muted)' }}>Authorization Key</span>
                           <div
                             className="waybill-chip"
                             onClick={() => {
@@ -1063,7 +1063,7 @@ export function OrderDetail() {
                             style={{ marginTop: '2px', cursor: 'pointer' }}
                             title="Click to copy Auth Key"
                           >
-                            <span className="mono" style={{ fontSize: '11px', fontWeight: 700, color: 'var(--ink-secondary)' }}>
+                            <span className="mono" style={{ fontSize: '12px', fontWeight: 700, color: 'var(--ink-secondary)' }}>
                               {order.paymentAuthorizationKey}
                             </span>
                             <Icon name="copy" size={11} />
@@ -1093,7 +1093,7 @@ export function OrderDetail() {
                     ) : order.paymentAggregator === 'GoKwik' || (order.paymentGateway || '').toLowerCase().includes('gokwik') ? (
                       <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                         <img src="/logos/gokwik.png" alt="GoKwik" style={{ height: '14px', objectFit: 'contain' }} />
-                        <span style={{ color: '#94a3b8', fontSize: '11px' }}>via</span>
+                        <span style={{ color: 'var(--muted-light)', fontSize: '12px' }}>via</span>
                         <img src="/logos/easebuzz.png" alt="Easebuzz" style={{ height: '13px', objectFit: 'contain' }} />
                         <span style={{ fontWeight: 600, color: 'var(--ink)' }}>{order.paymentProvider || 'Easebuzz'}</span>
                       </div>
@@ -1171,7 +1171,7 @@ export function OrderDetail() {
                       <Icon name="dollar" size={15} />
                       Issue Shopify Refund ({formatMoney(order.totalAmount, order.currency)})
                     </Button>
-                    <span style={{ fontSize: '10px', color: 'var(--muted)', textAlign: 'center' }}>
+                    <span style={{ fontSize: '12px', color: 'var(--muted)', textAlign: 'center' }}>
                       Processes refund directly via Shopify API. Shopify automatically routes the refund back through {order.paymentAggregator || 'GoKwik'}{order.paymentProvider ? ` / ${order.paymentProvider}` : ''} to the customer.
                     </span>
                   </div>
@@ -1223,7 +1223,7 @@ export function OrderDetail() {
                     disabled={isSyncingTracking}
                     loading={isSyncingTracking}
                     title={isVelocityCourier(order.shipment?.courier, order.shipment?.waybillNumber) ? "Poll Velocity Aggregator in real-time for live tracking, freight debits & COD remittance" : "Poll Delhivery API in real-time for latest parcel tracking events"}
-                    style={{ height: '28px', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                    style={{ height: '28px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
                   >
                     <Icon name="refresh" size={12} />
                     <span>{isSyncingTracking ? 'Syncing Tracking…' : isVelocityCourier(order.shipment?.courier, order.shipment?.waybillNumber) ? 'Sync Velocity Details' : 'Refresh Live Tracking'}</span>
@@ -1235,7 +1235,7 @@ export function OrderDetail() {
                     disabled={isFetchingExternalAwb}
                     loading={isFetchingExternalAwb}
                     title="Check if order was manifested in Delhivery ONE panel or fulfilled in OMS Guru and retrieve AWB"
-                    style={{ height: '28px', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '5px', color: '#7c3aed', borderColor: '#c4b5fd' }}
+                    style={{ height: '28px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '5px', color: 'var(--tone-purple-fg)', borderColor: 'var(--tone-purple-border)' }}
                   >
                     <Icon name="zap" size={12} />
                     <span>{isFetchingExternalAwb ? 'Checking…' : 'Get External AWB'}</span>
@@ -1258,7 +1258,7 @@ export function OrderDetail() {
                     ) : order.shipment.waybillNumber ? (
                       <CopyableBadge text={order.shipment.waybillNumber} monospace={true} />
                     ) : (
-                      <span style={{ fontSize: '13px', color: '#94a3b8' }}>Not assigned</span>
+                      <span style={{ fontSize: '13px', color: 'var(--muted-light)' }}>Not assigned</span>
                     )
                   }
                   icon={isReturnOrder ? 'refresh' : 'tag'}
@@ -1295,7 +1295,7 @@ export function OrderDetail() {
                 {order.shipment.paymentMode === 'COD' && (
                   <StatCard
                     title="COD Ledger"
-                    value={<span style={{ fontSize: '16px', fontWeight: 800, color: '#92400e' }}>{formatMoney(order.shipment.codAmount, order.currency)}</span>}
+                    value={<span style={{ fontSize: '16px', fontWeight: 800, color: 'var(--tone-warning-fg)' }}>{formatMoney(order.shipment.codAmount, order.currency)}</span>}
                     icon="creditCard"
                     accentColor="#d97706"
                     subtext={
@@ -1318,8 +1318,8 @@ export function OrderDetail() {
                         color:
                           order.shipment.shippingCostSource === 'ACTUAL'
                             ? (order.shipment.netBilledCost ?? 0) === 0
-                              ? '#059669'
-                              : '#1e293b'
+                              ? 'var(--tone-success-fg)'
+                              : 'var(--ink)'
                             : 'var(--muted)',
                       }}
                     >
@@ -1351,7 +1351,7 @@ export function OrderDetail() {
 
               {/* Velocity Aggregator Telemetry: Multi-Courier Partner, Freight Charges & COD Remittance */}
               {isVelocityCourier(order.shipment?.courier, order.shipment?.waybillNumber) && (
-                <div style={{ background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: '8px', padding: '12px 16px', marginTop: '14px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', fontSize: '12px' }}>
+                <div style={{ background: 'var(--tone-purple-bg)', border: '1px solid var(--tone-purple-border)', borderRadius: '8px', padding: '12px 16px', marginTop: '14px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', fontSize: '12px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <img
                       src="/logos/velocity.svg"
@@ -1360,36 +1360,36 @@ export function OrderDetail() {
                       onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none' }}
                     />
                     <div>
-                      <div style={{ color: '#6d28d9', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>⚡ Shipping Aggregator</div>
-                      <div style={{ fontWeight: 800, fontSize: '14px', color: '#1e1b4b', marginTop: '2px' }}>Velocity</div>
-                      <div style={{ color: '#6b7280', fontSize: '11px' }}>AWB: <span style={{ fontFamily: 'monospace' }}>{order.shipment.waybillNumber}</span></div>
+                      <div style={{ color: 'var(--tone-purple-fg)', fontWeight: 700, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>⚡ Shipping Aggregator</div>
+                      <div style={{ fontWeight: 800, fontSize: '14px', color: 'var(--ink)', marginTop: '2px' }}>Velocity</div>
+                      <div style={{ color: 'var(--muted-light)', fontSize: '12px' }}>AWB: <span style={{ fontFamily: 'monospace' }}>{order.shipment.waybillNumber}</span></div>
                     </div>
                   </div>
                   <div>
-                    <div style={{ color: '#6d28d9', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>💰 Freight Billing</div>
-                    <div style={{ fontWeight: 800, fontSize: '14px', color: '#1e1b4b', marginTop: '2px' }}>
+                    <div style={{ color: 'var(--tone-purple-fg)', fontWeight: 700, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>💰 Freight Billing</div>
+                    <div style={{ fontWeight: 800, fontSize: '14px', color: 'var(--ink)', marginTop: '2px' }}>
                       {order.shipment.netBilledCost != null && order.shipment.netBilledCost > 0
                         ? formatMoney(order.shipment.netBilledCost, order.currency)
                         : order.shipment.forwardCharge != null
                         ? `${formatMoney(order.shipment.forwardCharge, order.currency)} (Est)`
                         : 'Pending Audit'}
                     </div>
-                    <div style={{ color: '#6b7280', fontSize: '11px' }}>
+                    <div style={{ color: 'var(--muted-light)', fontSize: '12px' }}>
                       Status: <strong>{order.shipment.billingStatus || 'ESTIMATED'}</strong>
                       {order.shipment.totalDebited ? ` · Debited: ${formatMoney(order.shipment.totalDebited, order.currency)}` : ''}
                     </div>
                   </div>
                   {order.shipment.paymentMode === 'COD' && (
                     <div>
-                      <div style={{ color: '#6d28d9', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>🏦 COD Remittance & Settlement</div>
-                      <div style={{ fontWeight: 800, fontSize: '14px', color: order.shipment.codRemitted ? '#047857' : '#b45309', marginTop: '2px' }}>
+                      <div style={{ color: 'var(--tone-purple-fg)', fontWeight: 700, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>🏦 COD Remittance & Settlement</div>
+                      <div style={{ fontWeight: 800, fontSize: '14px', color: order.shipment.codRemitted ? 'var(--tone-success-fg)' : 'var(--tone-warning-fg)', marginTop: '2px' }}>
                         {order.shipment.codRemitted
                           ? `Remitted: ${formatMoney(order.shipment.codRemittedAmount ?? order.shipment.codAmount ?? 0, order.currency)}`
                           : order.shipment.codCollected
                           ? 'Collected · Bank Settlement Pending'
                           : 'Awaiting Delivery Collection'}
                       </div>
-                      <div style={{ color: '#6b7280', fontSize: '11px' }}>
+                      <div style={{ color: 'var(--muted-light)', fontSize: '12px' }}>
                         {order.shipment.codRemittanceRef ? (
                           <>Bank UTR / Ref: <CopyableBadge text={order.shipment.codRemittanceRef} monospace={true} /></>
                         ) : (
@@ -1410,7 +1410,7 @@ export function OrderDetail() {
                     target="_blank"
                     rel="noopener noreferrer"
                     title={`Open Return tracking on ${order.returns?.[0]?.carrier || 'Velocity'}`}
-                    style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: '#7c3aed', borderColor: '#c4b5fd', background: '#f5f3ff', fontWeight: 600 }}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: 'var(--tone-purple-fg)', borderColor: 'var(--tone-purple-border)', background: 'var(--tone-purple-bg)', fontWeight: 600 }}
                   >
                     <Icon name="refresh" size={15} />
                     <span>Track Return AWB ({returnAwb.slice(-6)})</span>
@@ -1434,7 +1434,7 @@ export function OrderDetail() {
                 {hasCustomerDelivery(order) && !(order.returns || []).some((r) => !['REFUNDED', 'CANCELLED'].includes(r.returnStatus)) && (
                   <Button
                     className="button-secondary"
-                    style={{ borderColor: '#c4b5fd', color: '#6d28d9', background: '#f5f3ff', fontWeight: 600 }}
+                    style={{ borderColor: 'var(--tone-purple-border)', color: 'var(--tone-purple-fg)', background: 'var(--tone-purple-bg)', fontWeight: 600 }}
                     onClick={() => setShowExchangeModal(true)}
                     title="Create size exchange request for this delivered order"
                   >
@@ -1502,12 +1502,12 @@ export function OrderDetail() {
               </div>
 
               {(order.shipment.epodStoragePath || order.shipment.epodReceivedBy) && (
-                <div style={{ background: '#f0fdf4', border: '1px solid #86efac', borderRadius: '8px', padding: '10px 14px', marginTop: '12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#166534' }}>
+                <div style={{ background: 'var(--tone-success-bg)', border: '1px solid var(--tone-success-border)', borderRadius: '8px', padding: '10px 14px', marginTop: '12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: 'var(--tone-success-fg)' }}>
                     <Icon name="check" size={16} />
                     <div>
                       <strong>Electronic Proof of Delivery (EPOD) Verified</strong>
-                      <div style={{ fontSize: '11px', color: '#15803d', marginTop: '1px' }}>
+                      <div style={{ fontSize: '12px', color: 'var(--tone-success-fg)', marginTop: '1px' }}>
                         {order.shipment.epodReceivedBy ? `Received by: ${order.shipment.epodReceivedBy}` : 'Signed & Delivered'}
                         {order.shipment.epodReceivedAt && ` • ${new Date(order.shipment.epodReceivedAt).toLocaleString('en-IN')}`}
                       </div>
@@ -1524,7 +1524,7 @@ export function OrderDetail() {
 
               {showEditDetails && order.shipment?.waybillNumber && (
                 <div style={{ background: 'var(--line-subtle)', border: '1px solid var(--line)', borderRadius: '8px', padding: '12px', marginTop: '10px', display: 'grid', gap: '8px' }}>
-                  <span style={{ fontSize: '11px', color: 'var(--muted)' }}>
+                  <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
                     {isVelocityCourier(order.shipment?.courier, order.shipment?.waybillNumber)
                       ? 'Pushes corrected details to Velocity Shipping Network (Edit Order API).'
                       : 'Pushes corrected details to Delhivery (Edit Order API — allowed while Manifested / In Transit / Pending).'}
@@ -1615,7 +1615,7 @@ export function OrderDetail() {
               eyebrow="GoKwik Buyer Intelligence"
               title="RTO Risk Assessment"
               action={
-                <span className={`rto-risk-pill ${(order.rtoRiskLevel || 'MEDIUM').toLowerCase()}`} style={{ fontSize: '11px', padding: '2px 8px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                <span className={`rto-risk-pill ${(order.rtoRiskLevel || 'MEDIUM').toLowerCase()}`} style={{ fontSize: '12px', padding: '2px 8px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
                   {order.rtoRiskLevel === 'LOW'
                     ? '✓ Low RTO Risk'
                     : order.rtoRiskLevel === 'HIGH'
@@ -1628,11 +1628,11 @@ export function OrderDetail() {
               <div style={{ background: 'var(--line-subtle)', border: '1px solid var(--line)', borderRadius: '7px', padding: '10px 12px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                   <span className="detail-label">GoKwik Delivery Track Record</span>
-                  <span style={{ fontSize: '11px', fontWeight: 800, color: (order.deliverOrderCount || 0) >= 2 ? '#047857' : '#b45309' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 800, color: (order.deliverOrderCount || 0) >= 2 ? 'var(--tone-success-fg)' : 'var(--tone-warning-fg)' }}>
                     {order.deliverOrderCount ?? 0} Prior Deliveries
                   </span>
                 </div>
-                <p style={{ margin: 0, fontSize: '11.5px', color: 'var(--ink-secondary)', lineHeight: 1.45 }}>
+                <p style={{ margin: 0, fontSize: '12px', color: 'var(--ink-secondary)', lineHeight: 1.45 }}>
                   {order.rtoRiskReason ||
                     (order.paymentMethod !== 'COD'
                       ? 'Prepaid order captured upfront · Zero RTO risk'
@@ -1649,7 +1649,7 @@ export function OrderDetail() {
                 </div>
                 <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '6px', padding: '8px 10px' }}>
                   <span className="detail-label">COD Confirmation</span>
-                  <strong style={{ fontSize: '12px', color: isCodConf ? '#047857' : 'var(--muted)' }}>
+                  <strong style={{ fontSize: '12px', color: isCodConf ? 'var(--tone-success-fg)' : 'var(--muted)' }}>
                     {isCodConf ? '✓ Confirmed' : order.paymentMethod === 'COD' ? 'Pending' : 'N/A (Prepaid)'}
                   </strong>
                 </div>
@@ -1688,23 +1688,23 @@ export function OrderDetail() {
                       else if (lower.includes('refund')) modifier = 'tag-refund'
 
                       return (
-                        <span key={`${tag}-${index}`} className={`shopify-tag-pill ${modifier}`} style={{ fontSize: '11px', padding: '3px 9px' }}>
+                        <span key={`${tag}-${index}`} className={`shopify-tag-pill ${modifier}`} style={{ fontSize: '12px', padding: '3px 9px' }}>
                           {tag}
                         </span>
                       )
                     })}
                   </div>
                 ) : (
-                  <span style={{ fontSize: '12px', color: '#94a3b8' }}>No tags assigned on Shopify</span>
+                  <span style={{ fontSize: '12px', color: 'var(--muted-light)' }}>No tags assigned on Shopify</span>
                 )}
               </div>
 
-              <div style={{ background: 'var(--line-subtle)', border: '1px solid var(--line)', borderRadius: '8px', padding: '10px 12px', fontSize: '11px', color: 'var(--ink-secondary)', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <div style={{ background: 'var(--line-subtle)', border: '1px solid var(--line)', borderRadius: '8px', padding: '10px 12px', fontSize: '12px', color: 'var(--ink-secondary)', display: 'flex', flexDirection: 'column', gap: '4px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontWeight: 700, color: 'var(--ink)' }}>Delhivery ONE Channel Link</span>
-                  <span style={{ color: '#16a34a', fontWeight: 700 }}>● Active</span>
+                  <span style={{ color: 'var(--tone-success-fg)', fontWeight: 700 }}>● Active</span>
                 </div>
-                <p style={{ margin: 0, fontSize: '10.5px', color: 'var(--muted)', lineHeight: 1.4 }}>
+                <p style={{ margin: 0, fontSize: '12px', color: 'var(--muted)', lineHeight: 1.4 }}>
                   When Shopify is linked in Delhivery ONE, dispatches triggered from this OMS automatically update Shopify fulfillment tracking with carrier <strong>Delhivery</strong> and append the generated AWB to order tags.
                 </p>
               </div>
@@ -1748,8 +1748,8 @@ export function OrderDetail() {
             </div>
             <div>
               <strong style={{ fontSize: '14px', color: 'var(--ink)' }}>{order.customerName}</strong>
-              <span style={{ fontSize: '11.5px', color: 'var(--ink-secondary)' }}>{order.customerPhone || 'No phone'}</span>
-              <span style={{ fontSize: '11.5px', color: 'var(--muted)' }}>{order.customerEmail ?? 'No email provided'}</span>
+              <span style={{ fontSize: '12px', color: 'var(--ink-secondary)' }}>{order.customerPhone || 'No phone'}</span>
+              <span style={{ fontSize: '12px', color: 'var(--muted)' }}>{order.customerEmail ?? 'No email provided'}</span>
             </div>
           </div>
           <div className="address-card">
@@ -1765,10 +1765,10 @@ export function OrderDetail() {
             <Icon name="pin" size={16} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <strong style={{ fontSize: '12.5px', color: 'var(--ink)' }}>{order.customerAddress}</strong>
-              <span style={{ fontSize: '11.5px', color: 'var(--ink-secondary)', marginTop: '3px', display: 'block' }}>
+              <span style={{ fontSize: '12px', color: 'var(--ink-secondary)', marginTop: '3px', display: 'block' }}>
                 {order.customerCity}, {order.customerState} — <strong className="mono">{order.customerPincode}</strong>
               </span>
-              <span style={{ fontSize: '11px', color: 'var(--muted)' }}>{order.customerCountry}</span>
+              <span style={{ fontSize: '12px', color: 'var(--muted)' }}>{order.customerCountry}</span>
             </div>
           </div>
           <div className="customer-quick-actions">
@@ -1861,7 +1861,7 @@ export function OrderDetail() {
               </div>
             )}
 
-            <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '10px 12px', fontSize: '11px', color: '#166534', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div style={{ background: 'var(--tone-success-bg)', border: '1px solid var(--tone-success-border)', borderRadius: '8px', padding: '10px 12px', fontSize: '12px', color: 'var(--tone-success-fg)', display: 'flex', alignItems: 'center', gap: '8px' }}>
               <Icon name="check" size={16} />
               <span>Shopify order will be marked cancelled and tagged with CANCELLED.</span>
             </div>
@@ -2018,7 +2018,7 @@ export function OrderDetail() {
                     {order.shipment.trackingStatus || 'Failed Delivery Attempt'}
                   </span>
                 </div>
-                <div style={{ fontSize: '11.5px' }}>
+                <div style={{ fontSize: '12px' }}>
                   Location: {order.shipment.trackingLocation || 'Destination Delivery Center'}
                 </div>
               </div>
@@ -2030,8 +2030,8 @@ export function OrderDetail() {
                 <label
                   style={{
                     flex: 1,
-                    border: ndrActionType === 'RE-ATTEMPT' ? '2px solid #2563eb' : '1px solid #cbd5e1',
-                    background: ndrActionType === 'RE-ATTEMPT' ? '#eff6ff' : 'var(--panel)',
+                    border: ndrActionType === 'RE-ATTEMPT' ? '2px solid #2563eb' : '1px solid var(--border-strong)',
+                    background: ndrActionType === 'RE-ATTEMPT' ? 'var(--tone-info-bg)' : 'var(--panel)',
                     borderRadius: '8px',
                     padding: '12px',
                     cursor: 'pointer',
@@ -2047,7 +2047,7 @@ export function OrderDetail() {
                     style={{ marginRight: '8px' }}
                   />
                   <strong>🔄 Re-attempt Delivery</strong>
-                  <p style={{ margin: '4px 0 0 0', fontSize: '11px', color: 'var(--ink-secondary)' }}>
+                  <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: 'var(--ink-secondary)' }}>
                     Request courier to re-attempt delivery tomorrow & notify customer via WhatsApp.
                   </p>
                 </label>
@@ -2055,8 +2055,8 @@ export function OrderDetail() {
                 <label
                   style={{
                     flex: 1,
-                    border: ndrActionType === 'RTO' ? '2px solid #dc2626' : '1px solid #cbd5e1',
-                    background: ndrActionType === 'RTO' ? '#fef2f2' : 'var(--panel)',
+                    border: ndrActionType === 'RTO' ? '2px solid #dc2626' : '1px solid var(--border-strong)',
+                    background: ndrActionType === 'RTO' ? 'var(--tone-danger-bg)' : 'var(--panel)',
                     borderRadius: '8px',
                     padding: '12px',
                     cursor: 'pointer',
@@ -2072,7 +2072,7 @@ export function OrderDetail() {
                     style={{ marginRight: '8px' }}
                   />
                   <strong>↩️ Return to Origin (RTO)</strong>
-                  <p style={{ margin: '4px 0 0 0', fontSize: '11px', color: 'var(--ink-secondary)' }}>
+                  <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: 'var(--ink-secondary)' }}>
                     Package will be returned to our Surat warehouse. (Prepaid orders get auto-refunded upon warehouse delivery).
                   </p>
                 </label>
@@ -2132,7 +2132,7 @@ export function OrderDetail() {
         <div className="modal-card" role="dialog" aria-modal="true" aria-label="Send WhatsApp message" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '540px' }}>
           <div className="modal-header">
             <div className="modal-header-left">
-              <div className="modal-icon-badge" style={{ background: '#dcfce7', color: '#16a34a' }}>
+              <div className="modal-icon-badge" style={{ background: 'var(--tone-success-bg)', color: 'var(--tone-success-fg)' }}>
                 <Icon name="message" size={20} />
               </div>
               <div>
@@ -2189,7 +2189,7 @@ export function OrderDetail() {
                 />
               </FormField>
             ) : (
-              <div style={{ background: 'var(--line-subtle)', border: '1px solid var(--line)', borderRadius: '8px', padding: '12px', fontSize: '11.5px', color: 'var(--ink-secondary)' }}>
+              <div style={{ background: 'var(--line-subtle)', border: '1px solid var(--line)', borderRadius: '8px', padding: '12px', fontSize: '12px', color: 'var(--ink-secondary)' }}>
                 <strong style={{ color: 'var(--ink)', display: 'block', marginBottom: '4px' }}>
                   ℹ️ Template Preview
                 </strong>
@@ -2221,7 +2221,7 @@ export function OrderDetail() {
               </div>
             )}
 
-            <div style={{ background: 'var(--tone-success-bg)', border: '1px solid var(--tone-success-border)', borderRadius: '8px', padding: '10px 12px', fontSize: '11px', color: 'var(--tone-success-fg)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div style={{ background: 'var(--tone-success-bg)', border: '1px solid var(--tone-success-border)', borderRadius: '8px', padding: '10px 12px', fontSize: '12px', color: 'var(--tone-success-fg)', display: 'flex', alignItems: 'center', gap: '8px' }}>
               <Icon name="check" size={16} />
               <span>Sent via KwikEngage Official WhatsApp Cloud & synced with OMS Notification history.</span>
             </div>
@@ -2339,10 +2339,10 @@ export function OrderDetail() {
                             <div style={{ fontWeight: 700, fontSize: '15px', color: 'var(--ink)' }}>
                               {opt.rate > 0 ? formatMoney(opt.rate) : 'Live Rate'}
                             </div>
-                            <span style={{ fontSize: '11px', color: 'var(--tone-success-fg)' }}>Serviceable</span>
+                            <span style={{ fontSize: '12px', color: 'var(--tone-success-fg)' }}>Serviceable</span>
                           </>
                         ) : (
-                          <span style={{ fontSize: '11px', color: 'var(--tone-danger-fg)' }}>Unserviceable</span>
+                          <span style={{ fontSize: '12px', color: 'var(--tone-danger-fg)' }}>Unserviceable</span>
                         )}
                       </div>
                     </label>
@@ -2352,7 +2352,7 @@ export function OrderDetail() {
             )}
           </div>
 
-          <div className="modal-footer" style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', padding: '16px 20px', borderTop: '1px solid var(--color-border, #e2e8f0)' }}>
+          <div className="modal-footer" style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', padding: '16px 20px', borderTop: '1px solid var(--line)' }}>
             <button
               type="button"
               className="button-secondary"
@@ -2447,7 +2447,7 @@ export function OrderDetail() {
             </div>
           </div>
 
-          <div className="modal-footer" style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', padding: '16px 20px', borderTop: '1px solid var(--color-border, #e2e8f0)' }}>
+          <div className="modal-footer" style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', padding: '16px 20px', borderTop: '1px solid var(--line)' }}>
             <button
               type="button"
               className="button-secondary"
@@ -2550,7 +2550,7 @@ function DetailRow({
         {copyable && typeof value === 'string' && (
           <button
             onClick={() => onCopy && onCopy(value)}
-            style={{ background: 'none', border: 0, padding: 0, color: '#94a3b8', cursor: 'pointer', display: 'grid', placeItems: 'center' }}
+            style={{ background: 'none', border: 0, padding: 0, color: 'var(--muted-light)', cursor: 'pointer', display: 'grid', placeItems: 'center' }}
             title="Copy value"
           >
             <Icon name="copy" size={13} />
@@ -2659,7 +2659,7 @@ function AccountTrailPanel({
       <PanelHeading eyebrow="Financial audit" title="COD approval & refund trail" />
       <p className="panel-description">A permanent, user-attributed trail of COD approval, return creation, and refunds. Manual entries record a payout already sent; they never initiate a transfer.</p>
       {isRefunded ? (
-        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '6px 12px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '6px', color: '#15803d', fontSize: '12px', fontWeight: 600 }}>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '6px 12px', background: 'var(--tone-success-bg)', border: '1px solid var(--tone-success-border)', borderRadius: '6px', color: 'var(--tone-success-fg)', fontSize: '12px', fontWeight: 600 }}>
           <Icon name="check" size={15} />
           Order is fully refunded (Single-refund invariant satisfied)
         </div>
@@ -2858,7 +2858,7 @@ function OrderReturnRefundOverviewCard({
             <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: 'var(--ink)' }}>
               Reverse Logistics & Refund Details
             </h3>
-            <span style={{ fontSize: '11px', color: 'var(--tone-info-fg)' }}>
+            <span style={{ fontSize: '12px', color: 'var(--tone-info-fg)' }}>
               {returns.length === 1 ? '1 Return Record linked to this order' : `${returns.length} Return Records linked`}
             </span>
           </div>
@@ -2867,7 +2867,7 @@ function OrderReturnRefundOverviewCard({
           type="button"
           className="button button-secondary button-small"
           onClick={onOpenReturns}
-          style={{ fontSize: '11.5px', fontWeight: 600 }}
+          style={{ fontSize: '12px', fontWeight: 600 }}
         >
           View in Returns Tab →
         </button>
@@ -2893,7 +2893,7 @@ function OrderReturnRefundOverviewCard({
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px', marginBottom: '12px' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontSize: '10.5px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--muted)' }}>
+                    <span style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--muted)' }}>
                       Reverse AWB ({carrier}):
                     </span>
                     {ret.returnWaybillNumber ? (
@@ -2911,7 +2911,7 @@ function OrderReturnRefundOverviewCard({
                       <span className="mono" style={{ fontSize: '12px', color: 'var(--muted)' }}>Waybill pending</span>
                     )}
                   </div>
-                  <div style={{ fontSize: '11px', color: 'var(--muted)' }}>
+                  <div style={{ fontSize: '12px', color: 'var(--muted)' }}>
                     Reason: <strong>{ret.returnReason || 'Customer return'}</strong>
                     {ret.receivedAt && ` · Arrived at Surat warehouse: ${formatDate(ret.receivedAt)}`}
                   </div>
@@ -2929,7 +2929,7 @@ function OrderReturnRefundOverviewCard({
 
               {returnedItems.length > 0 && (
                 <div style={{ marginBottom: '12px', background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '7px', padding: '10px 12px' }}>
-                  <div style={{ fontSize: '10.5px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted)', marginBottom: '8px' }}>
+                  <div style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted)', marginBottom: '8px' }}>
                     Returned Item(s)
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -2949,7 +2949,7 @@ function OrderReturnRefundOverviewCard({
                               <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--ink)' }}>
                                 {orderItem?.title || 'Returned Item'}
                               </div>
-                              <div style={{ fontSize: '11px', color: 'var(--muted)' }}>
+                              <div style={{ fontSize: '12px', color: 'var(--muted)' }}>
                                 SKU: <span className="mono">{orderItem?.sku || 'N/A'}</span>
                                 {orderItem?.variantTitle && ` · Size: ${orderItem.variantTitle}`}
                               </div>
@@ -2959,7 +2959,7 @@ function OrderReturnRefundOverviewCard({
                             <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--ink)' }}>
                               {item.quantity} pc{item.quantity > 1 ? 's' : ''}
                             </div>
-                            <div style={{ fontSize: '11px', color: 'var(--muted)' }}>
+                            <div style={{ fontSize: '12px', color: 'var(--muted)' }}>
                               {orderItem?.price ? formatMoney(orderItem.price, order.currency) : ''}
                             </div>
                           </div>
@@ -2985,12 +2985,12 @@ function OrderReturnRefundOverviewCard({
                         <Icon name="check" size={16} />
                         <span>Refund Processed: {formatMoney(ret.refundAmount || order.totalAmount, order.currency)}</span>
                       </div>
-                      <div style={{ fontSize: '11px', color: 'var(--tone-success-fg)', marginTop: '3px' }}>
+                      <div style={{ fontSize: '12px', color: 'var(--tone-success-fg)', marginTop: '3px' }}>
                         {ret.shopifyRefundId && <span>Shopify Refund ID: <strong className="mono">{ret.shopifyRefundId}</strong> · </span>}
                         {ret.refundProcessedAt && <span>Date: {formatDate(ret.refundProcessedAt)}</span>}
                       </div>
                     </div>
-                    <span style={{ fontSize: '11px', color: 'var(--tone-success-fg)', fontWeight: 600 }}>
+                    <span style={{ fontSize: '12px', color: 'var(--tone-success-fg)', fontWeight: 600 }}>
                       Credited to customer payment source
                     </span>
                   </div>
@@ -3000,7 +3000,7 @@ function OrderReturnRefundOverviewCard({
                       <div style={{ fontSize: '12.5px', fontWeight: 700, color: isReceived ? 'var(--tone-warning-fg)' : 'var(--ink-secondary)' }}>
                         {isReceived ? 'Return Received at Warehouse · Refund Pending' : 'Return in Transit'}
                       </div>
-                      <div style={{ fontSize: '11px', color: isReceived ? 'var(--tone-warning-fg)' : 'var(--muted)', marginTop: '2px' }}>
+                      <div style={{ fontSize: '12px', color: isReceived ? 'var(--tone-warning-fg)' : 'var(--muted)', marginTop: '2px' }}>
                         {isCod
                           ? 'Cash on Delivery order: Collect customer bank/UPI details and transfer refund manually.'
                           : 'Prepaid order: When QC passes, refund is processed automatically via Shopify to customer’s original payment method.'}
@@ -3014,7 +3014,7 @@ function OrderReturnRefundOverviewCard({
                             type="button"
                             className="button button-secondary"
                             onClick={onOpenPayments}
-                            style={{ fontSize: '11.5px', padding: '6px 12px' }}
+                            style={{ fontSize: '12px', padding: '6px 12px' }}
                           >
                             Record Manual Bank Transfer
                           </button>
@@ -3138,7 +3138,7 @@ function ReturnForm({
               <h4 style={{ margin: 0, fontSize: '13.5px', fontWeight: 700, color: 'var(--ink)' }}>
                 Initiate Return for Remaining Item(s)
               </h4>
-              <span style={{ fontSize: '11px', color: 'var(--ink-secondary)' }}>
+              <span style={{ fontSize: '12px', color: 'var(--ink-secondary)' }}>
                 {availableItems.length} item{availableItems.length > 1 ? 's' : ''} available to return
               </span>
             </div>
@@ -3148,10 +3148,10 @@ function ReturnForm({
             This opens a Shopify return on the order and books the reverse pickup the way Delhivery ONE “Initiate Return” does: same sale order id, the delivered forward AWB as the reference, and the return location set to the Surat warehouse. Delhivery assigns the reverse waybill. Pickup and transit update from carrier scans.
           </p>
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', padding: '12px 14px', background: '#f5f3ff', borderRadius: '8px', border: '1px solid #ddd6fe' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', padding: '12px 14px', background: 'var(--tone-purple-bg)', borderRadius: '8px', border: '1px solid var(--tone-purple-border)' }}>
             <div>
-              <strong style={{ color: '#5b21b6', fontSize: '13px' }}>Customer wants to change size?</strong>
-              <p style={{ margin: 0, fontSize: '12px', color: '#6d28d9' }}>Schedule reverse pickup of old size & dispatch replacement size via Velocity.</p>
+              <strong style={{ color: 'var(--tone-purple-fg)', fontSize: '13px' }}>Customer wants to change size?</strong>
+              <p style={{ margin: 0, fontSize: '12px', color: 'var(--tone-purple-fg)' }}>Schedule reverse pickup of old size & dispatch replacement size via Velocity.</p>
             </div>
             <button
               type="button"
@@ -3382,7 +3382,7 @@ function ActiveReturnCard({ record, order }: { record: ReturnRecord; order?: Ord
             {record.forwardWaybill ? ` Forward AWB ${record.forwardWaybill}.` : ''}
             {record.shopifyReturnId ? ` Shopify return ${record.shopifyReturnId.split('/').pop()}.` : ''}
           </p>
-          <p className="cell-muted" style={{ margin: 0, fontSize: '11.5px' }}>
+          <p className="cell-muted" style={{ margin: 0, fontSize: '12px' }}>
             Reason: <strong>{record.returnReason}</strong>
             {record.receivedAt && ` · Received at warehouse: ${formatDate(record.receivedAt)}`}
           </p>
@@ -3401,13 +3401,13 @@ function ActiveReturnCard({ record, order }: { record: ReturnRecord; order?: Ord
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
           <StatusBadge status={record.returnStatus} />
-          {record.trackingStatus ? <span className="cell-muted" style={{ fontSize: '11px' }}>{record.trackingStatus}{record.trackingLocation ? ` · ${record.trackingLocation}` : ''}</span> : null}
+          {record.trackingStatus ? <span className="cell-muted" style={{ fontSize: '12px' }}>{record.trackingStatus}{record.trackingLocation ? ` · ${record.trackingLocation}` : ''}</span> : null}
         </div>
       </div>
 
       {returnedItems.length > 0 && (
-        <div style={{ background: '#f8fafc', border: '1px solid #f1f5f9', borderRadius: '6px', padding: '10px' }}>
-          <div style={{ fontSize: '10.5px', fontWeight: 700, textTransform: 'uppercase', color: '#475569', marginBottom: '6px' }}>
+        <div style={{ background: 'var(--surface-elevated)', border: '1px solid var(--line)', borderRadius: '6px', padding: '10px' }}>
+          <div style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted)', marginBottom: '6px' }}>
             Returned Items ({returnedItems.length})
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -3446,7 +3446,7 @@ function ActiveReturnCard({ record, order }: { record: ReturnRecord; order?: Ord
               <Icon name="check" size={15} />
               <span>Refund Processed: {formatMoney(record.refundAmount || order?.totalAmount || 0)}</span>
             </div>
-            <div style={{ fontSize: '11px', color: 'var(--tone-success-fg)', marginTop: '2px' }}>
+            <div style={{ fontSize: '12px', color: 'var(--tone-success-fg)', marginTop: '2px' }}>
               {record.shopifyRefundId && <span>Shopify Refund ID: <strong className="mono">{record.shopifyRefundId}</strong> · </span>}
               {record.refundProcessedAt && <span>Date: {formatDate(record.refundProcessedAt)}</span>}
             </div>
@@ -3457,7 +3457,7 @@ function ActiveReturnCard({ record, order }: { record: ReturnRecord; order?: Ord
               <div style={{ fontSize: '12px', fontWeight: 700, color: isReceived ? 'var(--tone-warning-fg)' : 'var(--ink-secondary)' }}>
                 {isReceived ? 'Return Received at Warehouse · Refund Pending' : 'Return in Transit'}
               </div>
-              <div style={{ fontSize: '11px', color: isReceived ? 'var(--tone-warning-fg)' : 'var(--muted)' }}>
+              <div style={{ fontSize: '12px', color: isReceived ? 'var(--tone-warning-fg)' : 'var(--muted)' }}>
                 {isCod
                   ? 'COD Order: Transfer refund manually to customer UPI/Bank.'
                   : 'Prepaid Order: Automatic refund will credit customer payment source.'}
@@ -3469,7 +3469,7 @@ function ActiveReturnCard({ record, order }: { record: ReturnRecord; order?: Ord
                 className="button button-primary"
                 disabled={refunding}
                 onClick={handleProcessRefund}
-                style={{ fontSize: '11.5px', padding: '5px 12px', background: 'var(--emerald-solid)', borderColor: 'var(--emerald-solid)', color: '#ffffff', cursor: 'pointer' }}
+                style={{ fontSize: '12px', padding: '5px 12px', background: 'var(--emerald-solid)', borderColor: 'var(--emerald-solid)', color: '#ffffff', cursor: 'pointer' }}
               >
                 {refunding ? 'Refunding…' : 'Approve QC & Issue Refund'}
               </button>
@@ -3767,8 +3767,8 @@ function ExchangeModal({
                   alignItems: 'center',
                   justifyContent: 'space-between',
                   padding: '10px 14px',
-                  background: '#f5f3ff',
-                  border: '1px solid #ddd6fe',
+                  background: 'var(--tone-purple-bg)',
+                  border: '1px solid var(--tone-purple-border)',
                   borderRadius: '8px',
                   gap: '12px'
                 }}>
@@ -3778,24 +3778,24 @@ function ExchangeModal({
                         {selectedSkuOption.sku}
                       </span>
                       {selectedSkuOption.price ? (
-                        <span style={{ fontSize: '12.5px', fontWeight: 600, color: '#059669' }}>
+                        <span style={{ fontSize: '12.5px', fontWeight: 600, color: 'var(--tone-success-fg)' }}>
                           ₹{selectedSkuOption.price}
                         </span>
                       ) : null}
                       {typeof selectedSkuOption.inventoryQuantity === 'number' && (
                         <span style={{
-                          fontSize: '11px',
+                          fontSize: '12px',
                           padding: '1px 6px',
                           borderRadius: '4px',
-                          background: selectedSkuOption.inventoryQuantity > 0 ? '#dcfce7' : '#fee2e2',
-                          color: selectedSkuOption.inventoryQuantity > 0 ? '#15803d' : '#b91c1c',
+                          background: selectedSkuOption.inventoryQuantity > 0 ? 'var(--tone-success-bg)' : 'var(--tone-danger-bg)',
+                          color: selectedSkuOption.inventoryQuantity > 0 ? 'var(--tone-success-fg)' : 'var(--tone-danger-fg)',
                           fontWeight: 600
                         }}>
                           {selectedSkuOption.inventoryQuantity > 0 ? `In Stock (${selectedSkuOption.inventoryQuantity})` : 'Out of Stock'}
                         </span>
                       )}
                     </div>
-                    <div style={{ fontSize: '13px', fontWeight: 600, color: '#1e293b', marginTop: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--ink)', marginTop: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {selectedSkuOption.title} {selectedSkuOption.variantTitle && selectedSkuOption.variantTitle !== 'Default Title' ? `(${selectedSkuOption.variantTitle})` : ''}
                     </div>
                   </div>
@@ -3831,7 +3831,7 @@ function ExchangeModal({
                       autoComplete="off"
                     />
                     {loadingSkus && (
-                      <div style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', color: '#7c3aed', fontSize: '12px', pointerEvents: 'none' }}>
+                      <div style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--tone-purple-fg)', fontSize: '12px', pointerEvents: 'none' }}>
                         <span className="spin" style={{ display: 'inline-flex' }}>
                           <Icon name="refresh" size={14} />
                         </span>
@@ -3889,11 +3889,11 @@ function ExchangeModal({
                           >
                             <div style={{ minWidth: 0, flex: 1 }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                <span className="mono" style={{ background: 'var(--tone-purple-bg)', color: 'var(--tone-purple-fg)', padding: '1px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: 700 }}>
+                                <span className="mono" style={{ background: 'var(--tone-purple-bg)', color: 'var(--tone-purple-fg)', padding: '1px 6px', borderRadius: '4px', fontSize: '12px', fontWeight: 700 }}>
                                   {item.sku}
                                 </span>
                                 {item.variantTitle && item.variantTitle !== 'Default Title' && (
-                                  <span style={{ fontSize: '11.5px', color: 'var(--muted)', fontWeight: 600 }}>
+                                  <span style={{ fontSize: '12px', color: 'var(--muted)', fontWeight: 600 }}>
                                     Size: {item.variantTitle}
                                   </span>
                                 )}
@@ -3909,7 +3909,7 @@ function ExchangeModal({
                                 </div>
                               ) : null}
                               {typeof item.inventoryQuantity === 'number' && (
-                                <div style={{ fontSize: '10.5px', color: item.inventoryQuantity > 0 ? 'var(--tone-success-fg)' : 'var(--tone-danger-fg)' }}>
+                                <div style={{ fontSize: '12px', color: item.inventoryQuantity > 0 ? 'var(--tone-success-fg)' : 'var(--tone-danger-fg)' }}>
                                   {item.inventoryQuantity > 0 ? `${item.inventoryQuantity} left` : 'Out of stock'}
                                 </div>
                               )}
@@ -3971,8 +3971,8 @@ function ExchangeModal({
             </FormField>
           </div>
 
-          <div style={{ padding: '10px 14px', borderRadius: '8px', background: '#f8fafc', border: '1px solid #e2e8f0', fontSize: '12px', color: '#475569', lineHeight: 1.5 }}>
-            <strong style={{ color: '#1e293b', display: 'block', marginBottom: '2px' }}>How this exchange works:</strong>
+          <div style={{ padding: '10px 14px', borderRadius: '8px', background: 'var(--surface-elevated)', border: '1px solid var(--line)', fontSize: '12px', color: 'var(--muted)', lineHeight: 1.5 }}>
+            <strong style={{ color: 'var(--ink)', display: 'block', marginBottom: '2px' }}>How this exchange works:</strong>
             1. <strong>Reverse Leg:</strong> {carrier} books a doorstep pickup from the customer to Surat Warehouse.<br />
             2. <strong>Forward Leg:</strong> {dispatchMode === 'IMMEDIATE' ? (isSkuExchange ? 'Replacement SKU parcel will be manifested immediately with a fresh shipping label.' : 'Replacement size will be manifested immediately with a fresh shipping label.') : 'Replacement will be dispatched once courier scans the return parcel.'}<br />
             3. <strong>Shopify:</strong> A Return with replacement exchange item is registered, linking both journeys without refunding.
@@ -4018,7 +4018,7 @@ function ActiveExchangeCard({ record, orderName }: { record: ReturnRecord; order
 
         <div className="split-layout-2" style={{ gap: '16px', marginTop: '10px', padding: '10px 14px', background: 'var(--surface-elevated)', borderRadius: '8px', border: '1px solid var(--line)' }}>
           <div>
-            <div style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 600 }}>1. Reverse Pickup (Old Item)</div>
+            <div style={{ fontSize: '12px', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 600 }}>1. Reverse Pickup (Old Item)</div>
             <div style={{ marginTop: '4px' }}>
               <strong className="mono" style={{ fontSize: '13px', color: 'var(--ink)' }}>{record.returnWaybillNumber || 'Pending AWB'}</strong>
               <div style={{ fontSize: '12px', color: 'var(--ink-secondary)', marginTop: '2px' }}>
@@ -4031,7 +4031,7 @@ function ActiveExchangeCard({ record, orderName }: { record: ReturnRecord; order
                 target="_blank"
                 rel="noopener noreferrer"
                 className="button button-secondary"
-                style={{ marginTop: '8px', fontSize: '11px', padding: '3px 8px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                style={{ marginTop: '8px', fontSize: '12px', padding: '3px 8px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
               >
                 <Icon name="route" size={13} />
                 <span>Track Reverse</span>
@@ -4040,7 +4040,7 @@ function ActiveExchangeCard({ record, orderName }: { record: ReturnRecord; order
           </div>
 
           <div>
-            <div style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 600 }}>2. Forward Dispatch (Replacement)</div>
+            <div style={{ fontSize: '12px', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 600 }}>2. Forward Dispatch (Replacement)</div>
             <div style={{ marginTop: '4px' }}>
               <strong className="mono" style={{ fontSize: '13px', color: 'var(--ink)' }}>{record.exchangeForwardAwb || (record.exchangeDispatchMode === 'ON_PICKUP' ? 'Dispatches on Pickup' : 'Pending')}</strong>
               <div style={{ fontSize: '12px', color: 'var(--ink-secondary)', marginTop: '2px' }}>
@@ -4054,7 +4054,7 @@ function ActiveExchangeCard({ record, orderName }: { record: ReturnRecord; order
                   target="_blank"
                   rel="noopener noreferrer"
                   className="button button-secondary"
-                  style={{ fontSize: '11px', padding: '3px 8px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                  style={{ fontSize: '12px', padding: '3px 8px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
                 >
                   <Icon name="route" size={13} />
                   <span>Track Forward</span>
@@ -4066,7 +4066,7 @@ function ActiveExchangeCard({ record, orderName }: { record: ReturnRecord; order
                   target="_blank"
                   rel="noopener noreferrer"
                   className="button button-primary"
-                  style={{ fontSize: '11px', padding: '3px 8px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                  style={{ fontSize: '12px', padding: '3px 8px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
                 >
                   <Icon name="download" size={13} />
                   <span>Print Label</span>
@@ -4079,13 +4079,13 @@ function ActiveExchangeCard({ record, orderName }: { record: ReturnRecord; order
                 <Link
                   to={`/orders?search=${encodeURIComponent(exchangeOrderName)}`}
                   className="link-primary"
-                  style={{ fontWeight: 600, color: '#7c3aed', textDecoration: 'underline' }}
+                  style={{ fontWeight: 600, color: 'var(--tone-purple-fg)', textDecoration: 'underline' }}
                 >
                   {exchangeOrderName}
                 </Link>
                 <span
                   className={`micro-badge ${forwardDelivered ? 'micro-badge-emerald' : record.exchangeForwardStatus === 'IN_TRANSIT' ? 'micro-badge-purple' : 'micro-badge-emerald'}`}
-                  style={{ fontSize: '10px' }}
+                  style={{ fontSize: '12px' }}
                 >
                   {forwardDelivered ? 'Delivered' : record.exchangeForwardStatus === 'IN_TRANSIT' ? 'In Transit' : 'Ready to Ship'}
                 </span>

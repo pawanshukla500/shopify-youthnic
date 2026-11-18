@@ -155,7 +155,7 @@ export function ManualRefundModal({
       >
         <div className="modal-header">
           <div className="modal-header-left">
-            <div className="modal-icon-badge" style={{ background: '#fef3c7', color: '#b45309' }}>
+            <div className="modal-icon-badge" style={{ background: 'var(--tone-warning-bg)', color: 'var(--tone-warning-fg)' }}>
               <Icon name="dollar" size={20} />
             </div>
             <div>
@@ -190,12 +190,12 @@ export function ManualRefundModal({
 
           <div
             style={{
-              background: '#eff6ff',
-              border: '1px solid #bfdbfe',
+              background: 'var(--tone-info-bg)',
+              border: '1px solid var(--tone-info-border)',
               borderRadius: '8px',
               padding: '10px 12px',
               fontSize: '12px',
-              color: '#1e40af',
+              color: 'var(--tone-info-fg)',
               lineHeight: 1.4,
             }}
           >
@@ -234,7 +234,7 @@ export function ManualRefundModal({
               maxLength={160}
               required
             />
-            <small style={{ fontSize: '11px', color: '#64748b' }}>
+            <small style={{ fontSize: '12px', color: 'var(--muted-light)' }}>
               Masked suffix or source name (do not enter full account numbers).
             </small>
           </FormField>
@@ -247,7 +247,7 @@ export function ManualRefundModal({
               placeholder="e.g. 429182910482 or UPI Ref"
               maxLength={160}
             />
-            <small style={{ fontSize: '11px', color: '#64748b' }}>
+            <small style={{ fontSize: '12px', color: 'var(--muted-light)' }}>
               Provide UTR or upload payout screenshot below.
             </small>
           </FormField>
@@ -263,7 +263,7 @@ export function ManualRefundModal({
             />
             {evidenceFile && (
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
-                <span style={{ fontSize: '12px', color: '#15803d', fontWeight: 600 }}>
+                <span style={{ fontSize: '12px', color: 'var(--tone-success-fg)', fontWeight: 600 }}>
                   ✓ {evidenceFile.name} ({(evidenceFile.size / 1024).toFixed(1)} KB)
                 </span>
                 <button
@@ -272,8 +272,8 @@ export function ManualRefundModal({
                   style={{
                     background: 'none',
                     border: 'none',
-                    color: '#dc2626',
-                    fontSize: '11px',
+                    color: 'var(--tone-danger-fg)',
+                    fontSize: '12px',
                     cursor: 'pointer',
                     textDecoration: 'underline',
                   }}

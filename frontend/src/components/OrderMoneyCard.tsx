@@ -105,7 +105,7 @@ export function OrderMoneyCard({ order, onChanged }: { order: Order; onChanged: 
               <span className="money-muted"> · {SOURCE_LABELS[order.paymentReceivedSource || ''] || order.paymentReceivedSource}</span>
             </div>
             {order.gatewayFee && order.totalAmount ? (
-              <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
+              <div style={{ fontSize: '12px', color: 'var(--muted-light)', marginTop: '2px' }}>
                 Net credited after deducting gateway fee & GST (Gross {formatMoney(order.totalAmount)} − Fee {formatMoney(order.gatewayFee)})
               </div>
             ) : null}
@@ -147,7 +147,7 @@ export function OrderMoneyCard({ order, onChanged }: { order: Order; onChanged: 
           <div>
             Forward: {costLabel(shipment?.forwardCharge, shipment?.shippingCostSource)}
             {shipment?.shippingCostSource === 'ACTUAL' && (
-              <span style={{ marginLeft: '6px', fontSize: '11px', color: '#059669', fontWeight: 700 }}>
+              <span style={{ marginLeft: '6px', fontSize: '12px', color: 'var(--tone-success-fg)', fontWeight: 700 }}>
                 (Wallet Ledger Reconciled)
               </span>
             )}
@@ -190,22 +190,22 @@ export function OrderMoneyCard({ order, onChanged }: { order: Order; onChanged: 
               </span>
               <span
                 style={{
-                  fontSize: '10px',
+                  fontSize: '12px',
                   padding: '2px 8px',
                   borderRadius: '999px',
                   fontWeight: 750,
                   background:
                     shipment.billingStatus === 'REFUNDED' || (shipment.netBilledCost ?? 0) === 0
-                      ? '#ecfdf5'
-                      : '#eff6ff',
+                      ? 'var(--tone-success-bg)'
+                      : 'var(--tone-info-bg)',
                   color:
                     shipment.billingStatus === 'REFUNDED' || (shipment.netBilledCost ?? 0) === 0
-                      ? '#059669'
-                      : '#2563eb',
+                      ? 'var(--tone-success-fg)'
+                      : 'var(--tone-info-fg)',
                   border:
                     shipment.billingStatus === 'REFUNDED' || (shipment.netBilledCost ?? 0) === 0
-                      ? '1px solid #a7f3d0'
-                      : '1px solid #bfdbfe',
+                      ? '1px solid var(--tone-success-border)'
+                      : '1px solid var(--tone-info-border)',
                 }}
               >
                 {shipment.billingStatus === 'REFUNDED' || (shipment.netBilledCost ?? 0) === 0
@@ -219,7 +219,7 @@ export function OrderMoneyCard({ order, onChanged }: { order: Order; onChanged: 
                 display: 'flex',
                 alignItems: 'center',
                 gap: '12px',
-                fontSize: '11px',
+                fontSize: '12px',
                 background: 'var(--panel)',
                 padding: '4px 10px',
                 borderRadius: '6px',
@@ -227,17 +227,17 @@ export function OrderMoneyCard({ order, onChanged }: { order: Order; onChanged: 
               }}
             >
               <span>
-                Debited: <strong style={{ color: '#e11d48' }}>-{formatMoney(shipment.totalDebited ?? 0)}</strong>
+                Debited: <strong style={{ color: 'var(--tone-danger-fg)' }}>-{formatMoney(shipment.totalDebited ?? 0)}</strong>
               </span>
               <span>
-                Refunded: <strong style={{ color: '#16a34a' }}>+{formatMoney(shipment.totalCredited ?? 0)}</strong>
+                Refunded: <strong style={{ color: 'var(--tone-success-fg)' }}>+{formatMoney(shipment.totalCredited ?? 0)}</strong>
               </span>
               <span>
                 Net Freight:{' '}
                 <strong
                   style={{
                     color:
-                      (shipment.netBilledCost ?? 0) === 0 ? '#16a34a' : 'var(--ink)',
+                      (shipment.netBilledCost ?? 0) === 0 ? 'var(--tone-success-fg)' : 'var(--ink)',
                   }}
                 >
                   {formatMoney(shipment.netBilledCost ?? 0)}
@@ -257,7 +257,7 @@ export function OrderMoneyCard({ order, onChanged }: { order: Order; onChanged: 
             <table
               style={{
                 width: '100%',
-                fontSize: '11px',
+                fontSize: '12px',
                 borderCollapse: 'collapse',
                 textAlign: 'left',
               }}
@@ -279,14 +279,14 @@ export function OrderMoneyCard({ order, onChanged }: { order: Order; onChanged: 
                     style={{
                       borderBottom:
                         idx < shipment.walletTransactions!.length - 1
-                          ? '1px solid #f1f5f9'
+                          ? '1px solid var(--line)'
                           : 'none',
                     }}
                   >
                     <td style={{ padding: '7px 10px', whiteSpace: 'nowrap', color: 'var(--ink-secondary)' }}>
                       {tx.date}
                     </td>
-                    <td style={{ padding: '7px 10px', fontFamily: 'monospace', fontSize: '11px' }}>
+                    <td style={{ padding: '7px 10px', fontFamily: 'monospace', fontSize: '12px' }}>
                       <span
                         onClick={() => {
                           navigator.clipboard.writeText(tx.txnId)
@@ -294,7 +294,7 @@ export function OrderMoneyCard({ order, onChanged }: { order: Order; onChanged: 
                         }}
                         title="Click to copy Txn ID"
                         style={{
-                          background: '#f1f5f9',
+                          background: 'var(--surface-elevated)',
                           padding: '2px 5px',
                           borderRadius: '4px',
                           border: '1px solid var(--line)',
@@ -305,7 +305,7 @@ export function OrderMoneyCard({ order, onChanged }: { order: Order; onChanged: 
                         }}
                       >
                         <code>{tx.txnId}</code>
-                        <span style={{ fontSize: '9px', opacity: 0.6 }}>📋</span>
+                        <span style={{ fontSize: '12px', opacity: 0.6 }}>📋</span>
                       </span>
                     </td>
                     <td style={{ padding: '7px 10px' }}>
@@ -314,17 +314,17 @@ export function OrderMoneyCard({ order, onChanged }: { order: Order; onChanged: 
                           display: 'inline-block',
                           padding: '1.5px 7px',
                           borderRadius: '4px',
-                          fontSize: '9.5px',
+                          fontSize: '12px',
                           fontWeight: 750,
                           textTransform: 'uppercase',
-                          background: tx.type === 'credit' ? '#dcfce7' : '#ffe4e6',
-                          color: tx.type === 'credit' ? '#15803d' : '#be123c',
+                          background: tx.type === 'credit' ? 'var(--tone-success-bg)' : 'var(--tone-danger-bg)',
+                          color: tx.type === 'credit' ? 'var(--tone-success-fg)' : 'var(--tone-danger-fg)',
                         }}
                       >
                         {tx.type}
                       </span>
                     </td>
-                    <td style={{ padding: '7px 10px', color: '#1e293b', fontWeight: 550 }}>
+                    <td style={{ padding: '7px 10px', color: 'var(--ink)', fontWeight: 550 }}>
                       {tx.description}
                     </td>
                     <td style={{ padding: '7px 10px', color: 'var(--muted)' }}>
@@ -337,7 +337,7 @@ export function OrderMoneyCard({ order, onChanged }: { order: Order; onChanged: 
                         padding: '7px 10px',
                         textAlign: 'right',
                         fontWeight: 750,
-                        color: tx.type === 'credit' ? '#16a34a' : '#e11d48',
+                        color: tx.type === 'credit' ? 'var(--tone-success-fg)' : 'var(--tone-danger-fg)',
                         whiteSpace: 'nowrap',
                       }}
                     >
@@ -355,9 +355,9 @@ export function OrderMoneyCard({ order, onChanged }: { order: Order; onChanged: 
             marginTop: '8px',
             padding: '7px 10px',
             background: 'var(--line-subtle)',
-            border: '1px solid #f1f5f9',
+            border: '1px solid var(--line)',
             borderRadius: '6px',
-            fontSize: '11px',
+            fontSize: '12px',
             color: 'var(--muted)',
           }}
         >

@@ -85,7 +85,7 @@
   box-shadow: var(--shadow-sm);
 }
 .shopify-order-page.order-workspace .order-tab-count {
-  font-size: 11px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums;
+  font-size: 12px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums;
   background: color-mix(in srgb, var(--order-accent) 12%, transparent);
   color: var(--order-accent); border-radius: 999px; padding: 2px 7px;
 }
@@ -104,13 +104,13 @@
 .shopify-order-page.order-workspace .panel-heading { align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
 .shopify-order-page.order-workspace .panel-title,
 .shopify-order-page.order-workspace .shopify-card-head h2 {
-  color: var(--ink-secondary); font-size: 11px; font-weight: 750;
+  color: var(--ink-secondary); font-size: 12px; font-weight: 750;
   letter-spacing: .06em; text-transform: uppercase; line-height: 1.4; margin: 0;
 }
-.shopify-order-page.order-workspace .eyebrow { text-transform: uppercase; letter-spacing: .06em; font-size: 11px; font-weight: 700; color: var(--muted); margin-bottom: 4px; }
+.shopify-order-page.order-workspace .eyebrow { text-transform: uppercase; letter-spacing: .06em; font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 4px; }
 .shopify-order-page.order-workspace .shopify-card-head { padding: 18px 20px 12px; }
 .shopify-order-page.order-workspace .order-item-count {
-  font-size: 11px; font-weight: 700; letter-spacing: 0; text-transform: none;
+  font-size: 12px; font-weight: 700; letter-spacing: 0; text-transform: none;
   background: var(--line-subtle); color: var(--muted);
   border-radius: 999px; padding: 2px 8px; font-variant-numeric: tabular-nums;
 }
@@ -150,13 +150,13 @@
 .shopify-order-page.order-workspace .order-text-action { display: inline-flex; align-items: center; gap: 6px; padding: 8px 0; border: 0; background: none; color: var(--order-accent); font-size: 13px; font-weight: 600; text-align: left; }
 .shopify-order-page.order-workspace .order-preview-facts { display: grid; grid-template-columns: 1fr 1fr 1.2fr; gap: 20px; }
 .shopify-order-page.order-workspace .order-preview-facts > div { min-width: 0; }
-.shopify-order-page.order-workspace .order-preview-facts > div > span { display: block; color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px; }
+.shopify-order-page.order-workspace .order-preview-facts > div > span { display: block; color: var(--muted); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px; }
 .shopify-order-page.order-workspace .order-preview-facts strong { display: block; font-size: 13px; font-weight: 550; overflow-wrap: anywhere; }
 .shopify-order-page.order-workspace .order-history-list.is-expanded { max-height: 420px; overflow-y: auto; padding-right: 12px; }
 .shopify-order-page.order-workspace .timeline-item { padding-bottom: 20px; }
 .shopify-order-page.order-workspace .timeline-copy strong { font-size: 13px; font-weight: 600; color: var(--ink); }
 .shopify-order-page.order-workspace .timeline-copy span { color: var(--ink-secondary); font-size: 12px; }
-.shopify-order-page.order-workspace .timeline-copy time { color: var(--muted); font-size: 11px; }
+.shopify-order-page.order-workspace .timeline-copy time { color: var(--muted); font-size: 12px; }
 .shopify-order-page.order-workspace .timeline-marker { background: var(--panel); border-color: var(--line); }
 .shopify-order-page.order-workspace .timeline-marker.current { color: var(--order-accent); background: var(--order-selected); }
 .shopify-order-page.order-workspace .money-muted, .order-workspace .panel-description, .order-workspace .field-hint { color: var(--muted); font-size: 12px; line-height: 1.6; }
@@ -203,12 +203,12 @@
 }
 .shopify-order-page.order-workspace .address-copy-btn:hover { color: var(--order-accent); border-color: color-mix(in srgb, var(--order-accent) 45%, var(--line)); }
 .shopify-order-page.order-workspace .customer-quick-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
-.shopify-order-page.order-workspace .quick-action-btn { min-height: 36px; flex: none; font-size: 11px; font-weight: 700; padding: 6px 4px; border-radius: 9px; box-shadow: var(--shadow-xs); }
+.shopify-order-page.order-workspace .quick-action-btn { min-height: 36px; flex: none; font-size: 12px; font-weight: 700; padding: 6px 4px; border-radius: 9px; box-shadow: var(--shadow-xs); }
 .shopify-order-page.order-workspace .quick-action-btn:disabled { opacity: .55; cursor: not-allowed; box-shadow: none; }
 
 /* ─── Notes card ──────────────────────────────────────────────── */
 .shopify-order-page.order-workspace .shopify-order-notes h2 {
-  margin: 0; font-size: 11px; font-weight: 750; text-transform: uppercase;
+  margin: 0; font-size: 12px; font-weight: 750; text-transform: uppercase;
   letter-spacing: .06em; color: var(--ink-secondary);
 }
 .shopify-order-page.order-workspace .shopify-order-notes p { margin: 10px 0 0; font-size: 12.5px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink-secondary); }
@@ -218,7 +218,7 @@
   border-radius: 9px; padding: 12px;
 }
 .shopify-order-page.order-workspace .shopify-order-notes .shopify-note-empty svg { flex-shrink: 0; }
-.shopify-order-page.order-workspace .shopify-order-notes summary { font-size: 11px; font-weight: 750; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-secondary); }
+.shopify-order-page.order-workspace .shopify-order-notes summary { font-size: 12px; font-weight: 750; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-secondary); }
 
 /* ─── Shipment telemetry grid ─────────────────────────────────── */
 .shopify-order-page.order-workspace .order-shipment-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 1px solid var(--line); border-left: 1px solid var(--line); border-radius: 6px; overflow: hidden; margin: 16px 0; }
@@ -227,7 +227,7 @@
 .shopify-order-page.order-workspace .order-shipment-facts .stat-card-title { text-transform: none; letter-spacing: 0; font-size: 12px; color: var(--muted); }
 .shopify-order-page.order-workspace .order-shipment-facts .stat-card-value { font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; color: var(--ink); }
 .shopify-order-page.order-workspace .order-shipment-facts .stat-card-value span { color: inherit !important; font-size: inherit !important; }
-.shopify-order-page.order-workspace .order-shipment-facts .stat-card-subtext { font-size: 11px; color: var(--muted); }
+.shopify-order-page.order-workspace .order-shipment-facts .stat-card-subtext { font-size: 12px; color: var(--muted); }
 
 /* ─── Order evidence & audit feed ─────────────────────────────── */
 .order-evidence-columns { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:24px; }
@@ -244,7 +244,7 @@
 .order-audit-marker { height:28px; display:grid; place-items:center; border:1px solid var(--line); border-radius:6px; color:var(--muted); }
 .order-audit-heading { display:flex; justify-content:space-between; align-items:baseline; gap:12px; flex-wrap:wrap; }
 .order-audit-heading strong { font-size:13px; font-weight:600; }
-.order-audit-heading time,.order-audit-actor { font-size:11px; color:var(--muted); }
+.order-audit-heading time,.order-audit-actor { font-size:12px; color:var(--muted); }
 .order-audit-actor { margin:5px 0; overflow-wrap:anywhere; }
 .order-audit-note { white-space:pre-wrap; overflow-wrap:anywhere; font-size:13px; margin:8px 0; }
 .order-audit-meta { display:flex; align-items:center; flex-wrap:wrap; gap:10px; font-size:12px; color:var(--muted); }
@@ -297,7 +297,7 @@
   .shopify-order-page.order-workspace .shopify-line-unit { grid-column: 2; }
   .shopify-order-page.order-workspace .shopify-line-money { grid-column: 2; text-align: left; }
   .shopify-order-page.order-workspace .customer-quick-actions { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
-  .shopify-order-page.order-workspace .quick-action-btn { font-size: 10.5px; padding: 6px 2px; }
+  .shopify-order-page.order-workspace .quick-action-btn { font-size: 12px; padding: 6px 2px; }
   .shopify-order-page.order-workspace .money-row { grid-template-columns: minmax(0, 1fr); gap: 6px; }
 }
 

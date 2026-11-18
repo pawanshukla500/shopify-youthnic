@@ -35,7 +35,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 750;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -52,7 +52,7 @@
 }
 
 .wf-ribbon-sub {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
   white-space: nowrap;
   overflow: hidden;
@@ -90,7 +90,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 750;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -111,14 +111,14 @@
 
 .wf-guard-item p {
   margin: 0;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--muted);
   line-height: 1.45;
 }
 
 .wf-guard-item code {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
+  font-size: 12px;
   background: var(--line-subtle);
   padding: 1px 4px;
   border-radius: 4px;
@@ -189,7 +189,7 @@
 }
 
 .wf-section-badge {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -285,7 +285,7 @@
 }
 
 .wf-node-pill {
-  font-size: 9.5px;
+  font-size: 12px;
   font-weight: 750;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -301,14 +301,14 @@
 .pill-red { background: var(--tone-danger-bg); color: var(--tone-danger-fg); }
 
 .wf-node-id {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   color: var(--muted-light);
   font-family: 'JetBrains Mono', monospace;
 }
 
 .wf-node-count-badge {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 800;
   background: #2563eb;
   color: #ffffff;
@@ -325,7 +325,7 @@
 }
 
 .wf-node-card h4 code {
-  font-size: 11.5px;
+  font-size: 12px;
   background: rgba(15, 23, 42, 0.06);
   padding: 1px 4px;
   border-radius: 3px;
@@ -333,7 +333,7 @@
 
 .wf-node-card p {
   margin: 0;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
   line-height: 1.45;
   flex-grow: 1;
@@ -341,7 +341,7 @@
 
 .wf-node-card p code {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
+  font-size: 12px;
   background: var(--line-subtle);
   padding: 1px 3px;
   border-radius: 3px;
@@ -355,7 +355,7 @@
 }
 
 .wf-branch-pill {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   padding: 2px 6px;
   border-radius: 4px;
@@ -376,7 +376,7 @@
 }
 
 .wf-badge-tag {
-  font-size: 9.5px;
+  font-size: 12px;
   font-weight: 650;
   background: var(--line-subtle);
   color: var(--muted);
@@ -392,7 +392,7 @@
 }
 
 .wf-action-link {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 750;
   color: var(--blue, #2563eb);
   display: inline-flex;

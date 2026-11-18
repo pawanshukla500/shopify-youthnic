@@ -1670,7 +1670,7 @@ export function Orders() {
               }}
             />
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--muted-light)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: 'var(--muted-light)' }}>
             <span>Processing real-time &rarr; Ready to Ship</span>
             <span>{bulkDispatchProgress.completed} ready{bulkDispatchProgress.failed > 0 ? ` · ${bulkDispatchProgress.failed} failed` : ''}</span>
           </div>
@@ -1894,7 +1894,7 @@ export function Orders() {
                 </div>
               )}
 
-              <div style={{ background: 'rgba(16, 185, 129, 0.08)', border: '1px solid var(--line)', borderRadius: '8px', padding: '10px 12px', fontSize: '11px', color: 'var(--green)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ background: 'rgba(16, 185, 129, 0.08)', border: '1px solid var(--line)', borderRadius: '8px', padding: '10px 12px', fontSize: '12px', color: 'var(--green)', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <Icon name="check" size={16} />
                 <span>Shopify order will be marked cancelled and tagged with CANCELLED.</span>
               </div>
@@ -2051,7 +2051,7 @@ export function Orders() {
                       {orderForNdr.shipment.trackingStatus || 'Failed Delivery Attempt'}
                     </span>
                   </div>
-                  <div style={{ color: 'var(--red)', fontSize: '11.5px' }}>
+                  <div style={{ color: 'var(--red)', fontSize: '12px' }}>
                     Location: {orderForNdr.shipment.trackingLocation || 'Destination Delivery Center'}
                   </div>
                 </div>
@@ -2077,7 +2077,7 @@ export function Orders() {
                       style={{ marginRight: '8px' }}
                     />
                     <strong>Re-attempt Delivery</strong>
-                    <p style={{ margin: '4px 0 0 0', fontSize: '11px', color: 'var(--ink-secondary)' }}>
+                    <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: 'var(--ink-secondary)' }}>
                       Request Delhivery to re-attempt delivery tomorrow and trigger WhatsApp alert to customer.
                     </p>
                   </label>
@@ -2100,7 +2100,7 @@ export function Orders() {
                       style={{ marginRight: '8px' }}
                     />
                     <strong>Defer Delivery Date</strong>
-                    <p style={{ margin: '4px 0 0 0', fontSize: '11px', color: 'var(--ink-secondary)' }}>
+                    <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: 'var(--ink-secondary)' }}>
                       Delhivery async NDR API: deferred date max 6 days out. Returns UPL id.
                     </p>
                   </label>
@@ -2123,7 +2123,7 @@ export function Orders() {
                       style={{ marginRight: '8px' }}
                     />
                     <strong>Correct Phone / Address</strong>
-                    <p style={{ margin: '4px 0 0 0', fontSize: '11px', color: 'var(--ink-secondary)' }}>
+                    <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: 'var(--ink-secondary)' }}>
                       Push corrected consignee details to Delhivery while package is pending.
                     </p>
                   </label>
@@ -2146,7 +2146,7 @@ export function Orders() {
                       style={{ marginRight: '8px' }}
                     />
                     <strong>Return to Origin (RTO)</strong>
-                    <p style={{ margin: '4px 0 0 0', fontSize: '11px', color: 'var(--ink-secondary)' }}>
+                    <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: 'var(--ink-secondary)' }}>
                       Cancel delivery and return package to Surat warehouse.
                     </p>
                   </label>

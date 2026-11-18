@@ -261,7 +261,7 @@ export function Returns() {
             <Icon name="package" size={22} />
           </div>
           <div>
-            <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted)', letterSpacing: '0.04em' }}>
+            <div style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted)', letterSpacing: '0.04em' }}>
               Warehouse Intake
             </div>
             <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--ink)' }}>
@@ -495,12 +495,12 @@ export function Returns() {
                           <span className="cell-muted">Waybill pending</span>
                         )}
                         {item.pickupAutomatic ? (
-                          <span className="cell-muted" style={{ display: 'block', fontSize: '11px', marginTop: '2px' }}>
+                          <span className="cell-muted" style={{ display: 'block', fontSize: '12px', marginTop: '2px' }}>
                             Auto carrier pickup
                           </span>
                         ) : null}
                         {item.trackingStatus ? (
-                          <span className="cell-muted" style={{ display: 'block', fontSize: '11px' }}>
+                          <span className="cell-muted" style={{ display: 'block', fontSize: '12px' }}>
                             {item.trackingStatus}
                             {item.trackingLocation ? ` · ${item.trackingLocation}` : ''}
                           </span>
@@ -517,7 +517,7 @@ export function Returns() {
                           {item.returnReason}
                         </span>
                         {item.qcRemark && (
-                          <span className="cell-muted" style={{ display: 'block', color: 'var(--muted)', marginTop: '2px', fontSize: '11px' }}>
+                          <span className="cell-muted" style={{ display: 'block', color: 'var(--muted)', marginTop: '2px', fontSize: '12px' }}>
                             QC Note: {item.qcRemark}
                           </span>
                         )}
@@ -540,7 +540,7 @@ export function Returns() {
                         ) : isCod && (item.qcStatus === 'APPROVED' || item.qcStatus === 'PARTIAL' || item.returnStatus === 'QC_PENDING' || item.trackingStatus === 'DTO' || Boolean(item.receivedAt)) ? (
                           <span className="badge-pill badge-refund-due">Manual Refund Due</span>
                         ) : !isCod && (item.refundStatus === 'NONE' || item.refundStatus === 'FAILED') && Boolean(item.receivedAt || item.returnStatus === 'RECEIVED' || item.returnStatus === 'QC_PENDING' || item.trackingStatus === 'DTO') ? (
-                          <span className="badge-pill" style={{ background: '#fee2e2', color: '#991b1b', fontWeight: 650 }}>Refund Pending Push</span>
+                          <span className="badge-pill" style={{ background: 'var(--tone-danger-bg)', color: 'var(--tone-danger-fg)', fontWeight: 650 }}>Refund Pending Push</span>
                         ) : (
                           <StatusBadge status={item.refundStatus} />
                         )}
@@ -548,23 +548,23 @@ export function Returns() {
                       <td className="amount-cell">
                         <strong>{formatMoney(item.refundAmount)}</strong>
                       </td>
-                      <td style={{ fontSize: '11px', color: 'var(--muted)', whiteSpace: 'nowrap' }}>
+                      <td style={{ fontSize: '12px', color: 'var(--muted)', whiteSpace: 'nowrap' }}>
                         {formatDate(item.createdAt)}
                       </td>
                       <td style={{ textAlign: 'right' }}>
                         {item.isExchange ? (
-                          <span style={{ fontSize: '11px', color: '#6b21a8', fontWeight: 650 }}>
+                          <span style={{ fontSize: '12px', color: 'var(--tone-purple-fg)', fontWeight: 650 }}>
                             Size Replacement
                           </span>
                         ) : isRefunded ? (
-                          <span style={{ fontSize: '11px', color: 'var(--tone-success-fg)', fontWeight: 650 }}>
+                          <span style={{ fontSize: '12px', color: 'var(--tone-success-fg)', fontWeight: 650 }}>
                             Settled
                           </span>
                         ) : isCod ? (
                           item.qcStatus === 'APPROVED' || item.qcStatus === 'PARTIAL' || Boolean(item.receivedAt || item.returnStatus === 'RECEIVED' || item.returnStatus === 'QC_PENDING' || item.trackingStatus === 'DTO') ? (
                             <Button
                               className="button-small button-primary"
-                              style={{ background: '#b45309', borderColor: '#b45309', color: '#ffffff', fontSize: '11px', fontWeight: 650 }}
+                              style={{ background: '#b45309', borderColor: '#b45309', color: '#ffffff', fontSize: '12px', fontWeight: 650 }}
                               onClick={() =>
                                 setManualRefundTarget({
                                   orderId: item.orderId,
@@ -595,7 +595,7 @@ export function Returns() {
                           (item.qcStatus === 'APPROVED' || item.qcStatus === 'PARTIAL') ? (
                           <Button
                             className="button-small button-secondary"
-                            style={{ borderColor: 'var(--tone-danger-border)', color: 'var(--tone-danger-fg)', fontSize: '11px' }}
+                            style={{ borderColor: 'var(--tone-danger-border)', color: 'var(--tone-danger-fg)', fontSize: '12px' }}
                             loading={refund.isPending && refund.variables?.id === item.id}
                             onClick={() =>
                               refund.mutate({
@@ -612,7 +612,7 @@ export function Returns() {
                           Boolean(item.receivedAt || item.returnStatus === 'RECEIVED' || item.returnStatus === 'QC_PENDING' || item.trackingStatus === 'DTO') ? (
                           <Button
                             className="button-small button-primary"
-                            style={{ background: 'var(--emerald-solid)', borderColor: 'var(--emerald-solid)', color: '#ffffff', fontSize: '11px', fontWeight: 650 }}
+                            style={{ background: 'var(--emerald-solid)', borderColor: 'var(--emerald-solid)', color: '#ffffff', fontSize: '12px', fontWeight: 650 }}
                             loading={refund.isPending && refund.variables?.id === item.id}
                             onClick={() =>
                               refund.mutate({

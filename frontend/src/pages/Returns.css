@@ -47,7 +47,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.03em;
@@ -162,7 +162,7 @@
 }
 
 .returns-tab-count {
-  font-size: 11px;
+  font-size: 12px;
   padding: 1px 6px;
   border-radius: 10px;
   background: var(--line-subtle, #f1f5f9);
@@ -182,7 +182,7 @@
 
 .returns-table th {
   padding: 12px 14px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -208,7 +208,7 @@
   gap: 4px;
   padding: 3px 8px;
   border-radius: 5px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 650;
   white-space: nowrap;
 }
@@ -278,7 +278,7 @@
   border-radius: 4px;
   background: #ede9fe;
   color: #5b21b6;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   margin-top: 3px;
 }

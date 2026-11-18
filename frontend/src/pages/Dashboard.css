@@ -170,7 +170,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 650;
   color: var(--muted);
 }
@@ -225,7 +225,7 @@
   border: 1px solid var(--line);
   background: var(--canvas);
   color: var(--ink-secondary);
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 700;
   transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
@@ -283,7 +283,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 6px;
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--muted);
 }
@@ -298,7 +298,7 @@
 }
 
 .dash-metric-sub {
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -429,7 +429,7 @@
   display: flex;
   flex-direction: column;
   gap: 3px;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--muted);
 }
 
@@ -509,14 +509,14 @@
 }
 
 .dash-carrier-role {
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--muted);
 }
 
 .dash-badge {
   display: inline-flex;
   align-items: center;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 650;
   padding: 2px 8px;
   border-radius: 999px;
@@ -535,7 +535,7 @@
 
 .dash-carrier-stat span {
   display: block;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
 }
 
@@ -609,7 +609,7 @@
 }
 
 .dash-recon-meta {
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--muted);
 }
 
@@ -626,7 +626,7 @@
 }
 
 .dash-recon-sub {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
@@ -664,12 +664,12 @@
 
 .dash-mono-code {
   font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 600;
 }
 
 .dash-settlement-meta {
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
@@ -758,7 +758,7 @@
 
 .dash-table th {
   padding: 10px 12px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   color: var(--muted);
   border-bottom: 1px solid var(--line);
@@ -790,7 +790,7 @@
 
 .dash-cell-sub {
   display: block;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
   margin-top: 2px;
 }
@@ -969,7 +969,7 @@
 
 .dash-modal-stat span {
   display: block;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
 }
 
@@ -1005,7 +1005,7 @@
 
 .dash-calc-field label {
   display: block;
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 650;
   color: var(--muted);
   margin-bottom: 5px;

@@ -138,7 +138,7 @@ describe('Manifest Review Resolution & Courier Switch (Order #26YOU6128)', () =>
   });
 
   describe('orderService.updateShipmentCourier', () => {
-    it('updates courier to Velocity, sets velocity tracking URL and clears MANIFEST_REVIEW', async () => {
+    it('updates courier to Velocity, clears the stale label URL and MANIFEST_REVIEW', async () => {
       prismaStub.order.findUnique.mockResolvedValueOnce({
         id: 1950,
         supportFlag: 'MANIFEST_REVIEW',
@@ -165,7 +165,7 @@ describe('Manifest Review Resolution & Courier Switch (Order #26YOU6128)', () =>
         data: expect.objectContaining({
           courier: 'Velocity',
           waybillNumber: '374713114560',
-          labelUrl: 'https://www.velocityshipping.in/track/374713114560',
+          labelUrl: null,
           weightMismatch: false,
         }),
       });

@@ -301,20 +301,20 @@ export function SupportDesk() {
       {/* ─── Metric KPI Cards ────────────────────────────────────── */}
       <div className="kpi-grid-4">
         <div className="surface-card">
-          <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+          <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
             Open Support Tickets
           </span>
           <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--ink)', marginTop: '4px' }}>
             {emailsQuery.data?.openCount ?? 0}
           </div>
-          <span style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '2px', display: 'block' }}>
+          <span style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '2px', display: 'block' }}>
             Awaiting response or reverse pickup
           </span>
         </div>
 
         <div className="surface-card" style={{ borderColor: 'var(--tone-danger-border)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--tone-danger-fg)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+            <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--tone-danger-fg)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
               <Icon name="alert" size={13} /> Urgent Claims & Defects
             </span>
             <span className="tone-chip tone-chip--danger">Flagged</span>
@@ -322,31 +322,31 @@ export function SupportDesk() {
           <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--tone-danger-fg)', marginTop: '4px' }}>
             {emailsQuery.data?.urgentCount ?? 0}
           </div>
-          <span style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '2px', display: 'block' }}>
+          <span style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '2px', display: 'block' }}>
             High-priority returns & damage reports
           </span>
         </div>
 
         <div className="surface-card" style={{ borderColor: 'var(--tone-purple-border)' }}>
-          <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--tone-purple-fg)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+          <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--tone-purple-fg)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
             <Icon name="return" size={13} /> Return Requests
           </span>
           <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--tone-purple-fg)', marginTop: '4px' }}>
             {emailsQuery.data?.returnCount ?? 0}
           </div>
-          <span style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '2px', display: 'block' }}>
+          <span style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '2px', display: 'block' }}>
             Doorstep pickup requests
           </span>
         </div>
 
         <div className="surface-card" style={{ borderColor: 'var(--tone-success-border)' }}>
-          <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--tone-success-fg)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+          <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--tone-success-fg)', textTransform: 'uppercase', letterSpacing: '0.5px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
             <Icon name="zap" size={13} /> Self-Learned Resolution Cache
           </span>
           <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--tone-success-fg)', marginTop: '4px' }}>
             {patternsQuery.data?.patterns?.length ?? 5} Patterns
           </div>
-          <span style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '2px', display: 'block' }}>
+          <span style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '2px', display: 'block' }}>
             0-token offline pattern matching active
           </span>
         </div>
@@ -451,13 +451,13 @@ export function SupportDesk() {
                       </span>
 
                       {ticket.shopifyOrderName && (
-                        <span style={{ fontSize: '10.5px', color: 'var(--ink)', fontWeight: 700, background: 'var(--line-subtle)', padding: '1px 6px', borderRadius: '4px' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--ink)', fontWeight: 700, background: 'var(--line-subtle)', padding: '1px 6px', borderRadius: '4px' }}>
                           {ticket.shopifyOrderName}
                         </span>
                       )}
                     </div>
 
-                    <span style={{ fontSize: '10px', color: 'var(--muted)', whiteSpace: 'nowrap' }}>
+                    <span style={{ fontSize: '12px', color: 'var(--muted)', whiteSpace: 'nowrap' }}>
                       {formatDate(ticket.createdAt)}
                     </span>
                   </div>
@@ -466,11 +466,11 @@ export function SupportDesk() {
                     {ticket.subject}
                   </div>
 
-                  <div style={{ fontSize: '11px', color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <div style={{ fontSize: '12px', color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {ticket.bodyText}
                   </div>
 
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px', fontSize: '11px', color: 'var(--muted)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px', fontSize: '12px', color: 'var(--muted)' }}>
                     <span>{ticket.fromName || ticket.fromEmail}</span>
                     <span
                       style={{
@@ -499,12 +499,12 @@ export function SupportDesk() {
                       Ticket #{activeTicket.id}: {activeTicket.fromName || activeTicket.fromEmail}
                     </h3>
                     {activeTicket.urgency === 'URGENT' && (
-                      <span style={{ background: '#fee2e2', color: '#b91c1c', fontSize: '10px', fontWeight: 800, padding: '2px 8px', borderRadius: '4px' }}>
+                      <span style={{ background: 'var(--tone-danger-bg)', color: 'var(--tone-danger-fg)', fontSize: '12px', fontWeight: 800, padding: '2px 8px', borderRadius: '4px' }}>
                         🚨 ACTION REQUIRED
                       </span>
                     )}
                   </div>
-                  <div style={{ fontSize: '11.5px', color: 'var(--muted)', marginTop: '3px' }}>
+                  <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '3px' }}>
                     From: <strong>{activeTicket.fromEmail}</strong> · Received: {formatDate(activeTicket.createdAt)}
                   </div>
                 </div>
@@ -513,7 +513,7 @@ export function SupportDesk() {
                   <button
                     type="button"
                     className="button button-secondary"
-                    style={{ fontSize: '11px', height: '30px', padding: '0 10px' }}
+                    style={{ fontSize: '12px', height: '30px', padding: '0 10px' }}
                     onClick={() => setShowHistoryDrawer(!showHistoryDrawer)}
                   >
                     <Icon name="clock" size={13} />
@@ -523,7 +523,7 @@ export function SupportDesk() {
                     <button
                       type="button"
                       className="button button-secondary"
-                      style={{ fontSize: '11px', height: '30px', padding: '0 10px', color: 'var(--tone-info-fg)' }}
+                      style={{ fontSize: '12px', height: '30px', padding: '0 10px', color: 'var(--tone-info-fg)' }}
                       onClick={() => navigate(`/orders/${activeTicket.order?.id}`)}
                     >
                       <Icon name="external" size={13} />
@@ -537,20 +537,20 @@ export function SupportDesk() {
               {activeTicket.order ? (
                 <div style={{ background: 'var(--canvas)', border: '1px solid var(--line)', borderRadius: '8px', padding: '12px 14px', marginTop: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
                   <div>
-                    <span style={{ fontSize: '11px', color: 'var(--muted)' }}>Linked Order:</span>
+                    <span style={{ fontSize: '12px', color: 'var(--muted)' }}>Linked Order:</span>
                     <div style={{ fontWeight: 800, fontSize: '13px', color: 'var(--ink)' }}>
                       {activeTicket.order.shopifyOrderName} · {formatMoney(activeTicket.order.totalAmount)}
                     </div>
                   </div>
                   <div>
-                    <span style={{ fontSize: '11px', color: 'var(--muted)' }}>Shipment Status:</span>
+                    <span style={{ fontSize: '12px', color: 'var(--muted)' }}>Shipment Status:</span>
                     <div style={{ fontWeight: 700, fontSize: '12px', color: 'var(--tone-info-fg)' }}>
                       {activeTicket.order.status}
                     </div>
                   </div>
                   {activeTicket.order.shipment?.waybillNumber && (
                     <div>
-                      <span style={{ fontSize: '11px', color: 'var(--muted)' }}>{isVelocityCourier(activeTicket.order.shipment?.courier, activeTicket.order.shipment?.waybillNumber) ? 'Velocity' : 'Delhivery'} Waybill:</span>
+                      <span style={{ fontSize: '12px', color: 'var(--muted)' }}>{isVelocityCourier(activeTicket.order.shipment?.courier, activeTicket.order.shipment?.waybillNumber) ? 'Velocity' : 'Delhivery'} Waybill:</span>
                       <div>
                         <a
                           href={carrierTrackingUrl(activeTicket.order.shipment?.courier || (activeTicket.order as any).courierPartner, activeTicket.order.shipment.waybillNumber)}
@@ -564,13 +564,13 @@ export function SupportDesk() {
                     </div>
                   )}
                   {activeTicket.order.hasUrgentSupport && (
-                    <div style={{ background: '#fee2e2', border: '1px solid #fca5a5', padding: '4px 10px', borderRadius: '6px', fontSize: '11px', color: '#991b1b', fontWeight: 700 }}>
+                    <div style={{ background: 'var(--tone-danger-bg)', border: '1px solid var(--tone-danger-border)', padding: '4px 10px', borderRadius: '6px', fontSize: '12px', color: 'var(--tone-danger-fg)', fontWeight: 700 }}>
                       ⚠️ Order flagged: {activeTicket.order.supportFlag}
                     </div>
                   )}
                 </div>
               ) : (
-                <div style={{ fontSize: '11.5px', color: 'var(--muted)', marginTop: '10px', background: 'var(--canvas)', padding: '8px 12px', borderRadius: '6px' }}>
+                <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '10px', background: 'var(--canvas)', padding: '8px 12px', borderRadius: '6px' }}>
                   ℹ️ No exact order linked automatically. You can specify order number in reply.
                 </div>
               )}
@@ -582,7 +582,7 @@ export function SupportDesk() {
                 <span style={{ fontSize: '12px', fontWeight: 750, color: 'var(--ink)' }}>
                   Customer Message: "{activeTicket.subject}"
                 </span>
-                <span style={{ fontSize: '11px', color: 'var(--muted)' }}>
+                <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
                   Sent to: <code>return@youthnic.com</code>
                 </span>
               </div>
@@ -609,23 +609,23 @@ export function SupportDesk() {
                 )}
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '8px', marginBottom: '10px', fontSize: '11.5px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '8px', marginBottom: '10px', fontSize: '12px' }}>
                 <div style={{ background: 'var(--panel)', padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--line)' }}>
-                  <span style={{ color: 'var(--muted)', display: 'block', fontSize: '10px' }}>INTENT CATEGORY</span>
+                  <span style={{ color: 'var(--muted)', display: 'block', fontSize: '12px' }}>INTENT CATEGORY</span>
                   <strong style={{ color: 'var(--ink)' }}>{activeTicket.category.replace('_', ' ')}</strong>
                 </div>
                 <div style={{ background: 'var(--panel)', padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--line)' }}>
-                  <span style={{ color: 'var(--muted)', display: 'block', fontSize: '10px' }}>URGENCY</span>
+                  <span style={{ color: 'var(--muted)', display: 'block', fontSize: '12px' }}>URGENCY</span>
                   <strong style={{ color: activeTicket.urgency === 'URGENT' ? 'var(--tone-danger-fg)' : 'var(--tone-success-fg)' }}>{activeTicket.urgency}</strong>
                 </div>
                 <div style={{ background: 'var(--panel)', padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--line)' }}>
-                  <span style={{ color: 'var(--muted)', display: 'block', fontSize: '10px' }}>DETECTED SENTIMENT</span>
+                  <span style={{ color: 'var(--muted)', display: 'block', fontSize: '12px' }}>DETECTED SENTIMENT</span>
                   <strong style={{ color: activeTicket.sentiment === 'FRUSTRATED' || activeTicket.sentiment === 'URGENT' ? 'var(--tone-danger-fg)' : 'var(--ink-secondary)' }}>
                     {activeTicket.sentiment}
                   </strong>
                 </div>
                 <div style={{ background: 'var(--panel)', padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--line)' }}>
-                  <span style={{ color: 'var(--muted)', display: 'block', fontSize: '10px' }}>CONFIDENCE</span>
+                  <span style={{ color: 'var(--muted)', display: 'block', fontSize: '12px' }}>CONFIDENCE</span>
                   <strong style={{ color: 'var(--tone-success-fg)' }}>{Math.round((activeTicket.aiAnalysis?.confidence ?? 0.95) * 100)}%</strong>
                 </div>
               </div>
@@ -658,7 +658,7 @@ export function SupportDesk() {
                       <h4 style={{ margin: 0, fontSize: '13px', fontWeight: 800, color: 'var(--tone-purple-fg)' }}>
                         Customer Agent Memory (Firebase Realtime Database)
                       </h4>
-                      <span style={{ fontSize: '10.5px', color: 'var(--muted)' }}>
+                      <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
                         Node: <code>/agent_memory/customers/{agentMemoryQuery.data.memory.customerIdentifier?.replace(/[^a-zA-Z0-9]/g, '_')}</code>
                       </span>
                     </div>
@@ -677,7 +677,7 @@ export function SupportDesk() {
 
                 {/* Long-Term Learned Facts */}
                 <div style={{ marginBottom: '12px' }}>
-                  <span style={{ fontSize: '11px', fontWeight: 750, color: 'var(--tone-purple-fg)', display: 'block', marginBottom: '6px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 750, color: 'var(--tone-purple-fg)', display: 'block', marginBottom: '6px' }}>
                     EXTRACTED LONG-TERM CUSTOMER FACTS
                   </span>
                   {agentMemoryQuery.data.memory.longTermFacts?.length > 0 ? (
@@ -690,7 +690,7 @@ export function SupportDesk() {
                             border: '1px solid var(--tone-purple-border)',
                             borderRadius: '6px',
                             padding: '4px 10px',
-                            fontSize: '11px',
+                            fontSize: '12px',
                             color: 'var(--ink)',
                             fontWeight: 500,
                           }}
@@ -700,7 +700,7 @@ export function SupportDesk() {
                       ))}
                     </div>
                   ) : (
-                    <span style={{ fontSize: '11px', color: 'var(--muted)', fontStyle: 'italic' }}>
+                    <span style={{ fontSize: '12px', color: 'var(--muted)', fontStyle: 'italic' }}>
                       No previous facts recorded yet. The agent harness extracts facts automatically upon receipt of new messages.
                     </span>
                   )}
@@ -709,7 +709,7 @@ export function SupportDesk() {
                 {/* Action Audit History */}
                 {agentMemoryQuery.data.memory.actionHistory?.length > 0 && (
                   <div>
-                    <span style={{ fontSize: '11px', fontWeight: 750, color: 'var(--tone-purple-fg)', display: 'block', marginBottom: '6px' }}>
+                    <span style={{ fontSize: '12px', fontWeight: 750, color: 'var(--tone-purple-fg)', display: 'block', marginBottom: '6px' }}>
                       TRIGGERED APP ACTIONS AUDIT
                     </span>
                     <div style={{ display: 'grid', gap: '4px' }}>
@@ -721,7 +721,7 @@ export function SupportDesk() {
                             border: '1px solid var(--line)',
                             borderRadius: '6px',
                             padding: '6px 10px',
-                            fontSize: '11px',
+                            fontSize: '12px',
                             display: 'flex',
                             justifyContent: 'space-between',
                             alignItems: 'center',
@@ -732,7 +732,7 @@ export function SupportDesk() {
                             <strong style={{ color: 'var(--tone-purple-fg)', marginRight: '6px' }}>{act.actionType}</strong>
                             <span style={{ color: 'var(--ink-secondary)' }}>{act.reason}</span>
                           </div>
-                          <span style={{ fontSize: '10px', color: 'var(--muted)' }}>{formatDate(act.timestamp)}</span>
+                          <span style={{ fontSize: '12px', color: 'var(--muted)' }}>{formatDate(act.timestamp)}</span>
                         </div>
                       ))}
                     </div>
@@ -748,7 +748,7 @@ export function SupportDesk() {
                   <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 800 }}>
                     Official Reply Composer
                   </h4>
-                  <span style={{ fontSize: '11px', color: 'var(--muted)' }}>
+                  <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
                     Sender configured as: <strong style={{ color: 'var(--tone-purple-fg)' }}>Youthnic &lt;return@youthnic.com&gt;</strong>
                   </span>
                 </div>
@@ -756,7 +756,7 @@ export function SupportDesk() {
                 <button
                   type="button"
                   className="button button-ghost"
-                  style={{ fontSize: '11px', color: 'var(--tone-info-fg)' }}
+                  style={{ fontSize: '12px', color: 'var(--tone-info-fg)' }}
                   onClick={() => setReplyText(activeTicket.suggestedReply || '')}
                 >
                   Reset to AI Suggested Draft
@@ -766,7 +766,7 @@ export function SupportDesk() {
               <div style={{ display: 'grid', gap: '12px' }}>
                 {/* Official Sender Selection */}
                 <div style={{ background: 'var(--canvas)', border: '1px solid var(--line)', borderRadius: '8px', padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
-                  <span style={{ fontSize: '11.5px', color: 'var(--muted)', fontWeight: 750 }}>
+                  <span style={{ fontSize: '12px', color: 'var(--muted)', fontWeight: 750 }}>
                     Dispatch Channel:
                   </span>
                   <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
@@ -891,11 +891,11 @@ export function SupportDesk() {
                         <span style={{ fontWeight: 700, color: ev.channel === 'WHATSAPP' ? 'var(--tone-success-fg)' : 'var(--tone-info-fg)' }}>
                           {ev.channel === 'WHATSAPP' ? '📱 WhatsApp' : '✉️ Email'}: {ev.title}
                         </span>
-                        <span style={{ fontSize: '10.5px', color: 'var(--muted)' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
                           {formatDate(ev.timestamp)}
                         </span>
                       </div>
-                      <div style={{ color: 'var(--muted)', fontSize: '11.5px' }}>{ev.description}</div>
+                      <div style={{ color: 'var(--muted)', fontSize: '12px' }}>{ev.description}</div>
                     </div>
                   ))}
                 </div>
@@ -922,7 +922,7 @@ export function SupportDesk() {
 
             {/* Quick Scenario Buttons */}
             <div style={{ marginBottom: '14px' }}>
-              <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--muted)', display: 'block', marginBottom: '6px' }}>
+              <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--muted)', display: 'block', marginBottom: '6px' }}>
                 Select a Realistic Scenario:
               </span>
               <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
@@ -949,7 +949,7 @@ export function SupportDesk() {
                 <button
                   type="button"
                   className="button button-secondary"
-                  style={{ fontSize: '11px', padding: '4px 8px', height: '26px' }}
+                  style={{ fontSize: '12px', padding: '4px 8px', height: '26px' }}
                   onClick={() => {
                     setSimSubject('Where is my package? Expected delivery was 2 days ago')
                     setSimBody('Hello, my order #26YOU5752 has not arrived yet. The Delhivery tracking is stuck on transit. Please check what is the delay and confirm when delivery will happen.')
@@ -960,7 +960,7 @@ export function SupportDesk() {
                 <button
                   type="button"
                   className="button button-secondary"
-                  style={{ fontSize: '11px', padding: '4px 8px', height: '26px' }}
+                  style={{ fontSize: '12px', padding: '4px 8px', height: '26px' }}
                   onClick={() => {
                     setSimSubject('Delivery boy marked customer unreachable without calling me')
                     setSimBody('I was at home all day waiting. Suddenly I got SMS that delivery failed because customer was unreachable. The delivery boy never even called my phone! Please escalate.')
@@ -1089,7 +1089,7 @@ export function SupportDesk() {
                   onChange={(e) => setMetaApiKeyInput(e.target.value)}
                   style={{ width: '100%', fontSize: '13px' }}
                 />
-                <span style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '4px', display: 'block' }}>
+                <span style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '4px', display: 'block' }}>
                   Current Status: {metaConfigQuery.data?.config?.apiKeySet ? `Configured (${metaConfigQuery.data.config.maskedKey})` : 'Not Set (Using active intelligent offline harness)'}
                 </span>
               </div>
@@ -1106,12 +1106,12 @@ export function SupportDesk() {
                   onChange={(e) => setMetaModelInput(e.target.value)}
                   style={{ width: '100%', fontSize: '13px', background: 'var(--surface-elevated)' }}
                 />
-                <span style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '4px', display: 'block' }}>
+                <span style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '4px', display: 'block' }}>
                   Default: <code>muse-spark-1.3-contributor</code> (1M token context, high-efficiency contributor model)
                 </span>
               </div>
 
-              <div className="surface-well" style={{ borderRadius: '8px', padding: '12px', fontSize: '11.5px', color: 'var(--ink-secondary)', lineHeight: '1.5' }}>
+              <div className="surface-well" style={{ borderRadius: '8px', padding: '12px', fontSize: '12px', color: 'var(--ink-secondary)', lineHeight: '1.5' }}>
                 <strong>Agent Harness & Memory Architecture:</strong>
                 <ul style={{ margin: '6px 0 0 16px', padding: 0 }}>
                   <li>Conversation turns are recorded in <strong>Firebase Realtime Database</strong>.</li>

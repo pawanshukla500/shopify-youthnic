@@ -788,7 +788,7 @@ export function Dashboard() {
               </div>
               <div className="dash-recon-right">
                 <div className="dash-recon-amt">{formatMoney(recon?.delhiveryCod.totalAmount ?? 0, 'INR')}</div>
-                <Link to="/orders?gateway=cod" className="dash-link-btn" style={{ padding: '2px 0', fontSize: '11px' }}>
+                <Link to="/orders?gateway=cod" className="dash-link-btn" style={{ padding: '2px 0', fontSize: '12px' }}>
                   Orders ↗
                 </Link>
               </div>
@@ -806,7 +806,7 @@ export function Dashboard() {
               </div>
               <div className="dash-recon-right">
                 <div className="dash-recon-amt">{formatMoney(recon?.gokwikPrepaid.totalAmount ?? 0, 'INR')}</div>
-                <Link to="/orders?gateway=gokwik" className="dash-link-btn" style={{ padding: '2px 0', fontSize: '11px' }}>
+                <Link to="/orders?gateway=gokwik" className="dash-link-btn" style={{ padding: '2px 0', fontSize: '12px' }}>
                   Orders ↗
                 </Link>
               </div>
@@ -828,7 +828,7 @@ export function Dashboard() {
                 <div className="dash-recon-amt">
                   {formatMoney((recon?.phonepePrepaid.totalAmount ?? 0) + (recon?.manualPrepaid.totalAmount ?? 0), 'INR')}
                 </div>
-                <Link to="/orders?gateway=phonepe" className="dash-link-btn" style={{ padding: '2px 0', fontSize: '11px' }}>
+                <Link to="/orders?gateway=phonepe" className="dash-link-btn" style={{ padding: '2px 0', fontSize: '12px' }}>
                   Orders ↗
                 </Link>
               </div>

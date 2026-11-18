@@ -498,25 +498,25 @@ export function Analytics() {
               <div style={{ padding: '16px 20px', background: 'var(--surface-elevated)', borderBottom: '1px solid var(--line)', borderRadius: '0 0 10px 10px' }}>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px', marginBottom: '16px' }}>
                   <div style={{ background: 'var(--panel)', padding: '12px 14px', borderRadius: '8px', border: '1px solid var(--line)' }}>
-                    <div style={{ fontSize: '11px', color: 'var(--muted)', fontWeight: 700 }}>AVERAGE ORDER VALUE</div>
+                    <div style={{ fontSize: '12px', color: 'var(--muted)', fontWeight: 700 }}>AVERAGE ORDER VALUE</div>
                     <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--ink)', marginTop: '2px' }}>
                       {formatMoney(insights.averageOrderValue, 'INR')}
                     </div>
                   </div>
                   <div style={{ background: 'var(--panel)', padding: '12px 14px', borderRadius: '8px', border: '1px solid var(--line)' }}>
-                    <div style={{ fontSize: '11px', color: 'var(--muted)', fontWeight: 700 }}>MOM REVENUE GROWTH</div>
+                    <div style={{ fontSize: '12px', color: 'var(--muted)', fontWeight: 700 }}>MOM REVENUE GROWTH</div>
                     <div style={{ fontSize: '18px', fontWeight: 800, color: insights.momGrowthRate >= 0 ? 'var(--tone-success-fg)' : 'var(--tone-danger-fg)', marginTop: '2px' }}>
                       {insights.momGrowthRate >= 0 ? `+${insights.momGrowthRate}%` : `${insights.momGrowthRate}%`}
                     </div>
                   </div>
                   <div style={{ background: 'var(--panel)', padding: '12px 14px', borderRadius: '8px', border: '1px solid var(--line)' }}>
-                    <div style={{ fontSize: '11px', color: 'var(--muted)', fontWeight: 700 }}>RTO LOSS RATIO</div>
+                    <div style={{ fontSize: '12px', color: 'var(--muted)', fontWeight: 700 }}>RTO LOSS RATIO</div>
                     <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--tone-warning-fg)', marginTop: '2px' }}>
                       {insights.rtoLossRate}%
                     </div>
                   </div>
                   <div style={{ background: 'var(--panel)', padding: '12px 14px', borderRadius: '8px', border: '1px solid var(--line)' }}>
-                    <div style={{ fontSize: '11px', color: 'var(--muted)', fontWeight: 700 }}>DATA QUALITY & AUDIT SCORE</div>
+                    <div style={{ fontSize: '12px', color: 'var(--muted)', fontWeight: 700 }}>DATA QUALITY & AUDIT SCORE</div>
                     <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--tone-info-fg)', marginTop: '2px' }}>
                       {insights.dataQualityScore}%
                     </div>
@@ -538,7 +538,7 @@ export function Analytics() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
                         <span
                           style={{
-                            fontSize: '10px',
+                            fontSize: '12px',
                             fontWeight: 800,
                             padding: '2px 6px',
                             borderRadius: '4px',
@@ -553,7 +553,7 @@ export function Analytics() {
                       <div style={{ fontSize: '12px', color: 'var(--ink-secondary)', lineHeight: 1.5 }}>
                         <strong>Action:</strong> {rec.action}
                       </div>
-                      <div style={{ fontSize: '11.5px', color: 'var(--muted)', marginTop: '2px' }}>
+                      <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '2px' }}>
                         <em>Expected Impact:</em> {rec.impact}
                       </div>
                     </div>
@@ -699,7 +699,7 @@ export function Analytics() {
                     </td>
                     <td className="mono" style={{ textAlign: 'right', fontWeight: 700 }}>{c.totalOrders}</td>
                     <td className="mono" style={{ textAlign: 'right' }}>{formatMoney(c.totalCost, 'INR')}</td>
-                    <td className="mono" style={{ textAlign: 'right', color: c.totalRtoOrders > 0 ? '#b91c1c' : '#64748b' }}>
+                    <td className="mono" style={{ textAlign: 'right', color: c.totalRtoOrders > 0 ? 'var(--tone-danger-fg)' : 'var(--muted-light)' }}>
                       {c.totalRtoOrders}
                     </td>
                     <td className="mono" style={{ textAlign: 'right' }}>{formatMoney(c.avgPerOrderAmount, 'INR')}</td>
@@ -785,10 +785,10 @@ export function Analytics() {
                     <td className="mono" style={{ textAlign: 'right', fontWeight: 700 }}>
                       {formatMoney(s.grossRevenue, 'INR')}
                     </td>
-                    <td className="mono" style={{ textAlign: 'right', color: '#2563eb' }}>
+                    <td className="mono" style={{ textAlign: 'right', color: 'var(--tone-info-fg)' }}>
                       {s.prepaidCount}
                     </td>
-                    <td className="mono" style={{ textAlign: 'right', color: '#d97706' }}>
+                    <td className="mono" style={{ textAlign: 'right', color: 'var(--tone-warning-fg)' }}>
                       {s.codCount}
                     </td>
                     <td className="mono" style={{ textAlign: 'right', fontWeight: 700 }}>
@@ -806,7 +806,7 @@ export function Analytics() {
                         ))}
                       </div>
                     </td>
-                    <td className="mono" style={{ textAlign: 'right', color: '#047857', fontWeight: 700 }}>
+                    <td className="mono" style={{ textAlign: 'right', color: 'var(--tone-success-fg)', fontWeight: 700 }}>
                       {s.deliveredCount}
                     </td>
                   </tr>
@@ -824,72 +824,72 @@ export function Analytics() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '14px' }}>
             <div style={{ background: 'var(--tone-success-bg)', border: '1px solid var(--tone-success-border)', borderRadius: '10px', padding: '14px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '11px', fontWeight: 800, color: 'var(--tone-success-fg)', textTransform: 'uppercase' }}>Champions</span>
-                <span style={{ background: '#047857', color: '#fff', fontSize: '10px', fontWeight: 800, padding: '2px 6px', borderRadius: '4px' }}>
+                <span style={{ fontSize: '12px', fontWeight: 800, color: 'var(--tone-success-fg)', textTransform: 'uppercase' }}>Champions</span>
+                <span style={{ background: '#047857', color: '#fff', fontSize: '12px', fontWeight: 800, padding: '2px 6px', borderRadius: '4px' }}>
                   {accounts.rfmSummary.champions.count} ACCOUNTS
                 </span>
               </div>
               <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--tone-success-fg)', marginTop: '6px' }}>
                 {formatMoney(accounts.rfmSummary.champions.totalRevenue, 'INR')}
               </div>
-              <div style={{ fontSize: '11.5px', color: 'var(--ink-secondary)', marginTop: '4px' }}>
+              <div style={{ fontSize: '12px', color: 'var(--ink-secondary)', marginTop: '4px' }}>
                 {accounts.rfmSummary.champions.description}
               </div>
-              <div style={{ fontSize: '11.5px', color: 'var(--ink)', fontWeight: 600, marginTop: '8px', borderTop: '1px dashed var(--tone-success-border)', paddingTop: '6px' }}>
+              <div style={{ fontSize: '12px', color: 'var(--ink)', fontWeight: 600, marginTop: '8px', borderTop: '1px dashed var(--tone-success-border)', paddingTop: '6px' }}>
                 <em>Play:</em> {accounts.rfmSummary.champions.play}
               </div>
             </div>
 
             <div style={{ background: 'var(--tone-info-bg)', border: '1px solid var(--tone-info-border)', borderRadius: '10px', padding: '14px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '11px', fontWeight: 800, color: 'var(--tone-info-fg)', textTransform: 'uppercase' }}>Loyal Customers</span>
-                <span style={{ background: '#1d4ed8', color: '#fff', fontSize: '10px', fontWeight: 800, padding: '2px 6px', borderRadius: '4px' }}>
+                <span style={{ fontSize: '12px', fontWeight: 800, color: 'var(--tone-info-fg)', textTransform: 'uppercase' }}>Loyal Customers</span>
+                <span style={{ background: '#1d4ed8', color: '#fff', fontSize: '12px', fontWeight: 800, padding: '2px 6px', borderRadius: '4px' }}>
                   {accounts.rfmSummary.loyal.count} ACCOUNTS
                 </span>
               </div>
               <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--tone-info-fg)', marginTop: '6px' }}>
                 {formatMoney(accounts.rfmSummary.loyal.totalRevenue, 'INR')}
               </div>
-              <div style={{ fontSize: '11.5px', color: 'var(--ink-secondary)', marginTop: '4px' }}>
+              <div style={{ fontSize: '12px', color: 'var(--ink-secondary)', marginTop: '4px' }}>
                 {accounts.rfmSummary.loyal.description}
               </div>
-              <div style={{ fontSize: '11.5px', color: 'var(--ink)', fontWeight: 600, marginTop: '8px', borderTop: '1px dashed var(--tone-info-border)', paddingTop: '6px' }}>
+              <div style={{ fontSize: '12px', color: 'var(--ink)', fontWeight: 600, marginTop: '8px', borderTop: '1px dashed var(--tone-info-border)', paddingTop: '6px' }}>
                 <em>Play:</em> {accounts.rfmSummary.loyal.play}
               </div>
             </div>
 
             <div style={{ background: 'var(--tone-purple-bg)', border: '1px solid var(--tone-purple-border)', borderRadius: '10px', padding: '14px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '11px', fontWeight: 800, color: 'var(--tone-purple-fg)', textTransform: 'uppercase' }}>Potential Loyalists</span>
-                <span style={{ background: '#6d28d9', color: '#fff', fontSize: '10px', fontWeight: 800, padding: '2px 6px', borderRadius: '4px' }}>
+                <span style={{ fontSize: '12px', fontWeight: 800, color: 'var(--tone-purple-fg)', textTransform: 'uppercase' }}>Potential Loyalists</span>
+                <span style={{ background: '#6d28d9', color: '#fff', fontSize: '12px', fontWeight: 800, padding: '2px 6px', borderRadius: '4px' }}>
                   {accounts.rfmSummary.potential.count} ACCOUNTS
                 </span>
               </div>
               <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--tone-purple-fg)', marginTop: '6px' }}>
                 {formatMoney(accounts.rfmSummary.potential.totalRevenue, 'INR')}
               </div>
-              <div style={{ fontSize: '11.5px', color: 'var(--ink-secondary)', marginTop: '4px' }}>
+              <div style={{ fontSize: '12px', color: 'var(--ink-secondary)', marginTop: '4px' }}>
                 {accounts.rfmSummary.potential.description}
               </div>
-              <div style={{ fontSize: '11.5px', color: 'var(--ink)', fontWeight: 600, marginTop: '8px', borderTop: '1px dashed var(--tone-purple-border)', paddingTop: '6px' }}>
+              <div style={{ fontSize: '12px', color: 'var(--ink)', fontWeight: 600, marginTop: '8px', borderTop: '1px dashed var(--tone-purple-border)', paddingTop: '6px' }}>
                 <em>Play:</em> {accounts.rfmSummary.potential.play}
               </div>
             </div>
 
             <div style={{ background: 'var(--tone-danger-bg)', border: '1px solid var(--tone-danger-border)', borderRadius: '10px', padding: '14px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '11px', fontWeight: 800, color: 'var(--tone-danger-fg)', textTransform: 'uppercase' }}>At Risk (RTO Flagged)</span>
-                <span style={{ background: '#b91c1c', color: '#fff', fontSize: '10px', fontWeight: 800, padding: '2px 6px', borderRadius: '4px' }}>
+                <span style={{ fontSize: '12px', fontWeight: 800, color: 'var(--tone-danger-fg)', textTransform: 'uppercase' }}>At Risk (RTO Flagged)</span>
+                <span style={{ background: '#b91c1c', color: '#fff', fontSize: '12px', fontWeight: 800, padding: '2px 6px', borderRadius: '4px' }}>
                   {accounts.rfmSummary.atRisk.count} ACCOUNTS
                 </span>
               </div>
               <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--tone-danger-fg)', marginTop: '6px' }}>
                 {formatMoney(accounts.rfmSummary.atRisk.totalRevenue, 'INR')}
               </div>
-              <div style={{ fontSize: '11.5px', color: 'var(--ink-secondary)', marginTop: '4px' }}>
+              <div style={{ fontSize: '12px', color: 'var(--ink-secondary)', marginTop: '4px' }}>
                 {accounts.rfmSummary.atRisk.description}
               </div>
-              <div style={{ fontSize: '11.5px', color: 'var(--ink)', fontWeight: 600, marginTop: '8px', borderTop: '1px dashed var(--tone-danger-border)', paddingTop: '6px' }}>
+              <div style={{ fontSize: '12px', color: 'var(--ink)', fontWeight: 600, marginTop: '8px', borderTop: '1px dashed var(--tone-danger-border)', paddingTop: '6px' }}>
                 <em>Play:</em> {accounts.rfmSummary.atRisk.play}
               </div>
             </div>
@@ -949,24 +949,24 @@ export function Analytics() {
                   {filteredAccounts.map((a: CustomerAccountItem) => (
                     <tr key={a.phone}>
                       <td>
-                        <div style={{ fontWeight: 700, color: '#0f172a' }}>{a.name}</div>
-                        <div style={{ fontSize: '11px', color: 'var(--muted)' }}>
+                        <div style={{ fontWeight: 700, color: 'var(--ink)' }}>{a.name}</div>
+                        <div style={{ fontSize: '12px', color: 'var(--muted)' }}>
                           <code>{a.phone}</code>
                           {a.email ? ` · ${a.email}` : ''}
                         </div>
                       </td>
                       <td>
                         <div style={{ fontSize: '12px', fontWeight: 600 }}>{a.city}</div>
-                        <div style={{ fontSize: '11px', color: 'var(--muted)' }}>{a.state}</div>
+                        <div style={{ fontSize: '12px', color: 'var(--muted)' }}>{a.state}</div>
                       </td>
                       <td className="mono" style={{ textAlign: 'center' }}>
                         <strong>{a.orderCount}</strong>
-                        <span style={{ fontSize: '11px', color: 'var(--muted)' }}>
-                          {' '}(<span style={{ color: '#047857' }}>{a.deliveredCount} del</span>
-                          {a.rtoCount > 0 ? <span style={{ color: '#dc2626' }}>, {a.rtoCount} rto</span> : null})
+                        <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                          {' '}(<span style={{ color: 'var(--tone-success-fg)' }}>{a.deliveredCount} del</span>
+                          {a.rtoCount > 0 ? <span style={{ color: 'var(--tone-danger-fg)' }}>, {a.rtoCount} rto</span> : null})
                         </span>
                       </td>
-                      <td className="mono" style={{ textAlign: 'right', fontWeight: 800, color: '#0f172a' }}>
+                      <td className="mono" style={{ textAlign: 'right', fontWeight: 800, color: 'var(--ink)' }}>
                         {formatMoney(a.lifetimeGross, 'INR')}
                       </td>
                       <td style={{ textAlign: 'center' }}>
@@ -975,10 +975,10 @@ export function Analytics() {
                             display: 'inline-block',
                             padding: '3px 8px',
                             borderRadius: '12px',
-                            fontSize: '10px',
+                            fontSize: '12px',
                             fontWeight: 800,
                             background:
-                              a.healthScore === 'GREEN' ? '#dcfce7' : a.healthScore === 'YELLOW' ? '#fef3c7' : '#fee2e2',
+                              a.healthScore === 'GREEN' ? 'var(--tone-success-bg)' : a.healthScore === 'YELLOW' ? 'var(--tone-warning-bg)' : 'var(--tone-danger-bg)',
                             color:
                               a.healthScore === 'GREEN' ? '#15803d' : a.healthScore === 'YELLOW' ? '#b45309' : '#b91c1c',
                           }}
@@ -992,16 +992,16 @@ export function Analytics() {
                             display: 'inline-block',
                             padding: '3px 8px',
                             borderRadius: '6px',
-                            fontSize: '11px',
+                            fontSize: '12px',
                             fontWeight: 700,
-                            background: '#f1f5f9',
-                            color: '#334155',
+                            background: 'var(--surface-elevated)',
+                            color: 'var(--ink-secondary)',
                           }}
                         >
                           {a.segment}
                         </span>
                       </td>
-                      <td style={{ fontSize: '12px', color: '#1e293b' }}>
+                      <td style={{ fontSize: '12px', color: 'var(--ink)' }}>
                         {a.recommendedPlay}
                       </td>
                     </tr>
@@ -1021,7 +1021,7 @@ export function Analytics() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '14px' }}>
               <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '10px', padding: '16px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: '11px', fontWeight: 800, color: 'var(--tone-info-fg)', textTransform: 'uppercase' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 800, color: 'var(--tone-info-fg)', textTransform: 'uppercase' }}>
                     DAILY TERRITORY SCHEDULE
                   </span>
                   <span className="tone-chip tone-chip--success">
@@ -1041,7 +1041,7 @@ export function Analytics() {
 
               <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '10px', padding: '16px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: '11px', fontWeight: 800, color: 'var(--tone-purple-fg)', textTransform: 'uppercase' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 800, color: 'var(--tone-purple-fg)', textTransform: 'uppercase' }}>
                     WEEKLY EXECUTIVE SCHEDULE
                   </span>
                   <span className="tone-chip tone-chip--success">
@@ -1060,7 +1060,7 @@ export function Analytics() {
               </div>
 
               <div style={{ background: 'var(--surface-elevated)', border: '1px solid var(--line)', borderRadius: '10px', padding: '16px' }}>
-                <div style={{ fontSize: '11px', fontWeight: 800, color: 'var(--muted)', textTransform: 'uppercase' }}>
+                <div style={{ fontSize: '12px', fontWeight: 800, color: 'var(--muted)', textTransform: 'uppercase' }}>
                   DISTRIBUTION AGENT AUDIT STATUS
                 </div>
                 <div style={{ fontSize: '20px', fontWeight: 900, color: 'var(--ink)', marginTop: '6px' }}>
@@ -1246,12 +1246,12 @@ export function Analytics() {
                   ) : (
                     historyData.history.map((log) => (
                       <tr key={log.id}>
-                        <td className="mono" style={{ fontSize: '11.5px', color: 'var(--ink-secondary)' }}>
+                        <td className="mono" style={{ fontSize: '12px', color: 'var(--ink-secondary)' }}>
                           {new Date(log.sentAt || log.createdAt).toLocaleString()}
                         </td>
                         <td>
                           <div style={{ fontWeight: 700, color: 'var(--ink)' }}>{log.recipientName}</div>
-                          <div style={{ fontSize: '11px', color: 'var(--muted)' }}>{log.recipientEmail}</div>
+                          <div style={{ fontSize: '12px', color: 'var(--muted)' }}>{log.recipientEmail}</div>
                         </td>
                         <td style={{ fontSize: '12px', fontWeight: 600, color: 'var(--ink)' }}>
                           {log.subject}
@@ -1263,7 +1263,7 @@ export function Analytics() {
                             {log.status}
                           </span>
                         </td>
-                        <td style={{ fontSize: '11px', color: 'var(--muted)' }}>
+                        <td style={{ fontSize: '12px', color: 'var(--muted)' }}>
                           <code>{log.metadata?.reportType || 'EXECUTIVE_DIGEST'}</code>
                           {log.metadata?.mode ? ` · ${log.metadata.mode}` : ''}
                         </td>

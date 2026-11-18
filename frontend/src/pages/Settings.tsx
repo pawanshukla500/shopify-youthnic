@@ -570,7 +570,7 @@ export function Settings() {
               </button>
             </div>
             {webhookStatus && (
-              <div style={{ marginTop: 12, fontSize: 12, display: 'grid', gap: 6, color: '#334155' }}>
+              <div style={{ marginTop: 12, fontSize: 12, display: 'grid', gap: 6, color: 'var(--ink-secondary)' }}>
                 <div>APP_BASE_URL: <code>{webhookStatus.appBaseUrl}</code> {webhookStatus.https ? '· HTTPS OK' : '· NOT HTTPS — webhooks will fail'}</div>
                 <div>Shopify → <code>{webhookStatus.shopify?.expectedAddress}</code> · registered: {webhookStatus.shopify?.registered?.length ?? 0}/5 · secret: {webhookStatus.shopify?.webhookSecretConfigured ? 'set' : 'missing'}</div>
                 <div>Delhivery → <code>{webhookStatus.delhivery?.expectedAddress}</code> · {webhookStatus.delhivery?.setup} · token: {webhookStatus.delhivery?.apiTokenConfigured ? 'set' : 'missing'} · pickup: <code>{webhookStatus.delhivery?.pickupLocation}</code></div>
@@ -583,7 +583,7 @@ export function Settings() {
             <PanelHeading title="Delhivery Pickup Warehouse" eyebrow="One-time registration · avoids ClientWarehouse-mismatch manifest failures" />
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px', marginTop: 12 }}>
               {(['name', 'phone', 'city', 'pin', 'address', 'email'] as const).map((field) => (
-                <label key={field} style={{ display: 'grid', gap: 4, fontSize: 11, color: 'var(--muted)', textTransform: 'capitalize' }}>
+                <label key={field} style={{ display: 'grid', gap: 4, fontSize: 12, color: 'var(--muted)', textTransform: 'capitalize' }}>
                   {field}
                   <input
                     value={whForm[field]}
@@ -649,7 +649,7 @@ export function Settings() {
                 <Panel style={{ padding: '18px 20px', position: 'relative' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: '#ffffff', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px', flexShrink: 0, boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+                      <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: '#ffffff', border: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px', flexShrink: 0, boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
                         <img
                           src="/logos/postgresql.png"
                           alt="PostgreSQL"
@@ -659,14 +659,14 @@ export function Settings() {
                       </div>
                       <div>
                         <strong style={{ fontSize: '13px', display: 'block', color: 'var(--ink)' }}>PostgreSQL VPS</strong>
-                        <span style={{ fontSize: '10.5px', color: 'var(--muted)' }}>Hostinger 31.97.234.18</span>
+                        <span style={{ fontSize: '12px', color: 'var(--muted)' }}>Hostinger 31.97.234.18</span>
                       </div>
                     </div>
                     <span className="status-badge status-success">
                       <span className="status-dot" /> LIVE
                     </span>
                   </div>
-                  <div style={{ fontSize: '11.5px', display: 'grid', gap: '6px', color: 'var(--muted)' }}>
+                  <div style={{ fontSize: '12px', display: 'grid', gap: '6px', color: 'var(--muted)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span style={{ color: 'var(--muted)' }}>Port & DB:</span>
                       <strong style={{ color: 'var(--ink)' }}>5433 · shopify_express</strong>
@@ -690,7 +690,7 @@ export function Settings() {
                 <Panel style={{ padding: '18px 20px', position: 'relative' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: '#ffffff', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px', flexShrink: 0, boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+                      <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: '#ffffff', border: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px', flexShrink: 0, boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
                         <img
                           src="/logos/shopify.svg"
                           alt="Shopify"
@@ -700,17 +700,17 @@ export function Settings() {
                       </div>
                       <div>
                         <strong style={{ fontSize: '13px', display: 'block', color: 'var(--ink)' }}>Shopify API</strong>
-                        <span style={{ fontSize: '10.5px', color: 'var(--muted)' }}>v{statusData.shopify.apiVersion} (2026-07)</span>
+                        <span style={{ fontSize: '12px', color: 'var(--muted)' }}>v{statusData.shopify.apiVersion} (2026-07)</span>
                       </div>
                     </div>
                     <span className="status-badge status-info">
                       <span className="status-dot" /> CONNECTED
                     </span>
                   </div>
-                  <div style={{ fontSize: '11.5px', display: 'grid', gap: '6px', color: 'var(--muted)' }}>
+                  <div style={{ fontSize: '12px', display: 'grid', gap: '6px', color: 'var(--muted)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span style={{ color: 'var(--muted)' }}>Store Domain:</span>
-                      <strong style={{ color: 'var(--ink)', fontSize: '10.5px' }}>youthnic2024.myshopify.com</strong>
+                      <strong style={{ color: 'var(--ink)', fontSize: '12px' }}>youthnic2024.myshopify.com</strong>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span style={{ color: 'var(--muted)' }}>Ingestion Floor:</span>
@@ -731,7 +731,7 @@ export function Settings() {
                 <Panel style={{ padding: '18px 20px', position: 'relative' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: '#ffffff', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px', flexShrink: 0, boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+                      <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: '#ffffff', border: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px', flexShrink: 0, boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
                         <img
                           src="/logos/delhivery.png"
                           alt="Delhivery"
@@ -741,14 +741,14 @@ export function Settings() {
                       </div>
                       <div>
                         <strong style={{ fontSize: '13px', display: 'block', color: 'var(--ink)' }}>Delhivery Express</strong>
-                        <span style={{ fontSize: '10.5px', color: 'var(--muted)' }}>Production Express API</span>
+                        <span style={{ fontSize: '12px', color: 'var(--muted)' }}>Production Express API</span>
                       </div>
                     </div>
                     <span className="status-badge status-warning">
                       <span className="status-dot" /> ACTIVE
                     </span>
                   </div>
-                  <div style={{ fontSize: '11.5px', display: 'grid', gap: '6px', color: 'var(--muted)' }}>
+                  <div style={{ fontSize: '12px', display: 'grid', gap: '6px', color: 'var(--muted)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span style={{ color: 'var(--muted)' }}>Surat Origin Hub:</span>
                       <strong style={{ color: 'var(--ink)' }}>{statusData.delhivery.originHub}</strong>
@@ -772,7 +772,7 @@ export function Settings() {
                 <Panel style={{ padding: '18px 20px', position: 'relative' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: '#ffffff', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px', flexShrink: 0, boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+                      <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: '#ffffff', border: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px', flexShrink: 0, boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
                         <img
                           src="/logos/nodejs.svg"
                           alt="Node.js"
@@ -782,14 +782,14 @@ export function Settings() {
                       </div>
                       <div>
                         <strong style={{ fontSize: '13px', display: 'block', color: 'var(--ink)' }}>Node & Express</strong>
-                        <span style={{ fontSize: '10.5px', color: 'var(--muted)' }}>{statusData.stack.nodeVersion} · {statusData.stack.platform}</span>
+                        <span style={{ fontSize: '12px', color: 'var(--muted)' }}>{statusData.stack.nodeVersion} · {statusData.stack.platform}</span>
                       </div>
                     </div>
                     <span className="status-badge status-purple">
                       <span className="status-dot" /> PORT {statusData.stack.port}
                     </span>
                   </div>
-                  <div style={{ fontSize: '11.5px', display: 'grid', gap: '6px', color: 'var(--muted)' }}>
+                  <div style={{ fontSize: '12px', display: 'grid', gap: '6px', color: 'var(--muted)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span style={{ color: 'var(--muted)' }}>Uptime:</span>
                       <strong style={{ color: 'var(--ink)' }}>{Math.floor(statusData.stack.uptimeSeconds / 60)} mins</strong>
@@ -872,7 +872,7 @@ export function Settings() {
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '8px', borderBottom: '1px solid var(--line)' }}>
                       <span style={{ color: 'var(--muted)' }}>Endpoint:</span>
-                      <code style={{ fontSize: '10.5px', background: 'var(--line-subtle)', padding: '2px 6px', borderRadius: '4px', color: 'var(--tone-info-fg)' }}>
+                      <code style={{ fontSize: '12px', background: 'var(--line-subtle)', padding: '2px 6px', borderRadius: '4px', color: 'var(--tone-info-fg)' }}>
                         https://api.resend.com/emails
                       </code>
                     </div>
@@ -884,28 +884,28 @@ export function Settings() {
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '8px', borderBottom: '1px solid var(--line)' }}>
                       <span style={{ color: 'var(--muted)' }}>Conversion Tracking:</span>
-                      <span style={{ color: 'var(--tone-success-fg)', fontWeight: 700, fontSize: '11.5px' }}>
+                      <span style={{ color: 'var(--tone-success-fg)', fontWeight: 700, fontSize: '12px' }}>
                         Active (Click-to-Convert Redirect Endpoint Enabled)
                       </span>
                     </div>
                     <div>
-                      <span style={{ color: 'var(--muted)', fontSize: '11px', display: 'block', marginBottom: '6px' }}>Supported Customer Delay & Transit Templates:</span>
+                      <span style={{ color: 'var(--muted)', fontSize: '12px', display: 'block', marginBottom: '6px' }}>Supported Customer Delay & Transit Templates:</span>
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px', background: 'var(--canvas)', padding: '5px 8px', borderRadius: '6px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12px', background: 'var(--canvas)', padding: '5px 8px', borderRadius: '6px' }}>
                           <span>⏱️ <strong>In-Transit Weather / Route Delay</strong></span>
-                          <span style={{ color: 'var(--tone-warning-fg)', fontSize: '10px', fontWeight: 700 }}>Proactive Alert</span>
+                          <span style={{ color: 'var(--tone-warning-fg)', fontSize: '12px', fontWeight: 700 }}>Proactive Alert</span>
                         </div>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px', background: 'var(--canvas)', padding: '5px 8px', borderRadius: '6px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12px', background: 'var(--canvas)', padding: '5px 8px', borderRadius: '6px' }}>
                           <span>🏭 <strong>Warehouse SLA Dispatch Delay</strong></span>
-                          <span style={{ color: 'var(--tone-danger-fg)', fontSize: '10px', fontWeight: 700 }}>QC Priority</span>
+                          <span style={{ color: 'var(--tone-danger-fg)', fontSize: '12px', fontWeight: 700 }}>QC Priority</span>
                         </div>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px', background: 'var(--canvas)', padding: '5px 8px', borderRadius: '6px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12px', background: 'var(--canvas)', padding: '5px 8px', borderRadius: '6px' }}>
                           <span>🚚 <strong>Out For Delivery Alert</strong></span>
-                          <span style={{ color: 'var(--tone-info-fg)', fontSize: '10px', fontWeight: 700 }}>COD Readiness</span>
+                          <span style={{ color: 'var(--tone-info-fg)', fontSize: '12px', fontWeight: 700 }}>COD Readiness</span>
                         </div>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px', background: 'var(--canvas)', padding: '5px 8px', borderRadius: '6px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12px', background: 'var(--canvas)', padding: '5px 8px', borderRadius: '6px' }}>
                           <span>⚠️ <strong>NDR Delivery Reschedule</strong></span>
-                          <span style={{ color: 'var(--tone-purple-fg)', fontSize: '10px', fontWeight: 700 }}>RTO Prevention</span>
+                          <span style={{ color: 'var(--tone-purple-fg)', fontSize: '12px', fontWeight: 700 }}>RTO Prevention</span>
                         </div>
                       </div>
                     </div>
@@ -919,7 +919,7 @@ export function Settings() {
                   eyebrow="Payment Rails & Settlement Partners"
                   title="Checkout Aggregators & Reconciliation Status"
                   action={
-                    <span style={{ fontSize: '11px', color: 'var(--muted)', fontWeight: 600 }}>
+                    <span style={{ fontSize: '12px', color: 'var(--muted)', fontWeight: 600 }}>
                       Configured for 100% 3-Way Order Reconciliation
                     </span>
                   }
@@ -928,7 +928,7 @@ export function Settings() {
                   {/* GoKwik */}
                   <div style={{ border: '1px solid var(--line)', borderRadius: '10px', padding: '14px', background: 'var(--canvas)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
-                      <div style={{ width: '40px', height: '40px', borderRadius: '8px', background: '#ffffff', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '5px', flexShrink: 0, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+                      <div style={{ width: '40px', height: '40px', borderRadius: '8px', background: '#ffffff', border: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '5px', flexShrink: 0, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
                         <img
                           src="/logos/gokwik.png"
                           alt="GoKwik"
@@ -938,10 +938,10 @@ export function Settings() {
                       </div>
                       <div>
                         <strong style={{ fontSize: '12px', display: 'block', color: 'var(--ink)' }}>GoKwik</strong>
-                        <span style={{ fontSize: '10px', color: 'var(--muted)' }}>Checkout Aggregator</span>
+                        <span style={{ fontSize: '12px', color: 'var(--muted)' }}>Checkout Aggregator</span>
                       </div>
                     </div>
-                    <div style={{ fontSize: '10.5px', color: 'var(--muted)', display: 'grid', gap: '4px' }}>
+                    <div style={{ fontSize: '12px', color: 'var(--muted)', display: 'grid', gap: '4px' }}>
                       <div>• Automated COD Confirmation tags</div>
                       <div>• RTO Risk scores & delivery history</div>
                       <div>• Headless checkout routing</div>
@@ -951,7 +951,7 @@ export function Settings() {
                   {/* Easebuzz */}
                   <div style={{ border: '1px solid var(--line)', borderRadius: '10px', padding: '14px', background: 'var(--canvas)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
-                      <div style={{ width: '40px', height: '40px', borderRadius: '8px', background: '#ffffff', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '5px', flexShrink: 0, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+                      <div style={{ width: '40px', height: '40px', borderRadius: '8px', background: '#ffffff', border: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '5px', flexShrink: 0, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
                         <img
                           src="/logos/easebuzz.png"
                           alt="Easebuzz"
@@ -961,10 +961,10 @@ export function Settings() {
                       </div>
                       <div>
                         <strong style={{ fontSize: '12px', display: 'block', color: 'var(--ink)' }}>Easebuzz</strong>
-                        <span style={{ fontSize: '10px', color: 'var(--muted)' }}>Settlement Partner</span>
+                        <span style={{ fontSize: '12px', color: 'var(--muted)' }}>Settlement Partner</span>
                       </div>
                     </div>
-                    <div style={{ fontSize: '10.5px', color: 'var(--muted)', display: 'grid', gap: '4px' }}>
+                    <div style={{ fontSize: '12px', color: 'var(--muted)', display: 'grid', gap: '4px' }}>
                       <div>• Primary UPI & NetBanking collection</div>
                       <div>• Direct bank settlement verification</div>
                       <div>• Transaction ID matching (E2609...)</div>
@@ -974,7 +974,7 @@ export function Settings() {
                   {/* PhonePe */}
                   <div style={{ border: '1px solid var(--line)', borderRadius: '10px', padding: '14px', background: 'var(--canvas)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
-                      <div style={{ width: '40px', height: '40px', borderRadius: '8px', background: '#ffffff', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '5px', flexShrink: 0, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+                      <div style={{ width: '40px', height: '40px', borderRadius: '8px', background: '#ffffff', border: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '5px', flexShrink: 0, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
                         <img
                           src="/logos/phonepe.png"
                           alt="PhonePe"
@@ -984,10 +984,10 @@ export function Settings() {
                       </div>
                       <div>
                         <strong style={{ fontSize: '12px', display: 'block', color: 'var(--ink)' }}>PhonePe</strong>
-                        <span style={{ fontSize: '10px', color: 'var(--muted)' }}>Secondary UPI Rail</span>
+                        <span style={{ fontSize: '12px', color: 'var(--muted)' }}>Secondary UPI Rail</span>
                       </div>
                     </div>
-                    <div style={{ fontSize: '10.5px', color: 'var(--muted)', display: 'grid', gap: '4px' }}>
+                    <div style={{ fontSize: '12px', color: 'var(--muted)', display: 'grid', gap: '4px' }}>
                       <div>• Instant UPI Intent & QR Gateway</div>
                       <div>• UTR reconciliation mapping</div>
                       <div>• High-traffic backup gateway</div>
@@ -997,7 +997,7 @@ export function Settings() {
                   {/* COD Remittance */}
                   <div style={{ border: '1px solid var(--line)', borderRadius: '10px', padding: '14px', background: 'var(--canvas)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
-                      <div style={{ width: '40px', height: '40px', borderRadius: '8px', background: '#ffffff', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '5px', flexShrink: 0, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+                      <div style={{ width: '40px', height: '40px', borderRadius: '8px', background: '#ffffff', border: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '5px', flexShrink: 0, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
                         <img
                           src="/logos/delhivery.png"
                           alt="Delhivery"
@@ -1007,10 +1007,10 @@ export function Settings() {
                       </div>
                       <div>
                         <strong style={{ fontSize: '12px', display: 'block', color: 'var(--ink)' }}>Delhivery COD</strong>
-                        <span style={{ fontSize: '10px', color: 'var(--muted)' }}>Cash Remittance</span>
+                        <span style={{ fontSize: '12px', color: 'var(--muted)' }}>Cash Remittance</span>
                       </div>
                     </div>
-                    <div style={{ fontSize: '10.5px', color: 'var(--muted)', display: 'grid', gap: '4px' }}>
+                    <div style={{ fontSize: '12px', color: 'var(--muted)', display: 'grid', gap: '4px' }}>
                       <div>• Cash on Delivery collection</div>
                       <div>• Live rate-API freight estimates</div>
                       <div>• Automated discrepancy flagging</div>
@@ -1020,7 +1020,7 @@ export function Settings() {
                   {/* Razorpay */}
                   <div style={{ border: '1px solid var(--line)', borderRadius: '10px', padding: '14px', background: 'var(--canvas)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
-                      <div style={{ width: '40px', height: '40px', borderRadius: '8px', background: '#ffffff', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '5px', flexShrink: 0, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+                      <div style={{ width: '40px', height: '40px', borderRadius: '8px', background: '#ffffff', border: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '5px', flexShrink: 0, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
                         <img
                           src="/logos/razorpay.svg"
                           alt="Razorpay"
@@ -1030,10 +1030,10 @@ export function Settings() {
                       </div>
                       <div>
                         <strong style={{ fontSize: '12px', display: 'block', color: 'var(--ink)' }}>Razorpay</strong>
-                        <span style={{ fontSize: '10px', color: 'var(--muted)' }}>Cards & Subscriptions</span>
+                        <span style={{ fontSize: '12px', color: 'var(--muted)' }}>Cards & Subscriptions</span>
                       </div>
                     </div>
-                    <div style={{ fontSize: '10.5px', color: 'var(--muted)', display: 'grid', gap: '4px' }}>
+                    <div style={{ fontSize: '12px', color: 'var(--muted)', display: 'grid', gap: '4px' }}>
                       <div>• Instant refunds via Razorpay API</div>
                       <div>• Multi-bank netbanking aggregator</div>
                       <div>• 3D secure international card rail</div>
@@ -1043,7 +1043,7 @@ export function Settings() {
                   {/* Cashfree */}
                   <div style={{ border: '1px solid var(--line)', borderRadius: '10px', padding: '14px', background: 'var(--canvas)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
-                      <div style={{ width: '40px', height: '40px', borderRadius: '8px', background: '#ffffff', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '5px', flexShrink: 0, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+                      <div style={{ width: '40px', height: '40px', borderRadius: '8px', background: '#ffffff', border: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '5px', flexShrink: 0, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
                         <img
                           src="/logos/cashfree.svg"
                           alt="Cashfree"
@@ -1053,10 +1053,10 @@ export function Settings() {
                       </div>
                       <div>
                         <strong style={{ fontSize: '12px', display: 'block', color: 'var(--ink)' }}>Cashfree</strong>
-                        <span style={{ fontSize: '10px', color: 'var(--muted)' }}>Payouts & API Banking</span>
+                        <span style={{ fontSize: '12px', color: 'var(--muted)' }}>Payouts & API Banking</span>
                       </div>
                     </div>
-                    <div style={{ fontSize: '10.5px', color: 'var(--muted)', display: 'grid', gap: '4px' }}>
+                    <div style={{ fontSize: '12px', color: 'var(--muted)', display: 'grid', gap: '4px' }}>
                       <div>• Automated instant vendor payouts</div>
                       <div>• 24x7 IMPS/UPI customer refund engine</div>
                       <div>• Bank account verification validation</div>
@@ -1090,15 +1090,15 @@ export function Settings() {
                               <strong>{w.name}</strong>
                             </td>
                             <td>
-                              <code style={{ fontSize: '10.5px', background: 'var(--line-subtle)', padding: '2px 6px', borderRadius: '4px' }}>
+                              <code style={{ fontSize: '12px', background: 'var(--line-subtle)', padding: '2px 6px', borderRadius: '4px' }}>
                                 {w.path}
                               </code>
                             </td>
                             <td>
-                              <span style={{ fontSize: '10px', fontWeight: 800, color: 'var(--tone-info-fg)' }}>{w.method}</span>
+                              <span style={{ fontSize: '12px', fontWeight: 800, color: 'var(--tone-info-fg)' }}>{w.method}</span>
                             </td>
                             <td>
-                              <span style={{ fontSize: '11px', color: 'var(--tone-success-fg)', fontWeight: 700 }}>{w.latency || '10ms'}</span>
+                              <span style={{ fontSize: '12px', color: 'var(--tone-success-fg)', fontWeight: 700 }}>{w.latency || '10ms'}</span>
                             </td>
                             <td>
                               <span className="status-badge status-success">
@@ -1169,13 +1169,13 @@ export function Settings() {
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '8px', borderBottom: '1px solid var(--line)' }}>
                       <span style={{ color: 'var(--muted)' }}>API Endpoint:</span>
-                      <code style={{ fontSize: '10.5px', background: 'var(--line-subtle)', padding: '2px 6px', borderRadius: '4px', color: 'var(--tone-info-fg)' }}>
+                      <code style={{ fontSize: '12px', background: 'var(--line-subtle)', padding: '2px 6px', borderRadius: '4px', color: 'var(--tone-info-fg)' }}>
                         https://api.kwikengage.ai/send-message/v2
                       </code>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '8px', borderBottom: '1px solid var(--line)' }}>
                       <span style={{ color: 'var(--muted)' }}>Authorization:</span>
-                      <strong style={{ color: 'var(--ink)', fontSize: '11px' }}>
+                      <strong style={{ color: 'var(--ink)', fontSize: '12px' }}>
                         {kwikEngageQuery.data?.apiKeyConfigured ? 'Bearer [CONFIGURED]' : 'Bearer ${env:KWIKENGAGE_API_KEY}'}
                       </strong>
                     </div>
@@ -1198,23 +1198,23 @@ export function Settings() {
                       </strong>
                     </div>
                     <div>
-                      <span style={{ color: 'var(--muted)', fontSize: '11px', display: 'block', marginBottom: '6px' }}>Critical Trigger Automations:</span>
+                      <span style={{ color: 'var(--muted)', fontSize: '12px', display: 'block', marginBottom: '6px' }}>Critical Trigger Automations:</span>
                       <div style={{ display: 'grid', gap: '5px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px', background: 'var(--canvas)', padding: '5px 8px', borderRadius: '6px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12px', background: 'var(--canvas)', padding: '5px 8px', borderRadius: '6px' }}>
                           <span>⚡ <strong>COD Confirmation</strong></span>
-                          <span style={{ color: 'var(--tone-success-fg)', fontSize: '10px', fontWeight: 700 }}>Auto Tag Sync</span>
+                          <span style={{ color: 'var(--tone-success-fg)', fontSize: '12px', fontWeight: 700 }}>Auto Tag Sync</span>
                         </div>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px', background: 'var(--canvas)', padding: '5px 8px', borderRadius: '6px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12px', background: 'var(--canvas)', padding: '5px 8px', borderRadius: '6px' }}>
                           <span>🚀 <strong>Delhivery Dispatched</strong></span>
-                          <span style={{ color: 'var(--tone-info-fg)', fontSize: '10px', fontWeight: 700 }}>Click-to-Track</span>
+                          <span style={{ color: 'var(--tone-info-fg)', fontSize: '12px', fontWeight: 700 }}>Click-to-Track</span>
                         </div>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px', background: 'var(--canvas)', padding: '5px 8px', borderRadius: '6px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12px', background: 'var(--canvas)', padding: '5px 8px', borderRadius: '6px' }}>
                           <span>🚚 <strong>Out for Delivery</strong></span>
-                          <span style={{ color: 'var(--tone-warning-fg)', fontSize: '10px', fontWeight: 700 }}>COD Cash Alert</span>
+                          <span style={{ color: 'var(--tone-warning-fg)', fontSize: '12px', fontWeight: 700 }}>COD Cash Alert</span>
                         </div>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px', background: 'var(--canvas)', padding: '5px 8px', borderRadius: '6px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12px', background: 'var(--canvas)', padding: '5px 8px', borderRadius: '6px' }}>
                           <span>⚠️ <strong>NDR Reschedule Help</strong></span>
-                          <span style={{ color: 'var(--tone-danger-fg)', fontSize: '10px', fontWeight: 700 }}>RTO Prevent Link</span>
+                          <span style={{ color: 'var(--tone-danger-fg)', fontSize: '12px', fontWeight: 700 }}>RTO Prevent Link</span>
                         </div>
                       </div>
                     </div>
@@ -1269,11 +1269,11 @@ export function Settings() {
                         </div>
                         <div>
                           <strong style={{ fontSize: '15px', color: 'var(--ink)' }}>Delhivery First</strong>
-                          <span style={{ fontSize: '11.5px', color: 'var(--muted)', display: 'block' }}>Primary Carrier (Default)</span>
+                          <span style={{ fontSize: '12px', color: 'var(--muted)', display: 'block' }}>Primary Carrier (Default)</span>
                         </div>
                       </div>
                       {currentPriority === 'DELHIVERY_FIRST' ? (
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#1d4ed8', color: '#ffffff', fontSize: '11px', fontWeight: 700, padding: '4px 10px', borderRadius: '12px' }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#1d4ed8', color: '#ffffff', fontSize: '12px', fontWeight: 700, padding: '4px 10px', borderRadius: '12px' }}>
                           <Icon name="check" size={12} /> ACTIVE
                         </span>
                       ) : (
@@ -1307,11 +1307,11 @@ export function Settings() {
                         </div>
                         <div>
                           <strong style={{ fontSize: '15px', color: 'var(--ink)' }}>Velocity First</strong>
-                          <span style={{ fontSize: '11.5px', color: 'var(--muted)', display: 'block' }}>Primary Carrier (Velocity)</span>
+                          <span style={{ fontSize: '12px', color: 'var(--muted)', display: 'block' }}>Primary Carrier (Velocity)</span>
                         </div>
                       </div>
                       {currentPriority === 'VELOCITY_FIRST' ? (
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#6d28d9', color: '#ffffff', fontSize: '11px', fontWeight: 700, padding: '4px 10px', borderRadius: '12px' }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#6d28d9', color: '#ffffff', fontSize: '12px', fontWeight: 700, padding: '4px 10px', borderRadius: '12px' }}>
                           <Icon name="check" size={12} /> ACTIVE
                         </span>
                       ) : (
@@ -1339,7 +1339,7 @@ export function Settings() {
                 <div style={{ maxWidth: '85%' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <strong style={{ fontSize: '13.5px', color: 'var(--ink, #1e293b)' }}>Automatic Carrier Failover</strong>
-                    <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 6px', borderRadius: '4px', background: shippingPrefForm.autoFailover ? '#dcfce7' : '#f1f5f9', color: shippingPrefForm.autoFailover ? '#15803d' : '#64748b' }}>
+                    <span style={{ fontSize: '12px', fontWeight: 700, padding: '2px 6px', borderRadius: '4px', background: shippingPrefForm.autoFailover ? 'var(--tone-success-bg)' : 'var(--surface-elevated)', color: shippingPrefForm.autoFailover ? 'var(--tone-success-fg)' : 'var(--muted-light)' }}>
                       {shippingPrefForm.autoFailover ? 'ENABLED' : 'DISABLED'}
                     </span>
                   </div>
@@ -1373,7 +1373,7 @@ export function Settings() {
                     <option value="DELHIVERY">DELHIVERY (Always Delhivery Express for COD)</option>
                     <option value="VELOCITY">VELOCITY (Always Velocity Shipping for COD)</option>
                   </select>
-                  <span style={{ fontSize: '11px', color: 'var(--muted)' }}>Route Cash-on-Delivery packages to specific carrier rates or remittance windows.</span>
+                  <span style={{ fontSize: '12px', color: 'var(--muted)' }}>Route Cash-on-Delivery packages to specific carrier rates or remittance windows.</span>
                 </div>
 
                 <div style={{ display: 'grid', gap: '6px' }}>
@@ -1390,7 +1390,7 @@ export function Settings() {
                     <option value="DELHIVERY">DELHIVERY (Always Delhivery Express for Prepaid)</option>
                     <option value="VELOCITY">VELOCITY (Always Velocity Shipping for Prepaid)</option>
                   </select>
-                  <span style={{ fontSize: '11px', color: 'var(--muted)' }}>Route verified prepaid packages through lowest weight slab carrier.</span>
+                  <span style={{ fontSize: '12px', color: 'var(--muted)' }}>Route verified prepaid packages through lowest weight slab carrier.</span>
                 </div>
               </div>
 
@@ -1424,14 +1424,14 @@ export function Settings() {
                       style={{ fontSize: '13px', padding: '9px 12px', borderRadius: '8px', border: '1px solid var(--line)', background: 'var(--surface-elevated)', color: 'var(--ink)' }}
                     />
                   )}
-                  <span style={{ fontSize: '11px', color: 'var(--muted)' }}>Matched with Velocity origin pickup address for manifests.</span>
+                  <span style={{ fontSize: '12px', color: 'var(--muted)' }}>Matched with Velocity origin pickup address for manifests.</span>
                 </div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
                   <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', background: 'var(--surface-elevated)', borderRadius: '8px', border: '1px solid var(--line)', cursor: 'pointer' }}>
                     <div style={{ maxWidth: '80%' }}>
                       <strong style={{ fontSize: '12.5px', color: 'var(--ink)', display: 'block' }}>Direct Live Remittance Sync</strong>
-                      <span style={{ fontSize: '11px', color: 'var(--muted)' }}>Reconcile Velocity COD settlements directly via API without downloading CSVs.</span>
+                      <span style={{ fontSize: '12px', color: 'var(--muted)' }}>Reconcile Velocity COD settlements directly via API without downloading CSVs.</span>
                     </div>
                     <input
                       type="checkbox"
@@ -1478,7 +1478,7 @@ export function Settings() {
                   </div>
                   <div>
                     <strong style={{ fontSize: '14px', color: 'var(--ink)' }}>Delhivery Express B2C</strong>
-                    <span style={{ fontSize: '11px', color: 'var(--muted)', display: 'block' }}>Primary Carrier Partner</span>
+                    <span style={{ fontSize: '12px', color: 'var(--muted)', display: 'block' }}>Primary Carrier Partner</span>
                   </div>
                 </div>
                 <span className="status-badge status-warning">
@@ -1519,7 +1519,7 @@ export function Settings() {
                   </div>
                   <div>
                     <strong style={{ fontSize: '14px', color: 'var(--ink)' }}>Velocity Shipping</strong>
-                    <span style={{ fontSize: '11px', color: 'var(--muted)', display: 'block' }}>Multi-Carrier Logistics Aggregator</span>
+                    <span style={{ fontSize: '12px', color: 'var(--muted)', display: 'block' }}>Multi-Carrier Logistics Aggregator</span>
                   </div>
                 </div>
                 <span className={`status-badge ${velocityStatusQuery.data?.configured ? 'status-success' : 'status-warning'}`}>
@@ -1573,7 +1573,7 @@ export function Settings() {
                   placeholder="e.g. 400001, 110001, 560001"
                   value={velTestPincode}
                   onChange={(e) => setVelTestPincode(e.target.value)}
-                  style={{ fontSize: 13, padding: '8px 12px', borderRadius: 6, border: '1px solid #cbd5e1', width: 200 }}
+                  style={{ fontSize: 13, padding: '8px 12px', borderRadius: 6, border: '1px solid var(--border-strong)', width: 200 }}
                 />
               </label>
               <label style={{ display: 'grid', gap: 4, fontSize: 12, color: 'var(--muted)' }}>
@@ -1581,7 +1581,7 @@ export function Settings() {
                 <select
                   value={velTestPaymentMode}
                   onChange={(e) => setVelTestPaymentMode(e.target.value as any)}
-                  style={{ fontSize: 13, padding: '8px 12px', borderRadius: 6, border: '1px solid #cbd5e1' }}
+                  style={{ fontSize: 13, padding: '8px 12px', borderRadius: 6, border: '1px solid var(--border-strong)' }}
                 >
                   <option value="cod">COD (Cash on Delivery)</option>
                   <option value="prepaid">Prepaid (Online Payment)</option>
@@ -1627,7 +1627,7 @@ export function Settings() {
                 )}
                 {velServiceabilityResult.couriers && velServiceabilityResult.couriers.length > 0 && (
                   <div style={{ marginTop: 10 }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-secondary)', textTransform: 'uppercase' }}>Available Couriers ({velServiceabilityResult.couriers.length}):</div>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-secondary)', textTransform: 'uppercase' }}>Available Couriers ({velServiceabilityResult.couriers.length}):</div>
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
                       {velServiceabilityResult.couriers.map((c: any, idx: number) => (
                         <span key={idx} className="tone-chip tone-chip-neutral">
@@ -1646,7 +1646,7 @@ export function Settings() {
             <PanelHeading title="Pickup Warehouse Registration" eyebrow="One-time registration · avoids ClientWarehouse-mismatch manifest failures" />
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px', marginTop: 12 }}>
               {(['name', 'phone', 'city', 'pin', 'address', 'email'] as const).map((field) => (
-                <label key={field} style={{ display: 'grid', gap: 4, fontSize: 11, color: 'var(--muted)', textTransform: 'capitalize' }}>
+                <label key={field} style={{ display: 'grid', gap: 4, fontSize: 12, color: 'var(--muted)', textTransform: 'capitalize' }}>
                   {field}
                   <input
                     value={whForm[field]}
@@ -1718,7 +1718,7 @@ export function Settings() {
               </div>
 
               <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                <span style={{ fontSize: '11.5px', color: 'var(--muted)', fontWeight: 600 }}>
+                <span style={{ fontSize: '12px', color: 'var(--muted)', fontWeight: 600 }}>
                   Showing {filteredUsers.length} of {usersQuery.data?.length ?? 0} active console accounts
                 </span>
                 <button
@@ -1771,7 +1771,7 @@ export function Settings() {
                                 display: 'grid',
                                 placeItems: 'center',
                                 fontWeight: 800,
-                                fontSize: '11px',
+                                fontSize: '12px',
                                 flexShrink: 0,
                               }}
                             >
@@ -1779,14 +1779,14 @@ export function Settings() {
                             </div>
                             <div>
                               <strong style={{ fontSize: '12px', color: 'var(--ink)' }}>{user.name}</strong>
-                              <span style={{ fontSize: '10.5px', color: 'var(--muted)' }}>{user.email}</span>
+                              <span style={{ fontSize: '12px', color: 'var(--muted)' }}>{user.email}</span>
                             </div>
                           </div>
                         </td>
                         <td>
                           <span
                             style={{
-                              fontSize: '11px',
+                              fontSize: '12px',
                               fontWeight: 750,
                               color: user.role.includes('Admin')
                                 ? '#7c3aed'
@@ -1801,10 +1801,10 @@ export function Settings() {
                           </span>
                         </td>
                         <td>
-                          <span style={{ fontSize: '11px', color: 'var(--muted)' }}>{user.department}</span>
+                          <span style={{ fontSize: '12px', color: 'var(--muted)' }}>{user.department}</span>
                         </td>
                         <td>
-                          <span style={{ fontSize: '11px', color: 'var(--muted)' }}>{user.phone || '—'}</span>
+                          <span style={{ fontSize: '12px', color: 'var(--muted)' }}>{user.phone || '—'}</span>
                         </td>
                         <td>
                           <button
@@ -1819,7 +1819,7 @@ export function Settings() {
                           </button>
                         </td>
                         <td>
-                          <span style={{ fontSize: '10.5px', color: 'var(--muted)' }}>{user.lastActive || 'Never'}</span>
+                          <span style={{ fontSize: '12px', color: 'var(--muted)' }}>{user.lastActive || 'Never'}</span>
                         </td>
                         <td style={{ textAlign: 'right' }}>
                           <div style={{ display: 'inline-flex', gap: '6px' }}>
@@ -1944,7 +1944,7 @@ export function Settings() {
                     value={formData.password}
                     onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                   />
-                  <span style={{ fontSize: '11px', color: 'var(--muted)' }}>Admin sets this now — operator signs in with email + this password.</span>
+                  <span style={{ fontSize: '12px', color: 'var(--muted)' }}>Admin sets this now — operator signs in with email + this password.</span>
                 </div>
               ) : (
                 <>
@@ -1971,7 +1971,7 @@ export function Settings() {
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    <span style={{ fontSize: '11px', color: 'var(--muted)' }}>Login: {editingUser.loginEnabled === false ? 'disabled (roster-only)' : editingUser.firebaseUid ? `Firebase linked` : 'roster-only'}</span>
+                    <span style={{ fontSize: '12px', color: 'var(--muted)' }}>Login: {editingUser.loginEnabled === false ? 'disabled (roster-only)' : editingUser.firebaseUid ? `Firebase linked` : 'roster-only'}</span>
                     <button
                       type="button"
                       className="button button-secondary"
@@ -2059,7 +2059,7 @@ export function Settings() {
                 </div>
               )}
 
-              <div style={{ background: 'var(--canvas)', border: '1px solid var(--line)', borderRadius: '8px', padding: '12px', fontSize: '11px', color: 'var(--muted)' }}>
+              <div style={{ background: 'var(--canvas)', border: '1px solid var(--line)', borderRadius: '8px', padding: '12px', fontSize: '12px', color: 'var(--muted)' }}>
                 <div style={{ fontWeight: 700, color: 'var(--ink)', marginBottom: '4px' }}>📡 KwikEngage WhatsApp REST API:</div>
                 <div>Configured endpoint: <code>https://api.kwikengage.ai/send-message/v2</code></div>
                 <div style={{ marginTop: '2px' }}>Bearer Token: <code>&#36;{'{env:KWIKENGAGE_API_KEY}'}</code></div>
@@ -2116,7 +2116,7 @@ export function Settings() {
                   value={kwikEngageApiKey}
                   onChange={(e) => setKwikEngageApiKey(e.target.value)}
                 />
-                <span style={{ fontSize: '10.5px', color: 'var(--muted)', marginTop: '3px' }}>
+                <span style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '3px' }}>
                   Supplied in Authorization header: <code>Bearer [YOUR_KEY]</code> and <code>x-api-key</code>.
                 </span>
               </div>
@@ -2129,7 +2129,7 @@ export function Settings() {
                   value={kwikEngageMerchantId}
                   onChange={(e) => setKwikEngageMerchantId(e.target.value)}
                 />
-                <span style={{ fontSize: '10.5px', color: 'var(--muted)', marginTop: '3px' }}>
+                <span style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '3px' }}>
                   GoKwik / KwikEngage assigned Merchant identifier.
                 </span>
               </div>
@@ -2142,7 +2142,7 @@ export function Settings() {
                   value={kwikEngageSenderPhone}
                   onChange={(e) => setKwikEngageSenderPhone(e.target.value)}
                 />
-                <span style={{ fontSize: '10.5px', color: 'var(--muted)', marginTop: '3px' }}>
+                <span style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '3px' }}>
                   Official display phone number registered in KwikEngage.
                 </span>
               </div>
@@ -2155,12 +2155,12 @@ export function Settings() {
                   value={kwikEngageWabaId}
                   onChange={(e) => setKwikEngageWabaId(e.target.value)}
                 />
-                <span style={{ fontSize: '10.5px', color: 'var(--muted)', marginTop: '3px' }}>
+                <span style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '3px' }}>
                   Meta WhatsApp Business Account ID registered under GoKwik.
                 </span>
               </div>
 
-              <div style={{ background: 'var(--canvas)', border: '1px solid var(--line)', borderRadius: '8px', padding: '12px', fontSize: '11px', color: 'var(--muted)' }}>
+              <div style={{ background: 'var(--canvas)', border: '1px solid var(--line)', borderRadius: '8px', padding: '12px', fontSize: '12px', color: 'var(--muted)' }}>
                 <div style={{ fontWeight: 700, color: 'var(--ink)', marginBottom: '4px' }}>🔐 Persistence & MCP Sync:</div>
                 <div>Updating these values immediately updates the active runtime service and persists <code>KWIKENGAGE_API_KEY</code>, <code>KWIKENGAGE_MERCHANT_ID</code>, <code>KWIKENGAGE_SENDER_PHONE</code>, and <code>KWIKENGAGE_WABA_ID</code> to your local <code>.env</code> file.</div>
               </div>
@@ -2211,7 +2211,7 @@ export function Settings() {
                   value={resendApiKey}
                   onChange={(e) => setResendApiKey(e.target.value)}
                 />
-                <span style={{ fontSize: '10.5px', color: 'var(--muted)', marginTop: '3px' }}>
+                <span style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '3px' }}>
                   From your <a href="https://resend.com/api-keys" target="_blank" rel="noreferrer" style={{ color: 'var(--tone-info-fg)' }}>Resend Console</a>. If left empty, system operates in high-fidelity simulated sandbox mode.
                 </span>
               </div>
@@ -2224,12 +2224,12 @@ export function Settings() {
                   value={resendFromEmail}
                   onChange={(e) => setResendFromEmail(e.target.value)}
                 />
-                <span style={{ fontSize: '10.5px', color: 'var(--muted)', marginTop: '3px' }}>
+                <span style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '3px' }}>
                   Use <code>Youthnic Logistics &lt;onboarding@resend.dev&gt;</code> for testing or your verified sending domain (e.g., <code>orders@youthnic.com</code>).
                 </span>
               </div>
 
-              <div className="surface-well" style={{ borderRadius: '8px', padding: '12px', fontSize: '11px', color: 'var(--ink-secondary)' }}>
+              <div className="surface-well" style={{ borderRadius: '8px', padding: '12px', fontSize: '12px', color: 'var(--ink-secondary)' }}>
                 <div style={{ fontWeight: 700, color: 'var(--ink)', marginBottom: '4px' }}>Persistence & Security:</div>
                 <div>Updating these values immediately updates the active runtime email service and persists <code>RESEND_API_KEY</code> and <code>RESEND_FROM_EMAIL</code> to your <code>.env</code> file.</div>
               </div>

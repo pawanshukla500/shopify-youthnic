@@ -118,7 +118,7 @@ function UploadCard({ upload, onDone }: { upload: (typeof UPLOADS)[number]; onDo
       <div>
         <h3 style={{ margin: 0, fontSize: '15px' }}>{upload.title}</h3>
         <p style={{ margin: '4px 0 0', fontSize: '12px', color: 'var(--muted)' }}>{upload.what}</p>
-        <p style={{ margin: '6px 0 0', fontSize: '11px', color: 'var(--muted)' }}>
+        <p style={{ margin: '6px 0 0', fontSize: '12px', color: 'var(--muted)' }}>
           <strong>Source:</strong> {upload.where}
         </p>
       </div>
@@ -310,12 +310,12 @@ export default function AccountsPage() {
 
   const tiles = stateData ? [
     { label: 'Orders placed', value: stateData.totals.totalOrders, tone: 'var(--ink)' },
-    { label: 'Opening balance (B/F)', value: formatMoney(stateData.totals.openingBalance || 0), tone: '#64748b' },
-    { label: 'Gross sales in period', value: formatMoney(stateData.totals.grossSales), tone: '#1e293b' },
-    { label: 'Returns deducted', value: `-${formatMoney(stateData.totals.returnsDeducted)}`, tone: '#dc2626' },
-    { label: 'Net period sales', value: formatMoney(stateData.totals.netSales), tone: '#0f766e' },
-    { label: 'Received in bank', value: formatMoney(stateData.totals.paymentReceived), tone: '#1d4ed8' },
-    { label: 'Closing balance (C/F)', value: formatMoney(stateData.totals.closingBalance !== undefined ? stateData.totals.closingBalance : stateData.totals.outstanding), tone: (stateData.totals.closingBalance !== undefined ? stateData.totals.closingBalance : stateData.totals.outstanding) > 0 ? '#b91c1c' : '#15803d' },
+    { label: 'Opening balance (B/F)', value: formatMoney(stateData.totals.openingBalance || 0), tone: 'var(--muted-light)' },
+    { label: 'Gross sales in period', value: formatMoney(stateData.totals.grossSales), tone: 'var(--ink)' },
+    { label: 'Returns deducted', value: `-${formatMoney(stateData.totals.returnsDeducted)}`, tone: 'var(--tone-danger-fg)' },
+    { label: 'Net period sales', value: formatMoney(stateData.totals.netSales), tone: 'var(--tone-success-fg)' },
+    { label: 'Received in bank', value: formatMoney(stateData.totals.paymentReceived), tone: 'var(--tone-info-fg)' },
+    { label: 'Closing balance (C/F)', value: formatMoney(stateData.totals.closingBalance !== undefined ? stateData.totals.closingBalance : stateData.totals.outstanding), tone: (stateData.totals.closingBalance !== undefined ? stateData.totals.closingBalance : stateData.totals.outstanding) > 0 ? 'var(--tone-danger-fg)' : 'var(--tone-success-fg)' },
   ] : []
 
   return (
@@ -345,7 +345,7 @@ export default function AccountsPage() {
               <Icon name="mail" size={14} />
               Email Report
             </Button>
-            <Button className="button-primary" style={{ background: '#059669' }} loading={closeMonthMutation.isPending} onClick={() => closeMonthMutation.mutate()}>
+            <Button className="button-primary" style={{ background: 'var(--emerald-solid)' }} loading={closeMonthMutation.isPending} onClick={() => closeMonthMutation.mutate()}>
               <Icon name="check" size={14} />
               Close Month
             </Button>
@@ -358,7 +358,7 @@ export default function AccountsPage() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '12px', marginBottom: '16px' }}>
           {tiles.map((tile) => (
             <div key={tile.label} style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '10px', padding: '14px 16px' }}>
-              <span style={{ fontSize: '11px', color: 'var(--muted)', fontWeight: 700, textTransform: 'uppercase' }}>{tile.label}</span>
+              <span style={{ fontSize: '12px', color: 'var(--muted)', fontWeight: 700, textTransform: 'uppercase' }}>{tile.label}</span>
               <strong className="tabular-nums" style={{ display: 'block', fontSize: '19px', color: tile.tone, fontWeight: 800, marginTop: '4px' }}>
                 {tile.value}
               </strong>
@@ -380,8 +380,8 @@ export default function AccountsPage() {
               cursor: 'pointer',
               fontWeight: activeTab === t.key ? 700 : 500,
               fontSize: '13px',
-              color: activeTab === t.key ? '#2563eb' : 'var(--muted)',
-              borderBottom: activeTab === t.key ? '2px solid #2563eb' : '2px solid transparent',
+              color: activeTab === t.key ? 'var(--tone-info-fg)' : 'var(--muted)',
+              borderBottom: activeTab === t.key ? '2px solid var(--tone-info-fg)' : '2px solid transparent',
               marginBottom: '-2px',
               whiteSpace: 'nowrap',
             }}
@@ -396,10 +396,10 @@ export default function AccountsPage() {
 
       {/* TAB 1: State-Wise Matrix & Settlement Bridge */}
       {activeTab === 'matrix' && stateData && (
-        <Panel className="table-panel" style={{ marginBottom: '20px', border: '1px solid var(--accent, #3b82f6)' }}>
+        <Panel className="table-panel" style={{ marginBottom: '20px', border: '1px solid var(--tone-info-border)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderBottom: '1px solid var(--border)', flexWrap: 'wrap', gap: '12px' }}>
             <div>
-              <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', fontWeight: 600 }}>
+              <div style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)', fontWeight: 600 }}>
                 Reconciliation & Financial Operations ({stateData.label})
               </div>
               <h3 style={{ margin: '4px 0 0', fontSize: '18px', fontWeight: 700, color: 'var(--ink)' }}>
@@ -410,7 +410,7 @@ export default function AccountsPage() {
               </h3>
             </div>
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-              <div style={{ display: 'flex', background: 'var(--bg-subtle, #f1f5f9)', padding: '2px', borderRadius: '6px' }}>
+              <div style={{ display: 'flex', background: 'var(--surface-elevated)', padding: '2px', borderRadius: '6px' }}>
                 <button
                   type="button"
                   onClick={() => setMatrixView('bridge')}
@@ -420,7 +420,7 @@ export default function AccountsPage() {
                     border: 'none',
                     fontSize: '12px',
                     fontWeight: matrixView === 'bridge' ? 700 : 500,
-                    background: matrixView === 'bridge' ? '#2563eb' : 'transparent',
+                    background: matrixView === 'bridge' ? 'var(--blue)' : 'transparent',
                     color: matrixView === 'bridge' ? '#ffffff' : 'var(--muted)',
                     cursor: 'pointer',
                   }}
@@ -436,7 +436,7 @@ export default function AccountsPage() {
                     border: 'none',
                     fontSize: '12px',
                     fontWeight: matrixView === 'ledger' ? 700 : 500,
-                    background: matrixView === 'ledger' ? '#2563eb' : 'transparent',
+                    background: matrixView === 'ledger' ? 'var(--blue)' : 'transparent',
                     color: matrixView === 'ledger' ? '#ffffff' : 'var(--muted)',
                     cursor: 'pointer',
                   }}
@@ -452,7 +452,7 @@ export default function AccountsPage() {
                     border: 'none',
                     fontSize: '12px',
                     fontWeight: matrixView === 'expenses' ? 700 : 500,
-                    background: matrixView === 'expenses' ? '#2563eb' : 'transparent',
+                    background: matrixView === 'expenses' ? 'var(--blue)' : 'transparent',
                     color: matrixView === 'expenses' ? '#ffffff' : 'var(--muted)',
                     cursor: 'pointer',
                   }}
@@ -468,7 +468,7 @@ export default function AccountsPage() {
                     border: 'none',
                     fontSize: '12px',
                     fontWeight: matrixView === 'contribution' ? 700 : 500,
-                    background: matrixView === 'contribution' ? '#2563eb' : 'transparent',
+                    background: matrixView === 'contribution' ? 'var(--blue)' : 'transparent',
                     color: matrixView === 'contribution' ? '#ffffff' : 'var(--muted)',
                     cursor: 'pointer',
                   }}
@@ -489,7 +489,7 @@ export default function AccountsPage() {
           {/* VIEW A: State Settlement Bridge */}
           {matrixView === 'bridge' && (
             <div className="table-wrap">
-              <div style={{ padding: '8px 16px', background: '#eff6ff', fontSize: '12px', color: '#1e40af', borderBottom: '1px solid #dbeafe' }}>
+              <div style={{ padding: '8px 16px', background: 'var(--tone-info-bg)', fontSize: '12px', color: 'var(--tone-info-fg)', borderBottom: '1px solid var(--tone-info-border)' }}>
                 <strong>Formula:</strong> Expected Gross = Opening (B/F) + Gross Sales − Cancellations − RTO − Returns | Net Expected = Expected Gross − Gateway Fees − COD Deductions | Outstanding (C/F) = Net Expected − Verified Received
               </div>
               <table className="data-table">
@@ -521,36 +521,36 @@ export default function AccountsPage() {
                       return (
                         <tr key={s.state}>
                           <td><strong>{s.state}</strong></td>
-                          <td style={{ textAlign: 'center', fontSize: '11px', color: 'var(--muted)' }}>{s.gstStateCode || '—'}</td>
+                          <td style={{ textAlign: 'center', fontSize: '12px', color: 'var(--muted)' }}>{s.gstStateCode || '—'}</td>
                           <td style={{ textAlign: 'center' }}>{s.orderCount}</td>
                           <td className="amount-cell" style={{ color: 'var(--muted)' }}>{formatMoney(s.openingOutstanding || s.openingBalance || 0)}</td>
                           <td className="amount-cell">{formatMoney(s.grossOrderSales || s.grossSales)}</td>
-                          <td className="amount-cell" style={{ color: (s.cancelledOrders || 0) > 0 ? '#b45309' : 'inherit' }}>
+                          <td className="amount-cell" style={{ color: (s.cancelledOrders || 0) > 0 ? 'var(--tone-warning-fg)' : 'inherit' }}>
                             {(s.cancelledOrders || 0) > 0 ? ('-' + formatMoney(s.cancelledOrders || 0)) : '₹0.00'}
                           </td>
-                          <td className="amount-cell" style={{ color: (s.rtoAdjustments || 0) > 0 ? '#dc2626' : 'inherit' }}>
+                          <td className="amount-cell" style={{ color: (s.rtoAdjustments || 0) > 0 ? 'var(--tone-danger-fg)' : 'inherit' }}>
                             {(s.rtoAdjustments || 0) > 0 ? ('-' + formatMoney(s.rtoAdjustments || 0)) : '₹0.00'}
                           </td>
-                          <td className="amount-cell" style={{ color: (s.customerReturns || s.returnsDeducted) > 0 ? '#dc2626' : 'inherit' }}>
+                          <td className="amount-cell" style={{ color: (s.customerReturns || s.returnsDeducted) > 0 ? 'var(--tone-danger-fg)' : 'inherit' }}>
                             {(s.customerReturns || s.returnsDeducted) > 0 ? ('-' + formatMoney(s.customerReturns || s.returnsDeducted)) : '₹0.00'}
                           </td>
                           <td className="amount-cell" style={{ fontWeight: 600 }}>{formatMoney(s.expectedGrossSettlement || 0)}</td>
-                          <td className="amount-cell" style={{ color: gwFees > 0 ? '#d97706' : 'inherit' }}>
+                          <td className="amount-cell" style={{ color: gwFees > 0 ? 'var(--tone-warning-fg)' : 'inherit' }}>
                             {gwFees > 0 ? ('-' + formatMoney(gwFees)) : '₹0.00'}
                           </td>
-                          <td className="amount-cell" style={{ color: (s.codSettlementDeductions || 0) > 0 ? '#d97706' : 'inherit' }}>
+                          <td className="amount-cell" style={{ color: (s.codSettlementDeductions || 0) > 0 ? 'var(--tone-warning-fg)' : 'inherit' }}>
                             {(s.codSettlementDeductions || 0) > 0 ? ('-' + formatMoney(s.codSettlementDeductions || 0)) : '₹0.00'}
                           </td>
-                          <td className="amount-cell" style={{ fontWeight: 700, color: '#0f766e' }}>{formatMoney(s.netExpectedBankSettlement || 0)}</td>
-                          <td className="amount-cell" style={{ color: '#16a34a', fontWeight: 600 }}>{formatMoney(s.verifiedPaymentReceived || s.paymentReceived)}</td>
-                          <td className="amount-cell" style={{ fontWeight: 700, color: out > 0 ? '#b91c1c' : '#15803d' }}>
+                          <td className="amount-cell" style={{ fontWeight: 700, color: 'var(--tone-success-fg)' }}>{formatMoney(s.netExpectedBankSettlement || 0)}</td>
+                          <td className="amount-cell" style={{ color: 'var(--tone-success-fg)', fontWeight: 600 }}>{formatMoney(s.verifiedPaymentReceived || s.paymentReceived)}</td>
+                          <td className="amount-cell" style={{ fontWeight: 700, color: out > 0 ? 'var(--tone-danger-fg)' : 'var(--tone-success-fg)' }}>
                             {formatMoney(out)}
                           </td>
                           <td style={{ fontSize: '12px' }}>
                             {Math.abs(out) <= 0.05 ? (
-                              <span style={{ color: '#15803d', fontWeight: 600, background: '#dcfce7', padding: '2px 6px', borderRadius: '4px' }}>Settled</span>
+                              <span style={{ color: 'var(--tone-success-fg)', fontWeight: 600, background: 'var(--tone-success-bg)', padding: '2px 6px', borderRadius: '4px' }}>Settled</span>
                             ) : (
-                              <span style={{ color: '#b91c1c', fontWeight: 600, background: '#fee2e2', padding: '2px 6px', borderRadius: '4px' }}>Pending</span>
+                              <span style={{ color: 'var(--tone-danger-fg)', fontWeight: 600, background: 'var(--tone-danger-bg)', padding: '2px 6px', borderRadius: '4px' }}>Pending</span>
                             )}
                           </td>
                         </tr>
@@ -595,16 +595,16 @@ export default function AccountsPage() {
                           <td className="amount-cell">{formatMoney(s.grossSales)}</td>
                           <td className="amount-cell">{formatMoney(s.taxableSales || 0)}</td>
                           <td className="amount-cell">{formatMoney(s.gstAmount || 0)}</td>
-                          <td className="amount-cell" style={{ color: s.returnsDeducted > 0 ? '#dc2626' : 'inherit' }}>
+                          <td className="amount-cell" style={{ color: s.returnsDeducted > 0 ? 'var(--tone-danger-fg)' : 'inherit' }}>
                             {s.returnsDeducted > 0 ? ('-' + formatMoney(s.returnsDeducted)) : '₹0.00'}
                           </td>
                           <td className="amount-cell" style={{ fontWeight: 700 }}>{formatMoney(s.netSales)}</td>
-                          <td className="amount-cell" style={{ color: '#16a34a' }}>{formatMoney(s.paymentReceived)}</td>
-                          <td className="amount-cell" style={{ fontWeight: 700, color: closing > 0 ? '#b91c1c' : '#15803d' }}>
+                          <td className="amount-cell" style={{ color: 'var(--tone-success-fg)' }}>{formatMoney(s.paymentReceived)}</td>
+                          <td className="amount-cell" style={{ fontWeight: 700, color: closing > 0 ? 'var(--tone-danger-fg)' : 'var(--tone-success-fg)' }}>
                             {formatMoney(closing)}
                           </td>
                           <td style={{ fontSize: '12px' }}>
-                            {Math.abs(closing) <= 0.05 ? <span style={{ color: '#15803d', fontWeight: 600 }}>Settled</span> : <span style={{ color: '#b91c1c' }}>Carried Fwd</span>}
+                            {Math.abs(closing) <= 0.05 ? <span style={{ color: 'var(--tone-success-fg)', fontWeight: 600 }}>Settled</span> : <span style={{ color: 'var(--tone-danger-fg)' }}>Carried Fwd</span>}
                           </td>
                         </tr>
                       );
@@ -618,9 +618,9 @@ export default function AccountsPage() {
           {matrixView === 'expenses' && (
             <div style={{ padding: '20px' }}>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '20px' }}>
-                <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                  <div style={{ fontSize: '12px', color: '#64748b' }}>MDR Payment Fees</div>
-                  <div style={{ fontSize: '20px', fontWeight: 700, color: '#1e293b', marginTop: '4px' }}>
+                <div style={{ background: 'var(--surface-elevated)', padding: '16px', borderRadius: '8px', border: '1px solid var(--line)' }}>
+                  <div style={{ fontSize: '12px', color: 'var(--muted-light)' }}>MDR Payment Fees</div>
+                  <div style={{ fontSize: '20px', fontWeight: 700, color: 'var(--ink)', marginTop: '4px' }}>
                     {formatMoney(
                       stateData.monthlyExpenses
                         ? (stateData.monthlyExpenses.gokwikFees.mdr + stateData.monthlyExpenses.easebuzzFees.mdr + stateData.monthlyExpenses.phonepeFees.mdr)
@@ -628,15 +628,15 @@ export default function AccountsPage() {
                     )}
                   </div>
                 </div>
-                <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                  <div style={{ fontSize: '12px', color: '#64748b' }}>Platform Fees</div>
-                  <div style={{ fontSize: '20px', fontWeight: 700, color: '#1e293b', marginTop: '4px' }}>
+                <div style={{ background: 'var(--surface-elevated)', padding: '16px', borderRadius: '8px', border: '1px solid var(--line)' }}>
+                  <div style={{ fontSize: '12px', color: 'var(--muted-light)' }}>Platform Fees</div>
+                  <div style={{ fontSize: '20px', fontWeight: 700, color: 'var(--ink)', marginTop: '4px' }}>
                     {formatMoney(stateData.monthlyExpenses?.gokwikFees.platform ?? 0)}
                   </div>
                 </div>
-                <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                  <div style={{ fontSize: '12px', color: '#64748b' }}>Forward Freight</div>
-                  <div style={{ fontSize: '20px', fontWeight: 700, color: '#1e293b', marginTop: '4px' }}>
+                <div style={{ background: 'var(--surface-elevated)', padding: '16px', borderRadius: '8px', border: '1px solid var(--line)' }}>
+                  <div style={{ fontSize: '12px', color: 'var(--muted-light)' }}>Forward Freight</div>
+                  <div style={{ fontSize: '20px', fontWeight: 700, color: 'var(--ink)', marginTop: '4px' }}>
                     {formatMoney(
                       stateData.monthlyExpenses
                         ? (stateData.monthlyExpenses.delhiveryFreight.forward + stateData.monthlyExpenses.velocityFreight.forward)
@@ -644,9 +644,9 @@ export default function AccountsPage() {
                     )}
                   </div>
                 </div>
-                <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                  <div style={{ fontSize: '12px', color: '#64748b' }}>RTO Freight Expense</div>
-                  <div style={{ fontSize: '20px', fontWeight: 700, color: '#dc2626', marginTop: '4px' }}>
+                <div style={{ background: 'var(--surface-elevated)', padding: '16px', borderRadius: '8px', border: '1px solid var(--line)' }}>
+                  <div style={{ fontSize: '12px', color: 'var(--muted-light)' }}>RTO Freight Expense</div>
+                  <div style={{ fontSize: '20px', fontWeight: 700, color: 'var(--tone-danger-fg)', marginTop: '4px' }}>
                     {formatMoney(
                       stateData.monthlyExpenses
                         ? (stateData.monthlyExpenses.delhiveryFreight.rto + stateData.monthlyExpenses.velocityFreight.rto)
@@ -654,17 +654,17 @@ export default function AccountsPage() {
                     )}
                   </div>
                 </div>
-                <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                  <div style={{ fontSize: '12px', color: '#64748b' }}>Exchange Freight (Reverse + Forward)</div>
-                  <div style={{ fontSize: '20px', fontWeight: 700, color: '#7c3aed', marginTop: '4px' }}>
+                <div style={{ background: 'var(--surface-elevated)', padding: '16px', borderRadius: '8px', border: '1px solid var(--line)' }}>
+                  <div style={{ fontSize: '12px', color: 'var(--muted-light)' }}>Exchange Freight (Reverse + Forward)</div>
+                  <div style={{ fontSize: '20px', fontWeight: 700, color: 'var(--tone-purple-fg)', marginTop: '4px' }}>
                     {formatMoney(
                       stateData.monthlyExpenses?.exchangeFreight?.netFreightExpense ?? (stateData.totals.exchangeFreightExpenses || 0)
                     )}
                   </div>
                 </div>
-                <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                  <div style={{ fontSize: '12px', color: '#64748b' }}>Total Monthly Expenses</div>
-                  <div style={{ fontSize: '20px', fontWeight: 700, color: '#0f172a', marginTop: '4px' }}>
+                <div style={{ background: 'var(--surface-elevated)', padding: '16px', borderRadius: '8px', border: '1px solid var(--line)' }}>
+                  <div style={{ fontSize: '12px', color: 'var(--muted-light)' }}>Total Monthly Expenses</div>
+                  <div style={{ fontSize: '20px', fontWeight: 700, color: 'var(--ink)', marginTop: '4px' }}>
                     {formatMoney(stateData.monthlyExpenses?.totalOperatingExpenses ?? 0)}
                   </div>
                 </div>
@@ -676,24 +676,24 @@ export default function AccountsPage() {
           {matrixView === 'contribution' && (
             <div style={{ padding: '20px' }}>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '20px' }}>
-                <div style={{ background: '#f0fdf4', padding: '16px', borderRadius: '8px', border: '1px solid #bbf7d0' }}>
-                  <div style={{ fontSize: '12px', color: '#166534' }}>Net Sales (Gross − Returns)</div>
-                  <div style={{ fontSize: '22px', fontWeight: 700, color: '#14532d', marginTop: '4px' }}>
+                <div style={{ background: 'var(--tone-success-bg)', padding: '16px', borderRadius: '8px', border: '1px solid var(--tone-success-border)' }}>
+                  <div style={{ fontSize: '12px', color: 'var(--tone-success-fg)' }}>Net Sales (Gross − Returns)</div>
+                  <div style={{ fontSize: '22px', fontWeight: 700, color: 'var(--tone-success-fg)', marginTop: '4px' }}>
                     {formatMoney(stateData.monthlyContribution?.netRecognizedRevenue ?? (stateData.totals.netSales || 0))}
                   </div>
                 </div>
-                <div style={{ background: '#fef2f2', padding: '16px', borderRadius: '8px', border: '1px solid #fecaca' }}>
-                  <div style={{ fontSize: '12px', color: '#991b1b' }}>Total Logistics &amp; Gateway Costs</div>
-                  <div style={{ fontSize: '22px', fontWeight: 700, color: '#7f1d1d', marginTop: '4px' }}>
+                <div style={{ background: 'var(--tone-danger-bg)', padding: '16px', borderRadius: '8px', border: '1px solid var(--tone-danger-border)' }}>
+                  <div style={{ fontSize: '12px', color: 'var(--tone-danger-fg)' }}>Total Logistics &amp; Gateway Costs</div>
+                  <div style={{ fontSize: '22px', fontWeight: 700, color: 'var(--tone-danger-fg)', marginTop: '4px' }}>
                     -{formatMoney(stateData.monthlyContribution?.totalVariableExpenses ?? 0)}
                   </div>
                 </div>
-                <div style={{ background: '#eff6ff', padding: '16px', borderRadius: '8px', border: '1px solid #bfdbfe' }}>
-                  <div style={{ fontSize: '12px', color: '#1e40af' }}>Contribution Before COGS</div>
-                  <div style={{ fontSize: '22px', fontWeight: 700, color: '#1e3a8a', marginTop: '4px' }}>
+                <div style={{ background: 'var(--tone-info-bg)', padding: '16px', borderRadius: '8px', border: '1px solid var(--tone-info-border)' }}>
+                  <div style={{ fontSize: '12px', color: 'var(--tone-info-fg)' }}>Contribution Before COGS</div>
+                  <div style={{ fontSize: '22px', fontWeight: 700, color: 'var(--tone-info-fg)', marginTop: '4px' }}>
                     {formatMoney(stateData.monthlyContribution?.contributionBeforeCogs ?? 0)}
                   </div>
-                  <div style={{ fontSize: '12px', color: '#3b82f6', marginTop: '4px' }}>
+                  <div style={{ fontSize: '12px', color: 'var(--tone-info-fg)', marginTop: '4px' }}>
                     Margin: {stateData.monthlyContribution?.contributionMarginPercent ?? 0}%
                   </div>
                 </div>
@@ -730,12 +730,12 @@ export default function AccountsPage() {
                       <td><strong>{b.gateway}</strong></td>
                       <td>{formatDate(b.settlementDate)}</td>
                       <td className="amount-cell">{formatMoney(Number(b.grossAmount))}</td>
-                      <td className="amount-cell" style={{ color: '#dc2626' }}>{formatMoney(Number(b.feeAmount))}</td>
+                      <td className="amount-cell" style={{ color: 'var(--tone-danger-fg)' }}>{formatMoney(Number(b.feeAmount))}</td>
                       <td className="amount-cell">{formatMoney(Number(b.gstAmount))}</td>
-                      <td className="amount-cell" style={{ color: '#16a34a', fontWeight: 700 }}>{formatMoney(Number(b.netAmount))}</td>
+                      <td className="amount-cell" style={{ color: 'var(--tone-success-fg)', fontWeight: 700 }}>{formatMoney(Number(b.netAmount))}</td>
                       <td><code>{b.bankUtr || '—'}</code></td>
                       <td>
-                        <span style={{ color: b.verificationStatus === 'VERIFIED' ? '#15803d' : '#b45309', fontWeight: 600, fontSize: '12px' }}>
+                        <span style={{ color: b.verificationStatus === 'VERIFIED' ? 'var(--tone-success-fg)' : 'var(--tone-warning-fg)', fontWeight: 600, fontSize: '12px' }}>
                           {b.verificationStatus}
                         </span>
                       </td>
@@ -782,8 +782,8 @@ export default function AccountsPage() {
                       <td className="amount-cell">{formatMoney(Number(f.reverseFreight))}</td>
                       <td className="amount-cell">{formatMoney(Number(f.surcharges))}</td>
                       <td className="amount-cell">{formatMoney(Number(f.gstAmount))}</td>
-                      <td className="amount-cell" style={{ fontWeight: 700, color: '#dc2626' }}>{formatMoney(Number(f.totalBilled))}</td>
-                      <td><span style={{ color: '#15803d', fontWeight: 600, fontSize: '12px' }}>{f.reconciliationStatus}</span></td>
+                      <td className="amount-cell" style={{ fontWeight: 700, color: 'var(--tone-danger-fg)' }}>{formatMoney(Number(f.totalBilled))}</td>
+                      <td><span style={{ color: 'var(--tone-success-fg)', fontWeight: 600, fontSize: '12px' }}>{f.reconciliationStatus}</span></td>
                     </tr>
                   ))
                 ) : (
@@ -820,10 +820,10 @@ export default function AccountsPage() {
                       <td>{l.statement?.bankName || 'HDFC Bank'}</td>
                       <td style={{ fontSize: '12px', maxWidth: '300px' }}>{l.description}</td>
                       <td><code>{l.referenceNo || '—'}</code></td>
-                      <td className="amount-cell" style={{ color: '#16a34a', fontWeight: 700 }}>{formatMoney(Number(l.credit))}</td>
+                      <td className="amount-cell" style={{ color: 'var(--tone-success-fg)', fontWeight: 700 }}>{formatMoney(Number(l.credit))}</td>
                       <td>
                         <span style={{
-                          color: l.status === 'VERIFIED' ? '#15803d' : (l.status === 'AMOUNT_MISMATCH' ? '#dc2626' : '#64748b'),
+                          color: l.status === 'VERIFIED' ? 'var(--tone-success-fg)' : (l.status === 'AMOUNT_MISMATCH' ? 'var(--tone-danger-fg)' : 'var(--muted-light)'),
                           fontWeight: 600,
                           fontSize: '12px',
                         }}>
@@ -848,12 +848,12 @@ export default function AccountsPage() {
           <PanelHeading eyebrow="Operating Statement" title={`Monthly Profit & Loss (${month})`} />
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', marginTop: '16px' }}>
             <div style={{ border: '1px solid var(--line)', borderRadius: '8px', padding: '16px' }}>
-              <h4 style={{ margin: '0 0 12px', color: '#15803d' }}>Income &amp; Net Turnover</h4>
+              <h4 style={{ margin: '0 0 12px', color: 'var(--tone-success-fg)' }}>Income &amp; Net Turnover</h4>
               <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--line)' }}>
                 <span>Gross Apparel Sales</span>
                 <strong>{formatMoney(stateData?.totals.grossSales || 0)}</strong>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--line)', color: '#dc2626' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--line)', color: 'var(--tone-danger-fg)' }}>
                 <span>Less: Sales Returns &amp; Credit Notes</span>
                 <strong>-{formatMoney(stateData?.totals.returnsDeducted || 0)}</strong>
               </div>
@@ -864,7 +864,7 @@ export default function AccountsPage() {
             </div>
 
             <div style={{ border: '1px solid var(--line)', borderRadius: '8px', padding: '16px' }}>
-              <h4 style={{ margin: '0 0 12px', color: '#b91c1c' }}>Direct Operational Expenses</h4>
+              <h4 style={{ margin: '0 0 12px', color: 'var(--tone-danger-fg)' }}>Direct Operational Expenses</h4>
               <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--line)' }}>
                 <span>Gateway Processing Fees (Easebuzz/GoKwik/PhonePe)</span>
                 <strong>{formatMoney(tbData.rows.filter(r => r.accountCode.startsWith('EXPENSE_PG')).reduce((a, b) => a + b.periodDebit, 0))}</strong>
@@ -873,7 +873,7 @@ export default function AccountsPage() {
                 <span>Logistics &amp; Freight (Delhivery/Velocity)</span>
                 <strong>{formatMoney(tbData.rows.filter(r => r.accountCode.startsWith('EXPENSE_FREIGHT')).reduce((a, b) => a + b.periodDebit, 0))}</strong>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', fontWeight: 800, fontSize: '15px', color: '#b91c1c' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', fontWeight: 800, fontSize: '15px', color: 'var(--tone-danger-fg)' }}>
                 <span>Total Operational Deductions</span>
                 <span>{formatMoney(tbData.rows.filter(r => r.accountType === 'EXPENSE').reduce((a, b) => a + b.periodDebit, 0))}</span>
               </div>
@@ -889,7 +889,7 @@ export default function AccountsPage() {
             eyebrow="Double-Entry Financial Accounting"
             title={`General Ledger Trial Balance (${month})`}
             action={
-              <span style={{ fontSize: '13px', fontWeight: 700, color: tbData.isBalanced ? '#15803d' : '#dc2626' }}>
+              <span style={{ fontSize: '13px', fontWeight: 700, color: tbData.isBalanced ? 'var(--tone-success-fg)' : 'var(--tone-danger-fg)' }}>
                 {tbData.isBalanced ? '✓ Balanced (Total Debits == Total Credits)' : '⚠ Imbalanced'}
               </span>
             }
@@ -1010,14 +1010,14 @@ export default function AccountsPage() {
                     <tr key={s.id}>
                       <td><strong>{s.period}</strong></td>
                       <td>
-                        <span style={{ color: s.status === 'CLOSED' ? '#15803d' : '#b45309', fontWeight: 700, fontSize: '12px' }}>
+                        <span style={{ color: s.status === 'CLOSED' ? 'var(--tone-success-fg)' : 'var(--tone-warning-fg)', fontWeight: 700, fontSize: '12px' }}>
                           {s.status}
                         </span>
                       </td>
                       <td>{formatDate(s.closedAt)}</td>
                       <td>{s.closedBy || 'SYSTEM'}</td>
                       <td className="amount-cell">{formatMoney(Number(s.netSales))}</td>
-                      <td className="amount-cell" style={{ color: '#16a34a' }}>{formatMoney(Number(s.netBankReceipts))}</td>
+                      <td className="amount-cell" style={{ color: 'var(--tone-success-fg)' }}>{formatMoney(Number(s.netBankReceipts))}</td>
                       <td className="amount-cell" style={{ fontWeight: 700 }}>{formatMoney(Number(s.closingReceivable))}</td>
                     </tr>
                   ))

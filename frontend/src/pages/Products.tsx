@@ -259,63 +259,63 @@ export function Products() {
       {/* KPI Metrics Cards */}
       <div className="kpi-grid-6">
         <div className="surface-card">
-          <div style={{ fontSize: '11px', color: 'var(--muted)', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>
+          <div style={{ fontSize: '12px', color: 'var(--muted)', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>
             Total Catalog
           </div>
           <div style={{ fontSize: '22px', fontWeight: 800, color: 'var(--ink)' }}>
             {summary.total.toLocaleString()}
           </div>
-          <span style={{ fontSize: '11px', color: 'var(--muted)' }}>All Shopify listings</span>
+          <span style={{ fontSize: '12px', color: 'var(--muted)' }}>All Shopify listings</span>
         </div>
 
         <div className="surface-card">
-          <div style={{ fontSize: '11px', color: 'var(--tone-success-fg)', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>
+          <div style={{ fontSize: '12px', color: 'var(--tone-success-fg)', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>
             Active Published
           </div>
           <div style={{ fontSize: '22px', fontWeight: 800, color: 'var(--tone-success-fg)' }}>
             {summary.active.toLocaleString()}
           </div>
-          <span style={{ fontSize: '11px', color: 'var(--tone-success-fg)' }}>Live on storefront</span>
+          <span style={{ fontSize: '12px', color: 'var(--tone-success-fg)' }}>Live on storefront</span>
         </div>
 
         <div className="surface-card">
-          <div style={{ fontSize: '11px', color: 'var(--tone-warning-fg)', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>
+          <div style={{ fontSize: '12px', color: 'var(--tone-warning-fg)', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>
             Draft Listings
           </div>
           <div style={{ fontSize: '22px', fontWeight: 800, color: 'var(--tone-warning-fg)' }}>
             {summary.draft.toLocaleString()}
           </div>
-          <span style={{ fontSize: '11px', color: 'var(--tone-warning-fg)' }}>Unpublished edits</span>
+          <span style={{ fontSize: '12px', color: 'var(--tone-warning-fg)' }}>Unpublished edits</span>
         </div>
 
         <div className="surface-card">
-          <div style={{ fontSize: '11px', color: 'var(--muted)', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>
+          <div style={{ fontSize: '12px', color: 'var(--muted)', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>
             Archived
           </div>
           <div style={{ fontSize: '22px', fontWeight: 800, color: 'var(--ink-secondary)' }}>
             {summary.archived.toLocaleString()}
           </div>
-          <span style={{ fontSize: '11px', color: 'var(--muted)' }}>Inactive archive</span>
+          <span style={{ fontSize: '12px', color: 'var(--muted)' }}>Inactive archive</span>
         </div>
 
         <div className="surface-card">
-          <div style={{ fontSize: '11px', color: 'var(--tone-danger-fg)', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>
+          <div style={{ fontSize: '12px', color: 'var(--tone-danger-fg)', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>
             Sold Out (0 Stock)
           </div>
           <div style={{ fontSize: '22px', fontWeight: 800, color: 'var(--tone-danger-fg)' }}>
             {summary.outOfStock.toLocaleString()}
           </div>
-          <span style={{ fontSize: '11px', color: 'var(--tone-danger-fg)' }}>Requires restocking</span>
+          <span style={{ fontSize: '12px', color: 'var(--tone-danger-fg)' }}>Requires restocking</span>
         </div>
 
         <div className="surface-card">
-          <div style={{ fontSize: '11px', color: 'var(--tone-info-fg)', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>
+          <div style={{ fontSize: '12px', color: 'var(--tone-info-fg)', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>
             Warehouse Stock
           </div>
           <div style={{ fontSize: '22px', fontWeight: 800, color: 'var(--tone-info-fg)' }}>
             {summary.totalInventory.toLocaleString()}
           </div>
-          <span style={{ fontSize: '11px', color: 'var(--tone-info-fg)' }}>Units in Surat Hub</span>
+          <span style={{ fontSize: '12px', color: 'var(--tone-info-fg)' }}>Units in Surat Hub</span>
         </div>
       </div>
 
@@ -425,7 +425,7 @@ export function Products() {
             </button>
           </div>
 
-          <div style={{ fontSize: '11px', color: 'var(--muted)' }}>
+          <div style={{ fontSize: '12px', color: 'var(--muted)' }}>
             Showing <strong>{filteredProducts.length}</strong> listings
           </div>
         </div>
@@ -434,7 +434,7 @@ export function Products() {
         <div style={{ display: 'flex', gap: '12px', padding: '14px 16px', background: 'var(--canvas)', borderBottom: '1px solid var(--line)', alignItems: 'center', flexWrap: 'wrap' }}>
           {/* Search box */}
           <div style={{ position: 'relative', flex: '1 1 240px', maxWidth: '380px' }}>
-            <span style={{ position: 'absolute', left: '10px', top: '9px', color: '#94a3b8' }}>
+            <span style={{ position: 'absolute', left: '10px', top: '9px', color: 'var(--muted-light)' }}>
               <Icon name="search" size={15} />
             </span>
             <input
@@ -575,8 +575,8 @@ export function Products() {
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                           <strong style={{ fontSize: '13px', color: 'var(--ink)' }}>{prod.title}</strong>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <span style={{ fontSize: '11px', color: 'var(--muted)' }}>
-                              ID: <code style={{ fontSize: '10.5px' }}>{prod.id}</code>
+                            <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                              ID: <code style={{ fontSize: '12px' }}>{prod.id}</code>
                             </span>
                             {prod.handle && (
                               <a
@@ -584,7 +584,7 @@ export function Products() {
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 style={{
-                                  fontSize: '10.5px',
+                                  fontSize: '12px',
                                   color: 'var(--tone-info-fg)',
                                   display: 'inline-flex',
                                   alignItems: 'center',
@@ -603,10 +603,10 @@ export function Products() {
 
                       {/* Type & Vendor */}
                       <td>
-                        <span style={{ fontSize: '11.5px', color: 'var(--ink)', fontWeight: 600, display: 'block' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--ink)', fontWeight: 600, display: 'block' }}>
                           {prod.product_type || 'Ethnic Wear'}
                         </span>
-                        <span style={{ fontSize: '10.5px', color: 'var(--muted)' }}>{prod.vendor || 'Youthnic'}</span>
+                        <span style={{ fontSize: '12px', color: 'var(--muted)' }}>{prod.vendor || 'Youthnic'}</span>
                       </td>
 
                       {/* Variants & Sizes */}
@@ -616,7 +616,7 @@ export function Products() {
                             <span
                               key={v.id}
                               style={{
-                                fontSize: '10px',
+                                fontSize: '12px',
                                 background: (v.inventory_quantity ?? 0) > 0 ? 'var(--tone-success-bg)' : 'var(--tone-danger-bg)',
                                 color: (v.inventory_quantity ?? 0) > 0 ? 'var(--tone-success-fg)' : 'var(--tone-danger-fg)',
                                 border: `1px solid ${(v.inventory_quantity ?? 0) > 0 ? 'var(--tone-success-border)' : 'var(--tone-danger-border)'}`,
@@ -630,7 +630,7 @@ export function Products() {
                             </span>
                           ))}
                           {(prod.variants?.length ?? 0) > 5 && (
-                            <span style={{ fontSize: '10px', color: 'var(--muted)' }}>
+                            <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
                               +{(prod.variants?.length ?? 0) - 5} more
                             </span>
                           )}
@@ -644,7 +644,7 @@ export function Products() {
                           {minPrice !== maxPrice && ` - ₹${Number(maxPrice).toLocaleString()}`}
                         </strong>
                         {compareAt && (
-                          <div style={{ fontSize: '11px', color: 'var(--muted-light)', textDecoration: 'line-through' }}>
+                          <div style={{ fontSize: '12px', color: 'var(--muted-light)', textDecoration: 'line-through' }}>
                             ₹{Number(compareAt).toLocaleString()}
                           </div>
                         )}
@@ -673,7 +673,7 @@ export function Products() {
                             type="button"
                             onClick={() => handleOpenStockAdjust(prod)}
                             className="btn-table-action"
-                            style={{ padding: '2px 6px', fontSize: '10.5px' }}
+                            style={{ padding: '2px 6px', fontSize: '12px' }}
                             title="Quick adjust inventory for this product"
                           >
                             Adjust
@@ -694,7 +694,7 @@ export function Products() {
                           }
                           disabled={statusMutation.isPending}
                           style={{
-                            fontSize: '11px',
+                            fontSize: '12px',
                             fontWeight: 700,
                             padding: '3px 8px',
                             borderRadius: '6px',
@@ -819,7 +819,7 @@ export function Products() {
                     >
                       <div>
                         <strong style={{ fontSize: '13px', color: 'var(--ink)' }}>{v.title}</strong>
-                        <span style={{ fontSize: '11px', color: 'var(--muted)', display: 'block' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--muted)', display: 'block' }}>
                           SKU: {v.sku || 'N/A'} · Price: ₹{v.price}
                         </span>
                       </div>
@@ -927,7 +927,7 @@ export function Products() {
           <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '440px' }}>
             <div className="modal-header">
               <div className="modal-header-left">
-                <div className="modal-icon-badge" style={{ background: '#fee2e2', color: '#dc2626' }}>
+                <div className="modal-icon-badge" style={{ background: 'var(--tone-danger-bg)', color: 'var(--tone-danger-fg)' }}>
                   <Icon name="alert" size={20} />
                 </div>
                 <div>
@@ -949,7 +949,7 @@ export function Products() {
               <p style={{ margin: 0, fontSize: '13px', color: 'var(--ink-secondary)' }}>
                 Are you sure you want to delete <strong>{deletingProduct.title}</strong>?
               </p>
-              <div style={{ marginTop: '12px', background: 'var(--tone-danger-bg)', border: '1px solid var(--tone-danger-border)', borderRadius: '8px', padding: '10px 12px', fontSize: '11.5px', color: 'var(--tone-danger-fg)' }}>
+              <div style={{ marginTop: '12px', background: 'var(--tone-danger-bg)', border: '1px solid var(--tone-danger-border)', borderRadius: '8px', padding: '10px 12px', fontSize: '12px', color: 'var(--tone-danger-fg)' }}>
                 This will permanently remove the product and all its variants from your Shopify store (<code>youthnic2024.myshopify.com</code>).
               </div>
             </div>
@@ -1130,7 +1130,7 @@ function AddProductModal({
 
             {/* Media / Images */}
             <div style={{ background: 'var(--surface-elevated)', border: '1px solid var(--line)', borderRadius: '8px', padding: '12px' }}>
-              <span style={{ fontSize: '11.5px', fontWeight: 700, color: 'var(--ink)', display: 'block', marginBottom: '6px' }}>
+              <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--ink)', display: 'block', marginBottom: '6px' }}>
                 Product Images (URLs)
               </span>
               <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
@@ -1140,13 +1140,13 @@ function AddProductModal({
                   placeholder="https://cdn.shopify.com/s/files/... or image link"
                   value={imageUrl}
                   onChange={(e) => setImageUrl(e.target.value)}
-                  style={{ flex: 1, fontSize: '11.5px', height: '32px' }}
+                  style={{ flex: 1, fontSize: '12px', height: '32px' }}
                 />
                 <button
                   type="button"
                   onClick={handleAddImage}
                   className="button-secondary"
-                  style={{ height: '32px', padding: '0 12px', fontSize: '11.5px' }}
+                  style={{ height: '32px', padding: '0 12px', fontSize: '12px' }}
                 >
                   + Add Image
                 </button>
@@ -1181,7 +1181,7 @@ function AddProductModal({
                           borderRadius: '50%',
                           width: '18px',
                           height: '18px',
-                          fontSize: '10px',
+                          fontSize: '12px',
                           display: 'grid',
                           placeItems: 'center',
                           cursor: 'pointer',
@@ -1197,7 +1197,7 @@ function AddProductModal({
 
             {/* Options & Variants Generation */}
             <div style={{ background: 'var(--surface-elevated)', border: '1px solid var(--line)', borderRadius: '8px', padding: '12px' }}>
-              <span style={{ fontSize: '11.5px', fontWeight: 700, color: 'var(--ink)', display: 'block', marginBottom: '8px' }}>
+              <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--ink)', display: 'block', marginBottom: '8px' }}>
                 Pricing & Size Variants Generator
               </span>
 
@@ -1415,7 +1415,7 @@ function EditProductModal({
 
             {/* Variants table */}
             <div style={{ background: 'var(--surface-elevated)', border: '1px solid var(--line)', borderRadius: '8px', padding: '12px' }}>
-              <span style={{ fontSize: '11.5px', fontWeight: 700, color: 'var(--ink)', display: 'block', marginBottom: '8px' }}>
+              <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--ink)', display: 'block', marginBottom: '8px' }}>
                 Variants, Pricing & Stock
               </span>
 
@@ -1438,11 +1438,11 @@ function EditProductModal({
                     >
                       <div>
                         <strong style={{ fontSize: '12px', color: 'var(--ink)' }}>{v.title}</strong>
-                        <span style={{ fontSize: '10px', color: 'var(--muted)', display: 'block' }}>SKU: {v.sku || 'N/A'}</span>
+                        <span style={{ fontSize: '12px', color: 'var(--muted)', display: 'block' }}>SKU: {v.sku || 'N/A'}</span>
                       </div>
 
                       <div>
-                        <label style={{ fontSize: '9.5px', color: 'var(--muted)', display: 'block' }}>Price (₹)</label>
+                        <label style={{ fontSize: '12px', color: 'var(--muted)', display: 'block' }}>Price (₹)</label>
                         <input
                           type="number"
                           value={state?.price ?? v.price}
@@ -1453,12 +1453,12 @@ function EditProductModal({
                               [v.id!]: { ...prev[v.id!], price: e.target.value },
                             }))
                           }
-                          style={{ width: '100%', height: '26px', fontSize: '11.5px' }}
+                          style={{ width: '100%', height: '26px', fontSize: '12px' }}
                         />
                       </div>
 
                       <div>
-                        <label style={{ fontSize: '9.5px', color: 'var(--muted)', display: 'block' }}>MRP (₹)</label>
+                        <label style={{ fontSize: '12px', color: 'var(--muted)', display: 'block' }}>MRP (₹)</label>
                         <input
                           type="number"
                           value={state?.compare_at_price ?? v.compare_at_price ?? ''}
@@ -1469,12 +1469,12 @@ function EditProductModal({
                               [v.id!]: { ...prev[v.id!], compare_at_price: e.target.value },
                             }))
                           }
-                          style={{ width: '100%', height: '26px', fontSize: '11.5px' }}
+                          style={{ width: '100%', height: '26px', fontSize: '12px' }}
                         />
                       </div>
 
                       <div>
-                        <label style={{ fontSize: '9.5px', color: 'var(--muted)', display: 'block' }}>Stock</label>
+                        <label style={{ fontSize: '12px', color: 'var(--muted)', display: 'block' }}>Stock</label>
                         <input
                           type="number"
                           value={state?.inventory_quantity ?? v.inventory_quantity ?? 0}
@@ -1485,7 +1485,7 @@ function EditProductModal({
                               [v.id!]: { ...prev[v.id!], inventory_quantity: parseInt(e.target.value, 10) || 0 },
                             }))
                           }
-                          style={{ width: '100%', height: '26px', fontSize: '11.5px', fontWeight: 700 }}
+                          style={{ width: '100%', height: '26px', fontSize: '12px', fontWeight: 700 }}
                         />
                       </div>
                     </div>

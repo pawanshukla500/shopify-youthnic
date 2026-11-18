@@ -1,6 +1,6 @@
 # Shopify OMS — System Handoff & Operational State
 
-> **Last Verified**: 2026-09-29  
+> **Last Verified**: 2026-11-18  
 > **Repository**: [pawanshukla500/shopify-youthnic](https://github.com/pawanshukla500/shopify-youthnic) (Branch: `main`)  
 > **TaskFlow Pro Project**: `Shopify Youthnic OMS` (`a7f820cb-4885-486d-92d2-c8e4a63054f4`)  
 
@@ -85,6 +85,21 @@ Automated Order Management System for **youthnic2024.myshopify.com** (Brand: You
 | `DELHIVERY_CLIENT_PROFILE` | `fa5d92-VBEXPORT-do` | Domestic Express profile (V B EXPORT) for all B2C surface shipments. |
 | `src/index.ts` import | `import './app';` | Must remain a side-effect import to prevent TypeScript compiler from eliding the server boot. |
 | `PRISMA_DB_PUSH` | Automated in CI/CD | Additive schema migrations execute automatically prior to building. |
+
+---
+
+## 4a. Agent Tooling (Graphify + Ponytail)
+
+Every agent session uses two core tools. They are wired in so new agents get them without manual setup.
+
+| Tool | What it does | Where it is wired |
+|---|---|---|
+| **Ponytail** (`DietrichGebert/ponytail`) | Lazy-senior-dev rules: smallest complete change, reuse first, no speculative code, checks for new logic | `AGENTS.md` (rules kept verbatim from upstream); Claude Code plugin `ponytail@ponytail` enabled in `.claude/settings.json` |
+| **Graphify** (`graphifyy==0.9.112`) | Code knowledge graph in `graphify-out/` (`graphify query / path / explain`), rebuilt after commit, checkout and merge | Skill in `.claude/skills/graphify/` and `.agents/skills/graphify/`; rules in `AGENTS.md` and `.agents/rules/graphify.md`; Claude PreToolUse hooks in `.claude/settings.json`; git hooks via `graphify hook install` |
+
+- **Bootstrap:** `python scripts/agent_bootstrap.py` runs automatically at Claude Code session start (SessionStart hook). Other agents are told to run it in `AGENTS.md` and `.agents/rules/project-upkeep.md`. It installs the pinned Graphify CLI, the git hooks and the graph when missing, and never blocks a session. `--self-test` runs its checks.
+- **Upkeep:** after every change, run `graphify update .` and update this file and any doc the change touches (`AGENTS.md` > Project upkeep).
+- **Hooks off:** if `"disableAllHooks": true` is set in `~/.claude/settings.json`, the project hooks don't run. Run the bootstrap by hand.
 
 ---
 

@@ -264,6 +264,7 @@ Test suites include:
 
 ## Operational Guide for Agents
 
-- Refer to [`AGENTS.md`](AGENTS.md) for full architecture standards, invariants, and guidelines.
+- Refer to [`AGENTS.md`](AGENTS.md) for full architecture standards, invariants, and guidelines. It holds the Ponytail rules, graphify rules and the **Project upkeep** checklist that every agent follows.
+- Start each agent session with `python scripts/agent_bootstrap.py` (Claude Code runs it automatically). It installs the pinned Graphify CLI, git hooks and code graph when missing. See [`docs/HANDOFF.md`](docs/HANDOFF.md) section 4a.
 - Always synchronize task progress with **TaskFlow Pro** (`a7f820cb-4885-486d-92d2-c8e4a63054f4`).
 - Refer to [`docs/HANDOFF.md`](docs/HANDOFF.md) for current deployment and infrastructure details.

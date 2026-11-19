@@ -122,47 +122,93 @@ describe('4x6" Thermal GST Tax Invoice Layout & Print Standard', () => {
     },
   };
 
-  it('renders single 4x6" thermal invoice HTML with required GST fields and Velocity AWB', () => {
+  it('renders the Velocity-style 4x6" invoice HTML with the sample layout fields', () => {
     const html = invoiceService.generateInvoiceHtml(dummyOrder);
 
     // Thermal wrapper & container
     expect(html).toContain('invoice-wrapper');
     expect(html).toContain('invoice-container');
 
-    // Branding & GST
-    expect(html).toContain('YOUTHNIC');
+    // Header: logo + title
+    expect(html).toContain('data:image/png;base64,');
+    expect(html).toContain('Tax Invoice');
+
+    // Meta grid
+    expect(html).toContain('Invoice Date');
+    expect(html).toContain('15-Oct-2026');
+    expect(html).toContain('#26YOU6001');
+    expect(html).toContain('INV-2026-6001');
+    expect(html).toContain('Cash on Delivery');
+    expect(html).toContain('Youthnic');
+
+    // Parties
+    expect(html).toContain('Shipping Address');
+    expect(html).toContain('Ananya Deshmukh');
+    expect(html).toContain('Flat 501, Greenfield Heights');
+    expect(html).toContain('Maharashtra 411001');
     expect(html).toContain('VB EXPORTS');
     expect(html).toContain('24AERPB8666E1ZB');
-    expect(html).toContain('TAX INVOICE');
-    expect(html).toContain('INV-2026-6001');
-    expect(html).toContain('#26YOU6001');
 
-    // Carrier identification
-    expect(html).toContain('Velocity AWB:');
-    expect(html).toContain('VEHR1122334455');
-
-    // Customer & destination
-    expect(html).toContain('Ananya Deshmukh');
-    expect(html).toContain('9822012345');
-    expect(html).toContain('Greenfield Heights');
-    expect(html).toContain('Pune, Maharashtra - 411001');
-    expect(html).toContain('Place of Supply: <strong>Maharashtra (27)</strong>');
-    expect(html).toContain('CASH ON DELIVERY: COLLECT ₹1899.00');
-
-    // Item row
-    expect(html).toContain('KURTI-FOIL-L');
-    expect(html).toContain('6204'); // HSN code
+    // Item row: SKU, HSN, GST inclusive at 5%
+    expect(html).toContain('Georgette Foil Print Kurti Set with Dupatta - Large');
+    expect(html).toContain('SKU: KURTI-FOIL-L');
+    expect(html).toContain('HSN: 6204');
+    expect(html).toContain('90.43 | 5%');
     expect(html).toContain('₹1899.00');
 
-    // Tax calculation: Maharashtra buyer = IGST (5%)
-    expect(html).toContain('IGST (5%):');
-    expect(html).toContain('INVOICE TOTAL:');
-    expect(html).toContain('In Words:');
+    // Totals: COD means nothing received yet
+    expect(html).toContain('Payment Received</td><td class="r">₹0.00');
+    expect(html).toContain('Total Payment Due</td><td class="r">₹1899.00');
+    expect(html).toContain('Amount Chargeable (in words)');
     expect(html).toContain('One Thousand Eight Hundred Ninety Nine Rupees Only');
+    expect(html).toContain('This is a computer-generated invoice; no signature is required.');
+  });
 
-    // Footer & Signatory
-    expect(html).toContain('Youthnic 7-day hassle-free return');
-    expect(html).toContain('AUTHORISED SIGNATORY');
+  it('spreads order discounts across lines so they add up to the order total', () => {
+    const d = invoiceService.buildInvoiceData({
+      ...dummyOrder,
+      paymentMethod: 'prepaid',
+      shipment: null,
+      totalAmount: 1566,
+      totalShipping: 0,
+      items: [
+        { title: 'Navy Kurta Set', sku: 'A', quantity: 1, price: 999 },
+        { title: 'Blue Kurti Set', sku: 'B', quantity: 1, price: 799 },
+      ],
+    });
+    expect(d.lines.map((l) => l.discount)).toEqual([128.9, 103.1]);
+    expect(d.lines.map((l) => l.net)).toEqual([870.1, 695.9]);
+    expect(Math.round(d.lines.reduce((a, l) => a + l.net, 0) * 100) / 100).toBe(1566);
+    expect(d.otherCharges).toBe(0);
+    expect(d.received).toBe(1566);
+    expect(d.due).toBe(0);
+    expect(d.paymentStatus).toBe('Paid');
+  });
+
+  it('keeps shipping out of the item discount and lists it as its own row', () => {
+    const d = invoiceService.buildInvoiceData({
+      ...dummyOrder,
+      totalAmount: 1372.02,
+      totalShipping: 99,
+      items: [{ title: 'Mustard Kurti', sku: 'M', quantity: 1, price: 1499 }],
+    });
+    expect(d.lines[0].discount).toBe(225.98);
+    expect(d.lines[0].net).toBe(1273.02);
+    expect(d.shipping).toBe(99);
+    expect(d.due).toBe(1372.02);
+    expect(invoiceService.generateInvoiceHtml({ ...dummyOrder, totalAmount: 1372.02, totalShipping: 99 } as any)).toContain('Shipping</td>');
+  });
+
+  it('escapes customer text and summarises rows that do not fit on 4x6"', () => {
+    const html = invoiceService.generateInvoiceHtml({
+      ...dummyOrder,
+      customerName: '<script>alert(1)</script>',
+      totalAmount: 6000,
+      items: Array.from({ length: 6 }, (_, i) => ({ title: `Kurta ${i + 1}`, sku: `K${i}`, quantity: 1, price: 1000 })),
+    });
+    expect(html).not.toContain('<script>alert(1)</script>');
+    expect(html).toContain('&lt;script&gt;');
+    expect(html).toContain('+ 2 more items (included in the total)');
   });
 
   it('enforces 100mm x 150mm thermal print CSS rules', () => {

@@ -1,4 +1,5 @@
-import invoiceService from '../modules/invoice/invoice.service';
+import invoiceService, { INVOICE_MAX_ROWS } from '../modules/invoice/invoice.service';
+import { YOUTHNIC_LOGO_BASE64 } from '../modules/delhivery/label-logos';
 import { config } from '../config';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import logger from './logger';
@@ -141,171 +142,200 @@ export async function create4x6FallbackPdf(
 }
 
 /**
- * Creates an authentic 4x6" (100mm x 150mm) GST Tax Invoice PDF page
- * strictly formatted for warehouse thermal label printers (288 x 432 pt).
+ * 4x6" (288 x 432 pt) GST tax invoice PDF in the Velocity-style layout.
+ * Uses the same numbers as the HTML invoice (invoiceService.buildInvoiceData).
  */
 export async function create4x6InvoicePdf(
   order: any,
-  waybillNumber: string,
-  courierName?: string | null
+  _waybillNumber?: string,
+  _courierName?: string | null
 ): Promise<Buffer> {
+  const d = invoiceService.buildInvoiceData(order);
   const pdfDoc = await PDFDocument.create();
   const page = pdfDoc.addPage([288, 432]);
-  const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-  const fontRegular = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const reg = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const bold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const logo = await pdfDoc.embedPng(Buffer.from(YOUTHNIC_LOGO_BASE64.split(',')[1], 'base64'));
 
-  const black = rgb(0, 0, 0);
-  const gray = rgb(0.3, 0.3, 0.3);
-  const lightGray = rgb(0.92, 0.92, 0.92);
+  const navy = rgb(0.17, 0.21, 0.38); // #2b3561
+  const title = rgb(0.18, 0.23, 0.4); // #2e3a66
+  const head = rgb(0.23, 0.24, 0.42); // #3a3e6b
+  const muted = rgb(0.42, 0.45, 0.5); // #6b7280
+  const rule = rgb(0.89, 0.9, 0.93); // #e3e6ee
+  const cardBg = rgb(0.965, 0.969, 0.984); // #f6f7fb
+  const white = rgb(1, 1, 1);
+  const M = 12;
+  const R = 276;
+  type Font = typeof reg;
 
-  // Outer border
-  page.drawRectangle({
-    x: 8,
-    y: 8,
-    width: 272,
-    height: 416,
-    borderColor: black,
-    borderWidth: 1.2,
+  // shortcut: Helvetica has no ₹ glyph, so the PDF prints "Rs."; embedding a TTF needs @pdf-lib/fontkit.
+  const money = (n: number) => `Rs.${n.toFixed(2)}`;
+  // Standard fonts only encode Latin-1; swap smart punctuation and replace anything else so drawText can't throw
+  const safe = (t: unknown) =>
+    String(t ?? '')
+      .replace(/[‘’]/g, "'")
+      .replace(/[“”]/g, '"')
+      .replace(/[–—]/g, '-')
+      .replace(/[^\x20-\x7E -ÿ]/g, '?');
+  const text = (t: unknown, x: number, y: number, size: number, font: Font = reg, color = navy) =>
+    page.drawText(safe(t), { x, y, size, font, color });
+  const textR = (t: unknown, right: number, y: number, size: number, font: Font = reg, color = navy) => {
+    const str = safe(t);
+    page.drawText(str, { x: right - font.widthOfTextAtSize(str, size), y, size, font, color });
+  };
+  const textC = (t: unknown, center: number, y: number, size: number, font: Font = reg, color = navy) => {
+    const str = safe(t);
+    page.drawText(str, { x: center - font.widthOfTextAtSize(str, size) / 2, y, size, font, color });
+  };
+  const wrap = (t: unknown, font: Font, size: number, width: number, maxLines: number): string[] => {
+    const out: string[] = [];
+    let cur = '';
+    let cut = false;
+    for (const w of safe(t).split(/\s+/).filter(Boolean)) {
+      const next = cur ? `${cur} ${w}` : w;
+      if (font.widthOfTextAtSize(next, size) <= width || !cur) {
+        cur = next;
+        continue;
+      }
+      out.push(cur);
+      cur = w;
+      if (out.length === maxLines) {
+        cut = true;
+        break;
+      }
+    }
+    if (!cut && cur) out.push(cur);
+    if (cut || out.length > maxLines) out[maxLines - 1] = `${out[maxLines - 1]}...`;
+    return out.slice(0, maxLines);
+  };
+  // pdf-lib draws SVG paths from (x, y) with y growing downwards
+  const roundRect = (x: number, top: number, w: number, h: number, r: number, color = cardBg) =>
+    page.drawSvgPath(
+      `M ${r} 0 H ${w - r} Q ${w} 0 ${w} ${r} V ${h - r} Q ${w} ${h} ${w - r} ${h} H ${r} Q 0 ${h} 0 ${h - r} V ${r} Q 0 0 ${r} 0 Z`,
+      { x, y: top, color }
+    );
+  const hline = (y: number) => page.drawLine({ start: { x: M, y }, end: { x: R, y }, thickness: 0.5, color: rule });
+
+  // 1. Header: logo + "Tax Invoice"
+  const logoH = 18;
+  page.drawImage(logo, { x: M, y: 432 - M - logoH, width: (logo.width / logo.height) * logoH, height: logoH });
+  textR('Tax Invoice', R, 407, 13, bold, title);
+
+  // 2. Meta grid (3 x 2)
+  const meta: Array<[string, string]> = [
+    ['Invoice Date', d.invoiceDate],
+    ['Order No.', d.orderName],
+    ['Order Date', d.orderDate],
+    ['Invoice No.', d.invoiceNumber],
+    ['Payment Status', d.paymentStatus],
+    ['Store', d.store],
+  ];
+  meta.forEach(([label, value], i) => {
+    const col = i % 3;
+    const row = Math.floor(i / 3);
+    const x = M + col * 88 + (col ? 6 : 0);
+    const y = 384 - row * 22;
+    text(label, x, y, 5.5, reg, muted);
+    text(value, x, y - 9, 7);
+  });
+  [M + 88, M + 176].forEach((x) =>
+    page.drawLine({ start: { x, y: 350 }, end: { x, y: 392 }, thickness: 0.5, color: rule })
+  );
+
+  // 3. Shipping Address / From cards
+  type CardLine = { t: string; font: Font; color: typeof navy; size: number };
+  const cardW = 129;
+  const inner = cardW - 12;
+  const shipLines: CardLine[] = [
+    { t: 'Shipping Address', font: reg, color: muted, size: 5.8 },
+    { t: d.shipTo.name, font: bold, color: navy, size: 6.3 },
+    ...wrap(d.shipTo.address, reg, 6.3, inner, 3).map((t) => ({ t, font: reg, color: navy, size: 6.3 })),
+    { t: `${d.shipTo.city},`, font: reg, color: navy, size: 6.3 },
+    { t: `${d.shipTo.state} ${d.shipTo.pincode}`, font: reg, color: navy, size: 6.3 },
+  ];
+  const fromLines: CardLine[] = [
+    { t: 'From', font: reg, color: muted, size: 5.8 },
+    { t: d.from.name, font: reg, color: navy, size: 6.3 },
+    ...wrap(d.from.address, reg, 6.3, inner, 3).map((t) => ({ t, font: reg, color: navy, size: 6.3 })),
+    { t: `GSTIN: ${d.from.gstin}`, font: bold, color: navy, size: 6.3 },
+  ];
+  const cardTop = 342;
+  const cardH = 8 + Math.max(shipLines.length, fromLines.length) * 8;
+  [shipLines, fromLines].forEach((lines, i) => {
+    const x = M + i * (cardW + 6);
+    roundRect(x, cardTop, cardW, cardH, 4);
+    lines.forEach((l, j) => text(l.t, x + 6, cardTop - 10 - j * 8, l.size, l.font, l.color));
   });
 
-  // Top Header: Seller Info & TAX INVOICE
-  page.drawText('TAX INVOICE', { x: 195, y: 410, size: 10, font: fontBold, color: black });
-  page.drawText('YOUTHNIC (VB EXPORTS)', { x: 14, y: 410, size: 9, font: fontBold, color: black });
-  page.drawText('7004, HTC Market-1, Surat, Gujarat - 395002', { x: 14, y: 400, size: 6.5, font: fontRegular, color: gray });
-  const gstin = config.company?.gstin || config.delhivery?.seller?.gstin || '24AERPB8666E1ZB';
-  const sellerPhone = config.company?.phone || config.delhivery?.seller?.phone || '+91 7984984563';
-  page.drawText(`GSTIN: ${gstin} (State 24) · ${sellerPhone}`, { x: 14, y: 391, size: 6.5, font: fontRegular, color: gray });
+  // 4. Items table
+  const col = { sno: M + 9, name: M + 20, qty: M + 116, amount: M + 156, discount: M + 184, gst: M + 222, net: R - 3, sumLabel: M + 210 };
+  let y = cardTop - cardH - 8;
+  const tableTop = y;
+  roundRect(M, y, R - M, 12, 3, head);
+  page.drawRectangle({ x: M, y: y - 12, width: R - M, height: 6, color: head }); // square off the bottom corners
+  const hy = y - 8.5;
+  textC('S No.', col.sno, hy, 5.8, reg, white);
+  text('Product Name', col.name, hy, 5.8, reg, white);
+  textC('Qty', col.qty, hy, 5.8, reg, white);
+  textR('Amount', col.amount, hy, 5.8, reg, white);
+  textR('Discount', col.discount, hy, 5.8, reg, white);
+  textR('GST', col.gst, hy, 5.8, reg, white);
+  textR('Amount', col.net, hy, 5.8, reg, white);
+  y -= 12;
 
-  page.drawLine({ start: { x: 8, y: 384 }, end: { x: 280, y: 384 }, thickness: 1, color: black });
+  const sumRows: Array<[string, number]> = [
+    ...(d.shipping > 0 ? ([['Shipping', d.shipping]] as Array<[string, number]>) : []),
+    ...(d.otherCharges > 0 ? ([['Other Charges', d.otherCharges]] as Array<[string, number]>) : []),
+    ['Total', d.total],
+    ['Payment Received', d.received],
+    ['Total Payment Due', d.due],
+  ];
+  const wordLines = wrap(`INR ${d.words}`, reg, 6.2, R - M - 10, 2);
+  const reserved = 30 /* footer */ + sumRows.length * 12 + 12 + wordLines.length * 7.5 + 12 /* more-items row */;
 
-  // Invoice & Order Meta Row
-  const invoiceNumber = `INV-2026-${order.shopifyOrderNumber || order.id}`;
-  const invoiceDate = new Date(order.shopifyCreatedAt || Date.now()).toLocaleDateString('en-IN', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  });
-  page.drawText(`Inv: ${invoiceNumber}`, { x: 14, y: 373, size: 7.5, font: fontBold, color: black });
-  page.drawText(`Date: ${invoiceDate}`, { x: 14, y: 362, size: 7, font: fontRegular, color: black });
-
-  page.drawText(`Order: ${order.shopifyOrderName}`, { x: 110, y: 373, size: 7.5, font: fontBold, color: black });
-  page.drawText(`AWB: ${waybillNumber || 'Pending'} (${courierName || 'Velocity'})`, { x: 110, y: 362, size: 7, font: fontRegular, color: black });
-
-  page.drawLine({ start: { x: 8, y: 354 }, end: { x: 280, y: 354 }, thickness: 1, color: black });
-
-  // Customer & Shipping Info
-  const isCod = order.paymentMethod === 'COD' || order.shipment?.paymentMode === 'COD';
-  const destStateCode = invoiceService.getStateCode(order.customerState);
-  page.drawText('SOLD & SHIPPED TO:', { x: 14, y: 343, size: 7, font: fontBold, color: gray });
-  page.drawText(`${(order.customerName || 'Customer').substring(0, 32)} · Ph: ${order.customerPhone || 'N/A'}`, { x: 14, y: 332, size: 8, font: fontBold, color: black });
-
-  const addr = (order.customerAddress || order.customerAddress1 || '').substring(0, 85);
-  page.drawText(addr.substring(0, 48), { x: 14, y: 322, size: 7, font: fontRegular, color: black });
-  if (addr.length > 48) {
-    page.drawText(addr.substring(48, 85), { x: 14, y: 312, size: 7, font: fontRegular, color: black });
+  let shownCount = 0;
+  for (const [i, l] of d.lines.entries()) {
+    if (i >= INVOICE_MAX_ROWS) break;
+    const titleLines = wrap(l.title, reg, 6, 90, 3);
+    const rowH = 6 + titleLines.length * 7.5 + 13;
+    if (y - rowH < reserved) break;
+    const by = y - 8;
+    textC(`${i + 1}.`, col.sno, by, 6);
+    titleLines.forEach((t, k) => text(t, col.name, by - k * 7.5, 6));
+    const subY = by - titleLines.length * 7.5;
+    text(`SKU: ${l.sku}`, col.name, subY, 5, reg, muted);
+    text(`HSN: ${l.hsn}`, col.name, subY - 6.5, 5, reg, muted);
+    textC(String(l.qty), col.qty, by, 6);
+    textR(money(l.amount), col.amount, by, 6);
+    textR(l.discount.toFixed(2), col.discount, by, 6);
+    textR(`${l.gst.toFixed(2)} | ${d.gstRate}%`, col.gst, by, 6);
+    textR(money(l.net), col.net, by, 6);
+    y -= rowH;
+    hline(y);
+    shownCount++;
   }
 
-  const cityState = `${order.customerCity || ''}, ${order.customerState || ''} - ${order.customerPincode || ''} (State Code: ${destStateCode})`;
-  page.drawText(cityState.substring(0, 52), { x: 14, y: 302, size: 7, font: fontBold, color: black });
-
-  // Payment Badge box
-  page.drawRectangle({
-    x: 14,
-    y: 284,
-    width: 260,
-    height: 14,
-    color: lightGray,
-  });
-  const payText = isCod
-    ? `CASH ON DELIVERY: COLLECT INR ${(order.totalAmount || 0).toFixed(2)}`
-    : `PREPAID (ONLINE) — DO NOT COLLECT CASH`;
-  page.drawText(payText, { x: 20, y: 288, size: 7, font: fontBold, color: black });
-
-  page.drawLine({ start: { x: 8, y: 278 }, end: { x: 280, y: 278 }, thickness: 1, color: black });
-
-  // Table Header
-  page.drawRectangle({
-    x: 8,
-    y: 264,
-    width: 272,
-    height: 14,
-    color: lightGray,
-  });
-  page.drawText('#', { x: 12, y: 268, size: 6.5, font: fontBold, color: black });
-  page.drawText('Description / SKU', { x: 26, y: 268, size: 6.5, font: fontBold, color: black });
-  page.drawText('Qty', { x: 165, y: 268, size: 6.5, font: fontBold, color: black });
-  page.drawText('Rate', { x: 195, y: 268, size: 6.5, font: fontBold, color: black });
-  page.drawText('GST', { x: 230, y: 268, size: 6.5, font: fontBold, color: black });
-  page.drawText('Total', { x: 255, y: 268, size: 6.5, font: fontBold, color: black });
-
-  page.drawLine({ start: { x: 8, y: 264 }, end: { x: 280, y: 264 }, thickness: 0.8, color: black });
-
-  // Items
-  const items = order.items || [];
-  let curY = 252;
-  for (let i = 0; i < Math.min(items.length, 4); i++) {
-    const item = items[i];
-    const itemGross = (item.price || 0) * (item.quantity || 1);
-    const itemTaxable = itemGross / 1.05;
-    const ratePerUnit = itemTaxable / (item.quantity || 1);
-
-    page.drawText(`${i + 1}`, { x: 12, y: curY, size: 6.5, font: fontRegular, color: black });
-    const desc = `${(item.title || 'Item').substring(0, 24)} (${(item.sku || 'N/A').substring(0, 12)})`;
-    page.drawText(desc, { x: 26, y: curY, size: 6.5, font: fontRegular, color: black });
-    page.drawText(`${item.quantity || 1}`, { x: 168, y: curY, size: 6.5, font: fontBold, color: black });
-    page.drawText(`${ratePerUnit.toFixed(1)}`, { x: 192, y: curY, size: 6.5, font: fontRegular, color: black });
-    page.drawText('5%', { x: 232, y: curY, size: 6.5, font: fontRegular, color: black });
-    page.drawText(`${itemGross.toFixed(1)}`, { x: 252, y: curY, size: 6.5, font: fontBold, color: black });
-
-    curY -= 13;
+  const hidden = d.lines.length - shownCount;
+  if (hidden > 0) {
+    text(`+ ${hidden} more item${hidden > 1 ? 's' : ''} (included in the total)`, M + 5, y - 8.5, 6, reg, muted);
+    y -= 12;
+    hline(y);
   }
+  for (const [label, value] of sumRows) {
+    textR(label, col.sumLabel, y - 8.5, 6.3);
+    textR(money(value), col.net, y - 8.5, 6.3);
+    y -= 12;
+    hline(y);
+  }
+  text('Amount Chargeable (in words)', M + 5, y - 9, 5.8, reg, muted);
+  wordLines.forEach((t, k) => text(t, M + 5, y - 17 - k * 7.5, 6.2));
+  y -= 12 + wordLines.length * 7.5;
+  hline(y);
+  [M, R].forEach((x) => page.drawLine({ start: { x, y: tableTop - 12 }, end: { x, y }, thickness: 0.5, color: rule }));
 
-  page.drawLine({ start: { x: 8, y: 195 }, end: { x: 280, y: 195 }, thickness: 0.8, color: black });
-
-  // Tax Breakdown & Totals
-  const totalAmount = order.totalAmount || 0;
-  const taxableTotal = totalAmount / 1.05;
-  const taxTotal = totalAmount - taxableTotal;
-  const isIntraState = destStateCode === '24';
-  const taxDetail = isIntraState
-    ? `CGST: ${(taxTotal / 2).toFixed(2)} | SGST: ${(taxTotal / 2).toFixed(2)}`
-    : `IGST (5%): ${taxTotal.toFixed(2)}`;
-
-  page.drawText(`Taxable Value: INR ${taxableTotal.toFixed(2)}`, { x: 14, y: 183, size: 7, font: fontRegular, color: black });
-  page.drawText(taxDetail, { x: 14, y: 172, size: 7, font: fontRegular, color: black });
-
-  // Grand Total Box
-  page.drawRectangle({
-    x: 160,
-    y: 162,
-    width: 114,
-    height: 28,
-    borderColor: black,
-    borderWidth: 1,
-    color: lightGray,
-  });
-  page.drawText('TOTAL AMOUNT:', { x: 166, y: 178, size: 7, font: fontBold, color: black });
-  page.drawText(`INR ${totalAmount.toFixed(2)}`, { x: 166, y: 166, size: 9, font: fontBold, color: black });
-
-  // Amount in words
-  const words = invoiceService.numberToWords(totalAmount);
-  page.drawText(`In Words: ${words.substring(0, 52)}`, { x: 14, y: 150, size: 6.5, font: fontRegular, color: gray });
-
-  page.drawLine({ start: { x: 8, y: 140 }, end: { x: 280, y: 140 }, thickness: 1, color: black });
-
-  // Footer & Disclaimer
-  page.drawText('TERMS & CONDITIONS:', { x: 14, y: 128, size: 6.5, font: fontBold, color: black });
-  page.drawText('1. Youthnic 7-day hassle-free exchange & return policy applies.', { x: 14, y: 118, size: 6, font: fontRegular, color: gray });
-  page.drawText('2. Computer generated tax invoice. No signature required.', { x: 14, y: 108, size: 6, font: fontRegular, color: gray });
-  page.drawText('3. Jurisdiction: Surat, Gujarat.', { x: 14, y: 98, size: 6, font: fontRegular, color: gray });
-
-  // Signature Block
-  page.drawText('For VB EXPORTS (YOUTHNIC)', { x: 160, y: 75, size: 7, font: fontBold, color: black });
-  page.drawText('Authorised Signatory', { x: 175, y: 45, size: 6.5, font: fontRegular, color: gray });
-
-  // Return address bar
-  page.drawLine({ start: { x: 8, y: 32 }, end: { x: 280, y: 32 }, thickness: 0.8, color: black });
-  page.drawText('Return To: 7004, HTC Market-1, Anjana Farm, Surat - 395002', { x: 14, y: 18, size: 6.5, font: fontBold, color: black });
+  // 5. Footer
+  text('This is a computer-generated invoice; no signature is required.', M, 20, 5, reg, muted);
+  text('Unless otherwise stated, tax on this invoice is not payable under reverse charge', M, 13, 5, reg, muted);
 
   const bytes = await pdfDoc.save();
   return Buffer.from(bytes);

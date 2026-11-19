@@ -660,7 +660,7 @@ export class ShippingLabelService {
           height: 100% !important;
           max-height: 100% !important;
           box-sizing: border-box !important;
-          border: 1.5px solid #000 !important;
+          border: none !important;
           overflow: hidden !important;
         }
         

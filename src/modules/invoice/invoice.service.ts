@@ -1,11 +1,52 @@
 import { Order, OrderItem } from '@prisma/client';
 import { config } from '../../config';
-import { isVelocityCourier, normalizeCourierName } from '../../utils/courier';
+import { YOUTHNIC_LOGO_BASE64 } from '../delhivery/label-logos';
 
 export interface OrderWithDetails extends Order {
   items: OrderItem[];
   shipment?: any;
 }
+
+export interface InvoiceLine {
+  title: string;
+  sku: string;
+  hsn: string;
+  qty: number;
+  amount: number; // qty x unit price, before discount
+  discount: number;
+  gst: number; // GST included in net
+  net: number;
+}
+
+export interface InvoiceData {
+  invoiceNumber: string;
+  invoiceDate: string;
+  orderDate: string;
+  orderName: string;
+  store: string;
+  paymentStatus: string;
+  isCod: boolean;
+  shipTo: { name: string; address: string; city: string; state: string; pincode: string };
+  from: { name: string; address: string; gstin: string };
+  gstRate: number;
+  lines: InvoiceLine[];
+  shipping: number;
+  otherCharges: number;
+  total: number;
+  received: number;
+  due: number;
+  words: string;
+}
+
+// Apparel GST rate and HSN used across invoices (prices are GST-inclusive)
+export const INVOICE_GST_RATE = 5;
+export const INVOICE_HSN = '6204';
+// Rows that fit on a 4x6" page; the rest are summarised in one line
+export const INVOICE_MAX_ROWS = 4;
+
+const round2 = (n: number): number => Math.round(n * 100) / 100;
+const esc = (v: unknown): string =>
+  String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
 
 export class InvoiceService {
   /**
@@ -105,149 +146,173 @@ export class InvoiceService {
   }
 
   /**
-   * Generates single GST Tax Invoice HTML for an order formatted strictly for 4x6" (100mm x 150mm) thermal label printers.
+   * Shared invoice numbers for the HTML and PDF invoices.
+   * Order-level discounts aren't stored per item, so they're spread by line value and the lines add up to the order total.
+   */
+  public buildInvoiceData(order: OrderWithDetails): InvoiceData {
+    const fmtDate = (d: Date | string | null | undefined) =>
+      new Date(d || Date.now()).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
+
+    const items = order.items || [];
+    const gross = items.map((i) => round2((i.price || 0) * (i.quantity || 1)));
+    const grossTotal = round2(gross.reduce((a, b) => a + b, 0));
+    const shipping = round2(order.totalShipping || 0);
+    const total = round2(order.totalAmount || 0);
+    const discountTotal = Math.max(0, round2(grossTotal + shipping - total));
+
+    let allocated = 0;
+    const lines: InvoiceLine[] = items.map((item, idx) => {
+      const share = grossTotal > 0
+        ? idx === items.length - 1
+          ? round2(discountTotal - allocated)
+          : round2((discountTotal * gross[idx]) / grossTotal)
+        : 0;
+      const discount = Math.min(Math.max(share, 0), gross[idx]);
+      allocated = round2(allocated + discount);
+      const net = round2(gross[idx] - discount);
+      return {
+        title: item.variantTitle && !item.title.includes(item.variantTitle) ? `${item.title} - ${item.variantTitle}` : item.title,
+        sku: item.sku || '',
+        hsn: INVOICE_HSN,
+        qty: item.quantity || 1,
+        amount: gross[idx],
+        discount,
+        gst: round2(net - net / (1 + INVOICE_GST_RATE / 100)),
+        net,
+      };
+    });
+
+    const linesNet = round2(lines.reduce((a, l) => a + l.net, 0));
+    const otherCharges = Math.max(0, round2(total - shipping - linesNet));
+    const isCod = order.paymentMethod === 'COD' || order.shipment?.paymentMode === 'COD';
+    const fs = String(order.financialStatus || '').toLowerCase();
+    // Refunds are issued separately, so a refunded sale still counts as received on its invoice.
+    // No status recorded (older rows): keep the old prepaid = paid assumption.
+    const isPaid = ['paid', 'refunded', 'partially_refunded'].includes(fs) || (!fs && !isCod);
+    const titleCase = (v: string) => v.split('_').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    const paymentStatus = isPaid ? (fs && fs !== 'paid' ? titleCase(fs) : 'Paid') : isCod ? 'Cash on Delivery' : titleCase(fs);
+    const brand = config.company?.brandName || 'YOUTHNIC';
+
+    return {
+      invoiceNumber: `INV-2026-${order.shopifyOrderNumber || order.id}`,
+      invoiceDate: fmtDate(order.shopifyCreatedAt),
+      orderDate: fmtDate(order.shopifyCreatedAt),
+      orderName: order.shopifyOrderName,
+      store: brand.charAt(0) + brand.slice(1).toLowerCase(),
+      paymentStatus,
+      isCod,
+      shipTo: {
+        name: order.customerName || '',
+        address: order.customerAddress || '',
+        city: order.customerCity || '',
+        state: order.customerState || '',
+        pincode: order.customerPincode || '',
+      },
+      from: {
+        name: config.company?.legalName || 'VB EXPORTS',
+        address: config.company?.address || '7004, HTC Market-1, Surat, Gujarat - 395002',
+        gstin: config.company?.gstin || config.delhivery?.seller?.gstin || '24AERPB8666E1ZB',
+      },
+      gstRate: INVOICE_GST_RATE,
+      lines,
+      shipping,
+      otherCharges,
+      total,
+      received: isPaid ? total : 0,
+      due: isPaid ? 0 : total,
+      words: this.numberToWords(total),
+    };
+  }
+
+  /**
+   * Single GST Tax Invoice HTML in the Velocity-style layout, sized for 4x6" (100mm x 150mm) thermal printers.
    */
   public generateInvoiceHtml(order: OrderWithDetails): string {
-    const invoiceNumber = `INV-2026-${order.shopifyOrderNumber || order.id}`;
-    const invoiceDate = new Date(order.shopifyCreatedAt || Date.now()).toLocaleDateString('en-IN', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-    });
-    const destStateCode = this.getStateCode(order.customerState);
-    const isIntraState = destStateCode === '24'; // Gujarat seller to Gujarat buyer
+    const d = this.buildInvoiceData(order);
+    const money = (n: number) => `₹${n.toFixed(2)}`;
+    const shown = d.lines.slice(0, INVOICE_MAX_ROWS);
+    const hidden = d.lines.length - shown.length;
 
-    const isCod = order.paymentMethod === 'COD' || order.shipment?.paymentMode === 'COD';
-    const totalAmount = order.totalAmount || 0;
-
-    // GST Calculation: Apparels under ₹1000 have 5% GST rate (2.5% CGST + 2.5% SGST or 5% IGST)
-    // Inclusive tax breakdown: Taxable = Total / 1.05
-    const taxableTotal = Math.round((totalAmount / 1.05) * 100) / 100;
-    const taxTotal = Math.round((totalAmount - taxableTotal) * 100) / 100;
-    const cgstAmount = isIntraState ? Math.round((taxTotal / 2) * 100) / 100 : 0;
-    const sgstAmount = isIntraState ? Math.round((taxTotal - cgstAmount) * 100) / 100 : 0;
-    const igstAmount = isIntraState ? 0 : taxTotal;
-
-    const amountInWords = this.numberToWords(totalAmount);
-
-    const waybill = order.shipment?.waybillNumber || '';
-    const courierName = order.shipment?.courier || (order as any).courierPartner;
-    const isVel = isVelocityCourier(courierName, order.shipment?.labelUrl, waybill);
-    const carrierLabel = isVel
-      ? 'Velocity'
-      : courierName
-      ? normalizeCourierName(courierName, order.shipment?.labelUrl, waybill)
-      : 'Delhivery';
-
-    const itemsHtml = (order.items || [])
-      .map((item, idx) => {
-        const itemGross = item.price * item.quantity;
-        const itemTaxable = Math.round((itemGross / 1.05) * 100) / 100;
-        const itemTax = Math.round((itemGross - itemTaxable) * 100) / 100;
-        const titleSnippet = item.title.length > 38 ? `${item.title.substring(0, 36)}…` : item.title;
-        return `
-        <tr>
-          <td style="text-align: center;">${idx + 1}</td>
-          <td>
-            <div class="thermal-item-title">${titleSnippet}</div>
-            <div class="thermal-item-meta">${item.variantTitle ? `Size: ${item.variantTitle} · ` : ''}SKU: ${item.sku || 'N/A'}</div>
-          </td>
-          <td style="text-align: center;">6204</td>
-          <td style="text-align: center;"><strong>${item.quantity}</strong></td>
-          <td style="text-align: right;">₹${(itemTaxable / item.quantity).toFixed(2)}</td>
-          <td style="text-align: center;">5%</td>
-          <td style="text-align: right; font-weight: 700;">₹${itemGross.toFixed(2)}</td>
-        </tr>`;
-      })
+    const rows = shown
+      .map((l, idx) => `
+          <tr class="inv-row">
+            <td class="c">${idx + 1}.</td>
+            <td>
+              <div class="inv-item inv-clamp2">${esc(l.title)}</div>
+              <div class="inv-sub">SKU: ${esc(l.sku)}</div>
+              <div class="inv-sub">HSN: ${esc(l.hsn)}</div>
+            </td>
+            <td class="c">${l.qty}</td>
+            <td class="r">${money(l.amount)}</td>
+            <td class="r">${l.discount.toFixed(2)}</td>
+            <td class="r">${l.gst.toFixed(2)} | ${d.gstRate}%</td>
+            <td class="r">${money(l.net)}</td>
+          </tr>`)
       .join('');
+
+    const sumRow = (label: string, value: number) =>
+      `<tr class="inv-sum"><td colspan="6" class="r">${label}</td><td class="r">${money(value)}</td></tr>`;
 
     return `
     <div class="invoice-wrapper">
       <div class="invoice-container">
-        <!-- 1. Compact Header -->
-        <div class="invoice-header">
-          <div class="header-left">
-            <div class="brand-title">YOUTHNIC</div>
-            <div class="legal-name">VB EXPORTS</div>
-            <div class="company-details">
-              7004, HTC Market-1, Ring Rd, Surat - 395002<br>
-              <strong>GSTIN:</strong> ${config.company?.gstin || config.delhivery?.seller?.gstin || "24AERPB8666E1ZB"} (State: 24)<br>
-              <strong>Support:</strong> +91 7984984563
-            </div>
+        <div class="inv-head">
+          <img class="inv-logo" src="${YOUTHNIC_LOGO_BASE64}" alt="Youthnic">
+          <div class="inv-title">Tax Invoice</div>
+        </div>
+
+        <div class="inv-meta">
+          <div><span>Invoice Date</span><b>${d.invoiceDate}</b></div>
+          <div><span>Order No.</span><b>${esc(d.orderName)}</b></div>
+          <div><span>Order Date</span><b>${d.orderDate}</b></div>
+          <div><span>Invoice No.</span><b>${d.invoiceNumber}</b></div>
+          <div><span>Payment Status</span><b>${d.paymentStatus}</b></div>
+          <div><span>Store</span><b>${esc(d.store)}</b></div>
+        </div>
+
+        <div class="inv-parties">
+          <div class="inv-card">
+            <div class="inv-card-label">Shipping Address</div>
+            <div class="inv-strong">${esc(d.shipTo.name)}</div>
+            <div class="inv-clamp3">${esc(d.shipTo.address)}</div>
+            <div>${esc(d.shipTo.city)},</div>
+            <div>${esc(d.shipTo.state)} ${esc(d.shipTo.pincode)}</div>
           </div>
-          <div class="header-right">
-            <div class="tax-invoice-badge">TAX INVOICE</div>
-            <div class="invoice-meta-table">
-              <div class="meta-row"><span class="meta-label">Inv No:</span> <strong>${invoiceNumber}</strong></div>
-              <div class="meta-row"><span class="meta-label">Date:</span> ${invoiceDate}</div>
-              <div class="meta-row"><span class="meta-label">Order:</span> <strong>${order.shopifyOrderName}</strong></div>
-              <div class="meta-row"><span class="meta-label">${carrierLabel} AWB:</span> <strong>${waybill || 'Pending AWB'}</strong></div>
-            </div>
+          <div class="inv-card">
+            <div class="inv-card-label">From</div>
+            <div>${esc(d.from.name)}</div>
+            <div class="inv-clamp3">${esc(d.from.address)}</div>
+            <div><b>GSTIN:</b> ${esc(d.from.gstin)}</div>
           </div>
         </div>
 
-        <!-- 2. Customer & Place of Supply Block -->
-        <div class="customer-section">
-          <div class="customer-box">
-            <div class="box-title">SOLD & SHIPPED TO:</div>
-            <div class="customer-name">${order.customerName} <span class="customer-phone">· 📞 ${order.customerPhone}</span></div>
-            <div class="customer-address">${order.customerAddress}, ${order.customerCity}, ${order.customerState} - ${order.customerPincode}</div>
-            <div class="customer-footer-row">
-              <span class="supply-state">Place of Supply: <strong>${order.customerState} (${destStateCode})</strong></span>
-              <span class="payment-badge-inline ${isCod ? 'cod-mode' : 'prepaid-mode'}">
-                ${isCod ? `CASH ON DELIVERY: COLLECT ₹${totalAmount.toFixed(2)}` : 'PREPAID (ONLINE) — DO NOT COLLECT'}
-              </span>
-            </div>
-          </div>
-        </div>
+        <table class="inv-table">
+          <thead>
+            <tr>
+              <th class="c" style="width:8%">S No.</th>
+              <th>Product Name</th>
+              <th class="c" style="width:6%">Qty</th>
+              <th class="r" style="width:13%">Amount</th>
+              <th class="r" style="width:11%">Discount</th>
+              <th class="r" style="width:13%">GST</th>
+              <th class="r" style="width:13%">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows}
+            ${hidden > 0 ? `<tr class="inv-sum"><td colspan="7">+ ${hidden} more item${hidden > 1 ? 's' : ''} (included in the total)</td></tr>` : ''}
+            ${d.shipping > 0 ? sumRow('Shipping', d.shipping) : ''}
+            ${d.otherCharges > 0 ? sumRow('Other Charges', d.otherCharges) : ''}
+            ${sumRow('Total', d.total)}
+            ${sumRow('Payment Received', d.received)}
+            ${sumRow('Total Payment Due', d.due)}
+            <tr class="inv-words"><td colspan="7"><span>Amount Chargeable (in words)</span><div>INR ${d.words}</div></td></tr>
+          </tbody>
+        </table>
 
-        <!-- 3. Items Table -->
-        <div class="table-items-wrapper">
-          <table class="table-items">
-            <thead>
-              <tr>
-                <th style="width: 14px; text-align: center;">#</th>
-                <th>Item Description / SKU</th>
-                <th style="width: 28px; text-align: center;">HSN</th>
-                <th style="width: 18px; text-align: center;">Qty</th>
-                <th style="width: 42px; text-align: right;">Rate</th>
-                <th style="width: 24px; text-align: center;">GST</th>
-                <th style="width: 48px; text-align: right;">Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${itemsHtml}
-            </tbody>
-          </table>
-        </div>
-
-        <!-- 4. Summary & Tax Breakdown -->
-        <div class="summary-section">
-          <div class="summary-left">
-            <div class="tax-breakdown-row">
-              <strong>Taxable:</strong> ₹${taxableTotal.toFixed(2)} &nbsp;|&nbsp;
-              ${isIntraState ? `<strong>CGST+SGST (5%):</strong> ₹${taxTotal.toFixed(2)}` : `<strong>IGST (5%):</strong> ₹${igstAmount.toFixed(2)}`}
-            </div>
-            <div class="words-text"><strong>In Words:</strong> ${amountInWords}</div>
-          </div>
-          <div class="summary-right">
-            <div class="grand-total-row">
-              <span class="grand-label">INVOICE TOTAL:</span>
-              <span class="grand-value">₹${totalAmount.toFixed(2)}</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- 5. Footer & Signatory -->
-        <div class="invoice-footer">
-          <div class="terms-text">
-            Goods covered under Youthnic 7-day hassle-free return/exchange policy.<br>
-            Disputes subject to Surat, Gujarat jurisdiction. Computer generated invoice.
-          </div>
-          <div class="signatory-box">
-            <div class="sign-for">For <strong>VB EXPORTS (YOUTHNIC)</strong></div>
-            <div class="auth-stamp">AUTHORISED SIGNATORY</div>
-          </div>
+        <div class="inv-foot">
+          This is a computer-generated invoice; no signature is required.<br>
+          Unless otherwise stated, tax on this invoice is not payable under reverse charge
         </div>
       </div>
     </div>`;
@@ -369,190 +434,48 @@ export class InvoiceService {
         width: 100%;
         height: 100%;
         max-height: 100%;
-        border: 2px solid #000;
         display: flex;
         flex-direction: column;
-        justify-content: space-between;
-        padding: 2.5mm 3.5mm;
+        padding: 4mm 4mm 3mm;
         box-sizing: border-box;
         overflow: hidden;
       }
 
-      /* 1. Header */
-      .invoice-header {
-        display: flex;
-        justify-content: space-between;
-        border-bottom: 1.5px solid #000;
-        padding-bottom: 4px;
-      }
-      .header-left {
-        flex: 1.2;
-      }
-      .brand-title {
-        font-size: 14px;
-        font-weight: 900;
-        letter-spacing: 1px;
-        color: #000;
-        line-height: 1.1;
-      }
-      .legal-name {
-        font-size: 9px;
-        font-weight: 800;
-        color: #333;
-        letter-spacing: 0.5px;
-      }
-      .company-details {
-        font-size: 7.5px;
-        color: #222;
-        line-height: 1.25;
-        margin-top: 2px;
-      }
+      .invoice-container * { color: #2b3561; }
+      .inv-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2.5mm; }
+      .inv-logo { height: 8mm; width: auto; display: block; }
+      .inv-title { font-size: 15px; font-weight: 700; color: #2e3a66; }
 
-      .header-right {
-        flex: 1.1;
-        text-align: right;
-      }
-      .tax-invoice-badge {
-        font-size: 11px;
-        font-weight: 900;
-        letter-spacing: 1px;
-        color: #000;
-        border: 1px solid #000;
-        display: inline-block;
-        padding: 1px 6px;
-        margin-bottom: 3px;
-      }
-      .invoice-meta-table {
-        font-size: 8px;
-        line-height: 1.25;
-      }
-      .meta-row {
-        margin-bottom: 1px;
-      }
-      .meta-label { color: #444; }
+      .inv-meta { display: grid; grid-template-columns: repeat(3, 1fr); row-gap: 1.5mm; margin-bottom: 2.5mm; }
+      .inv-meta > div { padding: 0 2mm; border-left: 0.5px solid #dfe3ec; line-height: 1.25; }
+      .inv-meta > div:nth-child(3n+1) { border-left: none; padding-left: 0; }
+      .inv-meta span { display: block; font-size: 6.5px; color: #6b7280; }
+      .inv-meta b { display: block; font-size: 8px; font-weight: 500; }
 
-      /* 2. Customer Section */
-      .customer-section {
-        margin: 3px 0;
-      }
-      .customer-box {
-        border: 1px solid #000;
-        padding: 3px 5px;
-        font-size: 8px;
-        line-height: 1.25;
-      }
-      .box-title {
-        font-size: 7.5px;
-        font-weight: 800;
-        color: #444;
-        letter-spacing: 0.5px;
-      }
-      .customer-name { font-size: 9.5px; font-weight: 800; color: #000; }
-      .customer-phone { font-weight: 700; color: #111; }
-      .customer-address { margin-top: 1px; color: #111; }
-      .customer-footer-row {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-top: 2px;
-        padding-top: 2px;
-        border-top: 0.5px dashed #666;
-      }
-      .supply-state { font-size: 7.5px; }
-      .payment-badge-inline {
-        font-size: 8px;
-        font-weight: 900;
-        padding: 1px 5px;
-        border-radius: 3px;
-        letter-spacing: 0.2px;
-      }
-      .prepaid-mode { background: #dcfce7; color: #15803d; border: 1px solid #86efac; }
-      .cod-mode { background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; }
+      .inv-parties { display: flex; gap: 2mm; margin-bottom: 2.5mm; }
+      .inv-card { flex: 1; background: #f6f7fb; border-radius: 2mm; padding: 1.8mm 2.2mm; font-size: 7px; line-height: 1.3; overflow-wrap: anywhere; }
+      .inv-card-label { font-size: 7px; color: #6b7280; }
+      .inv-strong { font-weight: 700; }
 
-      /* 3. Items Table */
-      .table-items-wrapper {
-        flex: 1;
-        overflow: hidden;
-        margin: 2px 0;
-      }
-      .table-items {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 8px;
-        line-height: 1.15;
-      }
-      .table-items th {
-        background: #000;
-        color: #fff;
-        padding: 2.5px 3px;
-        font-weight: 700;
-        text-align: left;
-        font-size: 7.5px;
-      }
-      .table-items td {
-        padding: 2.5px 3px;
-        border-bottom: 0.5px solid #ccc;
-        vertical-align: top;
-      }
-      .thermal-item-title { font-weight: 700; color: #000; }
-      .thermal-item-meta { font-size: 7px; color: #555; }
+      .inv-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 6.5px; line-height: 1.3; table-layout: fixed; }
+      .inv-table th { background: #3a3e6b; color: #fff; font-weight: 500; padding: 1.2mm 1mm; text-align: left; }
+      .inv-table th:first-child { border-top-left-radius: 1.5mm; }
+      .inv-table th:last-child { border-top-right-radius: 1.5mm; }
+      .inv-table td { padding: 1.2mm 1mm; vertical-align: top; border-bottom: 0.5px solid #e3e6ee; overflow-wrap: anywhere; }
+      .inv-table td:first-child { border-left: 0.5px solid #e3e6ee; }
+      .inv-table td:last-child { border-right: 0.5px solid #e3e6ee; }
+      .inv-table .c { text-align: center; }
+      .inv-table .r { text-align: right; }
+      .inv-item { font-size: 6.8px; }
+      /* Capped so 4 rows + totals always fit on the fixed 4x6" page */
+      .inv-clamp2, .inv-clamp3 { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
+      .inv-clamp2 { -webkit-line-clamp: 2; }
+      .inv-clamp3 { -webkit-line-clamp: 3; }
+      .inv-sub { font-size: 5.5px; color: #6b7280; }
+      .inv-words td { font-size: 6.5px; }
+      .inv-words span { color: #6b7280; }
 
-      /* 4. Summary Section */
-      .summary-section {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        border-top: 1.5px solid #000;
-        border-bottom: 1.5px solid #000;
-        padding: 3px 0;
-        margin: 2px 0;
-      }
-      .summary-left {
-        flex: 1.4;
-        font-size: 7.5px;
-        line-height: 1.25;
-      }
-      .tax-breakdown-row { color: #111; }
-      .words-text { font-size: 7px; color: #333; margin-top: 1px; }
-      .summary-right {
-        flex: 1;
-        text-align: right;
-      }
-      .grand-total-row {
-        display: flex;
-        justify-content: flex-end;
-        align-items: baseline;
-        gap: 4px;
-      }
-      .grand-label { font-size: 8.5px; font-weight: 800; color: #000; }
-      .grand-value { font-size: 13px; font-weight: 900; color: #000; }
-
-      /* 5. Footer & Signatory */
-      .invoice-footer {
-        display: flex;
-        justify-content: space-between;
-        align-items: flex-end;
-        padding-top: 2px;
-      }
-      .terms-text {
-        font-size: 6.5px;
-        color: #444;
-        line-height: 1.2;
-        max-width: 62%;
-      }
-      .signatory-box {
-        text-align: right;
-      }
-      .sign-for { font-size: 7.5px; color: #222; }
-      .auth-stamp {
-        display: inline-block;
-        border-top: 0.5px dashed #000;
-        padding-top: 1px;
-        margin-top: 12px;
-        font-size: 7px;
-        font-weight: 800;
-        color: #000;
-      }
+      .inv-foot { margin-top: auto; font-size: 5.5px; color: #6b7280; line-height: 1.35; padding-top: 2mm; }
 
       .page-break {
         page-break-after: always;
@@ -577,7 +500,7 @@ export class InvoiceService {
           overflow: hidden !important;
         }
         .invoice-container {
-          border: 1.5px solid #000 !important;
+          border: none !important;
           box-shadow: none !important;
           margin: 0 !important;
           width: 100% !important;

@@ -60,7 +60,9 @@ import { getProviderReconciliation, validateProviderInvoice } from '../modules/a
 const router = Router();
 
 function parsePositiveInt(val: any): number | null {
-  const n = parseInt(val, 10);
+  // Whole string must be digits: parseInt('12junk') would otherwise act on record 12.
+  if (!/^\d+$/.test(String(val ?? '').trim())) return null;
+  const n = Number(String(val).trim());
   return Number.isSafeInteger(n) && n > 0 ? n : null;
 }
 

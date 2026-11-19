@@ -126,6 +126,9 @@ export const DEFAULT_LEDGER_ACCOUNTS: Array<{
   // Liabilities
   { code: 'SUNDRY_CREDITORS_DELHIVERY', name: 'Delhivery Limited (Vendor Payable)', type: AccountType.LIABILITY, subType: 'CREDITORS' },
   { code: 'SUNDRY_CREDITORS_VELOCITY', name: 'Velocity Technologies (Vendor Payable)', type: AccountType.LIABILITY, subType: 'CREDITORS' },
+  // Gateway suppliers whose monthly bills the Tally Excel books (provider-invoice.service PROVIDERS).
+  { code: 'SUNDRY_CREDITORS_EASEBUZZ', name: 'Easebuzz Pvt Ltd', type: AccountType.LIABILITY, subType: 'CREDITORS' },
+  { code: 'SUNDRY_CREDITORS_PHONEPE', name: 'PhonePe Pvt Ltd', type: AccountType.LIABILITY, subType: 'CREDITORS' },
   { code: 'CUSTOMER_REFUND_PAYABLE', name: 'Customer Refund Payable Account', type: AccountType.LIABILITY, subType: 'REFUND_PAYABLE' },
   { code: 'OUTPUT_CGST', name: 'Output CGST (Central Goods & Services Tax)', type: AccountType.LIABILITY, subType: 'OUTPUT_TAX' },
   { code: 'OUTPUT_SGST', name: 'Output SGST (State Goods & Services Tax)', type: AccountType.LIABILITY, subType: 'OUTPUT_TAX' },

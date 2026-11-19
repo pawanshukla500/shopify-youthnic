@@ -30,6 +30,9 @@ import {
 } from '../src/modules/accounts/provider-invoice.service';
 import { buildGstRegister, registerChannel, renderGstRegisterWorkbook } from '../src/modules/accounts/gst-register.service';
 import { attachExchangeForwardFreight, buildReportData, buildStateAccountingSummary } from '../src/modules/accounts/accounts-report.service';
+import { PROVIDERS } from '../src/modules/accounts/provider-invoice.service';
+import { TALLY_STANDARD_LEDGER_MASTERS } from '../src/modules/accounts/tally-integration.service';
+import { gstService } from '../src/modules/accounts/gst.service';
 
 const easebuzzOct = {
   id: 1,
@@ -68,6 +71,15 @@ describe('provider bill reconciliation', () => {
     // Cr bill − Dr consumption = 0 on the provider ledger
     expect(purchase.totalAmount - journal.totalAmount).toBe(0);
     expect(providerTallyRows(reconcileProvider('PHONEPE', '2026-10', [], books(0, 0)), new Date())).toEqual([]);
+  });
+
+  it('exports every provider ledger the bill vouchers use as a Tally master', () => {
+    const masters = new Set(TALLY_STANDARD_LEDGER_MASTERS.map((m) => m.name));
+    for (const p of Object.values(PROVIDERS)) {
+      expect(masters.has(p.partyLedger), p.partyLedger).toBe(true);
+      expect(masters.has(p.expenseLedger), p.expenseLedger).toBe(true);
+      expect(masters.has(p.consumedFromLedger), p.consumedFromLedger).toBe(true);
+    }
   });
 
   it('validates a typed-in bill', () => {
@@ -129,6 +141,14 @@ function regOrder(overrides: Record<string, any> = {}) {
 }
 
 describe('sales & returns register (Tally Shopify format)', () => {
+  it('adds CGST + SGST lines into one rate but sends mixed-rate orders to GST review', () => {
+    expect(gstService.determineOrderGstRate({ totalAmount: 1050, taxLines: [{ rate: 0.025, title: 'CGST' }, { rate: 0.025, title: 'SGST' }] })).toBe(5);
+    expect(() => gstService.determineOrderGstRate({ totalAmount: 3000, taxLines: [{ rate: 0.05, title: 'IGST' }, { rate: 0.18, title: 'IGST' }] })).toThrow(/Mixed GST/);
+    const reg = buildGstRegister('2026-10', [regOrder({ taxLines: [{ rate: 0.05, title: 'IGST' }, { rate: 0.18, title: 'IGST' }] })], []);
+    expect(reg.sales['Delivery-COD']).toHaveLength(0);
+    expect(reg.review[0].reason).toMatch(/Mixed GST/);
+  });
+
   it('picks the channel from courier for COD and gateway for prepaid', () => {
     expect(registerChannel(regOrder())).toBe('Delivery-COD');
     expect(registerChannel(regOrder({ shipment: { courier: 'Velocity', waybillNumber: 'V1' } }))).toBe('Velocity-COD');
@@ -183,10 +203,10 @@ describe('exchange freight', () => {
   const replacement = regOrder({ shopifyOrderName: '26YOU9-EX-FWD', shopifyOrderId: 'EX-FWD-9', paymentMethod: 'EXCHANGE', totalAmount: 0, shipment: { courier: 'Velocity', waybillNumber: 'V10', forwardCharge: 90 } });
 
   it('charges the reverse pickup and the replacement leg to the parent order', async () => {
-    prismaStub.shipment.findMany.mockResolvedValueOnce([{ waybillNumber: 'V10', forwardCharge: 90, rtoCharge: null, order: { shopifyOrderName: '26YOU9-EX-FWD' } }] as any);
+    prismaStub.shipment.findMany.mockResolvedValueOnce([{ waybillNumber: 'V10', forwardCharge: 90, rtoCharge: null, shippingCostSource: 'ESTIMATE', rtoChargeSource: null, order: { shopifyOrderName: '26YOU9-EX-FWD' } }] as any);
     const ret = parent.returns[0] as any;
     await attachExchangeForwardFreight([ret]);
-    expect(ret).toMatchObject({ exchangeForwardCharge: 90, exchangeOrderName: '26YOU9-EX-FWD' });
+    expect(ret).toMatchObject({ exchangeForwardCharge: 90, exchangeOrderName: '26YOU9-EX-FWD', exchangeForwardCostSource: 'ESTIMATE' });
 
     const data = buildReportData('2026-10', [parent, replacement], [{ ...ret, order: parent }], new Date('2026-11-10'));
     expect(data.orders.map((o) => o.orderNo)).toEqual(['#26YOU9']); // replacement is not a separate sale
@@ -196,6 +216,12 @@ describe('exchange freight', () => {
 
     const { totals } = buildStateAccountingSummary([parent, replacement], [{ ...ret, order: parent }]);
     expect(totals.exchangeFreightExpenses).toBe(170);
+    expect(totals.actualFreightExpenses).toBe(0); // both legs are estimates, not billed cost
+    expect(totals.estimatedFreightNotBilled).toBe(170);
     expect(totals.totalOrders).toBe(1);
+
+    const billed = { ...ret, order: parent, shippingCostSource: 'ACTUAL', exchangeForwardCostSource: 'ESTIMATE' };
+    const split = buildStateAccountingSummary([parent], [billed]).totals;
+    expect(split).toMatchObject({ actualFreightExpenses: 80, estimatedFreightNotBilled: 90, exchangeFreightExpenses: 170 });
   });
 });

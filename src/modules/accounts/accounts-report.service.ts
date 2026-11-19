@@ -177,14 +177,21 @@ export async function attachExchangeForwardFreight(returns: any[]): Promise<void
   if (!exchanges.length || typeof prisma.shipment?.findMany !== 'function') return;
   const shipments = await prisma.shipment.findMany({
     where: { waybillNumber: { in: [...new Set(exchanges.map((r) => r.exchangeForwardAwb as string))] } },
-    select: { waybillNumber: true, forwardCharge: true, rtoCharge: true, order: { select: { shopifyOrderName: true } } },
+    select: {
+      waybillNumber: true, forwardCharge: true, rtoCharge: true, shippingCostSource: true, rtoChargeSource: true,
+      order: { select: { shopifyOrderName: true } },
+    },
   });
   const byAwb = new Map(shipments.map((s) => [s.waybillNumber, s]));
   for (const r of exchanges) {
     const s = byAwb.get(r.exchangeForwardAwb);
     if (!s) continue;
     r.exchangeOrderName = s.order?.shopifyOrderName || '';
-    if (s.forwardCharge !== null || s.rtoCharge !== null) r.exchangeForwardCharge = (s.forwardCharge || 0) + (s.rtoCharge || 0);
+    if (s.forwardCharge !== null || s.rtoCharge !== null) {
+      r.exchangeForwardCharge = (s.forwardCharge || 0) + (s.rtoCharge || 0);
+      const legs = [[s.forwardCharge, s.shippingCostSource], [s.rtoCharge, s.rtoChargeSource]].filter(([v]) => v !== null);
+      r.exchangeForwardCostSource = legs.every(([, src]) => src === 'ACTUAL') ? 'ACTUAL' : 'ESTIMATE';
+    }
   }
 }
 
@@ -605,9 +612,12 @@ export function buildStateAccountingSummary(
     const state = ret.order?.customerState || 'Unspecified';
     const row = getRow(state);
     if (ret.isExchange) {
-      const freight = exchangeFreight(ret);
-      row.exchangeFreightExpenses = (row.exchangeFreightExpenses || 0) + freight;
-      row.actualFreightExpenses = (row.actualFreightExpenses || 0) + freight;
+      row.exchangeFreightExpenses = (row.exchangeFreightExpenses || 0) + exchangeFreight(ret);
+      const billed =
+        (ret.shippingCostSource === 'ACTUAL' ? ret.shippingCharge || 0 : 0) +
+        (ret.exchangeForwardCostSource === 'ACTUAL' ? ret.exchangeForwardCharge || 0 : 0);
+      row.actualFreightExpenses = (row.actualFreightExpenses || 0) + billed;
+      row.estimatedFreightNotBilled = (row.estimatedFreightNotBilled || 0) + exchangeFreight(ret) - billed;
       continue;
     }
     const retAmt = (ret.refundAmount && ret.refundAmount > 0)
@@ -667,6 +677,7 @@ export function buildStateAccountingSummary(
     row.velocity = money(row.velocity) || 0;
     row.actualFreightExpenses = money(row.actualFreightExpenses || 0) || 0;
     row.exchangeFreightExpenses = money(row.exchangeFreightExpenses || 0) || 0;
+    row.estimatedFreightNotBilled = money(row.estimatedFreightNotBilled || 0) || 0;
 
     states.push(row);
   }

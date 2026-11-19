@@ -1,737 +1,443 @@
-import { useMemo, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
-import { getOrderTabCounts, getReturns } from '../api'
-import { Button, Icon, PageIntro, Panel, PanelHeading, useDocumentTitle, useToast } from '../components/UI'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { Link } from 'react-router-dom'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import type { BranchedStep, Definition, StepDefinition, StepsConfiguration, ToolboxConfiguration, ValidatorConfiguration } from 'sequential-workflow-designer'
+import {
+  SequentialWorkflowDesigner,
+  useSequentialWorkflowDesignerController,
+  useStepEditor,
+  wrapDefinition,
+  type WrappedDefinition,
+} from 'sequential-workflow-designer-react'
+import 'sequential-workflow-designer/css/designer.css'
+import 'sequential-workflow-designer/css/designer-light.css'
+import 'sequential-workflow-designer/css/designer-dark.css'
+import { apiError, getWorkflowDesign, lookupOrders, saveWorkflowDesign } from '../api'
+import { Button, ErrorBox, FormField, Icon, LoadingState, PageIntro, Panel, StatusBadge, useDocumentTitle, useToast } from '../components/UI'
+import { useTheme } from '../context/ThemeContext'
+import { formatMoney, labelize, normalizeCourierName } from '../lib'
+import {
+  activeReturn,
+  DEFAULT_WORKFLOW,
+  FACT_KEYS,
+  findStep,
+  invalidTokens,
+  orderFacts,
+  pickOrder,
+  resolveOrderPath,
+  type OrderPath,
+  type WorkflowDefinition,
+} from '../workflow-map'
 import './Workflows.css'
 
-type WorkflowStage = 'ALL' | 'DISPATCH' | 'TRACKING' | 'RETURNS' | 'QC_REFUND'
+// ─── Step types: four kinds of stage plus a decision ────────────────────────
 
-export function Workflows() {
-  useDocumentTitle('Workflow Trees · Architect View')
-  const toast = useToast()
-  const navigate = useNavigate()
-  const [activeStage, setActiveStage] = useState<WorkflowStage>('ALL')
-  const [showInvariants, setShowInvariants] = useState(true)
+const STEP_KINDS: Record<string, { label: string; color: string; path: string }> = {
+  order: { label: 'Order stage', color: '#2563eb', path: 'M6 2h9l4 4v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zM8 11h8M8 15h8M8 19h5' },
+  shipping: { label: 'Shipping stage', color: '#047857', path: 'M3 6h11v10H3zM14 9h4l3 3v4h-7M7 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM17 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4z' },
+  returns: { label: 'Return stage', color: '#b45309', path: 'M9 14 4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3' },
+  money: { label: 'Money stage', color: '#7c3aed', path: 'M12 2v20M17 6H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6' },
+  decision: { label: 'Decision', color: '#475569', path: 'M6 3v12M18 3a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM6 15a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM18 9a9 9 0 0 1-9 9' },
+}
 
-  // Fetch live counts for order queues and return states
-  const tabCountsQuery = useQuery({
-    queryKey: ['orders', 'tab-counts'],
-    queryFn: getOrderTabCounts,
-    staleTime: 15_000,
-    retry: false,
-  })
+const iconUrl = (type: string) => {
+  const kind = STEP_KINDS[type] ?? STEP_KINDS.order
+  return `data:image/svg+xml,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="${kind.color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${kind.path}"/></svg>`
+  )}`
+}
 
-  const returnsQuery = useQuery({
-    queryKey: ['returns', 'all'],
-    queryFn: () => getReturns(),
-    staleTime: 15_000,
-    retry: false,
-  })
+const toolbox: ToolboxConfiguration = {
+  groups: [
+    {
+      name: 'Steps',
+      steps: [
+        ...['order', 'shipping', 'returns', 'money'].map((type) => ({
+          componentType: 'task',
+          type,
+          name: STEP_KINDS[type].label,
+          properties: { states: '', note: '' },
+        })),
+        {
+          componentType: 'switch',
+          type: 'decision',
+          name: 'Decision',
+          properties: { conditions: { Yes: '', No: '' }, note: '' },
+          branches: { Yes: [], No: [] },
+        } as StepDefinition,
+      ],
+    },
+  ],
+}
 
-  const counts = tabCountsQuery.data ?? {}
-  const byStatus = counts.byStatus ?? {}
-  const returnsList = returnsQuery.data ?? []
+const stepsConfiguration: StepsConfiguration = { iconUrlProvider: (_componentType, type) => iconUrl(type) }
 
-  // Compute live return metrics
-  const returnMetrics = useMemo(() => {
-    const total = returnsList.length
-    const qcPassedUnrefunded = returnsList.filter((r) => {
-      if (r.isExchange) return false
-      const isSettled = r.order?.financialStatus === 'refunded' || r.order?.status === 'REFUNDED' || r.refundStatus === 'PROCESSED'
-      if (isSettled) return false
-      const qcPassed = r.qcStatus === 'APPROVED' || r.qcStatus === 'PARTIAL'
-      const received = Boolean(r.receivedAt || r.returnStatus === 'RECEIVED' || r.returnStatus === 'QC_PENDING' || r.trackingStatus === 'DTO')
-      return qcPassed || received
-    }).length
+// A typo in a token list can never match an order, so flag it on the canvas.
+const validator: ValidatorConfiguration = {
+  step: (step) =>
+    step.componentType === 'switch'
+      ? Object.values((step.properties.conditions as Record<string, string>) || {}).every((text) => invalidTokens(text).length === 0)
+      : invalidTokens(step.properties.states).length === 0,
+}
 
-    const pendingQc = returnsList.filter((r) => !r.qcStatus && r.returnStatus !== 'CANCELLED').length
-    const exchanges = returnsList.filter((r) => r.isExchange && r.returnStatus !== 'CANCELLED').length
-    const codDue = returnsList.filter((r) => {
-      const isCod = r.order?.paymentMethod === 'COD' || /cash/i.test(r.order?.paymentGateway || '')
-      const isSettled = r.order?.financialStatus === 'refunded' || r.order?.status === 'REFUNDED' || r.refundStatus === 'PROCESSED'
-      const qcPassed = r.qcStatus === 'APPROVED' || r.qcStatus === 'PARTIAL'
-      return isCod && qcPassed && !isSettled && !r.isExchange
-    }).length
-    const refunded = returnsList.filter((r) => r.refundStatus === 'PROCESSED' || r.order?.financialStatus === 'refunded').length
+const asWorkflow = (definition: WrappedDefinition) => definition.value as unknown as WorkflowDefinition
+const wrap = (workflow: WorkflowDefinition) => wrapDefinition(structuredClone(workflow) as unknown as Definition)
 
-    return { total, qcPassedUnrefunded, pendingQc, exchanges, codDue, refunded }
-  }, [returnsList])
+// ─── Editors (rendered by the designer in its own React root: no app context) ─
 
-  const copyMermaidDiagram = () => {
-    const mermaid = `flowchart TD
-    subgraph S1["1. ORDER INGESTION & DISPATCH"]
-        A1["Shopify Webhook: orders/create"] --> A2{"Payment Method"}
-        A2 -->|Prepaid| A3["Status: NEW / DISPATCH_PENDING"]
-        A2 -->|COD| A4{"GoKwik RTO Score"}
-        A4 -->|Confirmed| A3
-        A4 -->|High RTO / Cancel| A7["Status: COD_CANCELLED"]
-        A3 --> A8["Acquire dispatchLockedAt (2-min TTL)"]
-        A8 --> A9{"Courier Routing Engine"}
-        A9 -->|Velocity Primary| A10["Velocity API Forward Shipment"]
-        A9 -->|Delhivery Fallback| A11["Delhivery API Forward Shipment"]
-        A10 --> A12["Generate AWB & youthnic2024 Thermal Slip"]
-        A11 --> A12
-        A12 --> A13["Fulfill on Shopify + Customer WhatsApp"]
-        A13 --> A14["Status: DISPATCHED / Ready to Ship"]
-    end
-    subgraph S2["2. DELIVERY & LOGISTICS TRACKING"]
-        A14 --> B1["Courier Webhooks + 30-min Poller"]
-        B1 --> B2{"Terminal Event"}
-        B2 -->|Delivered| B3["Status: DELIVERED / codCollected: true"]
-        B2 -->|NDR / Exception| B4["NDR Action & Customer Re-attempt"]
-        B2 -->|RTO Initiated| B5["Status: RTO_INITIATED -> RTO_DELIVERED"]
-    end
-    subgraph S3["3. RETURNS & SIZE EXCHANGES"]
-        B3 --> C1{"Customer Request"}
-        C1 -->|Size Exchange| C2["Create Size Exchange (EX-FWD)"]
-        C1 -->|Standard Return| C3["Create Pro-Rated Return"]
-        C2 --> C4["Reverse Pickup + Replacement Forward"]
-        C3 --> C5["Reverse Pickup AWB Booked"]
-        C4 --> C6["Reverse In-Transit -> Warehouse Arrival"]
-        C5 --> C6
-    end
-    subgraph S4["4. QC VERIFICATION & REFUND SETTLEMENT"]
-        C6 --> D1["Warehouse Gun Scan (/api/returns/scan)"]
-        D1 --> D2{"Is Size Exchange?"}
-        D2 -->|Yes| D3["Mark RECEIVED & QC Passed / NO REFUND"]
-        D2 -->|No| D4{"Payment Method"}
-        D4 -->|Prepaid| D5["Shopify API Auto-Refund (idempotency: oms-return-id)"]
-        D5 --> D6["Status: REFUNDED"]
-        D4 -->|COD| D7["Flag: COD_MANUAL_REFUND_DUE"]
-        D7 --> D8["Operator Verifies UPI/Bank Screenshot Proof"]
-        D8 --> D9["Record in Account Trail (Cumulative Cap Verified)"]
-    end`
-    navigator.clipboard.writeText(mermaid)
-    toast.toast('success', 'Mermaid workflow architecture copied to clipboard!')
+function TokenHint() {
+  return <span className="field-hint">Comma separated, e.g. <code>order:IN_TRANSIT, shipment:IN_TRANSIT</code>. <code>key:*</code> = any value, <code>a&amp;b</code> = both.</span>
+}
+
+function TokenErrors({ text }: { text: unknown }) {
+  const bad = invalidTokens(text)
+  return bad.length ? <span className="wf-token-error" role="alert">Not a token: {bad.join(', ')}</span> : null
+}
+
+function BranchEditor() {
+  const { step, properties, setProperty, notifyChildrenChanged, isReadonly } = useStepEditor<BranchedStep>()
+  const conditions: Record<string, string> = (properties.conditions as Record<string, string>) || {}
+  const names = Object.keys(step.branches)
+
+  // Rebuild in place so branch order (left to right on the canvas) is kept.
+  const setBranches = (entries: Array<[string, BranchedStep['branches'][string]]>, nextConditions: Record<string, string>) => {
+    for (const key of Object.keys(step.branches)) delete step.branches[key]
+    for (const [key, value] of entries) step.branches[key] = value
+    setProperty('conditions', nextConditions)
+    notifyChildrenChanged()
+  }
+
+  const rename = (from: string, raw: string) => {
+    const to = raw.trim()
+    if (!to || to === from || names.includes(to)) return
+    setBranches(
+      Object.entries(step.branches).map(([key, value]) => [key === from ? to : key, value]),
+      Object.fromEntries(names.map((key) => [key === from ? to : key, conditions[key] ?? '']))
+    )
+  }
+
+  const add = () => {
+    let n = names.length + 1
+    while (names.includes(`Branch ${n}`)) n += 1
+    setBranches([...Object.entries(step.branches), [`Branch ${n}`, []]], { ...conditions, [`Branch ${n}`]: '' })
+  }
+
+  const remove = (name: string) => {
+    if (names.length <= 1) return
+    const { [name]: _removed, ...rest } = conditions
+    setBranches(Object.entries(step.branches).filter(([key]) => key !== name), rest)
   }
 
   return (
-    <div className="workflows-page">
+    <div className="wf-branches">
+      <span className="field-label">Branches · condition</span>
+      {names.map((name) => (
+        <div className="wf-branch" key={name}>
+          <div className="wf-branch-head">
+            <input
+              aria-label="Branch name"
+              defaultValue={name}
+              readOnly={isReadonly}
+              onBlur={(e) => rename(name, e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+            />
+            <button type="button" className="wf-icon-button" aria-label={`Remove branch ${name}`} disabled={isReadonly || names.length <= 1} onClick={() => remove(name)}>
+              <Icon name="close" size={13} />
+            </button>
+          </div>
+          <textarea
+            aria-label={`Condition for ${name}`}
+            rows={2}
+            value={conditions[name] ?? ''}
+            readOnly={isReadonly}
+            placeholder="empty = default branch"
+            onChange={(e) => setProperty('conditions', { ...conditions, [name]: e.target.value })}
+          />
+          <TokenErrors text={conditions[name]} />
+        </div>
+      ))}
+      <button type="button" className="button button-secondary button-small" disabled={isReadonly} onClick={add}>
+        <Icon name="plus" size={13} /> Add branch
+      </button>
+      <span className="field-hint">An order takes the first branch whose condition matches; otherwise the branch holding its stage; otherwise the empty (default) one.</span>
+      <TokenHint />
+    </div>
+  )
+}
+
+function StepEditor() {
+  const { componentType, type, name, setName, properties, setProperty, isReadonly } = useStepEditor()
+  return (
+    <div className="wf-editor">
+      <p className="eyebrow">{STEP_KINDS[type]?.label ?? 'Step'}</p>
+      <FormField label="Name">
+        <input value={name} readOnly={isReadonly} onChange={(e) => setName(e.target.value)} />
+      </FormField>
+      {componentType === 'switch' ? (
+        <BranchEditor />
+      ) : (
+        <FormField label="Order states shown here">
+          <textarea rows={4} value={(properties.states as string) ?? ''} readOnly={isReadonly} onChange={(e) => setProperty('states', e.target.value)} />
+          <TokenErrors text={properties.states} />
+          <TokenHint />
+        </FormField>
+      )}
+      <FormField label="Notes">
+        <textarea rows={3} value={(properties.note as string) ?? ''} readOnly={isReadonly} onChange={(e) => setProperty('note', e.target.value)} />
+      </FormField>
+    </div>
+  )
+}
+
+function RootEditor() {
+  return (
+    <div className="wf-editor">
+      <p className="eyebrow">How mapping works</p>
+      <p className="wf-editor-text">Select a step to edit it. Each stage lists the order states it stands for; each decision has a condition per branch. Look up an order to see where it sits.</p>
+      <dl className="wf-token-list">
+        {FACT_KEYS.map(({ key, values }) => (
+          <div key={key}>
+            <dt><code>{key}:</code></dt>
+            <dd>{values}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  )
+}
+
+// ─── Highlight: CSS keyed on the designer's data-step-id attributes ──────────
+
+function highlightCss(path: OrderPath | null): string {
+  if (!path) return ''
+  const id = (stepId: string) => `[data-step-id="${CSS.escape(stepId)}"]`
+  const lit = [...path.passedIds, ...(path.currentId ? [path.currentId] : [])]
+  const rules = ['.wf-canvas.is-tracing .sqd-step-task, .wf-canvas.is-tracing .sqd-step-switch > .sqd-label { opacity: .3; }']
+  if (lit.length) {
+    rules.push(`${lit.map((s) => `.wf-canvas.is-tracing .sqd-step-task${id(s)}, .wf-canvas.is-tracing .sqd-step-switch${id(s)} > .sqd-label`).join(', ')} { opacity: 1; }`)
+  }
+  if (path.passedIds.length) {
+    rules.push(`${path.passedIds.map((s) => `.wf-canvas .sqd-step-task${id(s)} > .sqd-step-task-rect`).join(', ')} { stroke: var(--blue); stroke-width: 2; }`)
+    rules.push(`${path.passedIds.map((s) => `.wf-canvas .sqd-step-switch${id(s)} > .sqd-label-primary > .sqd-label-rect`).join(', ')} { fill: var(--blue); }`)
+  }
+  if (path.currentId) {
+    // Opaque fill: the designer draws step text black in both of its themes.
+    rules.push(`.wf-canvas .sqd-step-task${id(path.currentId)} > .sqd-step-task-rect { stroke: #10b981; stroke-width: 3.5; fill: #d1fae5; }`)
+  }
+  return rules.join('\n')
+}
+
+// ─── Page ────────────────────────────────────────────────────────────────────
+
+export function Workflows() {
+  useDocumentTitle('Workflow Designer')
+  const designQuery = useQuery({ queryKey: ['workflow-design'], queryFn: getWorkflowDesign, staleTime: Infinity, retry: 1 })
+
+  if (designQuery.isLoading) return <LoadingState label="Loading workflow…" />
+  // Never fall back to the default here: saving it would overwrite the stored design.
+  if (designQuery.isError) return <ErrorBox message={apiError(designQuery.error)} onRetry={() => designQuery.refetch()} />
+  return <WorkflowDesigner saved={designQuery.data?.definition ?? null} savedAt={designQuery.data?.updatedAt ?? null} />
+}
+
+function WorkflowDesigner({ saved, savedAt }: { saved: WorkflowDefinition | null; savedAt: string | null }) {
+  const { toast } = useToast()
+  const { theme } = useTheme()
+  const queryClient = useQueryClient()
+  const controller = useSequentialWorkflowDesignerController()
+  const [definition, setDefinition] = useState(() => wrap(saved ?? DEFAULT_WORKFLOW))
+  const [dirty, setDirty] = useState(false)
+  const [lookup, setLookup] = useState('')
+  const [query, setQuery] = useState('')
+  const [chosenId, setChosenId] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (!dirty) return
+    const warn = (event: BeforeUnloadEvent) => event.preventDefault()
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [dirty])
+
+  const ordersQuery = useQuery({
+    queryKey: ['workflow-lookup', query],
+    queryFn: () => lookupOrders(query),
+    enabled: Boolean(query),
+    retry: false,
+  })
+  const matches = ordersQuery.data ?? []
+  const order = (chosenId ? matches.find((entry) => entry.id === chosenId) : null) ?? pickOrder(matches, query)
+  const facts = useMemo(() => (order ? orderFacts(order) : []), [order])
+  const path = useMemo(() => (order ? resolveOrderPath(asWorkflow(definition), facts) : null), [order, facts, definition])
+
+  // Centre the current step on lookup, and again when the designer remounts (theme switch).
+  const currentId = path?.currentId ?? null
+  const currentIdRef = useRef(currentId)
+  currentIdRef.current = currentId
+  const focusCurrent = () => {
+    if (currentIdRef.current && controller.isReady()) controller.moveViewportToStep(currentIdRef.current)
+  }
+  useEffect(focusCurrent, [currentId])
+
+  // Counts edits so a save that finishes after a newer edit leaves that edit unsaved.
+  const editCount = useRef(0)
+  const save = useMutation({
+    mutationFn: ({ snapshot }: { snapshot: WorkflowDefinition; edits: number }) => saveWorkflowDesign(snapshot),
+    onSuccess: (result, { snapshot, edits }) => {
+      if (editCount.current === edits) setDirty(false)
+      queryClient.setQueryData(['workflow-design'], { definition: snapshot, updatedAt: result.updatedAt })
+      toast('success', 'Workflow saved')
+    },
+    onError: (error) => toast('error', apiError(error)),
+  })
+
+  const replace = (workflow: WorkflowDefinition, isDirty: boolean) => {
+    editCount.current += 1
+    setDefinition(wrap(workflow))
+    setDirty(isDirty)
+  }
+
+  const onLookup = (event: FormEvent) => {
+    event.preventDefault()
+    setChosenId(null)
+    setQuery(lookup.trim())
+  }
+
+  const stepName = (id: string) => findStep(asWorkflow(definition).sequence, id)?.name ?? id
+  const shipment = order?.shipment
+  const ret = activeReturn(order?.returns)
+
+  return (
+    <div className="wf-page">
       <PageIntro
-        eyebrow="System Architecture & State Machine"
-        title="Workflow Trees · Architect View"
-        description="Comprehensive interactive visualization of end-to-end fulfillment, courier routing, reverse logistics, and verified financial settlement lifecycles."
-        action={
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            <Button
-              className="button-secondary"
-              onClick={() => {
-                tabCountsQuery.refetch()
-                returnsQuery.refetch()
-                toast.toast('success', 'Refreshing live workflow counts...')
-              }}
-            >
-              <Icon name="refresh" size={14} />
-              Refresh Queues
+        eyebrow="Order lifecycle"
+        title="Workflow Designer"
+        description="Design how orders move from checkout to settlement, then look up a real order to see where it sits."
+      >
+        <div className="wf-actions">
+          <span className="wf-save-state">{dirty ? 'Unsaved changes' : savedAt ? `Saved ${new Date(savedAt).toLocaleString()}` : 'Default design (not saved yet)'}</span>
+          {dirty && saved && (
+            <Button type="button" className="button-secondary" onClick={() => replace(saved, false)}>
+              Discard changes
             </Button>
-            <Button className="button-secondary" onClick={copyMermaidDiagram}>
-              <Icon name="copy" size={14} />
-              Export Diagram
-            </Button>
-          </div>
-        }
-      />
+          )}
+          <Button
+            type="button"
+            className="button-secondary"
+            onClick={() => window.confirm('Replace the canvas with the default Youthnic workflow? Nothing is saved until you press Save.') && replace(DEFAULT_WORKFLOW, true)}
+          >
+            <Icon name="refresh" size={14} /> Reset to default
+          </Button>
+          <Button type="button" className="button-primary" loading={save.isPending} disabled={!dirty && Boolean(saved)} onClick={() => save.mutate({ snapshot: structuredClone(asWorkflow(definition)), edits: editCount.current })}>
+            <Icon name="check" size={14} /> Save workflow
+          </Button>
+        </div>
+      </PageIntro>
 
-      {/* Top Level Operational Ribbon */}
-      <div className="workflow-ribbon-grid">
-        <div className="wf-ribbon-card" onClick={() => navigate('/orders?tab=new')}>
-          <div className="wf-ribbon-header">
-            <span>New Orders</span>
-            <Icon name="box" size={15} />
-          </div>
-          <strong className="wf-ribbon-val">{counts.new ?? 0}</strong>
-          <span className="wf-ribbon-sub">Awaiting operator / auto-dispatch</span>
+      <div className="wf-layout">
+        <div className={`wf-canvas ${path ? 'is-tracing' : ''}`}>
+          <style>{highlightCss(path)}</style>
+          <SequentialWorkflowDesigner
+            // The wrapper ignores theme changes on a live designer, so remount.
+            key={theme}
+            definition={definition}
+            onDefinitionChange={(next, event) => {
+              setDefinition(next)
+              // No event = the designer finished rendering (onReady), not an edit.
+              if (event) {
+                editCount.current += 1
+                setDirty(true)
+              } else focusCurrent()
+            }}
+            theme={theme}
+            controller={controller}
+            stepsConfiguration={stepsConfiguration}
+            toolboxConfiguration={toolbox}
+            validatorConfiguration={validator}
+            controlBar
+            undoStackSize={20}
+            rootEditor={<RootEditor />}
+            stepEditor={<StepEditor />}
+          />
         </div>
 
-        <div className="wf-ribbon-card" onClick={() => navigate('/orders?tab=dispatch')}>
-          <div className="wf-ribbon-header" style={{ color: 'var(--tone-warning-fg)' }}>
-            <span>Dispatch Pending</span>
-            <Icon name="clock" size={15} />
-          </div>
-          <strong className="wf-ribbon-val" style={{ color: 'var(--tone-warning-fg)' }}>
-            {counts.dispatch ?? 0}
-          </strong>
-          <span className="wf-ribbon-sub">Locked or queuing for manifest</span>
-        </div>
+        <aside className="wf-side">
+          <Panel className="wf-lookup">
+            <p className="eyebrow">Check an order</p>
+            <form className="wf-lookup-form" onSubmit={onLookup}>
+              <input
+                aria-label="Order number or AWB"
+                placeholder="#26YOU6590 or AWB"
+                value={lookup}
+                onChange={(e) => setLookup(e.target.value)}
+              />
+              <Button type="submit" className="button-primary button-small" loading={ordersQuery.isFetching} disabled={!lookup.trim()}>
+                <Icon name="search" size={13} /> Find
+              </Button>
+              {query && (
+                <Button type="button" className="button-secondary button-small" onClick={() => { setQuery(''); setLookup(''); setChosenId(null) }}>
+                  Clear
+                </Button>
+              )}
+            </form>
 
-        <div className="wf-ribbon-card" onClick={() => navigate('/orders?tab=ready')}>
-          <div className="wf-ribbon-header" style={{ color: 'var(--tone-info-fg)' }}>
-            <span>Dispatched / In-Flight</span>
-            <Icon name="truck" size={15} />
-          </div>
-          <strong className="wf-ribbon-val" style={{ color: 'var(--tone-info-fg)' }}>
-            {(counts.ready ?? 0) + (counts.transit ?? 0)}
-          </strong>
-          <span className="wf-ribbon-sub">AWB assigned & with courier</span>
-        </div>
+            {ordersQuery.isError && <ErrorBox compact message={apiError(ordersQuery.error)} />}
+            {query && ordersQuery.isSuccess && !order && <p className="wf-muted">No order matches “{query}”.</p>}
 
-        <div className="wf-ribbon-card" onClick={() => navigate('/returns?tab=EXCHANGES')}>
-          <div className="wf-ribbon-header" style={{ color: 'var(--tone-purple-fg)' }}>
-            <span>Active Exchanges</span>
-            <Icon name="refresh" size={15} />
-          </div>
-          <strong className="wf-ribbon-val" style={{ color: 'var(--tone-purple-fg)' }}>
-            {returnMetrics.exchanges}
-          </strong>
-          <span className="wf-ribbon-sub">Reverse + forward replacement</span>
-        </div>
+            {order && path && (
+              <div className="wf-result">
+                <div className="wf-result-head">
+                  <Link to={`/orders/${order.id}`} className="wf-order-link">{order.shopifyOrderName}</Link>
+                  <StatusBadge status={order.status} />
+                </div>
+                <dl className="wf-facts">
+                  <div><dt>Customer</dt><dd>{order.customerName}</dd></div>
+                  <div><dt>Payment</dt><dd>{facts.includes('payment:COD') ? 'COD' : 'Prepaid'} · {labelize(order.financialStatus)} · {formatMoney(order.totalAmount, order.currency)}</dd></div>
+                  <div><dt>Courier</dt><dd>{shipment?.waybillNumber ? normalizeCourierName(shipment.courier, shipment.labelUrl, shipment.waybillNumber) : '—'}</dd></div>
+                  <div><dt>AWB</dt><dd className="wf-mono">{shipment?.waybillNumber || '—'}</dd></div>
+                  <div><dt>Shipment</dt><dd>{shipment ? `${labelize(shipment.status)}${shipment.trackingStatus ? ` · ${shipment.trackingStatus}` : ''}` : '—'}</dd></div>
+                  {ret && (
+                    <div><dt>{ret.isExchange ? 'Exchange' : 'Return'}</dt><dd>{labelize(ret.returnStatus)}{ret.returnWaybillNumber ? ` · ${ret.returnWaybillNumber}` : ''}</dd></div>
+                  )}
+                </dl>
 
-        <div className="wf-ribbon-card" onClick={() => navigate('/returns?tab=QC_PASSED_UNREFUNDED')}>
-          <div className="wf-ribbon-header" style={{ color: 'var(--tone-danger-fg)' }}>
-            <span>QC Passed (Unrefunded)</span>
-            <Icon name="alert" size={15} />
-          </div>
-          <strong className="wf-ribbon-val" style={{ color: 'var(--tone-danger-fg)' }}>
-            {returnMetrics.qcPassedUnrefunded}
-          </strong>
-          <span className="wf-ribbon-sub">Action required to settle</span>
-        </div>
+                <div className={`wf-where ${path.currentId ? 'is-found' : 'is-missing'}`}>
+                  {path.currentId ? (
+                    <><span>Sits at</span><strong>{stepName(path.currentId)}</strong></>
+                  ) : (
+                    <><strong>No step matches this order.</strong><span>Add one of its states (below) to a stage.</span></>
+                  )}
+                </div>
 
-        <div className="wf-ribbon-card" onClick={() => navigate('/remittance')}>
-          <div className="wf-ribbon-header" style={{ color: 'var(--tone-success-fg)' }}>
-            <span>Delivered & Closed</span>
-            <Icon name="check" size={15} />
-          </div>
-          <strong className="wf-ribbon-val" style={{ color: 'var(--tone-success-fg)' }}>
-            {(counts.delivered ?? 0) + (counts.closed ?? 0)}
-          </strong>
-          <span className="wf-ribbon-sub">Settled in ledger</span>
-        </div>
-      </div>
+                {path.currentId && (
+                  <ol className="wf-route">
+                    {[...path.passedIds, path.currentId].map((id) => (
+                      <li key={id} className={id === path.currentId ? 'is-current' : ''}>
+                        {stepName(id)}
+                        {path.branches[id] && <span className="wf-branch-taken"> → {path.branches[id]}</span>}
+                      </li>
+                    ))}
+                  </ol>
+                )}
 
-      {/* Invariants & Production Safety Guarantees Bar */}
-      <Panel className="wf-invariants-panel">
-        <PanelHeading
-          eyebrow="System Verification"
-          title="Architectural Invariants & Idempotency Safeguards"
-          action={
-            <Button
-              className="button-ghost"
-              style={{ fontSize: '12px', padding: '4px 8px' }}
-              onClick={() => setShowInvariants(!showInvariants)}
-            >
-              {showInvariants ? 'Hide Invariants' : 'Show Invariants'}
-            </Button>
-          }
-        />
-        {showInvariants && (
-          <div className="wf-invariants-grid">
-            <div className="wf-guard-item">
-              <div className="wf-guard-tag active">
-                <span className="live-dot" /> Lock Guard
+                <div className="wf-tokens" aria-label="Order states">
+                  {facts.map((fact) => <code key={fact}>{fact}</code>)}
+                </div>
+
+                {matches.length > 1 && (
+                  <div className="wf-other">
+                    <span className="wf-muted">{matches.length} orders matched:</span>
+                    {matches.map((entry) => (
+                      <button type="button" key={entry.id} className={entry.id === order.id ? 'is-active' : ''} onClick={() => setChosenId(entry.id)}>
+                        {entry.shopifyOrderName}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
-              <strong>2-Minute Dispatch Mutex</strong>
-              <p>
-                <code>Order.dispatchLockedAt</code> acquires an atomic lock prior to calling Velocity or Delhivery APIs, preventing duplicate shipments on rapid clicks or concurrent cron jobs.
-              </p>
-            </div>
+            )}
 
-            <div className="wf-guard-item">
-              <div className="wf-guard-tag active">
-                <span className="live-dot" /> Leakage Prevention
-              </div>
-              <strong>Exchange Scan Auto-Refund Suppression</strong>
-              <p>
-                Warehouse barcode scans verify <code>isExchange: true</code> and strictly suppress <code>orderService.processRtoRefund()</code>, preventing double compensation on replacement orders.
-              </p>
-            </div>
-
-            <div className="wf-guard-item">
-              <div className="wf-guard-tag active">
-                <span className="live-dot" /> Multi-Item Support
-              </div>
-              <strong>Cumulative Refund Cap Validation</strong>
-              <p>
-                Multi-item orders allow sequential partial returns scoped per <code>returnId</code> while enforcing <code>cumulativeRefunded + amount &le; order.totalAmount</code> to block excess payouts.
-              </p>
-            </div>
-
-            <div className="wf-guard-item">
-              <div className="wf-guard-tag active">
-                <span className="live-dot" /> Concurrency Guard
-              </div>
-              <strong>Atomic Webhook Dispatch Claim</strong>
-              <p>
-                Velocity reverse pickup webhooks atomically claim <code>CLAIMED_FOR_DISPATCH</code> before triggering forward exchange fulfillment, eliminating duplicate replacement AWB creation.
-              </p>
-            </div>
-          </div>
-        )}
-      </Panel>
-
-      {/* Stage Selector Tabs */}
-      <div className="wf-tabs-container">
-        <button
-          className={`wf-stage-tab ${activeStage === 'ALL' ? 'active' : ''}`}
-          onClick={() => setActiveStage('ALL')}
-        >
-          <Icon name="workflow" size={16} />
-          Unified Architecture (All 4 Pipelines)
-        </button>
-        <button
-          className={`wf-stage-tab ${activeStage === 'DISPATCH' ? 'active' : ''}`}
-          onClick={() => setActiveStage('DISPATCH')}
-        >
-          <Icon name="box" size={16} />
-          1. Forward Dispatching & Routing
-        </button>
-        <button
-          className={`wf-stage-tab ${activeStage === 'TRACKING' ? 'active' : ''}`}
-          onClick={() => setActiveStage('TRACKING')}
-        >
-          <Icon name="route" size={16} />
-          2. Delivery & In-Transit Tracking
-        </button>
-        <button
-          className={`wf-stage-tab ${activeStage === 'RETURNS' ? 'active' : ''}`}
-          onClick={() => setActiveStage('RETURNS')}
-        >
-          <Icon name="return" size={16} />
-          3. Returns & Size Exchanges
-        </button>
-        <button
-          className={`wf-stage-tab ${activeStage === 'QC_REFUND' ? 'active' : ''}`}
-          onClick={() => setActiveStage('QC_REFUND')}
-        >
-          <Icon name="dollar" size={16} />
-          4. QC Verification & Refunds
-        </button>
-      </div>
-
-      {/* Interactive Workflow Canvas */}
-      <div className="wf-trees-canvas">
-        {/* ========================================================
-            TREE 1: ORDER INGESTION & DISPATCHING
-           ======================================================== */}
-        {(activeStage === 'ALL' || activeStage === 'DISPATCH') && (
-          <div className="wf-tree-section">
-            <div className="wf-tree-header">
-              <span className="wf-stage-index" aria-hidden="true">1</span>
-              <div className="wf-section-title">
-                <h3>Order Ingestion & Forward Dispatch Pipeline</h3>
-                <p>Shopify webhook deduplication, GoKwik RTO risk gating, mutex locking, and carrier routing</p>
-              </div>
-            </div>
-
-            <div className="wf-nodes-flow">
-              {/* Node 1.1 */}
-              <div className="wf-node-card">
-                <div className="wf-node-top">
-                  <span className="wf-node-pill pill-gray">Webhook Ingest</span>
-                  <span className="wf-node-id">01</span>
-                </div>
-                <h4>Shopify <code>orders/create</code></h4>
-                <p>Stateless payload verification with 15-minute TTL cache and database unique constraint on <code>shopifyOrderId</code>.</p>
-                <div className="wf-node-meta">
-                  <span className="wf-badge-tag">Stateless JWT</span>
-                  <span className="wf-badge-tag">Idempotent</span>
-                </div>
-              </div>
-
-              <div className="wf-arrow-connector">→</div>
-
-              {/* Node 1.2 */}
-              <div className="wf-node-card decision-node">
-                <div className="wf-node-top">
-                  <span className="wf-node-pill pill-amber">Decision Point</span>
-                  <span className="wf-node-id">02</span>
-                </div>
-                <h4>Payment & Risk Split</h4>
-                <p>
-                  <strong>Prepaid:</strong> Immediate verification.<br />
-                  <strong>COD:</strong> GoKwik RTO scoring & customer phone verification.
-                </p>
-                <div className="wf-branch-pills">
-                  <span className="wf-branch-pill green">Prepaid: Auto-Ready</span>
-                  <span className="wf-branch-pill red">High RTO: Cancel</span>
-                </div>
-              </div>
-
-              <div className="wf-arrow-connector">→</div>
-
-              {/* Node 1.3 */}
-              <div className="wf-node-card highlighted-node">
-                <div className="wf-node-top">
-                  <span className="wf-node-pill pill-blue">Queue State</span>
-                  <span className="wf-node-count-badge">{counts.new ?? 0}</span>
-                </div>
-                <h4>NEW / DISPATCH_PENDING</h4>
-                <p>Orders ready for warehouse packing. Prioritized by delivery SLA and stock availability.</p>
-                <div className="wf-node-action">
-                  <Link to="/orders?tab=new" className="wf-action-link">
-                    Open New Orders ({counts.new ?? 0})</Link>
-                </div>
-              </div>
-
-              <div className="wf-arrow-connector">→</div>
-
-              {/* Node 1.4 */}
-              <div className="wf-node-card">
-                <div className="wf-node-top">
-                  <span className="wf-node-pill pill-purple">Concurrency Gate</span>
-                  <span className="wf-node-id">04</span>
-                </div>
-                <h4>Atomic Dispatch Lock</h4>
-                <p>Acquires <code>Order.dispatchLockedAt</code> (2-minute TTL). Prevents double booking during concurrent bulk dispatches.</p>
-                <div className="wf-node-meta">
-                  <span className="wf-badge-tag">Atomic DB Mutex</span>
-                </div>
-              </div>
-
-              <div className="wf-arrow-connector">→</div>
-
-              {/* Node 1.5 */}
-              <div className="wf-node-card decision-node">
-                <div className="wf-node-top">
-                  <span className="wf-node-pill pill-blue">Routing Engine</span>
-                  <span className="wf-node-id">05</span>
-                </div>
-                <h4>Carrier Routing Choice</h4>
-                <p>
-                  <strong>Velocity:</strong> Primary/cheaper aggregator with auto-failover.<br />
-                  <strong>Delhivery:</strong> B2C surface fallback.
-                </p>
-                <div className="wf-branch-pills">
-                  <span className="wf-branch-pill blue">Velocity B2C</span>
-                  <span className="wf-branch-pill orange">Delhivery Surface</span>
-                </div>
-              </div>
-
-              <div className="wf-arrow-connector">→</div>
-
-              {/* Node 1.6 */}
-              <div className="wf-node-card success-node">
-                <div className="wf-node-top">
-                  <span className="wf-node-pill pill-green">Terminal Manifest</span>
-                  <span className="wf-node-count-badge">{(counts.ready ?? 0) + (counts.transit ?? 0)}</span>
-                </div>
-                <h4>AWB Generated & Dispatched</h4>
-                <p>AWB assigned, thermal packing slip generated with <code>youthnic2024</code>, and Shopify order fulfilled.</p>
-                <div className="wf-node-action">
-                  <Link to="/orders?tab=ready" className="wf-action-link">
-                    View Dispatched ({counts.ready ?? 0})</Link>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ========================================================
-            TREE 2: IN-TRANSIT & DELIVERY TRACKING
-           ======================================================== */}
-        {(activeStage === 'ALL' || activeStage === 'TRACKING') && (
-          <div className="wf-tree-section">
-            <div className="wf-tree-header">
-              <span className="wf-stage-index" aria-hidden="true">2</span>
-              <div className="wf-section-title">
-                <h3>Delivery & Logistics Tracking State Machine</h3>
-                <p>Real-time courier webhooks, 30-minute background pollers, NDR resolution, and terminal states</p>
-              </div>
-            </div>
-
-            <div className="wf-nodes-flow">
-              {/* Node 2.1 */}
-              <div className="wf-node-card">
-                <div className="wf-node-top">
-                  <span className="wf-node-pill pill-blue">In Transit</span>
-                  <span className="wf-node-count-badge">{counts.transit ?? 0}</span>
-                </div>
-                <h4>Courier Handover & Transit</h4>
-                <p>Package picked up from warehouse hub. Tracked via Velocity & Delhivery push webhooks and periodic cron pollers.</p>
-                <div className="wf-node-action">
-                  <Link to="/orders?tab=transit" className="wf-action-link">
-                    View In Transit ({counts.transit ?? 0})</Link>
-                </div>
-              </div>
-
-              <div className="wf-arrow-connector">→</div>
-
-              {/* Node 2.2 */}
-              <div className="wf-node-card">
-                <div className="wf-node-top">
-                  <span className="wf-node-pill pill-blue">Destination Hub</span>
-                  <span className="wf-node-id">02</span>
-                </div>
-                <h4>Out for Delivery (OFD)</h4>
-                <p>Package is on the delivery vehicle. Customer receives WhatsApp alert with live courier contact and delivery OTP.</p>
-                <div className="wf-node-meta">
-                  <span className="wf-badge-tag">WhatsApp Alert</span>
-                  <span className="wf-badge-tag">Live OTP</span>
-                </div>
-              </div>
-
-              <div className="wf-arrow-connector">→</div>
-
-              {/* Node 2.3 */}
-              <div className="wf-node-card decision-node">
-                <div className="wf-node-top">
-                  <span className="wf-node-pill pill-amber">Terminal Evaluation</span>
-                  <span className="wf-node-id">03</span>
-                </div>
-                <h4>Delivery Outcome</h4>
-                <p>Courier driver records delivery confirmation, non-delivery reason (NDR), or customer rejection.</p>
-                <div className="wf-branch-pills">
-                  <span className="wf-branch-pill green">Successful Delivery</span>
-                  <span className="wf-branch-pill red">RTO / NDR Rejection</span>
-                </div>
-              </div>
-
-              <div className="wf-arrow-connector">→</div>
-
-              {/* Node 2.4 - Branch A */}
-              <div className="wf-node-card success-node">
-                <div className="wf-node-top">
-                  <span className="wf-node-pill pill-green">Terminal Success</span>
-                  <span className="wf-node-count-badge">{counts.delivered ?? 0}</span>
-                </div>
-                <h4>DELIVERED (COD Collected)</h4>
-                <p>Courier collects COD payment. Marked delivered, closes 7-day customer window, feeds Accounts remittance ledger.</p>
-                <div className="wf-node-action">
-                  <Link to="/orders?tab=delivered" className="wf-action-link">
-                    View Delivered ({counts.delivered ?? 0})</Link>
-                </div>
-              </div>
-
-              {/* Node 2.4 - Branch B */}
-              <div className="wf-node-card danger-node">
-                <div className="wf-node-top">
-                  <span className="wf-node-pill pill-red">Return to Origin</span>
-                  <span className="wf-node-id">RTO</span>
-                </div>
-                <h4>RTO_INITIATED → RTO_DELIVERED</h4>
-                <p>Failed delivery / NDR exhausted. Reverse parcel routes back to warehouse hub for intake and restocking.</p>
-                <div className="wf-node-action">
-                  <Link to="/orders?tab=cancel" className="wf-action-link">
-                    View Cancel/RTO</Link>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ========================================================
-            TREE 3: RETURNS & SIZE EXCHANGES
-           ======================================================== */}
-        {(activeStage === 'ALL' || activeStage === 'RETURNS') && (
-          <div className="wf-tree-section">
-            <div className="wf-tree-header">
-              <span className="wf-stage-index" aria-hidden="true">3</span>
-              <div className="wf-section-title">
-                <h3>Customer Returns & Size Exchanges Lifecycle</h3>
-                <p>Reverse pickup dispatching, dual-AWB replacement workflows, and warehouse hub transit</p>
-              </div>
-            </div>
-
-            <div className="wf-nodes-flow">
-              {/* Node 3.1 */}
-              <div className="wf-node-card">
-                <div className="wf-node-top">
-                  <span className="wf-node-pill pill-blue">Initiation</span>
-                  <span className="wf-node-id">01</span>
-                </div>
-                <h4>Customer Support / Desk Request</h4>
-                <p>Customer initiates return within 7-day window. Desk operator checks eligibility and inspects photos.</p>
-                <div className="wf-node-action">
-                  <Link to="/support" className="wf-action-link">
-                    Support Desk</Link>
-                </div>
-              </div>
-
-              <div className="wf-arrow-connector">→</div>
-
-              {/* Node 3.2 */}
-              <div className="wf-node-card decision-node">
-                <div className="wf-node-top">
-                  <span className="wf-node-pill pill-purple">Dual Path</span>
-                  <span className="wf-node-id">02</span>
-                </div>
-                <h4>Exchange vs Standard Return</h4>
-                <p>
-                  <strong>Exchange:</strong> Customer wants different size.<br />
-                  <strong>Return:</strong> Customer requests monetary refund.
-                </p>
-                <div className="wf-branch-pills">
-                  <span className="wf-branch-pill purple">Size Exchange</span>
-                  <span className="wf-branch-pill blue">Standard Return</span>
-                </div>
-              </div>
-
-              <div className="wf-arrow-connector">→</div>
-
-              {/* Node 3.3 - Branch Exchange */}
-              <div className="wf-node-card highlighted-node">
-                <div className="wf-node-top">
-                  <span className="wf-node-pill pill-purple">Dual AWB Booking</span>
-                  <span className="wf-node-count-badge">{returnMetrics.exchanges}</span>
-                </div>
-                <h4>Size Exchange Flow (<code>-EX-FWD</code>)</h4>
-                <p>
-                  Simultaneously books:<br />
-                  1. Reverse Pickup AWB (old item)<br />
-                  2. Forward Replacement AWB (new size)<br />
-                  Guarded by <code>CLAIMED_FOR_DISPATCH</code> mutex.
-                </p>
-                <div className="wf-node-action">
-                  <Link to="/returns?tab=EXCHANGES" className="wf-action-link">
-                    Active Exchanges ({returnMetrics.exchanges})</Link>
-                </div>
-              </div>
-
-              <div className="wf-arrow-connector">→</div>
-
-              {/* Node 3.4 */}
-              <div className="wf-node-card">
-                <div className="wf-node-top">
-                  <span className="wf-node-pill pill-gray">Reverse Logistics</span>
-                  <span className="wf-node-id">04</span>
-                </div>
-                <h4>Carrier Reverse Pickup</h4>
-                <p>Velocity / Delhivery picks up old item from customer doorstep with return packing slip.</p>
-                <div className="wf-node-meta">
-                  <span className="wf-badge-tag">Reverse Tracking</span>
-                </div>
-              </div>
-
-              <div className="wf-arrow-connector">→</div>
-
-              {/* Node 3.5 */}
-              <div className="wf-node-card">
-                <div className="wf-node-top">
-                  <span className="wf-node-pill pill-blue">Intake Ready</span>
-                  <span className="wf-node-count-badge">{returnMetrics.pendingQc}</span>
-                </div>
-                <h4>Arrived at Warehouse Hub</h4>
-                <p>Reverse parcel arrives at warehouse loading dock. Ready for operator barcode scan and QC check.</p>
-                <div className="wf-node-action">
-                  <Link to="/returns?tab=PENDING_QC" className="wf-action-link">
-                    Scan Intake Queue ({returnMetrics.pendingQc})</Link>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ========================================================
-            TREE 4: QC VERIFICATION & FINANCIAL SETTLEMENT
-           ======================================================== */}
-        {(activeStage === 'ALL' || activeStage === 'QC_REFUND') && (
-          <div className="wf-tree-section">
-            <div className="wf-tree-header">
-              <span className="wf-stage-index" aria-hidden="true">4</span>
-              <div className="wf-section-title">
-                <h3>Warehouse QC Verification & Refund Settlement Tree</h3>
-                <p>Barcode gun intake, exchange refund suppression, Shopify API auto-refund, and COD manual payout verification</p>
-              </div>
-            </div>
-
-            <div className="wf-nodes-flow">
-              {/* Node 4.1 */}
-              <div className="wf-node-card">
-                <div className="wf-node-top">
-                  <span className="wf-node-pill pill-blue">Intake Scan</span>
-                  <span className="wf-node-id">01</span>
-                </div>
-                <h4>Warehouse Barcode Gun Scan</h4>
-                <p>Operator scans return AWB via <code>POST /api/returns/scan</code>. Verifies parcel contents and records condition.</p>
-                <div className="wf-node-action">
-                  <Link to="/returns" className="wf-action-link">
-                    Open Returns Scanner</Link>
-                </div>
-              </div>
-
-              <div className="wf-arrow-connector">→</div>
-
-              {/* Node 4.2 */}
-              <div className="wf-node-card decision-node">
-                <div className="wf-node-top">
-                  <span className="wf-node-pill pill-amber">Security Gate</span>
-                  <span className="wf-node-id">02</span>
-                </div>
-                <h4>Is Size Exchange?</h4>
-                <p>
-                  <strong>If Exchange:</strong> Suppresses monetary refund! Forward replacement item satisfies order.<br />
-                  <strong>If Standard Return:</strong> Proceeds to financial refund.
-                </p>
-                <div className="wf-branch-pills">
-                  <span className="wf-branch-pill purple">Exchange: Suppress Refund</span>
-                  <span className="wf-branch-pill green">Return: Refund Item</span>
-                </div>
-              </div>
-
-              <div className="wf-arrow-connector">→</div>
-
-              {/* Node 4.3 */}
-              <div className="wf-node-card decision-node">
-                <div className="wf-node-top">
-                  <span className="wf-node-pill pill-blue">Payment Gateway</span>
-                  <span className="wf-node-id">03</span>
-                </div>
-                <h4>Prepaid vs COD Settlement</h4>
-                <p>
-                  <strong>Prepaid:</strong> Automated Shopify refund with idempotency key.<br />
-                  <strong>COD:</strong> Queued for manual UPI bank proof verification.
-                </p>
-                <div className="wf-branch-pills">
-                  <span className="wf-branch-pill green">Prepaid: Auto API</span>
-                  <span className="wf-branch-pill orange">COD: Manual Review</span>
-                </div>
-              </div>
-
-              <div className="wf-arrow-connector">→</div>
-
-              {/* Node 4.4 - Branch Prepaid */}
-              <div className="wf-node-card success-node">
-                <div className="wf-node-top">
-                  <span className="wf-node-pill pill-green">Shopify Auto-API</span>
-                  <span className="wf-node-id">Prepaid</span>
-                </div>
-                <h4>Prepaid Idempotent Auto-Refund</h4>
-                <p>
-                  Calls Shopify <code>refunds.json</code> with key <code>oms-return-&#123;id&#125;</code>. Restocks inventory and marks <code>REFUNDED</code>.
-                </p>
-                <div className="wf-node-action">
-                  <Link to="/returns?tab=REFUNDED" className="wf-action-link">
-                    Settled Returns ({returnMetrics.refunded})</Link>
-                </div>
-              </div>
-
-              {/* Node 4.4 - Branch COD */}
-              <div className="wf-node-card highlighted-node">
-                <div className="wf-node-top">
-                  <span className="wf-node-pill pill-amber">Manual Payout</span>
-                  <span className="wf-node-count-badge">{returnMetrics.codDue}</span>
-                </div>
-                <h4>COD Manual Payout Review</h4>
-                <p>
-                  Operator verifies customer UPI/bank details, uploads payment screenshot, enters UTR, validates cumulative order total limit.
-                </p>
-                <div className="wf-node-action">
-                  <Link to="/returns?tab=COD_DUE" className="wf-action-link">
-                    COD Due Queue ({returnMetrics.codDue})</Link>
-                </div>
-              </div>
-
-              <div className="wf-arrow-connector">→</div>
-
-              {/* Node 4.5 */}
-              <div className="wf-node-card success-node">
-                <div className="wf-node-top">
-                  <span className="wf-node-pill pill-green">Accounts Ledger</span>
-                  <span className="wf-node-id">05</span>
-                </div>
-                <h4>Settled in Account Trail</h4>
-                <p>
-                  <code>AccountTrailEvent</code> recorded in database. Linked with Velocity / Delhivery COD remittance ledger.
-                </p>
-                <div className="wf-node-action">
-                  <Link to="/remittance" className="wf-action-link">
-                    Open Accounts & Remittance</Link>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+            {!query && <p className="wf-muted">Paste an order number or AWB. The current step turns green, the path it took turns blue and the rest fades.</p>}
+          </Panel>
+        </aside>
       </div>
     </div>
   )

@@ -40,6 +40,7 @@ import velocityService from '../modules/velocity/velocity.service';
 import { isVelocityCourier, getTrackingUrl } from '../utils/courier';
 import { mergePdfBuffers, create4x6FallbackPdf, create4x6InvoicePdf } from '../utils/pdf-merger';
 import { analyticsService } from '../modules/analytics/analytics.service';
+import { WORKFLOW_DESIGN_KEY, workflowDesignError } from '../modules/workflows/workflow-design';
 
 const router = Router();
 
@@ -710,6 +711,40 @@ router.get('/orders', async (req: Request, res: Response): Promise<void> => {
       limit,
       offset,
     });
+    res.json({ orders });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Workflow designer lookup: the exact order name / AWB first, then up to 10
+// partial search hits. A plain limited search can bury an old exact match
+// (e.g. #26YOU1) under newer partial ones.
+router.get('/orders/lookup', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const q = String(req.query.q || '').trim();
+    if (!q || q.length > 100) {
+      res.status(400).json({ error: 'q (order name or AWB, up to 100 characters) is required' });
+      return;
+    }
+    const bare = q.replace(/^#/, '');
+    const same = (value: string) => ({ equals: value, mode: 'insensitive' as const });
+    const exact = await prisma.order.findFirst({
+      where: {
+        OR: [
+          { shopifyOrderName: same(`#${bare}`) },
+          { shopifyOrderName: same(bare) },
+          { shipment: { waybillNumber: same(q) } },
+          { returns: { some: { OR: [{ returnWaybillNumber: same(q) }, { exchangeForwardAwb: same(q) }] } } },
+        ],
+      },
+      select: { id: true },
+    });
+    const partial = await orderService.getOrders({ search: q, limit: 10 });
+    const orders =
+      exact && !partial.some((order: any) => order.id === exact.id)
+        ? [await orderService.getOrder(exact.id), ...partial]
+        : partial;
     res.json({ orders });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -4073,6 +4108,37 @@ router.post('/settings/shipping-priority', async (req: Request, res: Response): 
     }
     await shippingRouterService.setCarrierPriority(priority);
     res.json({ success: true, priority });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─── Workflow designer (/workflows) ──────────────────────
+router.get('/workflows/design', async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const row = await prisma.setting.findUnique({ where: { key: WORKFLOW_DESIGN_KEY } });
+    res.json({ definition: row ? JSON.parse(row.value) : null, updatedAt: row?.updatedAt ?? null });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.put('/workflows/design', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const definition = req.body?.definition;
+    const invalid = workflowDesignError(definition);
+    if (invalid) {
+      res.status(400).json({ error: invalid });
+      return;
+    }
+    const value = JSON.stringify(definition);
+    const row = await prisma.setting.upsert({
+      where: { key: WORKFLOW_DESIGN_KEY },
+      update: { value },
+      create: { key: WORKFLOW_DESIGN_KEY, value },
+    });
+    logger.info('Workflow design saved', { by: req.user?.email, bytes: value.length });
+    res.json({ success: true, updatedAt: row.updatedAt });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

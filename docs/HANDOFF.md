@@ -86,6 +86,12 @@ Automated Order Management System for **youthnic2024.myshopify.com** (Brand: You
    - `invoiceService.buildInvoiceData` is the single source of invoice numbers for both the HTML invoice and the PDF (`create4x6InvoicePdf`). Order-level discounts are spread across lines by value so the lines add up to the order total; shipping is its own row. Payment status comes from Shopify `financialStatus` (paid / refunded / partially refunded count as received; pending and other unpaid statuses, and COD until Shopify marks it paid, show Rs.0 received and the full amount due).
    - GST stays 5% inclusive with HSN 6204; up to 4 item rows fit, the rest are summarised in one line. The PDF prints "Rs." because the built-in PDF font has no rupee glyph.
 
+11. **Workflow Designer replaces Workflow Trees (2026-11-19)**:
+   - `/workflows` is now a node-based designer built on `sequential-workflow-designer` (+ `-react`): drag stages and decisions from the toolbox, edit names, order states, branch names and branch conditions in the side editor, undo/redo, light/dark.
+   - The design is saved whole in the `Setting` table under `workflow_designer_definition` via `GET`/`PUT /api/workflows/design` (validated in `src/modules/workflows/workflow-design.ts`; no schema change). Until someone saves, the page shows the seeded default.
+   - Order lookup: paste an order name (`#26YOU6590`) or AWB (forward, return or replacement). `GET /api/orders/lookup?q=` returns the exact name/AWB match first, then up to 10 partial hits; `/api/orders?search=` now also matches return and exchange AWBs, case-insensitively. The current stage turns green, the route taken blue, the rest fades, and the order facts and its state tokens show beside the canvas.
+   - Mapping lives in `frontend/src/workflow-map.ts`: `orderFacts` turns an order into tokens (`order:`, `tab:`, `payment:`, `shipment:`, `courier:`, `ndr:`, `flow:`, `return:`, `qc:`, `refund:`, `exchange:`); stages list the tokens they stand for, decisions pick a branch by condition, and the furthest matching stage on the route is "current". The seeded design covers every Prisma `OrderStatus` and `ReturnStatus` (checked in `tests/workflow-map.spec.ts`).
+
 ---
 
 ## 4. Key Configuration & Guardrails

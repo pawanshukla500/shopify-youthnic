@@ -240,6 +240,8 @@ export interface Order {
   isDispatchOverdue?: boolean
   dispatchOverdueHours?: number
   hasNdrException?: boolean
+  /** Orders page queue from classifyOrderTab (new, dispatch, ready, transit, delivered, closed, return, cancel). */
+  operationalTab?: string | null
   hasUrgentSupport?: boolean
   supportFlag?: string | null
 }

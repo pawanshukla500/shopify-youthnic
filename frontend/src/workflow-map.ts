@@ -191,6 +191,36 @@ export function resolveOrderPath(definition: WorkflowDefinition, facts: string[]
   }
 }
 
+/** Stages on the longest way through a sequence. */
+const longestStages = (sequence: WorkflowStep[]): number =>
+  sequence.reduce(
+    (count, step) =>
+      count + (step.componentType === 'switch' ? Math.max(0, ...Object.values(step.branches || {}).map(longestStages)) : 1),
+    0
+  )
+
+/**
+ * How far along its route the order is, counting stages only. A decision the
+ * order has not reached yet counts its longest branch, so the total isn't short.
+ */
+export function routeProgress(definition: WorkflowDefinition, path: OrderPath): { stage: number; stages: number } | null {
+  if (!path.currentId) return null
+  let stages = 0
+  let stage = 0
+  for (const id of path.routeIds) {
+    const step = findStep(definition.sequence, id)
+    if (step?.componentType !== 'switch') stages += 1
+    else if (!(id in path.branches)) stages += longestStages([step])
+    if (id === path.currentId) stage = stages
+  }
+  return { stage, stages }
+}
+
+/** A step colour picked in the editor, only when it is a plain #rrggbb: it is written into a stylesheet. */
+export function safeColor(value: unknown): string | null {
+  return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value) ? value : null
+}
+
 /** Every step id in a definition, depth first. */
 export function allStepIds(sequence: WorkflowStep[]): string[] {
   return sequence.flatMap((step) => [

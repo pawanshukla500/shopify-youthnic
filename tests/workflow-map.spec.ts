@@ -11,6 +11,8 @@ import {
   parseTokens,
   pickOrder,
   resolveOrderPath,
+  routeProgress,
+  safeColor,
   type WorkflowDefinition,
 } from '../frontend/src/workflow-map';
 import type { Order, ReturnRecord, Shipment } from '../frontend/src/types';
@@ -178,6 +180,27 @@ describe('save API validator', () => {
     [{ properties: { name: '₹'.repeat(100_000) }, sequence: [step] }, 'too large'],
   ])('rejects %j', (definition, message) => {
     expect(workflowDesignError(definition)).toContain(message);
+  });
+});
+
+describe('canvas helpers', () => {
+  it('accepts only plain #rrggbb colours, since they are written into a stylesheet', () => {
+    expect(safeColor('#2563eb')).toBe('#2563eb');
+    expect(safeColor('#2563EB')).toBe('#2563EB');
+    for (const bad of ['red', '#fff', 'red; } body { display: none', '#2563eb;', '', null, 7]) expect(safeColor(bad)).toBeNull();
+  });
+
+  it('counts progress in stages and adds the longest branch of decisions not reached yet', () => {
+    // COD, Velocity, in transit: received, cod-confirm, ready, velocity-awb, picked-up, in-transit (6th) and
+    // out-for-delivery are walked; "Delivery outcome" is undecided, its longest branch is
+    // Delivered (1) + Return (4 + QC passed 2) = 7, so 7 + 7 = 14 stages.
+    const transit = where(order({ status: 'IN_TRANSIT', operationalTab: 'transit' }, { waybillNumber: 'VELP1', courier: 'Velocity', status: 'IN_TRANSIT' }));
+    expect(routeProgress(DEFAULT_WORKFLOW, transit)).toEqual({ stage: 6, stages: 14 });
+
+    const closed = where(order({ status: 'DELIVERED', operationalTab: 'closed' }, { waybillNumber: 'VELP1', courier: 'Velocity', status: 'DELIVERED' }));
+    expect(routeProgress(DEFAULT_WORKFLOW, closed)).toEqual({ stage: 9, stages: 9 });
+
+    expect(routeProgress(DEFAULT_WORKFLOW, { currentId: null, passedIds: [], routeIds: [], branches: {} })).toBeNull();
   });
 });
 

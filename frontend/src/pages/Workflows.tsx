@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { BranchedStep, Definition, StepDefinition, StepsConfiguration, ToolboxConfiguration, ValidatorConfiguration } from 'sequential-workflow-designer'
@@ -22,11 +22,14 @@ import {
   FACT_KEYS,
   findStep,
   invalidTokens,
+  routeProgress,
+  safeColor,
   orderFacts,
   pickOrder,
   resolveOrderPath,
   type OrderPath,
   type WorkflowDefinition,
+  type WorkflowStep,
 } from '../workflow-map'
 import './Workflows.css'
 
@@ -34,11 +37,17 @@ import './Workflows.css'
 
 const STEP_KINDS: Record<string, { label: string; color: string; path: string }> = {
   order: { label: 'Order stage', color: '#2563eb', path: 'M6 2h9l4 4v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zM8 11h8M8 15h8M8 19h5' },
-  shipping: { label: 'Shipping stage', color: '#047857', path: 'M3 6h11v10H3zM14 9h4l3 3v4h-7M7 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM17 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4z' },
-  returns: { label: 'Return stage', color: '#b45309', path: 'M9 14 4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3' },
+  shipping: { label: 'Shipping stage', color: '#059669', path: 'M3 6h11v10H3zM14 9h4l3 3v4h-7M7 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM17 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4z' },
+  returns: { label: 'Return stage', color: '#d97706', path: 'M9 14 4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3' },
   money: { label: 'Money stage', color: '#7c3aed', path: 'M12 2v20M17 6H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6' },
-  decision: { label: 'Decision', color: '#475569', path: 'M6 3v12M18 3a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM6 15a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM18 9a9 9 0 0 1-9 9' },
+  decision: { label: 'Decision', color: '#1e3a8a', path: 'M6 3v12M18 3a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM6 15a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM18 9a9 9 0 0 1-9 9' },
 }
+
+// Swatches offered in the step editor; "Auto" uses the kind colour above.
+const PALETTE = ['#2563eb', '#059669', '#d97706', '#7c3aed', '#dc2626', '#db2777', '#0891b2', '#475569']
+
+/** Colour a step is drawn in: the one picked in the editor, else its kind's. */
+const stepColor = (step: WorkflowStep | null) => safeColor(step?.properties?.color) ?? STEP_KINDS[step?.type ?? '']?.color ?? '#64748b'
 
 const iconUrl = (type: string) => {
   const kind = STEP_KINDS[type] ?? STEP_KINDS.order
@@ -55,7 +64,7 @@ const toolbox: ToolboxConfiguration = {
         ...['order', 'shipping', 'returns', 'money'].map((type) => ({
           componentType: 'task',
           type,
-          name: STEP_KINDS[type].label,
+          name: STEP_KINDS[type].label.replace(/ stage$/, ''),
           properties: { states: '', note: '' },
         })),
         {
@@ -182,6 +191,26 @@ function StepEditor() {
           <TokenHint />
         </FormField>
       )}
+      <div className="wf-colors" role="group" aria-label="Step colour">
+        <span className="field-label">Colour</span>
+        <div className="wf-swatches">
+          <button type="button" className={`wf-swatch is-auto ${safeColor(properties.color) ? '' : 'is-active'}`} disabled={isReadonly} onClick={() => setProperty('color', '')} aria-label="Automatic colour" title="Automatic (by kind)">
+            Auto
+          </button>
+          {PALETTE.map((color) => (
+            <button
+              type="button"
+              key={color}
+              className={`wf-swatch ${properties.color === color ? 'is-active' : ''}`}
+              style={{ background: color }}
+              disabled={isReadonly}
+              onClick={() => setProperty('color', color)}
+              aria-label={`Colour ${color}`}
+              aria-pressed={properties.color === color}
+            />
+          ))}
+        </div>
+      </div>
       <FormField label="Notes">
         <textarea rows={3} value={(properties.note as string) ?? ''} readOnly={isReadonly} onChange={(e) => setProperty('note', e.target.value)} />
       </FormField>
@@ -206,23 +235,31 @@ function RootEditor() {
   )
 }
 
-// ─── Highlight: CSS keyed on the designer's data-step-id attributes ──────────
+// ─── Canvas CSS keyed on the designer's data-step-id attributes ─────────────
+// Kind colours, connectors and animations live in Workflows.css; this adds the
+// per-step colours picked in the editor and the trace of a looked-up order.
 
-function highlightCss(path: OrderPath | null): string {
-  if (!path) return ''
+function canvasCss(workflow: WorkflowDefinition, path: OrderPath | null): string {
   const id = (stepId: string) => `[data-step-id="${CSS.escape(stepId)}"]`
+  const rules: string[] = []
+  const paint = (sequence: WorkflowStep[]) =>
+    sequence.forEach((step) => {
+      const color = safeColor(step.properties?.color)
+      if (color) rules.push(`.wf-canvas .${step.componentType === 'switch' ? 'sqd-step-switch' : 'sqd-step-task'}${id(step.id)} { --wf-c: ${color}; }`)
+      Object.values(step.branches || {}).forEach(paint)
+    })
+  paint(workflow.sequence)
+  if (!path) return rules.join('\n')
+
   const lit = [...path.passedIds, ...(path.currentId ? [path.currentId] : [])]
-  const rules = ['.wf-canvas.is-tracing .sqd-step-task, .wf-canvas.is-tracing .sqd-step-switch > .sqd-label { opacity: .3; }']
   if (lit.length) {
     rules.push(`${lit.map((s) => `.wf-canvas.is-tracing .sqd-step-task${id(s)}, .wf-canvas.is-tracing .sqd-step-switch${id(s)} > .sqd-label`).join(', ')} { opacity: 1; }`)
   }
   if (path.passedIds.length) {
-    rules.push(`${path.passedIds.map((s) => `.wf-canvas .sqd-step-task${id(s)} > .sqd-step-task-rect`).join(', ')} { stroke: var(--blue); stroke-width: 2; }`)
-    rules.push(`${path.passedIds.map((s) => `.wf-canvas .sqd-step-switch${id(s)} > .sqd-label-primary > .sqd-label-rect`).join(', ')} { fill: var(--blue); }`)
+    rules.push(`${path.passedIds.map((s) => `.wf-canvas.is-tracing .sqd-step-task${id(s)}`).join(', ')} { --wf-tint: 24%; --wf-stroke: 2.5px; }`)
   }
   if (path.currentId) {
-    // Opaque fill: the designer draws step text black in both of its themes.
-    rules.push(`.wf-canvas .sqd-step-task${id(path.currentId)} > .sqd-step-task-rect { stroke: #10b981; stroke-width: 3.5; fill: #d1fae5; }`)
+    rules.push(`.wf-canvas.is-tracing .sqd-step-task${id(path.currentId)} > .sqd-step-task-rect { animation: wf-run 0.8s linear infinite, wf-glow 1.6s ease-in-out infinite; stroke: #10b981; stroke-width: 3px; stroke-dasharray: 8 5; fill: #d1fae5; }`)
   }
   return rules.join('\n')
 }
@@ -302,6 +339,7 @@ function WorkflowDesigner({ saved, savedAt }: { saved: WorkflowDefinition | null
   }
 
   const stepName = (id: string) => findStep(asWorkflow(definition).sequence, id)?.name ?? id
+  const progress = path ? routeProgress(asWorkflow(definition), path) : null
   const shipment = order?.shipment
   const ret = activeReturn(order?.returns)
 
@@ -334,7 +372,7 @@ function WorkflowDesigner({ saved, savedAt }: { saved: WorkflowDefinition | null
 
       <div className="wf-layout">
         <div className={`wf-canvas ${path ? 'is-tracing' : ''}`}>
-          <style>{highlightCss(path)}</style>
+          <style>{canvasCss(asWorkflow(definition), path)}</style>
           <SequentialWorkflowDesigner
             // The wrapper ignores theme changes on a live designer, so remount.
             key={theme}
@@ -407,14 +445,40 @@ function WorkflowDesigner({ saved, savedAt }: { saved: WorkflowDefinition | null
                   )}
                 </div>
 
+                {progress && (
+                  <div className="wf-progress">
+                    <div className="wf-progress-label">
+                      <span>Stage {progress.stage} of {progress.stages}</span>
+                      <span>{Math.round((progress.stage / progress.stages) * 100)}%</span>
+                    </div>
+                    <div
+                      className="wf-progress-track"
+                      role="progressbar"
+                      aria-label="Progress along the workflow"
+                      aria-valuemin={0}
+                      aria-valuemax={progress.stages}
+                      aria-valuenow={progress.stage}
+                    >
+                      <span className={progress.stage < progress.stages ? 'is-running' : ''} style={{ width: `${(progress.stage / progress.stages) * 100}%` }} />
+                    </div>
+                  </div>
+                )}
+
                 {path.currentId && (
                   <ol className="wf-route">
-                    {[...path.passedIds, path.currentId].map((id) => (
-                      <li key={id} className={id === path.currentId ? 'is-current' : ''}>
-                        {stepName(id)}
-                        {path.branches[id] && <span className="wf-branch-taken"> → {path.branches[id]}</span>}
-                      </li>
-                    ))}
+                    {[...path.passedIds, path.currentId].map((id) => {
+                      const step = findStep(asWorkflow(definition).sequence, id)
+                      return (
+                        <li
+                          key={id}
+                          className={`${id === path.currentId ? 'is-current' : ''} ${step?.componentType === 'switch' ? 'is-decision' : ''}`}
+                          style={{ '--dot': stepColor(step) } as CSSProperties}
+                        >
+                          {step?.name ?? id}
+                          {path.branches[id] && <span className="wf-branch-taken"> → {path.branches[id]}</span>}
+                        </li>
+                      )
+                    })}
                   </ol>
                 )}
 
@@ -435,7 +499,7 @@ function WorkflowDesigner({ saved, savedAt }: { saved: WorkflowDefinition | null
               </div>
             )}
 
-            {!query && <p className="wf-muted">Paste an order number or AWB. The current step turns green, the path it took turns blue and the rest fades.</p>}
+            {!query && <p className="wf-muted">Paste an order number or AWB. The route it took lights up in colour, the current step runs in green and the rest fades.</p>}
           </Panel>
         </aside>
       </div>

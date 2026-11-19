@@ -77,8 +77,103 @@
 .wf-where.is-found { background: var(--tone-success-bg); border-color: var(--tone-success-border); color: var(--tone-success-fg); }
 .wf-where.is-missing { background: var(--tone-warning-bg); border-color: var(--tone-warning-border); color: var(--tone-warning-fg); }
 
-.wf-route { margin: 0; padding-left: 18px; display: grid; gap: 3px; font-size: 12px; color: var(--blue); }
-.wf-route li.is-current { color: var(--tone-success-fg); font-weight: 800; }
+/* Route timeline: a dot per step in its colour, the current one pinging */
+.wf-route { list-style: none; margin: 0; padding: 0 0 0 2px; display: grid; font-size: 12px; color: var(--ink); }
+.wf-route li { position: relative; padding: 3px 0 3px 18px; }
+.wf-route li::before { content: ''; position: absolute; left: 0; top: 6px; width: 10px; height: 10px; border-radius: 50%; background: var(--dot, var(--blue)); }
+.wf-route li::after { content: ''; position: absolute; left: 4.5px; top: 17px; bottom: -6px; width: 1px; background: var(--border-strong); }
+.wf-route li:last-child::after { display: none; }
+.wf-route li.is-decision::before { width: 8px; height: 8px; top: 7px; left: 1px; border-radius: 2px; transform: rotate(45deg); }
+.wf-route li.is-current { font-weight: 800; color: var(--tone-success-fg); }
+.wf-route li.is-current::before { background: #10b981; animation: wf-ping 1.6s ease-out infinite; }
+
+/* "Running" progress along the route */
+.wf-progress { display: grid; gap: 6px; }
+.wf-progress-label { display: flex; justify-content: space-between; font-size: 12px; font-weight: 700; color: var(--ink-secondary); }
+.wf-progress-track { height: 10px; border-radius: 999px; background: var(--tone-neutral-bg); overflow: hidden; }
+.wf-progress-track span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #2563eb, #10b981); transition: width .6s ease; }
+.wf-progress-track span.is-running {
+  background-image:
+    linear-gradient(45deg, rgba(255, 255, 255, .3) 25%, transparent 25%, transparent 50%, rgba(255, 255, 255, .3) 50%, rgba(255, 255, 255, .3) 75%, transparent 75%, transparent),
+    linear-gradient(90deg, #2563eb, #10b981);
+  background-size: 16px 16px, 100% 100%;
+  animation: wf-stripes .8s linear infinite;
+}
+
+/* Colour picker in the step editor */
+.wf-colors { display: grid; gap: 6px; }
+.wf-swatches { display: flex; flex-wrap: wrap; gap: 6px; }
+.wf-swatch { width: 24px; height: 24px; border-radius: 6px; border: 2px solid transparent; cursor: pointer; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .12); }
+.wf-swatch.is-auto { width: auto; padding: 0 8px; font-size: 11px; font-weight: 700; background: var(--panel); color: var(--ink); border-color: var(--line); }
+.wf-swatch.is-active { border-color: var(--ink); box-shadow: inset 0 0 0 2px var(--panel); }
+.wf-swatch:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.wf-swatch:disabled { cursor: not-allowed; opacity: .5; }
+
+/* ─── Canvas look ─────────────────────────────────────────────────────────
+   Colours come from --wf-c: set per step kind here, or per step from the
+   editor (canvasCss in Workflows.tsx). ".sqd-designer" outranks the theme CSS. */
+.wf-canvas .sqd-step-task { --wf-c: #64748b; }
+.wf-canvas .sqd-step-task.sqd-type-order { --wf-c: #2563eb; }
+.wf-canvas .sqd-step-task.sqd-type-shipping { --wf-c: #059669; }
+.wf-canvas .sqd-step-task.sqd-type-returns { --wf-c: #d97706; }
+.wf-canvas .sqd-step-task.sqd-type-money { --wf-c: #7c3aed; }
+.wf-canvas .sqd-step-switch { --wf-c: #1e3a8a; }
+
+.wf-canvas .sqd-designer .sqd-step-task > .sqd-step-task-rect {
+  /* Light tint in both themes: the designer draws step text black. */
+  fill: color-mix(in srgb, var(--wf-c) var(--wf-tint, 10%), #fff);
+  stroke: var(--wf-c);
+  stroke-width: var(--wf-stroke, 1.5px);
+  filter: drop-shadow(0 2px 3px rgba(15, 23, 42, .14));
+}
+.wf-canvas .sqd-designer .sqd-step-task > .sqd-step-task-rect.sqd-selected { stroke: #f97316; stroke-width: 3px; }
+.wf-canvas .sqd-designer .sqd-step-task > .sqd-step-task-text { fill: #0f172a; font-weight: 600; }
+.wf-canvas .sqd-designer .sqd-step-task .sqd-input { fill: #fff; stroke: var(--wf-c); }
+.wf-canvas .sqd-designer .sqd-step-task .sqd-output { fill: var(--wf-c); }
+
+.wf-canvas .sqd-designer .sqd-step-switch > .sqd-label-primary > .sqd-label-rect { fill: var(--wf-c); }
+.wf-canvas .sqd-designer .sqd-step-switch > .sqd-label-secondary > .sqd-label-rect { fill: #fff; stroke: var(--wf-c); stroke-width: 1.5px; }
+.wf-canvas .sqd-designer .sqd-step-switch > .sqd-label-secondary > .sqd-label-text { fill: var(--wf-c); font-weight: 700; }
+.wf-canvas .sqd-designer .sqd-step-switch > g > .sqd-input { fill: #fff; stroke: var(--wf-c); }
+.wf-canvas .sqd-designer .sqd-root-start-stop-circle { fill: #1e3a8a; }
+.wf-canvas .sqd-designer .sqd-region { stroke: #cbd5e1; stroke-width: 1px; stroke-dasharray: 4 4; }
+.wf-canvas .sqd-designer .sqd-region.sqd-selected { stroke: #f97316; stroke-width: 2px; stroke-dasharray: 0; }
+
+/* Running connectors: dashes flow in the direction orders move */
+.wf-canvas .sqd-designer .sqd-join { stroke: #94a3b8; stroke-width: 2px; stroke-dasharray: 6 4; animation: wf-flow 1.4s linear infinite; }
+
+/* Drop slots while dragging a step: light dashed blue, solid when hovered */
+.wf-canvas .sqd-designer .sqd-placeholder .sqd-placeholder-rect { fill: rgba(37, 99, 235, .06); stroke: #93c5fd; stroke-width: 1px; stroke-dasharray: 4 3; }
+.wf-canvas .sqd-designer .sqd-placeholder.sqd-hover .sqd-placeholder-rect { fill: #2563eb; stroke: #2563eb; }
+.wf-canvas .sqd-designer .sqd-placeholder-icon-path { fill: #93c5fd; }
+.wf-canvas .sqd-designer .sqd-placeholder.sqd-hover .sqd-placeholder-icon-path { fill: #fff; }
+
+/* Tracing an order: everything off the route fades (canvasCss lights the route) */
+.wf-canvas.is-tracing .sqd-step-task,
+.wf-canvas.is-tracing .sqd-step-switch > .sqd-label { opacity: .28; }
+.wf-canvas.is-tracing .sqd-join { opacity: .5; }
+
+@keyframes wf-flow { to { stroke-dashoffset: -20; } }
+@keyframes wf-run { to { stroke-dashoffset: -26; } }
+@keyframes wf-glow {
+  0%, 100% { filter: drop-shadow(0 0 1px rgba(16, 185, 129, .4)); }
+  50% { filter: drop-shadow(0 0 10px rgba(16, 185, 129, .95)); }
+}
+@keyframes wf-stripes { from { background-position: 16px 0, 0 0; } to { background-position: 0 0, 0 0; } }
+@keyframes wf-ping {
+  0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, .6); }
+  100% { box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wf-canvas .sqd-join,
+  .wf-canvas .sqd-step-task-rect,
+  .wf-progress-track span,
+  .wf-route li::before { animation: none !important; }
+  .wf-progress-track span,
+  .wf-canvas .sqd-step-task,
+  .wf-canvas .sqd-label { transition: none !important; }
+}
 .wf-branch-taken { color: var(--muted-light); font-weight: 600; }
 
 .wf-tokens { display: flex; flex-wrap: wrap; gap: 4px; }

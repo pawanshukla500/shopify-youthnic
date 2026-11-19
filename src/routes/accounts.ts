@@ -8,6 +8,10 @@
  *   POST /import                   { kind, fileName, contentBase64, defaults? }
  *   POST /orders/:id/payment-received  { utr, amount, receivedAt, ref } manual entry
  *   POST /run                      run closing + cost estimates + gateway sync now
+ *   GET  /gst-register?month=      state-wise Sales & Returns register per channel (.xlsx, Tally format)
+ *   GET  /provider-bills?month=    Easebuzz/PhonePe/Velocity/Delhivery bill vs charges in our books
+ *   POST /provider-bills           { provider, period, invoiceNumber, invoiceDate, taxableAmount, igst, cgst, sgst, totalAmount }
+ *   DELETE /provider-bills/:id
  */
 import { Router, Response } from 'express';
 import { BankReconciliationStatus } from '@prisma/client';
@@ -50,11 +54,15 @@ import gmailSettlementService from '../modules/accounts/gmail-settlement.service
 import { correctImportUtr } from '../modules/accounts/settlement-utr.service';
 import { istDateRange } from '../modules/accounts/settlement-summary';
 import { financialEventService } from '../modules/accounts/financial-event.service';
+import { generateGstRegister } from '../modules/accounts/gst-register.service';
+import { getProviderReconciliation, validateProviderInvoice } from '../modules/accounts/provider-invoice.service';
 
 const router = Router();
 
 function parsePositiveInt(val: any): number | null {
-  const n = parseInt(val, 10);
+  // Whole string must be digits: parseInt('12junk') would otherwise act on record 12.
+  if (!/^\d+$/.test(String(val ?? '').trim())) return null;
+  const n = Number(String(val).trim());
   return Number.isSafeInteger(n) && n > 0 ? n : null;
 }
 
@@ -175,6 +183,67 @@ router.get('/report', async (req: AuthenticatedRequest, res: Response): Promise<
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
     res.send(buffer);
+  } catch (error: any) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+router.get('/gst-register', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const { buffer, fileName } = await generateGstRegister(requestedMonth(req.query.month));
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.send(buffer);
+  } catch (error: any) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+router.get('/provider-bills', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const month = requestedMonth(req.query.month);
+    res.json({ month, rows: await getProviderReconciliation(month) });
+  } catch (error: any) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+async function assertPeriodOpen(period: string): Promise<void> {
+  const closed = await prisma.monthlyClosingSnapshot.findUnique({ where: { period } });
+  if (closed?.status === 'CLOSED') throw new Error(`Accounting period ${period} is closed`);
+}
+
+router.post('/provider-bills', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const bill = validateProviderInvoice(req.body);
+    await assertPeriodOpen(bill.period);
+    const existing = await prisma.providerInvoice.findUnique({
+      where: { provider_invoiceNumber: { provider: bill.provider, invoiceNumber: bill.invoiceNumber } },
+    });
+    if (existing && existing.period !== bill.period) await assertPeriodOpen(existing.period);
+    const saved = await prisma.providerInvoice.upsert({
+      where: { provider_invoiceNumber: { provider: bill.provider, invoiceNumber: bill.invoiceNumber } },
+      create: { ...bill, createdBy: req.user?.email || null },
+      update: bill,
+    });
+    res.json(saved);
+  } catch (error: any) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+router.delete('/provider-bills/:id', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const id = parsePositiveInt(req.params.id);
+    if (!id) throw new Error('Invalid bill id');
+    const bill = await prisma.providerInvoice.findUnique({ where: { id } });
+    if (!bill) {
+      res.status(404).json({ error: 'Bill not found' });
+      return;
+    }
+    await assertPeriodOpen(bill.period);
+    await prisma.providerInvoice.delete({ where: { id } });
+    res.json({ deleted: id });
   } catch (error: any) {
     res.status(400).json({ error: error.message });
   }

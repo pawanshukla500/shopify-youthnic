@@ -86,16 +86,28 @@ export class GstService {
     totalDiscounts?: number | null;
     items?: Array<{ price: number; quantity: number }>;
   }): number {
-    // 1. Inspect Shopify taxLines JSON if populated
+    // 1. Inspect Shopify taxLines JSON if populated.
+    // CGST + SGST lines add up to one rate; one tax title at two rates (IGST 5% and IGST 18%) is a mixed-rate order.
     if (order.taxLines) {
+      let lines: any = null;
       try {
-        const lines = typeof order.taxLines === 'string' ? JSON.parse(order.taxLines) : order.taxLines;
-        if (Array.isArray(lines) && lines.length > 0) {
-          const rateSum = lines.reduce((acc: number, l: any) => acc + (parseFloat(l.rate || '0') * 100), 0);
-          if (rateSum > 0) return Math.round(rateSum * 100) / 100;
-        }
+        lines = typeof order.taxLines === 'string' ? JSON.parse(order.taxLines) : order.taxLines;
       } catch {
         // ignore and fallback
+      }
+      if (Array.isArray(lines) && lines.length > 0) {
+        const ratesByTitle = new Map<string, Set<number>>();
+        for (const l of lines) {
+          const rate = Math.round(parseFloat(l?.rate || '0') * 10000) / 100;
+          if (!(rate > 0)) continue;
+          const title = String(l?.title || '').trim().toUpperCase();
+          ratesByTitle.set(title, (ratesByTitle.get(title) || new Set<number>()).add(rate));
+        }
+        if ([...ratesByTitle.values()].some((rates) => rates.size > 1)) {
+          throw new Error('Mixed GST rates require item-wise invoice/credit-note postings.');
+        }
+        const rateSum = [...ratesByTitle.values()].reduce((acc, rates) => acc + [...rates][0], 0);
+        if (rateSum > 0) return Math.round(rateSum * 100) / 100;
       }
     }
 

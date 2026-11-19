@@ -170,6 +170,9 @@
   .wf-canvas .sqd-step-task-rect,
   .wf-progress-track span,
   .wf-route li::before { animation: none !important; }
+  .wf-progress-track span,
+  .wf-canvas .sqd-step-task,
+  .wf-canvas .sqd-label { transition: none !important; }
 }
 .wf-branch-taken { color: var(--muted-light); font-weight: 600; }
 

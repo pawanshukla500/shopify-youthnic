@@ -34,6 +34,7 @@ import { tallyIntegrationService } from './tally-integration.service';
 
 export const IST_OFFSET_MS = 5.5 * 3600 * 1000;
 import { financialEventService } from './financial-event.service';
+import type { ProviderReconRow } from './provider-invoice.service';
 
 export type PaymentRailName = 'Delhivery' | 'EaseBuzz' | 'PhonePe' | 'Velocity';
 
@@ -155,6 +156,36 @@ export function resolvePaymentRailName(order: {
   }
 
   return 'EaseBuzz';
+}
+
+/** OMS-created `-EX-FWD` replacement orders: ₹0, not a sale; their freight belongs to the parent exchange. */
+export function isExchangeReplacement(order: { paymentMethod?: string | null; shopifyOrderId?: string | null }): boolean {
+  return order.paymentMethod === 'EXCHANGE' || /^EX-FWD-/.test(order.shopifyOrderId || '');
+}
+
+/** Exchange freight = reverse pickup (return charge) + replacement forward leg. */
+export function exchangeFreight(ret: { shippingCharge?: number | null; exchangeForwardCharge?: number | null }): number {
+  return (ret.shippingCharge || 0) + (ret.exchangeForwardCharge || 0);
+}
+
+/**
+ * The replacement leg is billed on the `-EX-FWD` order's own shipment (AWB = exchangeForwardAwb).
+ * Copy its cost and order name onto each exchange return so the report charges it to the parent.
+ */
+export async function attachExchangeForwardFreight(returns: any[]): Promise<void> {
+  const exchanges = returns.filter((r) => r?.isExchange && r.exchangeForwardAwb);
+  if (!exchanges.length || typeof prisma.shipment?.findMany !== 'function') return;
+  const shipments = await prisma.shipment.findMany({
+    where: { waybillNumber: { in: [...new Set(exchanges.map((r) => r.exchangeForwardAwb as string))] } },
+    select: { waybillNumber: true, forwardCharge: true, rtoCharge: true, order: { select: { shopifyOrderName: true } } },
+  });
+  const byAwb = new Map(shipments.map((s) => [s.waybillNumber, s]));
+  for (const r of exchanges) {
+    const s = byAwb.get(r.exchangeForwardAwb);
+    if (!s) continue;
+    r.exchangeOrderName = s.order?.shopifyOrderName || '';
+    if (s.forwardCharge !== null || s.rtoCharge !== null) r.exchangeForwardCharge = (s.forwardCharge || 0) + (s.rtoCharge || 0);
+  }
 }
 
 export const GST_STATE_CODES: Record<string, string> = {
@@ -323,6 +354,7 @@ export interface ReportOrderRow {
   rtoShipping: number | null;
   returnAwb: string;
   returnShipping: number | null;
+  exchangeShipping: number | null;
   totalShipping: number | null;
   shippingBasis: string;
   returnDeductedInPeriod: number;
@@ -369,6 +401,7 @@ export interface ReportData {
   cancellationsAndRtos?: Array<Record<string, any>>;
   exchanges?: Array<Record<string, any>>;
   settlementBridge?: any;
+  providerBills?: ProviderReconRow[];
 }
 
 /**
@@ -390,6 +423,7 @@ export function buildStateAccountingSummary(
   periodRtoOrders?: any[]
 ): { states: StateAccountingRow[]; totals: StateAccountingTotals } {
   const safeReturns = Array.isArray(periodReturns) ? periodReturns : [];
+  orders = orders.filter((o) => !isExchangeReplacement(o));
   const stateMap = new Map<string, StateAccountingRow>();
 
   function getRow(stateName?: string | null): StateAccountingRow {
@@ -571,10 +605,9 @@ export function buildStateAccountingSummary(
     const state = ret.order?.customerState || 'Unspecified';
     const row = getRow(state);
     if (ret.isExchange) {
-      if (ret.shippingCharge) {
-        row.exchangeFreightExpenses = (row.exchangeFreightExpenses || 0) + ret.shippingCharge;
-        row.actualFreightExpenses = (row.actualFreightExpenses || 0) + ret.shippingCharge;
-      }
+      const freight = exchangeFreight(ret);
+      row.exchangeFreightExpenses = (row.exchangeFreightExpenses || 0) + freight;
+      row.actualFreightExpenses = (row.actualFreightExpenses || 0) + freight;
       continue;
     }
     const retAmt = (ret.refundAmount && ret.refundAmount > 0)
@@ -732,6 +765,7 @@ export function buildReportData(
     label = monthOrLabel;
   }
 
+  orders = orders.filter((o) => !isExchangeReplacement(o));
   const { states: stateSummary, totals: stateTotals } = buildStateAccountingSummary(
     orders,
     periodReturns,
@@ -760,7 +794,8 @@ export function buildReportData(
     const forwardShipping = money(shipment?.forwardCharge);
     const rtoShipping = money(shipment?.rtoCharge);
     const returnShipping = money(returns.reduce((t, r) => t + (r.shippingCharge || 0), 0) || null);
-    const legsKnown = [forwardShipping, rtoShipping, returnShipping].filter((v) => v !== null);
+    const exchangeShipping = money(returns.reduce((t, r) => t + (r.isExchange ? r.exchangeForwardCharge || 0 : 0), 0) || null);
+    const legsKnown = [forwardShipping, rtoShipping, returnShipping, exchangeShipping].filter((v) => v !== null);
     const totalShipping = legsKnown.length ? sum(legsKnown) : null;
 
     const sources = new Set<string>([
@@ -843,6 +878,7 @@ export function buildReportData(
       rtoShipping,
       returnAwb: reverse?.returnWaybillNumber || '',
       returnShipping,
+      exchangeShipping,
       totalShipping,
       shippingBasis,
       returnDeductedInPeriod: money(returnDeductedInPeriod) || 0,
@@ -903,7 +939,10 @@ export function buildReportData(
     }
     for (const r of returns) {
       if (r.returnWaybillNumber) {
-        shipping.push({ orderNo: row.orderNo, leg: 'Reverse pickup', awb: r.returnWaybillNumber, weight: null, zone: '', charge: money(r.shippingCharge), basis: r.shippingCostSource || '' });
+        shipping.push({ orderNo: row.orderNo, leg: r.isExchange ? 'Exchange reverse pickup' : 'Reverse pickup', awb: r.returnWaybillNumber, weight: null, zone: '', charge: money(r.shippingCharge), basis: r.shippingCostSource || '' });
+      }
+      if (r.isExchange && r.exchangeForwardAwb) {
+        shipping.push({ orderNo: row.orderNo, leg: 'Exchange replacement', awb: r.exchangeForwardAwb, weight: null, zone: '', charge: money(r.exchangeForwardCharge), basis: r.exchangeOrderName || '' });
       }
       returnRows.push({
         orderNo: row.orderNo,
@@ -973,7 +1012,8 @@ export function buildReportData(
     { label: 'Shipping cost total (₹)', value: sum(rows.map((r) => r.totalShipping)) },
     { label: '   …forward (₹)', value: sum(rows.map((r) => r.forwardShipping)) },
     { label: '   …RTO (₹)', value: sum(rows.map((r) => r.rtoShipping)) },
-    { label: '   …reverse pickups (₹)', value: sum(rows.map((r) => r.returnShipping)) },
+    { label: '   …reverse pickups, incl. exchange pickups (₹)', value: sum(rows.map((r) => r.returnShipping)) },
+    { label: '   …exchange replacements (₹)', value: sum(rows.map((r) => r.exchangeShipping)) },
     { label: 'Orders with actual (billed) shipping cost', value: rows.filter((r) => r.shippingBasis.startsWith('Actual')).length },
     { label: 'Orders with estimated shipping cost only', value: rows.filter((r) => r.shippingBasis.startsWith('Estimate')).length },
     { label: 'Refunds (₹)', value: sum(rows.map((r) => r.refundAmount)) },
@@ -1024,9 +1064,9 @@ export function buildReportData(
       returnAwb: ex.returnWaybillNumber || '',
       reverseFreight: money(ex.shippingCharge) || 0,
       replacementOrderNo: ex.exchangeOrderName || '',
-      replacementAwb: ex.exchangeWaybillNumber || '',
-      forwardFreight: money(ex.exchangeShippingCharge) || 0,
-      totalFreight: money((ex.shippingCharge || 0) + (ex.exchangeShippingCharge || 0)) || 0,
+      replacementAwb: ex.exchangeForwardAwb || '',
+      forwardFreight: money(ex.exchangeForwardCharge) || 0,
+      totalFreight: money(exchangeFreight(ex)) || 0,
       netNewSales: 0.00, // Exchange replacements are zero new sales
       attributedState: origOrder?.customerState || 'Unspecified',
     });
@@ -1272,6 +1312,7 @@ export async function renderWorkbook(data: ReportData): Promise<Buffer> {
     { header: 'RTO Shipping (₹)', key: 'rtoShipping', width: 11, type: 'money' },
     { header: 'Return AWB', key: 'returnAwb', width: 16 },
     { header: 'Return Shipping (₹)', key: 'returnShipping', width: 11, type: 'money' },
+    { header: 'Exchange Replacement Shipping (₹)', key: 'exchangeShipping', width: 13, type: 'money' },
     { header: 'Total Shipping (₹)', key: 'totalShipping', width: 12, type: 'money' },
     { header: 'Shipping Cost Basis', key: 'shippingBasis', width: 24 },
     { header: 'Refund (₹)', key: 'refundAmount', width: 11, type: 'money' },
@@ -1285,7 +1326,7 @@ export async function renderWorkbook(data: ReportData): Promise<Buffer> {
     'Orders',
     ordersColumns,
     data.orders as any[],
-    ['orderValue', 'receivedAmount', 'gatewayFee', 'forwardShipping', 'rtoShipping', 'returnShipping', 'totalShipping', 'refundAmount', 'netAfterShipping', 'outstanding']
+    ['orderValue', 'receivedAmount', 'gatewayFee', 'forwardShipping', 'rtoShipping', 'returnShipping', 'exchangeShipping', 'totalShipping', 'refundAmount', 'netAfterShipping', 'outstanding']
   );
 
   const statusCol = ordersSheet.getColumn('accountsStatus').number;
@@ -1525,6 +1566,13 @@ export async function renderWorkbook(data: ReportData): Promise<Buffer> {
     });
   }
 
+  // 3. Provider bills (Easebuzz, PhonePe, Velocity, Delhivery): Purchase + Journal nullifying it against consumption
+  if (data.providerBills?.length) {
+    const { providerTallyRows } = await import('./provider-invoice.service');
+    const monthEnd = istDay(new Date(monthRange(data.month).end.getTime() - 1));
+    for (const bill of data.providerBills) tallyVoucherRows.push(...providerTallyRows(bill, monthEnd!));
+  }
+
   addTable(workbook, 'Tally Vouchers', tallyVoucherColumns, tallyVoucherRows, [
     'taxableAmount',
     'igst',
@@ -1706,6 +1754,53 @@ export async function renderWorkbook(data: ReportData): Promise<Buffer> {
     );
   }
 
+  // ═════════════════════════════════════════════════════════════════════════════
+  // Sheet: Provider Bills (bill vs charges already deducted)
+  // ═════════════════════════════════════════════════════════════════════════════
+  if (data.providerBills?.length) {
+    addTable(
+      workbook,
+      'Provider Bills',
+      [
+        { header: 'Provider', key: 'label', width: 12 },
+        { header: 'Type', key: 'kind', width: 10 },
+        { header: 'Invoice No(s)', key: 'invoiceNos', width: 26 },
+        { header: 'Bill Taxable (₹)', key: 'invoiceTaxable', width: 14, type: 'money' },
+        { header: 'Bill GST (₹)', key: 'invoiceGst', width: 12, type: 'money' },
+        { header: 'Bill Total (₹)', key: 'invoiceTotal', width: 14, type: 'money' },
+        { header: 'Our Books Taxable (₹)', key: 'bookTaxable', width: 14, type: 'money' },
+        { header: 'Our Books GST (₹)', key: 'bookGst', width: 12, type: 'money' },
+        { header: 'Our Books Total (₹)', key: 'bookTotal', width: 14, type: 'money' },
+        { header: 'Variance: Bill − Books (₹)', key: 'variance', width: 14, type: 'money' },
+        { header: 'Status', key: 'status', width: 16 },
+        { header: 'Lines Counted', key: 'lines', width: 10 },
+        { header: 'Lines on Estimate', key: 'estimated', width: 10 },
+        { header: 'Books Basis', key: 'basis', width: 44 },
+        { header: 'Tally: Bill Credited To', key: 'partyLedger', width: 30 },
+        { header: 'Tally: Nullify Against', key: 'consumedFromLedger', width: 32 },
+      ],
+      data.providerBills.map((b) => ({
+        label: b.label,
+        kind: b.kind === 'GATEWAY' ? 'Gateway' : 'Freight',
+        invoiceNos: b.invoices.map((i) => i.invoiceNumber).join(', '),
+        invoiceTaxable: b.invoiceTaxable,
+        invoiceGst: b.invoiceGst,
+        invoiceTotal: b.invoiceTotal,
+        bookTaxable: b.consumption.taxable,
+        bookGst: b.consumption.gst,
+        bookTotal: b.consumption.total,
+        variance: b.variance,
+        status: b.status === 'MATCHED' ? 'Matched' : b.status === 'VARIANCE' ? 'Variance: check' : 'Bill not entered',
+        lines: b.consumption.lines,
+        estimated: b.consumption.estimated,
+        basis: b.consumption.basis,
+        partyLedger: b.ledgers.partyLedger,
+        consumedFromLedger: b.ledgers.consumedFromLedger,
+      })),
+      ['invoiceTaxable', 'invoiceGst', 'invoiceTotal', 'bookTaxable', 'bookGst', 'bookTotal', 'variance']
+    );
+  }
+
   return Buffer.from(await workbook.xlsx.writeBuffer());
 }
 
@@ -1881,6 +1976,7 @@ export async function generateMonthlyReport(
       }),
   ]);
 
+  await attachExchangeForwardFreight([...orders.flatMap((o: any) => o.returns || []), ...periodReturns]);
   const data = buildReportData(
     month,
     orders,
@@ -1893,6 +1989,12 @@ export async function generateMonthlyReport(
   );
   if (bridgeResult) {
     data.settlementBridge = bridgeResult;
+  }
+  try {
+    const { getProviderReconciliation } = await import('./provider-invoice.service');
+    data.providerBills = await getProviderReconciliation(month);
+  } catch (err: any) {
+    logger.warn('Provider bill reconciliation failed for monthly report', { month, error: err?.message });
   }
   const buffer = await renderWorkbook(data);
   return { data, buffer, fileName: `Youthnic-Accounts-${month}.xlsx` };
@@ -1963,6 +2065,7 @@ export async function generateDateRangeReport(
       : Promise.resolve([]),
   ]);
 
+  await attachExchangeForwardFreight([...orders.flatMap((o: any) => o.returns || []), ...periodReturns]);
   const data = buildReportData(
     label,
     orders,
@@ -2063,6 +2166,7 @@ export async function getStateMonthlyAccounting(
       : Promise.resolve([]),
   ]);
 
+  await attachExchangeForwardFreight(periodReturns);
   const { states, totals } = buildStateAccountingSummary(
     orders,
     periodReturns,

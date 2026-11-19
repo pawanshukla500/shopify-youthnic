@@ -30,6 +30,12 @@ $$\text{Gross Collection} = \text{Actual Bank Receipt} + \text{MDR Fee Expense} 
 - **Credit**: `CLEARING_EASEBUZZ` ₹1,000.00
 - **Total Debits**: ₹1,000.00 == **Total Credits**: ₹1,000.00
 
+### Monthly provider bill (Tally Excel path)
+Easebuzz, PhonePe, Velocity and Delhivery each raise one tax invoice a month for charges they already deducted (`src/modules/accounts/provider-invoice.service.ts`, Accounts → Provider Bills). The bill total must equal our consumption for the month (Easebuzz: `GatewaySettlementOrder` service charge + GST by transaction date). In the monthly Tally Excel:
+- **Purchase**: Dr expense ledger + Dr input GST / Cr provider ledger (bill total).
+- **Journal**: Dr provider ledger / Cr `Sundry Debtors - Online Store Customers` (gateway) or the courier wallet (freight), for the consumption total.
+The provider ledger closes to zero; any balance is a variance to raise with the provider. The internal journal (and TallyPrime XML) already expenses fees at settlement, so use one path per month, never both.
+
 ## 4. Verification & Audit Precedence
 1. Bank credit transaction on authorized bank statement with matching UTR.
 2. Gateway settlement batch payout advice.

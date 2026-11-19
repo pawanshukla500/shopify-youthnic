@@ -958,6 +958,30 @@ model FreightBill {
   @@index([invoiceNumber])
 }
 
+// Monthly tax invoice a provider raises for charges it already deducted
+// (Easebuzz/PhonePe from settlements, Velocity/Delhivery from the wallet).
+// Reconciled against the per-transaction charges in our books; the bill is
+// booked in Tally and cancelled against that consumption.
+model ProviderInvoice {
+  id            Int      @id @default(autoincrement())
+  provider      String // EASEBUZZ | PHONEPE | VELOCITY | DELHIVERY
+  period        String // "YYYY-MM": the month the charges were for
+  invoiceNumber String
+  invoiceDate   DateTime
+  taxableAmount Decimal  @db.Decimal(15, 2)
+  igst          Decimal  @default(0) @db.Decimal(15, 2)
+  cgst          Decimal  @default(0) @db.Decimal(15, 2)
+  sgst          Decimal  @default(0) @db.Decimal(15, 2)
+  totalAmount   Decimal  @db.Decimal(15, 2)
+  note          String?
+  createdBy     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([provider, invoiceNumber])
+  @@index([period])
+}
+
 model MonthlyClosingSnapshot {
   id                       Int           @id @default(autoincrement())
   period                   String        @unique // "YYYY-MM" e.g. "2026-10"

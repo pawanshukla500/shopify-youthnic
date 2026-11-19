@@ -1,6 +1,6 @@
 # Shopify OMS — System Handoff & Operational State
 
-> **Last Verified**: 2026-11-18  
+> **Last Verified**: 2026-11-19  
 > **Repository**: [pawanshukla500/shopify-youthnic](https://github.com/pawanshukla500/shopify-youthnic) (Branch: `main`)  
 > **TaskFlow Pro Project**: `Shopify Youthnic OMS` (`a7f820cb-4885-486d-92d2-c8e4a63054f4`)  
 
@@ -73,6 +73,11 @@ Automated Order Management System for **youthnic2024.myshopify.com** (Brand: You
    - Combined single & bulk download/print sequenced strictly as: **Order 1 Label → Order 1 Invoice → Order 2 Label → Order 2 Invoice...** formatted with thermal 4R and A4 page breaks.
    - Completed all official Delhivery requirement documents (`Scan Push`, `EPOD`, `QC Image`, `Sorter Image`) for profile `fa5d92-VBEXPORT-do` (V B EXPORT) in `C:\Users\Pawan Shukla\Desktop\Delhivery Docs\`.
    - Documented full integration specification in [`docs/DELHIVERY_INTEGRATION_SPEC.md`](DELHIVERY_INTEGRATION_SPEC.md).
+
+9. **Accounts: exchange freight, provider bills and Tally register (2026-11-19)**:
+   - **Exchange freight**: an exchange now costs reverse pickup (`Return.shippingCharge`) + replacement leg (the `-EX-FWD` order's shipment, copied onto the return by `attachExchangeForwardFreight`). The `-EX-FWD` replacement orders (`paymentMethod = 'EXCHANGE'`, ₹0) are no longer counted as orders or sales; their freight shows on the parent order (new "Exchange Replacement Shipping" column). The Velocity charge sync now also fetches reverse-pickup AWBs and writes the actual charge to the return.
+   - **Provider Bills** (Accounts → Provider Bills tab, `GET/POST /api/accounts/provider-bills`, `DELETE /provider-bills/:id`, new `ProviderInvoice` table): type in the monthly tax invoice from Easebuzz, PhonePe, Velocity or Delhivery. It is compared with the charges already deducted in our books (Easebuzz: settlement rows by transaction date; PhonePe: order gateway fees; couriers: per-AWB forward/RTO/reverse/exchange legs by manifest date). The monthly Tally Excel gets a "Provider Bills" sheet plus, per bill, a Purchase voucher (Dr expense + input GST, Cr provider) and a Journal nullifying it against the consumption (Dr provider, Cr Sundry Debtors / courier wallet). Closed periods refuse changes.
+   - **Sales & Returns Register** (`GET /api/accounts/gst-register?month=`, header button): the accounts team's "Shopify format": one sheet per channel (Delivery-COD, Velocity-COD, EaseBuzz-Prepaid, PhonePe-Prepaid) and the same four for returns, state-wise, CGST+SGST for Gujarat and IGST elsewhere. Totals follow the State Summary (gross sales and returns deducted); orders without provable GST go to a "GST Review" sheet. RTOs are not in the returns register.
 
 ---
 

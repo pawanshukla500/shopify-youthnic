@@ -1955,6 +1955,65 @@ export async function getFreightBills(): Promise<any[]> {
   return response.data
 }
 
+export type ProviderCode = 'EASEBUZZ' | 'PHONEPE' | 'VELOCITY' | 'DELHIVERY'
+
+export interface ProviderBillInput {
+  provider: ProviderCode
+  period: string
+  invoiceNumber: string
+  invoiceDate: string
+  taxableAmount: number
+  igst: number
+  cgst: number
+  sgst: number
+  totalAmount: number
+  note?: string
+}
+
+export interface ProviderBillRow {
+  provider: ProviderCode
+  label: string
+  kind: 'GATEWAY' | 'FREIGHT'
+  period: string
+  invoices: Array<Omit<ProviderBillInput, 'provider' | 'period'> & { id: number }>
+  invoiceTaxable: number
+  invoiceGst: number
+  invoiceTotal: number
+  consumption: { taxable: number; gst: number; total: number; lines: number; estimated: number; basis: string }
+  variance: number | null
+  status: 'MATCHED' | 'VARIANCE' | 'INVOICE_PENDING'
+  ledgers: { partyLedger: string; expenseLedger: string; consumedFromLedger: string }
+}
+
+/** Each provider's monthly bill vs the charges it already deducted (our books). */
+export async function getProviderBills(month: string): Promise<{ month: string; rows: ProviderBillRow[] }> {
+  const response = await api.get('/api/accounts/provider-bills', { params: { month } })
+  return response.data
+}
+
+export async function saveProviderBill(payload: ProviderBillInput): Promise<unknown> {
+  const response = await api.post('/api/accounts/provider-bills', payload)
+  return response.data
+}
+
+export async function deleteProviderBill(id: number): Promise<unknown> {
+  const response = await api.delete(`/api/accounts/provider-bills/${id}`)
+  return response.data
+}
+
+/** State-wise Sales & Returns register per channel, in the accounts team's Tally upload format. */
+export async function downloadGstRegister(month: string): Promise<void> {
+  const response = await api.get('/api/accounts/gst-register', { params: { month }, responseType: 'blob' })
+  const url = window.URL.createObjectURL(new Blob([response.data]))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `Youthnic-Sales-Returns-Register-${month}.xlsx`
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.URL.revokeObjectURL(url)
+}
+
 export async function getReturnScanStatus(): Promise<{
   configured: boolean
   connected: boolean

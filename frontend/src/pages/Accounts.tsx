@@ -15,11 +15,16 @@ import {
   getBankStatementLines,
   getGatewayBatches,
   getFreightBills,
+  getProviderBills,
+  saveProviderBill,
+  deleteProviderBill,
+  downloadGstRegister,
   importAccountsFile,
   runAccountsNow,
   saveAccountsRecipients,
   type AccountsImportKind,
   type AccountsImportResult,
+  type ProviderCode,
 } from '../api'
 import {
   Button,
@@ -48,7 +53,7 @@ function nextReportDate(month: string, day: number): string {
   return next.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })
 }
 
-type AccountsTab = 'matrix' | 'gateway' | 'freight' | 'bank' | 'pnl' | 'ledger' | 'vouchers' | 'closing'
+type AccountsTab = 'matrix' | 'bills' | 'gateway' | 'freight' | 'bank' | 'pnl' | 'ledger' | 'vouchers' | 'closing'
 
 const UPLOADS: Array<{
   kind: AccountsImportKind
@@ -164,6 +169,158 @@ function UploadCard({ upload, onDone }: { upload: (typeof UPLOADS)[number]; onDo
   )
 }
 
+const BILL_STATUS: Record<string, { label: string; color: string }> = {
+  MATCHED: { label: 'Matched', color: 'var(--tone-success-fg)' },
+  VARIANCE: { label: 'Variance: check', color: 'var(--tone-danger-fg)' },
+  INVOICE_PENDING: { label: 'Bill not entered', color: 'var(--muted)' },
+}
+
+const EMPTY_BILL = { provider: 'EASEBUZZ' as ProviderCode, invoiceNumber: '', invoiceDate: '', taxableAmount: '', igst: '', cgst: '', sgst: '', totalAmount: '' }
+
+/** Provider monthly bills (Easebuzz, PhonePe, Velocity, Delhivery) against the charges already in our books. */
+function ProviderBillsTab({ month }: { month: string }) {
+  const toast = useToast()
+  const queryClient = useQueryClient()
+  const [form, setForm] = useState(EMPTY_BILL)
+  const bills = useQuery({ queryKey: ['provider-bills', month], queryFn: () => getProviderBills(month) })
+  const set = (key: keyof typeof EMPTY_BILL) => (e: { target: { value: string } }) => setForm((f) => ({ ...f, [key]: e.target.value }))
+  const num = (v: string) => (v.trim() === '' ? 0 : Number(v))
+
+  const save = useMutation({
+    mutationFn: () => saveProviderBill({
+      provider: form.provider,
+      period: month,
+      invoiceNumber: form.invoiceNumber.trim(),
+      invoiceDate: form.invoiceDate,
+      taxableAmount: num(form.taxableAmount),
+      igst: num(form.igst),
+      cgst: num(form.cgst),
+      sgst: num(form.sgst),
+      totalAmount: num(form.totalAmount),
+    }),
+    onSuccess: () => {
+      toast.toast('success', `Bill ${form.invoiceNumber} saved for ${month}.`)
+      setForm(EMPTY_BILL)
+      queryClient.invalidateQueries({ queryKey: ['provider-bills'] })
+    },
+    onError: (error) => toast.toast('error', apiError(error)),
+  })
+
+  const remove = useMutation({
+    mutationFn: deleteProviderBill,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['provider-bills'] }),
+    onError: (error) => toast.toast('error', apiError(error)),
+  })
+
+  return (
+    <>
+      <Panel style={{ marginBottom: '16px' }}>
+        <PanelHeading eyebrow={`Bills for ${month}`} title="Enter a provider's monthly tax invoice" />
+        <p style={{ margin: '0 0 12px', fontSize: '13px', color: 'var(--muted)' }}>
+          Copy the totals from the invoice PDF (e.g. Easebuzz: Base 4426.11, IGST 796.70, Total 5222.81). The month's Tally Excel then carries a
+          Purchase voucher for the bill and a Journal that cancels it against the charges already deducted, so the provider ledger closes to zero.
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '8px', alignItems: 'end' }}>
+          <FormField label="Provider">
+            <select value={form.provider} onChange={set('provider')}>
+              <option value="EASEBUZZ">Easebuzz</option>
+              <option value="PHONEPE">PhonePe</option>
+              <option value="VELOCITY">Velocity</option>
+              <option value="DELHIVERY">Delhivery</option>
+            </select>
+          </FormField>
+          <FormField label="Invoice no">
+            <input value={form.invoiceNumber} onChange={set('invoiceNumber')} placeholder="N2627/000099618" />
+          </FormField>
+          <FormField label="Invoice date">
+            <input type="date" value={form.invoiceDate} onChange={set('invoiceDate')} />
+          </FormField>
+          <FormField label="Taxable (₹)">
+            <input inputMode="decimal" value={form.taxableAmount} onChange={set('taxableAmount')} />
+          </FormField>
+          <FormField label="IGST (₹)">
+            <input inputMode="decimal" value={form.igst} onChange={set('igst')} />
+          </FormField>
+          <FormField label="CGST (₹)">
+            <input inputMode="decimal" value={form.cgst} onChange={set('cgst')} />
+          </FormField>
+          <FormField label="SGST (₹)">
+            <input inputMode="decimal" value={form.sgst} onChange={set('sgst')} />
+          </FormField>
+          <FormField label="Invoice total (₹)">
+            <input inputMode="decimal" value={form.totalAmount} onChange={set('totalAmount')} />
+          </FormField>
+          <Button
+            className="button-primary"
+            loading={save.isPending}
+            disabled={!form.invoiceNumber.trim() || !form.invoiceDate || !form.totalAmount}
+            onClick={() => save.mutate()}
+          >
+            Save bill
+          </Button>
+        </div>
+      </Panel>
+
+      <Panel className="table-panel">
+        <PanelHeading eyebrow="Reconciliation" title="Bill vs charges in our books" />
+        {bills.isLoading && <LoadingState label="Reconciling provider bills…" />}
+        {bills.isError && <ErrorBox message={apiError(bills.error)} />}
+        <div className="table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Provider</th>
+                <th>Bill(s)</th>
+                <th style={{ textAlign: 'right' }}>Bill total</th>
+                <th style={{ textAlign: 'right' }}>Our books (taxable + GST)</th>
+                <th style={{ textAlign: 'right' }}>Our books total</th>
+                <th style={{ textAlign: 'right' }}>Variance</th>
+                <th>Status</th>
+                <th>Basis</th>
+              </tr>
+            </thead>
+            <tbody>
+              {bills.data?.rows.map((row) => (
+                <tr key={row.provider}>
+                  <td><strong>{row.label}</strong></td>
+                  <td>
+                    {row.invoices.length === 0 && <span style={{ color: 'var(--muted)' }}>None</span>}
+                    {row.invoices.map((inv) => (
+                      <div key={inv.id} style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                        <code>{inv.invoiceNumber}</code>
+                        <span className="tabular-nums">{formatMoney(Number(inv.totalAmount))}</span>
+                        <button
+                          type="button"
+                          aria-label={`Delete bill ${inv.invoiceNumber}`}
+                          style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--tone-danger-fg)' }}
+                          onClick={() => window.confirm(`Delete bill ${inv.invoiceNumber}?`) && remove.mutate(inv.id)}
+                        >
+                          <Icon name="close" size={13} />
+                        </button>
+                      </div>
+                    ))}
+                  </td>
+                  <td className="amount-cell">{row.invoices.length ? formatMoney(row.invoiceTotal) : '—'}</td>
+                  <td className="amount-cell">{formatMoney(row.consumption.taxable)} + {formatMoney(row.consumption.gst)}</td>
+                  <td className="amount-cell" style={{ fontWeight: 700 }}>{formatMoney(row.consumption.total)}</td>
+                  <td className="amount-cell" style={{ color: row.status === 'VARIANCE' ? 'var(--tone-danger-fg)' : undefined }}>
+                    {row.variance === null ? '—' : formatMoney(row.variance)}
+                  </td>
+                  <td><span style={{ color: BILL_STATUS[row.status].color, fontWeight: 600, fontSize: '12px' }}>{BILL_STATUS[row.status].label}</span></td>
+                  <td style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                    {row.consumption.basis} · {row.consumption.lines} line(s)
+                    {row.consumption.estimated > 0 && <span style={{ color: 'var(--tone-danger-fg)' }}> · {row.consumption.estimated} still on estimate</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+    </>
+  )
+}
+
 export default function AccountsPage() {
   useDocumentTitle('Payments & Accounts (Tally ERP)')
   const toast = useToast()
@@ -246,6 +403,12 @@ export default function AccountsPage() {
     onError: (error) => toast.toast('error', apiError(error)),
   })
 
+  const downloadRegister = useMutation({
+    mutationFn: () => downloadGstRegister(month),
+    onSuccess: () => toast.toast('success', `Sales & Returns register for ${month} downloaded.`),
+    onError: (error) => toast.toast('error', apiError(error)),
+  })
+
   const downloadXml = useMutation({
     mutationFn: () => downloadTallyXml(month),
     onSuccess: () => toast.toast('success', `TallyPrime XML voucher file for ${month} downloaded.`),
@@ -299,6 +462,7 @@ export default function AccountsPage() {
 
   const tabs: Array<{ key: AccountsTab; label: string; icon: any }> = [
     { key: 'matrix', label: 'State-Wise Matrix', icon: 'table' },
+    { key: 'bills', label: 'Provider Bills', icon: 'file-text' },
     { key: 'gateway', label: 'Gateway Expenses', icon: 'credit-card' },
     { key: 'freight', label: 'Freight Expenses', icon: 'truck' },
     { key: 'bank', label: 'Bank & UTR Reconcile', icon: 'check-circle' },
@@ -339,7 +503,11 @@ export default function AccountsPage() {
             </Button>
             <Button className="button-secondary" loading={downloadExcel.isPending} onClick={() => downloadExcel.mutate()}>
               <Icon name="download" size={14} />
-              Tally Excel (8 Sheets)
+              Tally Excel Report
+            </Button>
+            <Button className="button-secondary" loading={downloadRegister.isPending} onClick={() => downloadRegister.mutate()}>
+              <Icon name="download" size={14} />
+              Sales &amp; Returns Register
             </Button>
             <Button className="button-secondary" loading={email.isPending} onClick={() => email.mutate()}>
               <Icon name="mail" size={14} />
@@ -751,6 +919,8 @@ export default function AccountsPage() {
       )}
 
       {/* TAB 3: Freight Expenses */}
+      {activeTab === 'bills' && <ProviderBillsTab month={month} />}
+
       {activeTab === 'freight' && (
         <Panel className="table-panel">
           <PanelHeading eyebrow="Logistics Invoicing" title="Delhivery & Velocity Freight Invoices" />

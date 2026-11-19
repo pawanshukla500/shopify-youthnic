@@ -284,6 +284,24 @@ export class VelocityFinancialSyncService {
         logger.warn('Failed querying DB shipments for Velocity candidates', { error: err.message });
       }
 
+      // 1a-ii. Velocity reverse pickups (returns and exchange pickups) still on an estimated charge
+      try {
+        if (typeof prisma.return?.findMany === 'function') {
+          const reverses = await prisma.return.findMany({
+            where: {
+              returnWaybillNumber: { not: null },
+              carrier: { contains: 'velocity', mode: 'insensitive' },
+              OR: [{ shippingCostSource: null }, { shippingCostSource: { not: 'ACTUAL' } }],
+            },
+            select: { returnWaybillNumber: true },
+            take: 500,
+          });
+          for (const r of reverses) if (r.returnWaybillNumber?.trim()) candidateAwbSet.add(r.returnWaybillNumber.trim());
+        }
+      } catch (err: any) {
+        logger.warn('Failed querying Velocity reverse pickups for charge audit', { error: err.message });
+      }
+
       // 1b. Query Velocity live shipments API (up to 5 pages) to discover recently manifested orders
       try {
         for (let page = 1; page <= 5; page++) {
@@ -450,6 +468,18 @@ export class VelocityFinancialSyncService {
 
           const charges = item.charges || [];
           if (charges.length === 0) continue;
+
+          // Reverse pickups are billed on the return AWB, never on the order's forward shipment.
+          const reverse = typeof prisma.return?.findFirst === 'function'
+            ? await prisma.return.findFirst({ where: { returnWaybillNumber: awb }, select: { id: true } })
+            : null;
+          if (reverse) {
+            const net = Math.round(charges.reduce((t: number, c: any) => t + Number(c.amountWithGst || 0), 0) * 100) / 100;
+            await prisma.return.update({ where: { id: reverse.id }, data: { shippingCharge: net, shippingCostSource: 'ACTUAL' } });
+            chargesAudited++;
+            totalBilledCharges += net;
+            continue;
+          }
 
           const order = await findOrderByReference(awb);
           if (!order || !order.shipment) continue;

@@ -19,7 +19,7 @@ The system is organized into five major integrated domains:
 │    - Tally XML      │    - WhatsApp Ekta │    - GSTIN 24AERPB8666E1ZB  │
 ├─────────────────────┴────────────────────┴─────────────────────────────┤
 │ 4. Analytics & Workflows                 │ 5. Core Order Lifecycle     │
-│    - RFM Customer Segments               │    - Sidebar Workflow Trees │
+│    - RFM Customer Segments               │    - Workflow Designer      │
 │    - Report Distribution Agent           │    - Order Money Cards      │
 │    - Executive Digests                   │    - KwikEngage WhatsApp    │
 └──────────────────────────────────────────┴─────────────────────────────┘

@@ -1574,6 +1574,7 @@ class OrderService {
           { salesChannel: { contains: search, mode: 'insensitive' } },
           { tags: { contains: search, mode: 'insensitive' } },
           { shipment: { waybillNumber: { contains: search } } },
+          { returns: { some: { OR: [{ returnWaybillNumber: { contains: search } }, { exchangeForwardAwb: { contains: search } }] } } },
           {
             items: {
               some: {

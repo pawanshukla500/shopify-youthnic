@@ -367,6 +367,12 @@ export async function setShippingPriority(priority: import('./types').CarrierPri
   return response.data
 }
 
+/** Order lookup for the workflow designer: exact order name / AWB first, then partial matches. */
+export async function lookupOrders(q: string): Promise<Order[]> {
+  const response = await api.get<{ orders: Order[] }>('/api/orders/lookup', { params: { q } })
+  return response.data.orders
+}
+
 export async function getWorkflowDesign(): Promise<{ definition: import('./workflow-map').WorkflowDefinition | null; updatedAt: string | null }> {
   const response = await api.get('/api/workflows/design')
   return response.data

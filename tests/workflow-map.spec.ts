@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   allStepIds,
+  chooseBranch,
   DEFAULT_WORKFLOW,
   invalidTokens,
   matchesFacts,
@@ -91,6 +92,15 @@ describe('resolveOrderPath on the default design', () => {
     expect(path.passedIds).not.toContain('in-transit');
   });
 
+  it('sends a cancel after pickup to transit or RTO, not "Cancelled before pickup"', () => {
+    const moving = where(order({ status: 'CANCELLED', operationalTab: 'transit' }, { waybillNumber: 'VELP2', courier: 'Velocity', status: 'IN_TRANSIT' }));
+    expect(moving.currentId).toBe('in-transit');
+    const returning = where(order({ status: 'CANCELLED', operationalTab: 'return' }, { waybillNumber: 'VELP3', courier: 'Velocity', status: 'IN_TRANSIT' }));
+    expect(returning.branches['delivery-outcome']).toBe('NDR / RTO');
+    expect(returning.currentId).toBe('rto-transit');
+    expect(returning.passedIds).not.toContain('cancelled');
+  });
+
   it('places a return at its latest stage even when the order status lags', () => {
     const path = where(order(
       { status: 'RETURN_REQUESTED', operationalTab: 'return' },
@@ -123,6 +133,19 @@ describe('resolveOrderPath on the default design', () => {
   });
 });
 
+describe('chooseBranch', () => {
+  const decision = (conditions: Record<string, string>) => ({
+    id: 'd', componentType: 'switch', type: 'decision', name: 'D',
+    properties: { conditions },
+    branches: Object.fromEntries(Object.keys(conditions).map((name) => [name, []])),
+  });
+  it('uses only a blank condition as the default, never a mistyped one', () => {
+    expect(chooseBranch(decision({ Typo: 'courier xpressbees', Default: '' }), ['order:NEW'])).toBe('Default');
+    expect(chooseBranch(decision({ Typo: 'courier xpressbees' }), ['order:NEW'])).toBeNull();
+    expect(chooseBranch(decision({ A: 'order:NEW', Default: '' }), ['order:NEW'])).toBe('A');
+  });
+});
+
 describe('default design', () => {
   const tokens = JSON.stringify(DEFAULT_WORKFLOW).toUpperCase();
   const enumValues = (name: string) => {
@@ -151,6 +174,8 @@ describe('save API validator', () => {
     [{ properties: {}, sequence: [step, step] }, 'duplicate'],
     [{ properties: {}, sequence: [{ ...step, componentType: 'container' }] }, 'unsupported'],
     [{ properties: {}, sequence: [{ ...step, componentType: 'switch', branches: { Yes: 'x' } }] }, 'invalid branch'],
+    // 100k three-byte characters: under the limit in UTF-16 units, over it in bytes.
+    [{ properties: { name: '₹'.repeat(100_000) }, sequence: [step] }, 'too large'],
   ])('rejects %j', (definition, message) => {
     expect(workflowDesignError(definition)).toContain(message);
   });

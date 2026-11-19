@@ -1573,8 +1573,8 @@ class OrderService {
           { customerPincode: { contains: search } },
           { salesChannel: { contains: search, mode: 'insensitive' } },
           { tags: { contains: search, mode: 'insensitive' } },
-          { shipment: { waybillNumber: { contains: search } } },
-          { returns: { some: { OR: [{ returnWaybillNumber: { contains: search } }, { exchangeForwardAwb: { contains: search } }] } } },
+          { shipment: { waybillNumber: { contains: search, mode: 'insensitive' } } },
+          { returns: { some: { OR: [{ returnWaybillNumber: { contains: search, mode: 'insensitive' } }, { exchangeForwardAwb: { contains: search, mode: 'insensitive' } }] } } },
           {
             items: {
               some: {

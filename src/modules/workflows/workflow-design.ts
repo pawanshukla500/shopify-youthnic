@@ -17,7 +17,7 @@ export function workflowDesignError(value: unknown): string | null {
   if (!isObject(value) || !Array.isArray(value.sequence) || !isObject(value.properties)) {
     return 'definition needs a sequence array and a properties object';
   }
-  if (JSON.stringify(value).length > MAX_BYTES) return 'definition is too large';
+  if (Buffer.byteLength(JSON.stringify(value), 'utf8') > MAX_BYTES) return 'definition is too large';
 
   const ids = new Set<string>();
   const check = (sequence: unknown[], depth: number): string | null => {

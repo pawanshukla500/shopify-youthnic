@@ -717,6 +717,40 @@ router.get('/orders', async (req: Request, res: Response): Promise<void> => {
   }
 });
 
+// Workflow designer lookup: the exact order name / AWB first, then up to 10
+// partial search hits. A plain limited search can bury an old exact match
+// (e.g. #26YOU1) under newer partial ones.
+router.get('/orders/lookup', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const q = String(req.query.q || '').trim();
+    if (!q || q.length > 100) {
+      res.status(400).json({ error: 'q (order name or AWB, up to 100 characters) is required' });
+      return;
+    }
+    const bare = q.replace(/^#/, '');
+    const same = (value: string) => ({ equals: value, mode: 'insensitive' as const });
+    const exact = await prisma.order.findFirst({
+      where: {
+        OR: [
+          { shopifyOrderName: same(`#${bare}`) },
+          { shopifyOrderName: same(bare) },
+          { shipment: { waybillNumber: same(q) } },
+          { returns: { some: { OR: [{ returnWaybillNumber: same(q) }, { exchangeForwardAwb: same(q) }] } } },
+        ],
+      },
+      select: { id: true },
+    });
+    const partial = await orderService.getOrders({ search: q, limit: 10 });
+    const orders =
+      exact && !partial.some((order: any) => order.id === exact.id)
+        ? [await orderService.getOrder(exact.id), ...partial]
+        : partial;
+    res.json({ orders });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Get a single order
 router.get('/orders/:id', async (req: Request, res: Response): Promise<void> => {
   try {

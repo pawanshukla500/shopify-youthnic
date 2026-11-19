@@ -12,7 +12,7 @@ import {
 import 'sequential-workflow-designer/css/designer.css'
 import 'sequential-workflow-designer/css/designer-light.css'
 import 'sequential-workflow-designer/css/designer-dark.css'
-import { apiError, getOrders, getWorkflowDesign, saveWorkflowDesign } from '../api'
+import { apiError, getWorkflowDesign, lookupOrders, saveWorkflowDesign } from '../api'
 import { Button, ErrorBox, FormField, Icon, LoadingState, PageIntro, Panel, StatusBadge, useDocumentTitle, useToast } from '../components/UI'
 import { useTheme } from '../context/ThemeContext'
 import { formatMoney, labelize, normalizeCourierName } from '../lib'
@@ -259,7 +259,7 @@ function WorkflowDesigner({ saved, savedAt }: { saved: WorkflowDefinition | null
 
   const ordersQuery = useQuery({
     queryKey: ['workflow-lookup', query],
-    queryFn: () => getOrders({ search: query, limit: 10 }),
+    queryFn: () => lookupOrders(query),
     enabled: Boolean(query),
     retry: false,
   })
@@ -277,18 +277,20 @@ function WorkflowDesigner({ saved, savedAt }: { saved: WorkflowDefinition | null
   }
   useEffect(focusCurrent, [currentId])
 
+  // Counts edits so a save that finishes after a newer edit leaves that edit unsaved.
+  const editCount = useRef(0)
   const save = useMutation({
-    mutationFn: () => saveWorkflowDesign(asWorkflow(definition)),
-    onSuccess: (result) => {
-      setDirty(false)
-      // Clone: the designer keeps mutating its own copy after this.
-      queryClient.setQueryData(['workflow-design'], { definition: structuredClone(asWorkflow(definition)), updatedAt: result.updatedAt })
+    mutationFn: ({ snapshot }: { snapshot: WorkflowDefinition; edits: number }) => saveWorkflowDesign(snapshot),
+    onSuccess: (result, { snapshot, edits }) => {
+      if (editCount.current === edits) setDirty(false)
+      queryClient.setQueryData(['workflow-design'], { definition: snapshot, updatedAt: result.updatedAt })
       toast('success', 'Workflow saved')
     },
     onError: (error) => toast('error', apiError(error)),
   })
 
   const replace = (workflow: WorkflowDefinition, isDirty: boolean) => {
+    editCount.current += 1
     setDefinition(wrap(workflow))
     setDirty(isDirty)
   }
@@ -324,7 +326,7 @@ function WorkflowDesigner({ saved, savedAt }: { saved: WorkflowDefinition | null
           >
             <Icon name="refresh" size={14} /> Reset to default
           </Button>
-          <Button type="button" className="button-primary" loading={save.isPending} disabled={!dirty && Boolean(saved)} onClick={() => save.mutate()}>
+          <Button type="button" className="button-primary" loading={save.isPending} disabled={!dirty && Boolean(saved)} onClick={() => save.mutate({ snapshot: structuredClone(asWorkflow(definition)), edits: editCount.current })}>
             <Icon name="check" size={14} /> Save workflow
           </Button>
         </div>
@@ -340,8 +342,10 @@ function WorkflowDesigner({ saved, savedAt }: { saved: WorkflowDefinition | null
             onDefinitionChange={(next, event) => {
               setDefinition(next)
               // No event = the designer finished rendering (onReady), not an edit.
-              if (event) setDirty(true)
-              else focusCurrent()
+              if (event) {
+                editCount.current += 1
+                setDirty(true)
+              } else focusCurrent()
             }}
             theme={theme}
             controller={controller}

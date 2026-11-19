@@ -157,7 +157,8 @@ export function chooseBranch(step: WorkflowStep, facts: string[]): string | null
   if (byCondition) return byCondition[0]
   const byContent = entries.find(([, branch]) => containsMatch(branch, facts))
   if (byContent) return byContent[0]
-  return entries.find(([name]) => parseTokens(conditions[name]).length === 0)?.[0] ?? null
+  // Only a blank condition is a default; a mistyped one must not catch every order.
+  return entries.find(([name]) => !String(conditions[name] ?? '').trim())?.[0] ?? null
 }
 
 /** Walk the design along the branches the order took and find where it sits. */
@@ -246,7 +247,8 @@ export const DEFAULT_WORKFLOW: WorkflowDefinition = {
     ]),
     decision('approval', 'Approved?', [
       ['Approved', '', []],
-      ['Cancelled', 'order:CANCELLED, tab:CANCEL', [stage('cancelled', 'order', 'Cancelled before pickup', 'order:CANCELLED, tab:CANCEL', 'COD_CANCELLED / High RTO cancel or a manual cancel.')]],
+      // tab:CANCEL is classifyOrderTab's "cancelled before pickup"; a cancel after pickup is in transit or RTO.
+      ['Cancelled', 'tab:CANCEL', [stage('cancelled', 'order', 'Cancelled before pickup', 'tab:CANCEL', 'COD_CANCELLED / High RTO cancel or a manual cancel.')]],
     ]),
     stage('ready', 'order', 'Ready to dispatch', 'order:DISPATCH_PENDING, tab:DISPATCH', 'Prepaid or COD-confirmed, waiting for a label.'),
     decision('courier', 'Courier routing', [
@@ -254,7 +256,7 @@ export const DEFAULT_WORKFLOW: WorkflowDefinition = {
       ['Velocity', 'courier:VELOCITY', [stage('velocity-awb', 'shipping', 'Velocity AWB + label', 'order:DISPATCHED, tab:READY')]],
     ], 'Carrier priority comes from Settings > Shipping priority.'),
     stage('picked-up', 'shipping', 'Picked up', 'order:SHIPPED, shipment:PICKED_UP'),
-    stage('in-transit', 'shipping', 'In transit', 'order:IN_TRANSIT'),
+    stage('in-transit', 'shipping', 'In transit', 'order:IN_TRANSIT, order:CANCELLED&tab:TRANSIT'),
     stage('out-for-delivery', 'shipping', 'Out for delivery', 'order:OUT_FOR_DELIVERY'),
     decision('delivery-outcome', 'Delivery outcome', [
       ['Delivered', 'shipment:DELIVERED, order:DELIVERED, flow:RETURN, flow:EXCHANGE', [
@@ -283,9 +285,9 @@ export const DEFAULT_WORKFLOW: WorkflowDefinition = {
           ]],
         ]),
       ]],
-      ['NDR / RTO', 'order:FAILED_DELIVERY, order:RTO_INITIATED, order:RTO_DELIVERED, shipment:FAILED, shipment:RTO, shipment:RTO_DELIVERED, ndr:YES', [
+      ['NDR / RTO', 'order:FAILED_DELIVERY, order:RTO_INITIATED, order:RTO_DELIVERED, shipment:FAILED, shipment:RTO, shipment:RTO_DELIVERED, ndr:YES, order:CANCELLED&tab:RETURN', [
         stage('ndr', 'shipping', 'NDR · delivery failed', 'order:FAILED_DELIVERY, ndr:YES', 'Re-attempt, change address or mark RTO from the order page.'),
-        stage('rto-transit', 'shipping', 'RTO in transit', 'order:RTO_INITIATED, shipment:RTO'),
+        stage('rto-transit', 'shipping', 'RTO in transit', 'order:RTO_INITIATED, shipment:RTO, order:CANCELLED&tab:RETURN'),
         stage('rto-received', 'returns', 'RTO received', 'order:RTO_DELIVERED, shipment:RTO_DELIVERED'),
         stage('rto-refund', 'money', 'Prepaid RTO refund', 'order:REFUNDED', 'Prepaid only; COD RTO just restocks.'),
       ]],

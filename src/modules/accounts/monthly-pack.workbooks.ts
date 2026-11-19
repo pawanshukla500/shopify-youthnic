@@ -251,7 +251,7 @@ async function chargesWorkbook(pack: MonthlyPack): Promise<Buffer> {
     ],
     notes: [
       'Only actual billed figures are totalled; estimates and missing charges are listed on the Detail tab (Actual = No) and in 05-Reconciliation → Data Gaps.',
-      'Gateway: Easebuzz (GoKwik) per-transaction fee + GST from the settlement files, by transaction date; PhonePe fee recorded on each settled order. Freight: per AWB, forward by manifest date, RTO by first RTO scan, reverse and exchange by return date. GST on freight split at 18%.',
+      'Gateway: Easebuzz (GoKwik) fee + GST per settled order from the settlement files, by settlement date (this matched the Easebuzz Oct-2026 invoice exactly); PhonePe fee recorded on each settled order. Freight: per AWB, forward by manifest date, RTO by first RTO scan, reverse and exchange by return date. GST on freight split at 18%.',
       'COD charges: Delhivery and Velocity include them in the per-AWB freight and do not itemise them, so they sit inside forward shipping.',
       'Courier freight is paid from the prepaid wallet, so it is an expense and not a deduction from COD remittances.',
     ],

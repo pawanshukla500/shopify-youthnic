@@ -343,8 +343,9 @@ export function computeMonth(data: PackData, month: string, now: Date): MonthFig
     }
   }
 
-  // Gateway fees. Each settled prepaid order carries fee + GST from the settlement file, dated on the
-  // transaction (paymentReceivedAt is the transaction date): the same basis as the provider's monthly invoice.
+  // Gateway fees. Each settled prepaid order carries fee + GST from the settlement file, dated by paymentReceivedAt
+  // (the file's settlement date). On that basis Easebuzz Oct-2026 = ₹5,222.81, exactly its invoice; by transaction
+  // date it was ₹5,081.44. If a provider's bill starts to differ, check the bill period against this date first.
   const rowsByOrder = new Map<number, any[]>();
   for (const row of data.settlementRows) if (row.orderId) rowsByOrder.set(row.orderId, [...(rowsByOrder.get(row.orderId) || []), row]);
   for (const o of realOrders) {

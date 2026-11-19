@@ -888,9 +888,11 @@ export class FinancialEventService {
         for (const ord of orders) {
           if (ord.status === 'CANCELLED') continue;
           try {
-            const tax = gstService.calculateSalesTax(ord.totalAmount, ord.customerState, undefined, ord);
-            grossTaxable += tax.taxableAmount;
-            grossGst += tax.totalGst;
+            for (const line of gstService.orderGstLines(ord)) {
+              const tax = gstService.calculateSalesTax(line.amount, ord.customerState, line.rate);
+              grossTaxable += tax.taxableAmount;
+              grossGst += tax.totalGst;
+            }
           } catch {
             missingEvidence = true;
           }

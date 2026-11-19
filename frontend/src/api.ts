@@ -2046,7 +2046,8 @@ function saveBlob(data: BlobPart, fileName: string) {
   document.body.appendChild(link)
   link.click()
   link.remove()
-  window.URL.revokeObjectURL(url)
+  // Revoked later: some browsers read the blob URL after click() returns.
+  setTimeout(() => window.URL.revokeObjectURL(url), 1000)
 }
 
 export const PACK_FILE_NAMES = ['01-Sales-Statewise', '02-Returns-Statewise', '03-Other-Charges', '04-Order-Level', '05-Reconciliation'] as const
@@ -2072,14 +2073,7 @@ export async function sendPack(month: string, force = false): Promise<{ held: bo
 /** State-wise Sales & Returns register per channel, in the accounts team's Tally upload format. */
 export async function downloadGstRegister(month: string): Promise<void> {
   const response = await api.get('/api/accounts/gst-register', { params: { month }, responseType: 'blob' })
-  const url = window.URL.createObjectURL(new Blob([response.data]))
-  const link = document.createElement('a')
-  link.href = url
-  link.download = `Youthnic-Sales-Returns-Register-${month}.xlsx`
-  document.body.appendChild(link)
-  link.click()
-  link.remove()
-  window.URL.revokeObjectURL(url)
+  saveBlob(response.data, `Youthnic-Sales-Returns-Register-${month}.xlsx`)
 }
 
 export async function getReturnScanStatus(): Promise<{

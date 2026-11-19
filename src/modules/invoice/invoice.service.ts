@@ -33,6 +33,7 @@ export interface InvoiceData {
   gstRate: number;
   lines: InvoiceLine[];
   shipping: number;
+  shippingGst: number; // GST included in shipping, at the goods' rate (composite supply)
   otherCharges: number;
   total: number;
   received: number;
@@ -187,6 +188,13 @@ export class InvoiceService {
     });
 
     const linesNet = round2(lines.reduce((a, l) => a + l.net, 0));
+    // Shipping is taxed with the goods: share it over the lines by value at each line's rate.
+    const shippingGst = linesNet > 0
+      ? round2(lines.reduce((a, l) => {
+          const part = (shipping * l.net) / linesNet;
+          return a + part - part / (1 + l.gstRate / 100);
+        }, 0))
+      : round2(shipping - shipping / (1 + INVOICE_GST_RATE / 100));
     const otherCharges = Math.max(0, round2(total - shipping - linesNet));
     const isCod = order.paymentMethod === 'COD' || order.shipment?.paymentMode === 'COD';
     const fs = String(order.financialStatus || '').toLowerCase();
@@ -220,6 +228,7 @@ export class InvoiceService {
       gstRate: lines.reduce((max, l) => Math.max(max, l.gstRate), INVOICE_GST_RATE),
       lines,
       shipping,
+      shippingGst,
       otherCharges,
       total,
       received: isPaid ? total : 0,
@@ -305,7 +314,7 @@ export class InvoiceService {
           <tbody>
             ${rows}
             ${hidden > 0 ? `<tr class="inv-sum"><td colspan="7">+ ${hidden} more item${hidden > 1 ? 's' : ''} (included in the total)</td></tr>` : ''}
-            ${d.shipping > 0 ? sumRow('Shipping', d.shipping) : ''}
+            ${d.shipping > 0 ? sumRow(`Shipping (incl. GST ${money(d.shippingGst)})`, d.shipping) : ''}
             ${d.otherCharges > 0 ? sumRow('Other Charges', d.otherCharges) : ''}
             ${sumRow('Total', d.total)}
             ${sumRow('Payment Received', d.received)}

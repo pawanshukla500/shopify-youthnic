@@ -207,8 +207,9 @@ describe('4x6" Thermal GST Tax Invoice Layout & Print Standard', () => {
     expect(d.lines[0].discount).toBe(225.98);
     expect(d.lines[0].net).toBe(1273.02);
     expect(d.shipping).toBe(99);
+    expect(d.shippingGst).toBe(4.71); // shipping taxed with the goods at 5%
     expect(d.due).toBe(1372.02);
-    expect(invoiceService.generateInvoiceHtml({ ...dummyOrder, totalAmount: 1372.02, totalShipping: 99 } as any)).toContain('Shipping</td>');
+    expect(invoiceService.generateInvoiceHtml({ ...dummyOrder, totalAmount: 1372.02, totalShipping: 99 } as any)).toContain('Shipping (incl. GST ₹');
   });
 
   it('escapes customer text and summarises rows that do not fit on 4x6"', () => {

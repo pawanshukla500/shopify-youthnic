@@ -2017,6 +2017,58 @@ export async function deleteProviderBill(id: number): Promise<unknown> {
   return response.data
 }
 
+export interface PackCheck { id: number; name: string; passed: boolean; detail: string }
+export interface PackChecks {
+  month: string
+  label: string
+  passed: boolean
+  checks: PackCheck[]
+  warnings: string[]
+  gaps: number
+  roll: { opening: number; sales: number; returns: number; deductions: number; receipts: number; closing: number; walletFreight: number }
+  counts: { sales: number; returns: number; charges: number }
+  status: { sent: { sentAt: string; to: string[]; cc: string[]; forced?: boolean } | null; held: { heldAt: string; to: string[]; failed: string[] } | null }
+  recipients: { to: string[]; cc: string[]; hold: string[] }
+  reportDay: number
+}
+
+/** Monthly accounts pack: checks, roll-forward and send status (builds the pack, so it takes a few seconds). */
+export async function getPackChecks(month: string): Promise<PackChecks> {
+  const response = await api.get('/api/accounts/pack/checks', { params: { month } })
+  return response.data
+}
+
+function saveBlob(data: BlobPart, fileName: string) {
+  const url = window.URL.createObjectURL(new Blob([data]))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = fileName
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.URL.revokeObjectURL(url)
+}
+
+export const PACK_FILE_NAMES = ['01-Sales-Statewise', '02-Returns-Statewise', '03-Other-Charges', '04-Order-Level', '05-Reconciliation'] as const
+
+/** The whole pack as a ZIP: exactly what the 15th email carries. */
+export async function downloadPack(month: string): Promise<void> {
+  const response = await api.get('/api/accounts/pack', { params: { month }, responseType: 'blob' })
+  saveBlob(response.data, `Youthnic-Accounts-Pack-${month}.zip`)
+}
+
+/** One report of the pack (file 1-5). */
+export async function downloadPackFile(month: string, file: number): Promise<void> {
+  const response = await api.get('/api/accounts/pack/file', { params: { month, file }, responseType: 'blob' })
+  saveBlob(response.data, `${PACK_FILE_NAMES[file - 1]}-${month}.xlsx`)
+}
+
+/** Email the pack: held for the hold address when checks fail, unless force. */
+export async function sendPack(month: string, force = false): Promise<{ held: boolean; sentTo: string[]; ccTo: string[]; failed: string[] }> {
+  const response = await api.post('/api/accounts/pack/email', { month, force })
+  return response.data
+}
+
 /** State-wise Sales & Returns register per channel, in the accounts team's Tally upload format. */
 export async function downloadGstRegister(month: string): Promise<void> {
   const response = await api.get('/api/accounts/gst-register', { params: { month }, responseType: 'blob' })

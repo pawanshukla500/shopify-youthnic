@@ -72,79 +72,89 @@ export function resolvePosCode(stateName?: string | null): { code: string; state
 
 export class GstService {
   /**
-   * Determine effective GST rate for an order from Shopify tax lines or line items.
-   * Prefer actual Shopify tax evidence. For apparel fallback only:
-   * before 22 Sep 2025: 5% up to ₹1,000 per piece; otherwise 12%.
-   * from 22 Sep 2025: 5% up to ₹2,500 per piece; otherwise 18%.
-   * Mixed-rate orders, missing supply dates and discounted prices need manual review.
+   * Apparel GST rate for one piece (HSN 61/62) by its sale value after discount and the supply date.
+   * From 22 Sep 2025: 5% up to ₹2,500 per piece, else 18%. Before: 5% up to ₹1,000, else 12%.
    */
-  public determineOrderGstRate(order: {
+  public apparelRate(pieceValue: number, supplyDate: Date | string | null | undefined): number {
+    const date = supplyDate ? new Date(supplyDate) : null;
+    if (!date || Number.isNaN(date.getTime())) throw new Error('Missing supply date: GST rate cannot be determined.');
+    if (!Number.isFinite(pieceValue) || pieceValue < 0) throw new Error('Invalid unit sale value for GST calculation.');
+    const isNewSlab = date >= new Date('2025-09-22T00:00:00+05:30');
+    return pieceValue <= (isNewSlab ? 2500 : 1000) ? 5 : isNewSlab ? 18 : 12;
+  }
+
+  /**
+   * The order's GST lines, one per rate, following the government apparel slabs (not Shopify/GoKwik tax
+   * lines, which are wrong for this store). Each piece is rated on its value after the order discount;
+   * the order total (shipping included, a composite supply) is shared over items by value.
+   * Shopify tax lines are used only when the order has no items to rate.
+   */
+  public orderGstLines(order: {
     taxLines?: any;
     totalAmount: number;
-    totalTax?: number | null;
     shopifyCreatedAt?: Date | string | null;
     totalDiscounts?: number | null;
-    items?: Array<{ price: number; quantity: number }>;
-  }): number {
-    // 1. Inspect Shopify taxLines JSON if populated.
-    // CGST + SGST lines add up to one rate; one tax title at two rates (IGST 5% and IGST 18%) is a mixed-rate order.
-    if (order.taxLines) {
-      let lines: any = null;
-      try {
-        lines = typeof order.taxLines === 'string' ? JSON.parse(order.taxLines) : order.taxLines;
-      } catch {
-        // ignore and fallback
+    items?: Array<{ price: number; quantity: number; title?: string | null }>;
+  }): Array<{ rate: number; amount: number; qty: number; titles: string[] }> {
+    const items = (order.items || []).filter((i) => (Number(i.quantity) || 0) > 0);
+    if (items.length) {
+      const subtotal = items.reduce((t, i) => t + (Number(i.price) || 0) * i.quantity, 0);
+      if (!(subtotal > 0)) throw new Error('Order items have no sale value: GST rate cannot be determined.');
+      const afterDiscount = Math.max(0, (subtotal - (order.totalDiscounts || 0)) / subtotal);
+      const byRate = new Map<number, { value: number; qty: number; titles: string[] }>();
+      for (const item of items) {
+        const rate = this.apparelRate((Number(item.price) || 0) * afterDiscount, order.shopifyCreatedAt);
+        const g = byRate.get(rate) || { value: 0, qty: 0, titles: [] };
+        g.value += (Number(item.price) || 0) * item.quantity;
+        g.qty += item.quantity;
+        if (item.title) g.titles.push(item.title);
+        byRate.set(rate, g);
       }
-      if (Array.isArray(lines) && lines.length > 0) {
-        const ratesByTitle = new Map<string, Set<number>>();
-        for (const l of lines) {
-          const rate = Math.round(parseFloat(l?.rate || '0') * 10000) / 100;
-          if (!(rate > 0)) continue;
-          const title = String(l?.title || '').trim().toUpperCase();
-          ratesByTitle.set(title, (ratesByTitle.get(title) || new Set<number>()).add(rate));
-        }
-        if ([...ratesByTitle.values()].some((rates) => rates.size > 1)) {
-          throw new Error('Mixed GST rates require item-wise invoice/credit-note postings.');
-        }
-        const rateSum = [...ratesByTitle.values()].reduce((acc, rates) => acc + [...rates][0], 0);
-        if (rateSum > 0) return Math.round(rateSum * 100) / 100;
-      }
+      const groups = [...byRate.entries()].sort((x, y) => x[0] - y[0]);
+      let allocated = 0;
+      return groups.map(([rate, g], idx) => {
+        // Last group takes the rounding remainder so the lines add up to the order total.
+        const amount = idx === groups.length - 1
+          ? Math.round((order.totalAmount - allocated) * 100) / 100
+          : Math.round(((order.totalAmount * g.value) / subtotal) * 100) / 100;
+        allocated += amount;
+        return { rate, amount, qty: g.qty, titles: g.titles };
+      });
     }
+    const rate = this.shopifyTaxLineRate(order.taxLines);
+    if (rate !== null) return [{ rate, amount: order.totalAmount, qty: 0, titles: [] }];
+    throw new Error('No order items or Shopify tax lines: manual GST review required.');
+  }
 
-    // 2. Check totalTax ratio if present
-    if (order.totalTax && order.totalAmount > order.totalTax) {
-      const taxable = order.totalAmount - order.totalTax;
-      const calculatedRate = (order.totalTax / taxable) * 100;
-      if (Math.abs(calculatedRate - 5) <= 1) return 5;
-      if (Math.abs(calculatedRate - 12) <= 1.5) return 12;
-      if (Math.abs(calculatedRate - 18) <= 2) return 18;
+  /** Rate from Shopify tax lines (CGST + SGST add up); a cross-check only. Null when there are none. */
+  public shopifyTaxLineRate(taxLines: any): number | null {
+    let lines: any = null;
+    try {
+      lines = typeof taxLines === 'string' ? JSON.parse(taxLines) : taxLines;
+    } catch {
+      return null;
     }
-
-    // 3. Apparel-only fallback when source taxes are absent. Never infer a mixed order's GST rate.
-    if (order.items && order.items.length > 0) {
-      const supplyDate = order.shopifyCreatedAt ? new Date(order.shopifyCreatedAt) : null;
-      if (!supplyDate || Number.isNaN(supplyDate.getTime())) {
-        throw new Error('Missing supply date: GST rate cannot be determined without invoice tax evidence.');
-      }
-      if (order.totalDiscounts && order.totalDiscounts > 0) {
-        throw new Error('Discounted order without item-level tax evidence requires GST review.');
-      }
-      const isNewSlab = supplyDate >= new Date('2025-09-22T00:00:00+05:30');
-      const limit = isNewSlab ? 2500 : 1000;
-      const rates = new Set(order.items.map((item) => {
-        if (!Number.isFinite(item.price) || item.price < 0) {
-          throw new Error('Invalid unit sale value for GST calculation.');
-        }
-        return item.price <= limit ? 5 : (isNewSlab ? 18 : 12);
-      }));
-      if (rates.size !== 1) {
-        throw new Error('Mixed GST rates require item-wise invoice/credit-note postings.');
-      }
-      return [...rates][0];
+    if (!Array.isArray(lines) || !lines.length) return null;
+    const ratesByTitle = new Map<string, Set<number>>();
+    for (const l of lines) {
+      const rate = Math.round(parseFloat(l?.rate || '0') * 10000) / 100;
+      if (!(rate > 0)) continue;
+      const title = String(l?.title || '').trim().toUpperCase();
+      ratesByTitle.set(title, (ratesByTitle.get(title) || new Set<number>()).add(rate));
     }
+    // One tax title at two rates (IGST 5% and IGST 18%) is a mixed-rate order.
+    if ([...ratesByTitle.values()].some((rates) => rates.size > 1)) {
+      throw new Error('Mixed GST rates require item-wise invoice/credit-note postings.');
+    }
+    const sum = [...ratesByTitle.values()].reduce((acc, rates) => acc + [...rates][0], 0);
+    return sum > 0 ? Math.round(sum * 100) / 100 : null;
+  }
 
-    // Never invent a tax rate for orders without item prices or primary tax evidence.
-    throw new Error('Missing Shopify tax and product line evidence: manual GST review required.');
+  /** Single GST rate for the order; throws for a mixed-rate order (use orderGstLines to split it). */
+  public determineOrderGstRate(order: Parameters<GstService['orderGstLines']>[0]): number {
+    const lines = this.orderGstLines(order);
+    if (lines.length > 1) throw new Error('Mixed GST rates require item-wise invoice/credit-note postings.');
+    return lines[0].rate;
   }
 
   /**

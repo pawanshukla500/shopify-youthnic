@@ -879,7 +879,7 @@ export class FinancialEventService {
       const { start, end } = monthRange(period);
       const orders = await prisma.order.findMany({
         where: { shopifyCreatedAt: { gte: start, lt: end } },
-        select: { totalAmount: true, customerState: true, totalTax: true, shopifyCreatedAt: true, totalDiscounts: true, status: true },
+        select: { totalAmount: true, customerState: true, totalTax: true, taxLines: true, shopifyCreatedAt: true, totalDiscounts: true, status: true, items: { select: { price: true, quantity: true } } },
       });
 
       if (orders.length > 0) {

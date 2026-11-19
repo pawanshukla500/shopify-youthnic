@@ -12,6 +12,10 @@
  *   GET  /provider-bills?month=    Easebuzz/PhonePe/Velocity/Delhivery bill vs charges in our books
  *   POST /provider-bills           { provider, period, invoiceNumber, invoiceDate, taxableAmount, igst, cgst, sgst, totalAmount }
  *   DELETE /provider-bills/:id
+ *   GET  /pack?month=              monthly accounts pack (.zip of the 5 reports, same as the 15th email)
+ *   GET  /pack/file?month=&file=1  one report of the pack (.xlsx), file 1-5
+ *   GET  /pack/checks?month=       pack checks, warnings, roll-forward and send status
+ *   POST /pack/email               { month, force? } send it (held for review when checks fail, unless force)
  */
 import { Router, Response } from 'express';
 import { BankReconciliationStatus } from '@prisma/client';
@@ -56,6 +60,7 @@ import { istDateRange } from '../modules/accounts/settlement-summary';
 import { financialEventService } from '../modules/accounts/financial-event.service';
 import { generateGstRegister } from '../modules/accounts/gst-register.service';
 import { getProviderReconciliation, validateProviderInvoice } from '../modules/accounts/provider-invoice.service';
+import { generateMonthlyPack, packHoldRecipients, packStatus, sendMonthlyPack } from '../modules/accounts/monthly-pack.service';
 
 const router = Router();
 
@@ -194,6 +199,68 @@ router.get('/gst-register', async (req: AuthenticatedRequest, res: Response): Pr
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
     res.send(buffer);
+  } catch (error: any) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+router.get('/pack', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const { zip, zipName } = await generateMonthlyPack(requestedMonth(req.query.month));
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${zipName}"`);
+    res.send(zip);
+  } catch (error: any) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+router.get('/pack/file', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const index = parsePositiveInt(req.query.file);
+    if (!index || index > 5) throw new Error('file must be 1-5');
+    const { files } = await generateMonthlyPack(requestedMonth(req.query.month));
+    const file = files[index - 1];
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${file.name}"`);
+    res.send(file.buffer);
+  } catch (error: any) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+router.get('/pack/checks', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const month = requestedMonth(req.query.month);
+    const [{ pack }, status, to, cc] = await Promise.all([generateMonthlyPack(month), packStatus(month), getReportRecipients(), getReportCcRecipients()]);
+    res.json({
+      month,
+      label: pack.label,
+      passed: pack.passed,
+      checks: pack.checks,
+      warnings: pack.warnings,
+      gaps: pack.gaps.length,
+      roll: pack.roll,
+      counts: {
+        sales: pack.current.sales.length,
+        returns: pack.current.returns.filter((r) => r.deducted).length,
+        charges: pack.current.charges.filter((c) => c.actual).length,
+      },
+      status,
+      recipients: { to, cc, hold: packHoldRecipients() },
+      reportDay: config.accounts.reportDayOfMonth,
+    });
+  } catch (error: any) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+router.post('/pack/email', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const month = requestedMonth(req.body?.month);
+    const result = await sendMonthlyPack(month, { force: req.body?.force === true });
+    logger.info('Accounts pack emailed on request', { month, by: req.user?.email, held: result.held, force: req.body?.force === true });
+    res.json(result);
   } catch (error: any) {
     res.status(400).json({ error: error.message });
   }

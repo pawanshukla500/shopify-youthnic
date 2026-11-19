@@ -19,6 +19,11 @@ import {
   saveProviderBill,
   deleteProviderBill,
   downloadGstRegister,
+  getPackChecks,
+  downloadPack,
+  downloadPackFile,
+  sendPack,
+  PACK_FILE_NAMES,
   importAccountsFile,
   runAccountsNow,
   saveAccountsRecipients,
@@ -47,13 +52,8 @@ function defaultMonth(): string {
   return `${year}-${String(month).padStart(2, '0')}`
 }
 
-function nextReportDate(month: string, day: number): string {
-  const [year, m] = month.split('-').map(Number)
-  const next = new Date(Date.UTC(m === 12 ? year + 1 : year, m === 12 ? 0 : m, day))
-  return next.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })
-}
 
-type AccountsTab = 'matrix' | 'bills' | 'gateway' | 'freight' | 'bank' | 'pnl' | 'ledger' | 'vouchers' | 'closing'
+type AccountsTab = 'reports' | 'sales' | 'charges' | 'payments' | 'tally'
 
 const UPLOADS: Array<{
   kind: AccountsImportKind
@@ -321,12 +321,135 @@ function ProviderBillsTab({ month }: { month: string }) {
   )
 }
 
+const PACK_FILE_LABELS = ['Sales (state-wise)', 'Returns (state-wise)', 'Other charges', 'Order level', 'Reconciliation']
+
+/** The monthly accounts pack: checks, downloads (same as the 15th email) and send. */
+function MonthlyReportsTab({ month }: { month: string }) {
+  const toast = useToast()
+  const queryClient = useQueryClient()
+  const checks = useQuery({ queryKey: ['pack-checks', month], queryFn: () => getPackChecks(month), staleTime: 60_000 })
+  const zip = useMutation({
+    mutationFn: () => downloadPack(month),
+    onError: (error) => toast.toast('error', apiError(error)),
+  })
+  const file = useMutation({
+    mutationFn: (n: number) => downloadPackFile(month, n),
+    onError: (error) => toast.toast('error', apiError(error)),
+  })
+  const send = useMutation({
+    mutationFn: (force: boolean) => sendPack(month, force),
+    onSuccess: (r) => {
+      toast.toast(r.held ? 'error' : 'success', r.held
+        ? `Checks failed: pack held and sent to ${r.sentTo.join(', ')} for review.`
+        : `Pack sent to ${r.sentTo.join(', ')}${r.ccTo.length ? ` (CC ${r.ccTo.join(', ')})` : ''}.`)
+      queryClient.invalidateQueries({ queryKey: ['pack-checks', month] })
+    },
+    onError: (error) => toast.toast('error', apiError(error)),
+  })
+  const d = checks.data
+  const confirmSend = () => {
+    if (!d) return
+    const failed = d.checks.filter((c) => !c.passed).length
+    const msg = failed
+      ? `${failed} check(s) failed for ${d.label}. Send to the accounts team anyway (marked "sent with failed checks")?`
+      : `Send the ${d.label} pack to ${d.recipients.to.join(', ')}${d.recipients.cc.length ? ` (CC ${d.recipients.cc.join(', ')})` : ''}?`
+    if (window.confirm(msg)) send.mutate(failed > 0)
+  }
+  const roll = d ? [
+    ['Opening outstanding', d.roll.opening], ['+ Sales', d.roll.sales], ['− Returns', d.roll.returns],
+    ['− Deductions from payouts', d.roll.deductions], ['− Payments received (net of refunds)', d.roll.receipts], ['= Closing outstanding', d.roll.closing],
+  ] as Array<[string, number]> : []
+
+  return (
+    <div style={{ display: 'grid', gap: '16px' }}>
+      <Panel>
+        <PanelHeading
+          eyebrow={`Accounts pack · ${month}`}
+          title={d ? (d.passed ? 'All checks passed' : `${d.checks.filter((c) => !c.passed).length} check(s) failed`) : 'Checking the month…'}
+          action={
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <Button className="button-secondary" loading={zip.isPending} onClick={() => zip.mutate()}>
+                <Icon name="download" size={14} />
+                Download ZIP
+              </Button>
+              <Button className="button-primary" loading={send.isPending} disabled={!d} onClick={confirmSend}>
+                <Icon name="mail" size={14} />
+                Send to accounts team
+              </Button>
+            </div>
+          }
+        />
+        {checks.isLoading && <LoadingState label="Building the five reports and running the checks…" />}
+        {checks.isError && <ErrorBox message={apiError(checks.error)} />}
+        {d && (
+          <>
+            <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: '6px', fontSize: '13px' }}>
+              {d.checks.map((c) => (
+                <li key={c.id} style={{ display: 'flex', gap: '8px' }}>
+                  <strong style={{ color: c.passed ? 'var(--tone-success-fg)' : 'var(--tone-danger-fg)', minWidth: '38px' }}>{c.passed ? 'PASS' : 'FAIL'}</strong>
+                  <span>{c.name}<span style={{ color: 'var(--muted)' }}> · {c.detail}</span></span>
+                </li>
+              ))}
+            </ul>
+            {d.warnings.length > 0 && (
+              <ul style={{ margin: '12px 0 0', paddingLeft: '18px', fontSize: '12px', color: 'var(--muted)' }}>
+                {d.warnings.map((w) => <li key={w}>{w}</li>)}
+              </ul>
+            )}
+            <p style={{ margin: '12px 0 0', fontSize: '12px', color: 'var(--muted)' }}>
+              {d.status.sent
+                ? `Sent to the accounts team on ${formatDate(d.status.sent.sentAt)} (${d.status.sent.to.join(', ')})${d.status.sent.forced ? ', with failed checks' : ''}.`
+                : d.status.held
+                  ? `Held on ${formatDate(d.status.held.heldAt)}: sent to ${d.status.held.to.join(', ')} for review, not to the accounts team.`
+                  : `Not sent yet. Goes out automatically on the ${d.reportDay}th at 09:00 IST to ${d.recipients.to.join(', ')}; if a check fails it is held and sent to ${d.recipients.hold.join(', ')} only.`}
+            </p>
+          </>
+        )}
+      </Panel>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px' }}>
+        <Panel>
+          <PanelHeading eyebrow="Reports" title="Download one report" />
+          <div style={{ display: 'grid', gap: '8px' }}>
+            {PACK_FILE_NAMES.map((name, i) => (
+              <div key={name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', fontSize: '13px' }}>
+                <span>{String(i + 1).padStart(2, '0')} · {PACK_FILE_LABELS[i]}</span>
+                <Button className="button-secondary button-small" loading={file.isPending && file.variables === i + 1} onClick={() => file.mutate(i + 1)}>
+                  <Icon name="download" size={13} />
+                  .xlsx
+                </Button>
+              </div>
+            ))}
+          </div>
+        </Panel>
+        <Panel>
+          <PanelHeading eyebrow="Reconciliation" title="Roll-forward" />
+          {d ? (
+            <table className="data-table">
+              <tbody>
+                {roll.map(([label, value]) => (
+                  <tr key={label}>
+                    <td style={{ fontWeight: label.startsWith('=') ? 700 : 400 }}>{label}</td>
+                    <td className="amount-cell" style={{ fontWeight: label.startsWith('=') ? 700 : 400 }}>{formatMoney(value)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p style={{ fontSize: '13px', color: 'var(--muted)' }}>Waiting for the checks.</p>
+          )}
+        </Panel>
+      </div>
+    </div>
+  )
+}
+
 export default function AccountsPage() {
   useDocumentTitle('Payments & Accounts (Tally ERP)')
   const toast = useToast()
   const queryClient = useQueryClient()
   const [month, setMonth] = useState(defaultMonth)
-  const [activeTab, setActiveTab] = useState<AccountsTab>('matrix')
+  const [activeTab, setActiveTab] = useState<AccountsTab>('reports')
   const [matrixView, setMatrixView] = useState<'bridge' | 'ledger' | 'expenses' | 'contribution'>('bridge')
   const [stateFilter, setStateFilter] = useState<string>('')
 
@@ -343,37 +466,37 @@ export default function AccountsPage() {
   const trialBalanceQuery = useQuery({
     queryKey: ['trial-balance', month],
     queryFn: () => getTrialBalance(month),
-    enabled: activeTab === 'ledger' || activeTab === 'pnl',
+    enabled: activeTab === 'tally',
   })
 
   const vouchersQuery = useQuery({
     queryKey: ['journal-vouchers', month],
     queryFn: () => getJournalVouchers(month),
-    enabled: activeTab === 'vouchers',
+    enabled: activeTab === 'tally',
   })
 
   const closingHistoryQuery = useQuery({
     queryKey: ['closing-history'],
     queryFn: getClosingHistory,
-    enabled: activeTab === 'closing',
+    enabled: activeTab === 'tally',
   })
 
   const bankLinesQuery = useQuery({
     queryKey: ['bank-statement-lines'],
     queryFn: () => getBankStatementLines(50),
-    enabled: activeTab === 'bank',
+    enabled: activeTab === 'payments',
   })
 
   const gatewayBatchesQuery = useQuery({
     queryKey: ['gateway-batches'],
     queryFn: getGatewayBatches,
-    enabled: activeTab === 'gateway',
+    enabled: activeTab === 'charges',
   })
 
   const freightBillsQuery = useQuery({
     queryKey: ['freight-bills'],
     queryFn: getFreightBills,
-    enabled: activeTab === 'freight',
+    enabled: activeTab === 'charges',
   })
 
   const [recipients, setRecipients] = useState('')
@@ -461,15 +584,11 @@ export default function AccountsPage() {
   const tbData = trialBalanceQuery.data
 
   const tabs: Array<{ key: AccountsTab; label: string; icon: any }> = [
-    { key: 'matrix', label: 'State-Wise Matrix', icon: 'table' },
-    { key: 'bills', label: 'Provider Bills', icon: 'file-text' },
-    { key: 'gateway', label: 'Gateway Expenses', icon: 'credit-card' },
-    { key: 'freight', label: 'Freight Expenses', icon: 'truck' },
-    { key: 'bank', label: 'Bank & UTR Reconcile', icon: 'check-circle' },
-    { key: 'pnl', label: 'Monthly P&L', icon: 'pie-chart' },
-    { key: 'ledger', label: 'Trial Balance', icon: 'file-text' },
-    { key: 'vouchers', label: 'Tally Vouchers', icon: 'download' },
-    { key: 'closing', label: 'Closing Snapshots', icon: 'lock' },
+    { key: 'reports', label: 'Monthly Reports', icon: 'download' },
+    { key: 'sales', label: 'Sales & Returns', icon: 'table' },
+    { key: 'charges', label: 'Charges & Bills', icon: 'truck' },
+    { key: 'payments', label: 'Payments', icon: 'check-circle' },
+    { key: 'tally', label: 'Tally & Ledger', icon: 'file-text' },
   ]
 
   const tiles = stateData ? [
@@ -486,43 +605,17 @@ export default function AccountsPage() {
     <>
       <PageIntro
         eyebrow="Financial Operations & Tally ERP"
-        title="Youthnic Accounting & Reconciliation"
-        description="Double-entry financial ledger, dynamic GST, GoKwik/Easebuzz & PhonePe MDR expenses, Delhivery & Velocity freight, and official TallyPrime integration."
+        title="Accounts"
+        description="Monthly reports for the accounts team, charges and provider bills, payments, and Tally."
         action={
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-            <FormField label="Accounting month">
-              <input type="month" value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} />
-            </FormField>
-            <Button className="button-secondary" loading={downloadMasters.isPending} onClick={() => downloadMasters.mutate()}>
-              <Icon name="download" size={14} />
-              Tally Masters
-            </Button>
-            <Button className="button-primary" loading={downloadXml.isPending} onClick={() => downloadXml.mutate()}>
-              <Icon name="download" size={14} />
-              TallyPrime XML
-            </Button>
-            <Button className="button-secondary" loading={downloadExcel.isPending} onClick={() => downloadExcel.mutate()}>
-              <Icon name="download" size={14} />
-              Tally Excel Report
-            </Button>
-            <Button className="button-secondary" loading={downloadRegister.isPending} onClick={() => downloadRegister.mutate()}>
-              <Icon name="download" size={14} />
-              Sales &amp; Returns Register
-            </Button>
-            <Button className="button-secondary" loading={email.isPending} onClick={() => email.mutate()}>
-              <Icon name="mail" size={14} />
-              Email Report
-            </Button>
-            <Button className="button-primary" style={{ background: 'var(--emerald-solid)' }} loading={closeMonthMutation.isPending} onClick={() => closeMonthMutation.mutate()}>
-              <Icon name="check" size={14} />
-              Close Month
-            </Button>
-          </div>
+          <FormField label="Accounting month">
+            <input type="month" value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} />
+          </FormField>
         }
       />
 
       {/* KPI Header Tiles */}
-      {tiles.length > 0 && (
+      {activeTab === 'sales' && tiles.length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '12px', marginBottom: '16px' }}>
           {tiles.map((tile) => (
             <div key={tile.label} style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: '10px', padding: '14px 16px' }}>
@@ -559,11 +652,29 @@ export default function AccountsPage() {
         ))}
       </div>
 
-      {(overview.isLoading || stateAccounting.isLoading) && <LoadingState label="Loading accounting ledger…" />}
-      {(overview.isError || stateAccounting.isError) && <ErrorBox message={apiError(overview.error || stateAccounting.error)} />}
+      {activeTab === 'reports' && (
+        <div style={{ display: 'grid', gap: '16px' }}>
+          <MonthlyReportsTab month={month} />
+          <Panel>
+            <PanelHeading eyebrow="Recipients" title="Who gets the pack on the 15th" />
+            <FormField label="To" hint="Accounts team">
+              <input value={recipients} onChange={(e) => setRecipients(e.target.value)} placeholder="accounts2@vbexports.co.in" />
+            </FormField>
+            <FormField label="CC" hint="Comma-separated">
+              <input value={ccRecipients} onChange={(e) => setCcRecipients(e.target.value)} placeholder="returnorders@vbexports.co.in, vaibhav@vbexports.co.in" />
+            </FormField>
+            <Button className="button-secondary button-small" style={{ marginTop: '8px' }} loading={saveRecipientsMutation.isPending} onClick={() => saveRecipientsMutation.mutate()}>
+              Save recipients
+            </Button>
+          </Panel>
+        </div>
+      )}
+
+      {activeTab === 'sales' && (overview.isLoading || stateAccounting.isLoading) && <LoadingState label="Loading accounting ledger…" />}
+      {activeTab === 'sales' && (overview.isError || stateAccounting.isError) && <ErrorBox message={apiError(overview.error || stateAccounting.error)} />}
 
       {/* TAB 1: State-Wise Matrix & Settlement Bridge */}
-      {activeTab === 'matrix' && stateData && (
+      {activeTab === 'sales' && stateData && (
         <Panel className="table-panel" style={{ marginBottom: '20px', border: '1px solid var(--tone-info-border)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderBottom: '1px solid var(--border)', flexWrap: 'wrap', gap: '12px' }}>
             <div>
@@ -871,8 +982,10 @@ export default function AccountsPage() {
         </Panel>
       )}
 
-      {/* TAB 2: Gateway Expenses */}
-      {activeTab === 'gateway' && (
+      {/* Charges & Bills: provider bills, gateway batches, freight invoices */}
+      {activeTab === 'charges' && (
+        <div style={{ display: 'grid', gap: '16px' }}>
+          <ProviderBillsTab month={month} />
         <Panel className="table-panel">
           <PanelHeading eyebrow="Payment Processing Deductions" title="Easebuzz, GoKwik & PhonePe Settlement Batches" />
           <div className="table-wrap">
@@ -916,12 +1029,7 @@ export default function AccountsPage() {
             </table>
           </div>
         </Panel>
-      )}
 
-      {/* TAB 3: Freight Expenses */}
-      {activeTab === 'bills' && <ProviderBillsTab month={month} />}
-
-      {activeTab === 'freight' && (
         <Panel className="table-panel">
           <PanelHeading eyebrow="Logistics Invoicing" title="Delhivery & Velocity Freight Invoices" />
           <div className="table-wrap">
@@ -963,10 +1071,11 @@ export default function AccountsPage() {
             </table>
           </div>
         </Panel>
+        </div>
       )}
 
-      {/* TAB 4: Bank Statement Reconciliation */}
-      {activeTab === 'bank' && (
+      {/* Payments: bank & UTR reconcile, uploads */}
+      {activeTab === 'payments' && (
         <Panel className="table-panel">
           <PanelHeading eyebrow="Authorized Bank Statements" title="Bank Credit & UTR Verification Lines" />
           <div className="table-wrap">
@@ -1012,8 +1121,39 @@ export default function AccountsPage() {
         </Panel>
       )}
 
-      {/* TAB 5: Monthly P&L */}
-      {activeTab === 'pnl' && tbData && (
+      {/* Tally & Ledger */}
+      {activeTab === 'tally' && (
+        <div style={{ display: 'grid', gap: '16px' }}>
+          <Panel>
+            <PanelHeading eyebrow="Tally" title="Exports" />
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <Button className="button-secondary" loading={downloadXml.isPending} onClick={() => downloadXml.mutate()}>
+                <Icon name="download" size={14} />
+                TallyPrime XML
+              </Button>
+              <Button className="button-secondary" loading={downloadMasters.isPending} onClick={() => downloadMasters.mutate()}>
+                <Icon name="download" size={14} />
+                Tally Masters
+              </Button>
+              <Button className="button-secondary" loading={downloadExcel.isPending} onClick={() => downloadExcel.mutate()}>
+                <Icon name="download" size={14} />
+                Ledger workbook
+              </Button>
+              <Button className="button-secondary" loading={downloadRegister.isPending} onClick={() => downloadRegister.mutate()}>
+                <Icon name="download" size={14} />
+                Sales &amp; Returns Register
+              </Button>
+              <Button className="button-secondary" loading={email.isPending} onClick={() => email.mutate()}>
+                <Icon name="mail" size={14} />
+                Email ledger workbook
+              </Button>
+              <Button className="button-primary" loading={closeMonthMutation.isPending} onClick={() => closeMonthMutation.mutate()}>
+                <Icon name="check" size={14} />
+                Close month
+              </Button>
+            </div>
+          </Panel>
+      {tbData && (
         <Panel style={{ padding: '24px' }}>
           <PanelHeading eyebrow="Operating Statement" title={`Monthly Profit & Loss (${month})`} />
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', marginTop: '16px' }}>
@@ -1052,8 +1192,7 @@ export default function AccountsPage() {
         </Panel>
       )}
 
-      {/* TAB 6: Trial Balance */}
-      {activeTab === 'ledger' && tbData && (
+      {tbData && (
         <Panel className="table-panel">
           <PanelHeading
             eyebrow="Double-Entry Financial Accounting"
@@ -1103,8 +1242,7 @@ export default function AccountsPage() {
         </Panel>
       )}
 
-      {/* TAB 7: Tally Vouchers */}
-      {activeTab === 'vouchers' && (
+      {(
         <Panel className="table-panel">
           <PanelHeading
             eyebrow="TallyPrime Vouchers"
@@ -1157,8 +1295,7 @@ export default function AccountsPage() {
         </Panel>
       )}
 
-      {/* TAB 8: Closing Snapshots */}
-      {activeTab === 'closing' && (
+      {(
         <Panel className="table-panel">
           <PanelHeading eyebrow="Audit & Compliance" title="Immutable Monthly Closing Snapshots" />
           <div className="table-wrap">
@@ -1200,32 +1337,17 @@ export default function AccountsPage() {
         </Panel>
       )}
 
-      {/* Uploads & Connectors Section */}
-      <h2 style={{ fontSize: '16px', margin: '24px 0 12px' }}>Bring in Payments, Settlements &amp; Shipping Charges</h2>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '12px' }}>
-        {UPLOADS.map((upload) => (
-          <UploadCard key={upload.kind} upload={upload} onDone={refresh} />
-        ))}
-      </div>
+        </div>
+      )}
 
-      {/* Configuration & Recipients Section */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '12px', marginTop: '20px' }}>
-        <Panel>
-          <PanelHeading eyebrow="Monthly report" title={`Automated dispatch on the 10th of every month`} />
-          <p style={{ margin: '0 0 8px', fontSize: '13px' }}>
-            The report goes out on <strong>{nextReportDate(month, 10)}</strong> at 09:00 IST.
-          </p>
-          <FormField label="Primary Accounts Email (To)" hint="Main recipient for Tally entries">
-            <input value={recipients} onChange={(e) => setRecipients(e.target.value)} placeholder="accounts2@vbexports.co.in" />
-          </FormField>
-          <FormField label="CC Emails" hint="Comma-separated executive & audit emails">
-            <input value={ccRecipients} onChange={(e) => setCcRecipients(e.target.value)} placeholder="returnorders@vbexports.co.in, vaibhav@vbexports.co.in, accounts@vbexports.co.in" />
-          </FormField>
-          <Button className="button-primary button-small" style={{ marginTop: '8px' }} loading={saveRecipientsMutation.isPending} onClick={() => saveRecipientsMutation.mutate()}>
-            Save recipients &amp; CCs
-          </Button>
-        </Panel>
-
+      {activeTab === 'payments' && (
+        <div style={{ display: 'grid', gap: '16px', marginTop: '16px' }}>
+          <h2 style={{ fontSize: '16px', margin: '8px 0 0' }}>Bring in payments, settlements &amp; shipping charges</h2>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '12px' }}>
+            {UPLOADS.map((upload) => (
+              <UploadCard key={upload.kind} upload={upload} onDone={refresh} />
+            ))}
+          </div>
         <Panel>
           <PanelHeading eyebrow="Connections" title="Active Financial Integrations" />
           <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '13px', lineHeight: 1.7 }}>
@@ -1237,7 +1359,8 @@ export default function AccountsPage() {
             <li>TallyPrime XML Export: <strong>ready</strong></li>
           </ul>
         </Panel>
-      </div>
+        </div>
+      )}
     </>
   )
 }

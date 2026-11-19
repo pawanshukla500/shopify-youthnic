@@ -262,8 +262,10 @@ export const config = {
   accounts: {
     reportRecipients: optional('ACCOUNTS_REPORT_EMAILS', 'accounts2@vbexports.co.in'),
     reportCcRecipients: optional('ACCOUNTS_REPORT_CC_EMAILS', 'returnorders@vbexports.co.in,vaibhav@vbexports.co.in,accounts@vbexports.co.in'),
-    reportCron: optional('CRON_ACCOUNTS_REPORT', '0 9 10 * *'),
-    reportDayOfMonth: parseInt(optional('ACCOUNTS_REPORT_DAY', '10'), 10),
+    // Monthly accounts pack (ZIP of 5 reports) goes out on the 15th; failed checks hold it for this address.
+    reportCron: optional('CRON_ACCOUNTS_REPORT', '0 9 15 * *'),
+    reportDayOfMonth: parseInt(optional('ACCOUNTS_REPORT_DAY', '15'), 10),
+    packHoldEmails: optional('ACCOUNTS_PACK_HOLD_EMAILS', 'returnorders@vbexports.co.in'),
   },
 
   // Resend Email API

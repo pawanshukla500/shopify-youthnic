@@ -309,7 +309,7 @@ export async function create4x6InvoicePdf(
     textC(String(l.qty), col.qty, by, 6);
     textR(money(l.amount), col.amount, by, 6);
     textR(l.discount.toFixed(2), col.discount, by, 6);
-    textR(`${l.gst.toFixed(2)} | ${d.gstRate}%`, col.gst, by, 6);
+    textR(`${l.gst.toFixed(2)} | ${l.gstRate}%`, col.gst, by, 6);
     textR(money(l.net), col.net, by, 6);
     y -= rowH;
     hline(y);

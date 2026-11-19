@@ -170,7 +170,8 @@ export async function create4x6InvoicePdf(
 
   // shortcut: Helvetica has no ₹ glyph, so the PDF prints "Rs."; embedding a TTF needs @pdf-lib/fontkit.
   const money = (n: number) => `Rs.${n.toFixed(2)}`;
-  // Standard fonts only encode Latin-1; swap smart punctuation and replace anything else so drawText can't throw
+  // Standard fonts only encode Latin-1; swap smart punctuation and replace anything else so drawText can't throw.
+  // shortcut: non-Latin text (e.g. Devanagari) prints as "?" in the PDF (the HTML invoice shows it); embed a Unicode font via @pdf-lib/fontkit if such orders become common.
   const safe = (t: unknown) =>
     String(t ?? '')
       .replace(/[‘’]/g, "'")

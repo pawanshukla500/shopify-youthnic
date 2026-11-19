@@ -83,7 +83,7 @@ Automated Order Management System for **youthnic2024.myshopify.com** (Brand: You
 
 10. **Velocity-Style 4x6" Tax Invoice (2026-11-19)**:
    - The invoice now follows the Velocity panel's invoice layout (logo + "Tax Invoice", Invoice/Order meta grid, Shipping Address and From cards, navy item table with Amount / Discount / GST / Amount, Total / Payment Received / Total Payment Due, amount in words), kept at 4x6" (100mm x 150mm) so Label -> Invoice still prints on the thermal printer.
-   - `invoiceService.buildInvoiceData` is the single source of invoice numbers for both the HTML invoice and the PDF (`create4x6InvoicePdf`). Order-level discounts are spread across lines by value so the lines add up to the order total; shipping is its own row; COD orders show Payment Received Rs.0 and the full amount due.
+   - `invoiceService.buildInvoiceData` is the single source of invoice numbers for both the HTML invoice and the PDF (`create4x6InvoicePdf`). Order-level discounts are spread across lines by value so the lines add up to the order total; shipping is its own row. Payment status comes from Shopify `financialStatus` (paid / refunded / partially refunded count as received; pending and other unpaid statuses, and COD until Shopify marks it paid, show Rs.0 received and the full amount due).
    - GST stays 5% inclusive with HSN 6204; up to 4 item rows fit, the rest are summarised in one line. The PDF prints "Rs." because the built-in PDF font has no rupee glyph.
 
 ---

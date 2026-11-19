@@ -185,6 +185,18 @@ describe('4x6" Thermal GST Tax Invoice Layout & Print Standard', () => {
     expect(d.paymentStatus).toBe('Paid');
   });
 
+  it('takes payment status from Shopify financialStatus', () => {
+    const prepaid = { ...dummyOrder, paymentMethod: 'prepaid', shipment: null };
+    const pending = invoiceService.buildInvoiceData({ ...prepaid, financialStatus: 'pending' });
+    expect([pending.paymentStatus, pending.received, pending.due]).toEqual(['Pending', 0, 1899]);
+    const partRefund = invoiceService.buildInvoiceData({ ...prepaid, financialStatus: 'partially_refunded' });
+    expect([partRefund.paymentStatus, partRefund.received, partRefund.due]).toEqual(['Partially Refunded', 1899, 0]);
+    const codPaid = invoiceService.buildInvoiceData({ ...dummyOrder, financialStatus: 'paid' });
+    expect([codPaid.paymentStatus, codPaid.received, codPaid.due]).toEqual(['Paid', 1899, 0]);
+    const codPending = invoiceService.buildInvoiceData({ ...dummyOrder, financialStatus: 'pending' });
+    expect([codPending.paymentStatus, codPending.received, codPending.due]).toEqual(['Cash on Delivery', 0, 1899]);
+  });
+
   it('keeps shipping out of the item discount and lists it as its own row', () => {
     const d = invoiceService.buildInvoiceData({
       ...dummyOrder,

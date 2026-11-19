@@ -185,6 +185,12 @@ export class InvoiceService {
     const linesNet = round2(lines.reduce((a, l) => a + l.net, 0));
     const otherCharges = Math.max(0, round2(total - shipping - linesNet));
     const isCod = order.paymentMethod === 'COD' || order.shipment?.paymentMode === 'COD';
+    const fs = String(order.financialStatus || '').toLowerCase();
+    // Refunds are issued separately, so a refunded sale still counts as received on its invoice.
+    // No status recorded (older rows): keep the old prepaid = paid assumption.
+    const isPaid = ['paid', 'refunded', 'partially_refunded'].includes(fs) || (!fs && !isCod);
+    const titleCase = (v: string) => v.split('_').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    const paymentStatus = isPaid ? (fs && fs !== 'paid' ? titleCase(fs) : 'Paid') : isCod ? 'Cash on Delivery' : titleCase(fs);
     const brand = config.company?.brandName || 'YOUTHNIC';
 
     return {
@@ -193,7 +199,7 @@ export class InvoiceService {
       orderDate: fmtDate(order.shopifyCreatedAt),
       orderName: order.shopifyOrderName,
       store: brand.charAt(0) + brand.slice(1).toLowerCase(),
-      paymentStatus: isCod ? 'Cash on Delivery' : 'Paid',
+      paymentStatus,
       isCod,
       shipTo: {
         name: order.customerName || '',
@@ -212,8 +218,8 @@ export class InvoiceService {
       shipping,
       otherCharges,
       total,
-      received: isCod ? 0 : total,
-      due: isCod ? total : 0,
+      received: isPaid ? total : 0,
+      due: isPaid ? 0 : total,
       words: this.numberToWords(total),
     };
   }
@@ -232,7 +238,7 @@ export class InvoiceService {
           <tr class="inv-row">
             <td class="c">${idx + 1}.</td>
             <td>
-              <div class="inv-item">${esc(l.title)}</div>
+              <div class="inv-item inv-clamp2">${esc(l.title)}</div>
               <div class="inv-sub">SKU: ${esc(l.sku)}</div>
               <div class="inv-sub">HSN: ${esc(l.hsn)}</div>
             </td>
@@ -268,14 +274,14 @@ export class InvoiceService {
           <div class="inv-card">
             <div class="inv-card-label">Shipping Address</div>
             <div class="inv-strong">${esc(d.shipTo.name)}</div>
-            <div>${esc(d.shipTo.address)}</div>
+            <div class="inv-clamp3">${esc(d.shipTo.address)}</div>
             <div>${esc(d.shipTo.city)},</div>
             <div>${esc(d.shipTo.state)} ${esc(d.shipTo.pincode)}</div>
           </div>
           <div class="inv-card">
             <div class="inv-card-label">From</div>
             <div>${esc(d.from.name)}</div>
-            <div>${esc(d.from.address)}</div>
+            <div class="inv-clamp3">${esc(d.from.address)}</div>
             <div><b>GSTIN:</b> ${esc(d.from.gstin)}</div>
           </div>
         </div>
@@ -461,6 +467,10 @@ export class InvoiceService {
       .inv-table .c { text-align: center; }
       .inv-table .r { text-align: right; }
       .inv-item { font-size: 6.8px; }
+      /* Capped so 4 rows + totals always fit on the fixed 4x6" page */
+      .inv-clamp2, .inv-clamp3 { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
+      .inv-clamp2 { -webkit-line-clamp: 2; }
+      .inv-clamp3 { -webkit-line-clamp: 3; }
       .inv-sub { font-size: 5.5px; color: #6b7280; }
       .inv-words td { font-size: 6.5px; }
       .inv-words span { color: #6b7280; }

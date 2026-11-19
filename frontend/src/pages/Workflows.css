@@ -1,537 +1,193 @@
-/* Workflow Trees · Architect View Stylesheet */
-.workflows-page {
-  max-width: 1440px;
-  margin: 0 auto;
-  color: var(--ink);
-  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-}
+/* Workflow Designer (/workflows). Colours come from the app tokens so light/dark both work. */
 
-/* ─── Top Level Operational Ribbon ──────────────────────────────── */
-.workflow-ribbon-grid {
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 20px;
-}
+.wf-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.wf-save-state { font-size: 12px; color: var(--muted-light); margin-right: 4px; }
 
-.wf-ribbon-card {
-  background: var(--panel);
+.wf-layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
+
+.wf-canvas {
+  height: calc(100vh - 210px);
+  min-height: 560px;
   border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 14px 16px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  display: flex;
-  flex-direction: column;
-}
-
-.wf-ribbon-card:hover {
-  border-color: var(--line-strong, #94a3b8);
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
-}
-
-.wf-ribbon-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 12px;
-  font-weight: 750;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted);
-  margin-bottom: 6px;
-}
-
-.wf-ribbon-val {
-  font-size: 24px;
-  font-weight: 800;
-  color: var(--ink);
-  line-height: 1.1;
-  margin-bottom: 4px;
-}
-
-.wf-ribbon-sub {
-  font-size: 12px;
-  color: var(--muted);
-  white-space: nowrap;
+  border-radius: var(--radius-lg);
   overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* ─── Invariants Panel ─────────────────────────────────────────── */
-.wf-invariants-panel {
-  margin-bottom: 24px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-}
-
-.wf-invariants-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
-  padding: 16px;
-  background: var(--canvas);
-  border-radius: var(--radius-md);
-  margin: 12px 16px 16px;
-}
-
-.wf-guard-item {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 12px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.wf-guard-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 750;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: #15803d;
-  margin-bottom: 2px;
-}
-
-.wf-guard-tag .live-dot {
-  width: 6px;
-  height: 6px;
-}
-
-.wf-guard-item strong {
-  font-size: 12.5px;
-  font-weight: 700;
-  color: var(--ink);
-}
-
-.wf-guard-item p {
-  margin: 0;
-  font-size: 12px;
-  color: var(--muted);
-  line-height: 1.45;
-}
-
-.wf-guard-item code {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 12px;
-  background: var(--line-subtle);
-  padding: 1px 4px;
-  border-radius: 4px;
-  color: var(--ink-secondary);
-}
-
-/* ─── Stage Selector Tabs ──────────────────────────────────────── */
-.wf-tabs-container {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 20px;
-  border-bottom: 1px solid var(--line);
-  padding-bottom: 12px;
-  overflow-x: auto;
-}
-
-.wf-stage-tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 14px;
-  font-size: 12.5px;
-  font-weight: 650;
-  border-radius: 8px;
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--muted);
-  transition: all 0.15s ease;
-  white-space: nowrap;
-}
-
-.wf-stage-tab:hover {
-  background: var(--line-subtle);
-  color: var(--ink);
-}
-
-.wf-stage-tab.active {
-  background: var(--panel);
-  border-color: var(--line);
-  color: var(--blue, #2563eb);
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
-  font-weight: 750;
-}
-
-/* ─── Workflow Trees Canvas ────────────────────────────────────── */
-.wf-trees-canvas {
-  display: flex;
-  flex-direction: column;
-  gap: 28px;
-  margin-bottom: 40px;
-}
-
-.wf-tree-section {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 20px 22px;
   box-shadow: var(--shadow-sm);
-}
-
-.wf-tree-header {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  margin-bottom: 22px;
-  padding-bottom: 14px;
-  border-bottom: 1px solid var(--line-subtle);
-}
-
-.wf-section-badge {
-  font-size: 12px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  padding: 4px 10px;
-  border-radius: 999px;
-  flex-shrink: 0;
-}
-
-.wf-section-badge.s1 { background: #dbeafe; color: #1d4ed8; }
-.wf-section-badge.s2 { background: #e0e7ff; color: #4338ca; }
-.wf-section-badge.s3 { background: #f3e8ff; color: #7e22ce; }
-.wf-section-badge.s4 { background: #dcfce7; color: #15803d; }
-
-.wf-section-title h3 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 750;
-  color: var(--ink);
-  letter-spacing: -0.01em;
-}
-
-.wf-section-title p {
-  margin: 2px 0 0;
-  font-size: 12px;
-  color: var(--muted);
-}
-
-/* ─── Node Flow Layout ─────────────────────────────────────────── */
-.wf-nodes-flow {
-  display: flex;
-  align-items: stretch;
-  gap: 12px;
-  overflow-x: auto;
-  padding: 6px 2px 14px;
-}
-
-.wf-arrow-connector {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 18px;
-  font-weight: 800;
-  color: var(--muted-light);
-  flex-shrink: 0;
-  user-select: none;
-}
-
-.wf-node-card {
-  width: 220px;
-  min-width: 220px;
-  background: var(--canvas);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 14px;
-  display: flex;
-  flex-direction: column;
-  transition: all 0.15s ease;
-  position: relative;
-}
-
-.wf-node-card:hover {
-  border-color: var(--line-strong, #94a3b8);
   background: var(--panel);
-  transform: translateY(-2px);
-  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.05);
+}
+.wf-canvas .sqd-designer-react,
+.wf-canvas .sqd-designer { height: 100%; }
+.wf-canvas .sqd-step-task,
+.wf-canvas .sqd-label { transition: opacity .2s ease; }
+.wf-canvas .sqd-designer.sqd-theme-dark { background: var(--canvas); }
+.wf-canvas .sqd-theme-dark .sqd-smart-editor,
+.wf-canvas .sqd-theme-dark .sqd-toolbox { background: var(--panel); color: var(--ink); }
+
+/* Step editor panel inside the designer */
+.wf-editor { display: grid; gap: 14px; padding: 14px; font-size: 12px; color: var(--ink); }
+.wf-editor .eyebrow { margin: 0; }
+.wf-editor .form-field { min-width: 0; }
+.wf-editor-text { margin: 0; color: var(--muted); line-height: 1.5; }
+.wf-editor code, .wf-tokens code, .wf-token-list code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; }
+.wf-token-error { color: var(--tone-danger-fg); font-size: 12px; font-weight: 600; }
+.wf-token-list { margin: 0; display: grid; gap: 8px; }
+.wf-token-list div { display: grid; gap: 2px; }
+.wf-token-list dt { color: var(--ink); font-weight: 700; }
+.wf-token-list dd { margin: 0; color: var(--muted-light); line-height: 1.4; word-break: break-word; }
+
+.wf-branches { display: grid; gap: 8px; }
+.wf-branch { display: grid; gap: 6px; padding: 8px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-elevated); }
+.wf-branch-head { display: flex; gap: 6px; align-items: center; }
+.wf-branch input, .wf-branch textarea {
+  width: 100%; border: 1.5px solid var(--border-strong); border-radius: 6px; padding: 6px 8px;
+  font-size: 12px; color: var(--ink); background: var(--panel); outline: none; resize: vertical;
+}
+.wf-branch input { font-weight: 700; }
+.wf-branch input:focus, .wf-branch textarea:focus { border-color: var(--blue); }
+.wf-icon-button {
+  flex: none; width: 28px; height: 28px; display: grid; place-items: center; cursor: pointer;
+  border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--muted);
+}
+.wf-icon-button:hover:not(:disabled) { color: var(--red); border-color: var(--tone-danger-border); }
+.wf-icon-button:disabled { opacity: .4; cursor: not-allowed; }
+
+/* Order lookup */
+.wf-side { position: sticky; top: 16px; display: grid; gap: 16px; }
+.wf-lookup { padding: 18px; display: grid; gap: 12px; }
+.wf-lookup .eyebrow { margin: 0; }
+.wf-lookup-form { display: flex; gap: 6px; }
+.wf-lookup-form input {
+  flex: 1; min-width: 0; height: 32px; padding: 0 10px; font-size: 12px;
+  border: 1.5px solid var(--border-strong); border-radius: 8px; background: var(--panel); color: var(--ink); outline: none;
+}
+.wf-lookup-form input:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12); }
+.wf-muted { margin: 0; color: var(--muted-light); font-size: 12px; line-height: 1.5; }
+
+.wf-result { display: grid; gap: 12px; }
+.wf-result-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.wf-order-link { font-size: 16px; font-weight: 800; color: var(--blue); text-decoration: none; }
+.wf-order-link:hover { text-decoration: underline; }
+.wf-facts { margin: 0; display: grid; gap: 6px; font-size: 12px; }
+.wf-facts div { display: grid; grid-template-columns: 76px 1fr; gap: 8px; }
+.wf-facts dt { color: var(--muted-light); font-weight: 600; }
+.wf-facts dd { margin: 0; color: var(--ink); word-break: break-word; }
+.wf-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+.wf-where { display: grid; gap: 2px; padding: 10px 12px; border-radius: var(--radius-md); font-size: 12px; border: 1px solid; }
+.wf-where strong { font-size: 14px; }
+.wf-where.is-found { background: var(--tone-success-bg); border-color: var(--tone-success-border); color: var(--tone-success-fg); }
+.wf-where.is-missing { background: var(--tone-warning-bg); border-color: var(--tone-warning-border); color: var(--tone-warning-fg); }
+
+/* Route timeline: a dot per step in its colour, the current one pinging */
+.wf-route { list-style: none; margin: 0; padding: 0 0 0 2px; display: grid; font-size: 12px; color: var(--ink); }
+.wf-route li { position: relative; padding: 3px 0 3px 18px; }
+.wf-route li::before { content: ''; position: absolute; left: 0; top: 6px; width: 10px; height: 10px; border-radius: 50%; background: var(--dot, var(--blue)); }
+.wf-route li::after { content: ''; position: absolute; left: 4.5px; top: 17px; bottom: -6px; width: 1px; background: var(--border-strong); }
+.wf-route li:last-child::after { display: none; }
+.wf-route li.is-decision::before { width: 8px; height: 8px; top: 7px; left: 1px; border-radius: 2px; transform: rotate(45deg); }
+.wf-route li.is-current { font-weight: 800; color: var(--tone-success-fg); }
+.wf-route li.is-current::before { background: #10b981; animation: wf-ping 1.6s ease-out infinite; }
+
+/* "Running" progress along the route */
+.wf-progress { display: grid; gap: 6px; }
+.wf-progress-label { display: flex; justify-content: space-between; font-size: 12px; font-weight: 700; color: var(--ink-secondary); }
+.wf-progress-track { height: 10px; border-radius: 999px; background: var(--tone-neutral-bg); overflow: hidden; }
+.wf-progress-track span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #2563eb, #10b981); transition: width .6s ease; }
+.wf-progress-track span.is-running {
+  background-image:
+    linear-gradient(45deg, rgba(255, 255, 255, .3) 25%, transparent 25%, transparent 50%, rgba(255, 255, 255, .3) 50%, rgba(255, 255, 255, .3) 75%, transparent 75%, transparent),
+    linear-gradient(90deg, #2563eb, #10b981);
+  background-size: 16px 16px, 100% 100%;
+  animation: wf-stripes .8s linear infinite;
 }
 
-.wf-node-card.decision-node {
-  border-left: 3px solid #f59e0b;
+/* Colour picker in the step editor */
+.wf-colors { display: grid; gap: 6px; }
+.wf-swatches { display: flex; flex-wrap: wrap; gap: 6px; }
+.wf-swatch { width: 24px; height: 24px; border-radius: 6px; border: 2px solid transparent; cursor: pointer; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .12); }
+.wf-swatch.is-auto { width: auto; padding: 0 8px; font-size: 11px; font-weight: 700; background: var(--panel); color: var(--ink); border-color: var(--line); }
+.wf-swatch.is-active { border-color: var(--ink); box-shadow: inset 0 0 0 2px var(--panel); }
+.wf-swatch:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.wf-swatch:disabled { cursor: not-allowed; opacity: .5; }
+
+/* ─── Canvas look ─────────────────────────────────────────────────────────
+   Colours come from --wf-c: set per step kind here, or per step from the
+   editor (canvasCss in Workflows.tsx). ".sqd-designer" outranks the theme CSS. */
+.wf-canvas .sqd-step-task { --wf-c: #64748b; }
+.wf-canvas .sqd-step-task.sqd-type-order { --wf-c: #2563eb; }
+.wf-canvas .sqd-step-task.sqd-type-shipping { --wf-c: #059669; }
+.wf-canvas .sqd-step-task.sqd-type-returns { --wf-c: #d97706; }
+.wf-canvas .sqd-step-task.sqd-type-money { --wf-c: #7c3aed; }
+.wf-canvas .sqd-step-switch { --wf-c: #1e3a8a; }
+
+.wf-canvas .sqd-designer .sqd-step-task > .sqd-step-task-rect {
+  /* Light tint in both themes: the designer draws step text black. */
+  fill: color-mix(in srgb, var(--wf-c) var(--wf-tint, 10%), #fff);
+  stroke: var(--wf-c);
+  stroke-width: var(--wf-stroke, 1.5px);
+  filter: drop-shadow(0 2px 3px rgba(15, 23, 42, .14));
+}
+.wf-canvas .sqd-designer .sqd-step-task > .sqd-step-task-rect.sqd-selected { stroke: #f97316; stroke-width: 3px; }
+.wf-canvas .sqd-designer .sqd-step-task > .sqd-step-task-text { fill: #0f172a; font-weight: 600; }
+.wf-canvas .sqd-designer .sqd-step-task .sqd-input { fill: #fff; stroke: var(--wf-c); }
+.wf-canvas .sqd-designer .sqd-step-task .sqd-output { fill: var(--wf-c); }
+
+.wf-canvas .sqd-designer .sqd-step-switch > .sqd-label-primary > .sqd-label-rect { fill: var(--wf-c); }
+.wf-canvas .sqd-designer .sqd-step-switch > .sqd-label-secondary > .sqd-label-rect { fill: #fff; stroke: var(--wf-c); stroke-width: 1.5px; }
+.wf-canvas .sqd-designer .sqd-step-switch > .sqd-label-secondary > .sqd-label-text { fill: var(--wf-c); font-weight: 700; }
+.wf-canvas .sqd-designer .sqd-step-switch > g > .sqd-input { fill: #fff; stroke: var(--wf-c); }
+.wf-canvas .sqd-designer .sqd-root-start-stop-circle { fill: #1e3a8a; }
+.wf-canvas .sqd-designer .sqd-region { stroke: #cbd5e1; stroke-width: 1px; stroke-dasharray: 4 4; }
+.wf-canvas .sqd-designer .sqd-region.sqd-selected { stroke: #f97316; stroke-width: 2px; stroke-dasharray: 0; }
+
+/* Running connectors: dashes flow in the direction orders move */
+.wf-canvas .sqd-designer .sqd-join { stroke: #94a3b8; stroke-width: 2px; stroke-dasharray: 6 4; animation: wf-flow 1.4s linear infinite; }
+
+/* Drop slots while dragging a step: light dashed blue, solid when hovered */
+.wf-canvas .sqd-designer .sqd-placeholder .sqd-placeholder-rect { fill: rgba(37, 99, 235, .06); stroke: #93c5fd; stroke-width: 1px; stroke-dasharray: 4 3; }
+.wf-canvas .sqd-designer .sqd-placeholder.sqd-hover .sqd-placeholder-rect { fill: #2563eb; stroke: #2563eb; }
+.wf-canvas .sqd-designer .sqd-placeholder-icon-path { fill: #93c5fd; }
+.wf-canvas .sqd-designer .sqd-placeholder.sqd-hover .sqd-placeholder-icon-path { fill: #fff; }
+
+/* Tracing an order: everything off the route fades (canvasCss lights the route) */
+.wf-canvas.is-tracing .sqd-step-task,
+.wf-canvas.is-tracing .sqd-step-switch > .sqd-label { opacity: .28; }
+.wf-canvas.is-tracing .sqd-join { opacity: .5; }
+
+@keyframes wf-flow { to { stroke-dashoffset: -20; } }
+@keyframes wf-run { to { stroke-dashoffset: -26; } }
+@keyframes wf-glow {
+  0%, 100% { filter: drop-shadow(0 0 1px rgba(16, 185, 129, .4)); }
+  50% { filter: drop-shadow(0 0 10px rgba(16, 185, 129, .95)); }
+}
+@keyframes wf-stripes { from { background-position: 16px 0, 0 0; } to { background-position: 0 0, 0 0; } }
+@keyframes wf-ping {
+  0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, .6); }
+  100% { box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
 }
 
-.wf-node-card.highlighted-node {
-  border-color: #93c5fd;
-  background: #f8fafc;
-  box-shadow: 0 0 0 1px #bfdbfe;
+@media (prefers-reduced-motion: reduce) {
+  .wf-canvas .sqd-join,
+  .wf-canvas .sqd-step-task-rect,
+  .wf-progress-track span,
+  .wf-route li::before { animation: none !important; }
+  .wf-progress-track span,
+  .wf-canvas .sqd-step-task,
+  .wf-canvas .sqd-label { transition: none !important; }
 }
+.wf-branch-taken { color: var(--muted-light); font-weight: 600; }
 
-.wf-node-card.success-node {
-  border-color: #86efac;
-  background: #f0fdf4;
-}
+.wf-tokens { display: flex; flex-wrap: wrap; gap: 4px; }
+.wf-tokens code { padding: 2px 6px; border-radius: 5px; background: var(--tone-neutral-bg); color: var(--tone-neutral-fg); border: 1px solid var(--tone-neutral-border); }
 
-.wf-node-card.danger-node {
-  border-color: #fca5a5;
-  background: #fef2f2;
+.wf-other { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.wf-other button {
+  font-size: 12px; padding: 2px 8px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--panel); color: var(--ink);
 }
+.wf-other button.is-active { border-color: var(--blue); color: var(--blue); font-weight: 700; }
 
-.wf-node-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
-}
-
-.wf-node-pill {
-  font-size: 12px;
-  font-weight: 750;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  padding: 2px 6px;
-  border-radius: 4px;
-}
-
-.pill-gray { background: var(--tone-neutral-bg); color: var(--tone-neutral-fg); }
-.pill-blue { background: var(--tone-info-bg); color: var(--tone-info-fg); }
-.pill-purple { background: var(--tone-purple-bg); color: var(--tone-purple-fg); }
-.pill-amber { background: var(--tone-warning-bg); color: var(--tone-warning-fg); }
-.pill-green { background: var(--tone-success-bg); color: var(--tone-success-fg); }
-.pill-red { background: var(--tone-danger-bg); color: var(--tone-danger-fg); }
-
-.wf-node-id {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--muted-light);
-  font-family: 'JetBrains Mono', monospace;
-}
-
-.wf-node-count-badge {
-  font-size: 12px;
-  font-weight: 800;
-  background: #2563eb;
-  color: #ffffff;
-  padding: 1px 7px;
-  border-radius: 999px;
-}
-
-.wf-node-card h4 {
-  margin: 0 0 6px;
-  font-size: 13px;
-  font-weight: 750;
-  color: var(--ink);
-  line-height: 1.3;
-}
-
-.wf-node-card h4 code {
-  font-size: 12px;
-  background: rgba(15, 23, 42, 0.06);
-  padding: 1px 4px;
-  border-radius: 3px;
-}
-
-.wf-node-card p {
-  margin: 0;
-  font-size: 12px;
-  color: var(--muted);
-  line-height: 1.45;
-  flex-grow: 1;
-}
-
-.wf-node-card p code {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 12px;
-  background: var(--line-subtle);
-  padding: 1px 3px;
-  border-radius: 3px;
-}
-
-.wf-branch-pills {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-top: 10px;
-}
-
-.wf-branch-pill {
-  font-size: 12px;
-  font-weight: 700;
-  padding: 2px 6px;
-  border-radius: 4px;
-  display: inline-block;
-}
-
-.wf-branch-pill.green { background: var(--tone-success-bg); color: var(--tone-success-fg); }
-.wf-branch-pill.red { background: var(--tone-danger-bg); color: var(--tone-danger-fg); }
-.wf-branch-pill.blue { background: var(--tone-info-bg); color: var(--tone-info-fg); }
-.wf-branch-pill.orange { background: var(--tone-warning-bg); color: var(--tone-warning-fg); }
-.wf-branch-pill.purple { background: var(--tone-purple-bg); color: var(--tone-purple-fg); }
-
-.wf-node-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 10px;
-}
-
-.wf-badge-tag {
-  font-size: 12px;
-  font-weight: 650;
-  background: var(--line-subtle);
-  color: var(--muted);
-  padding: 2px 6px;
-  border-radius: 4px;
-  border: 1px solid var(--line);
-}
-
-.wf-node-action {
-  margin-top: 12px;
-  padding-top: 8px;
-  border-top: 1px solid var(--line-subtle);
-}
-
-.wf-action-link {
-  font-size: 12px;
-  font-weight: 750;
-  color: var(--blue, #2563eb);
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  transition: all 0.15s ease;
-}
-
-.wf-action-link:hover {
-  text-decoration: underline;
-  transform: translateX(2px);
-}
-
-/* ─── Responsive Adjustments ───────────────────────────────────── */
-@media (max-width: 1200px) {
-  .workflow-ribbon-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-  .wf-invariants-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-
-/* ─── Phase 2 Design System: Dark Mode, Focus Rings & Responsive ─── */
-.wf-tabs-container {
-  flex-wrap: wrap;
-  max-width: 100%;
-}
-
-.wf-tab-btn:focus-visible,
-.wf-node-card:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
-}
-
-[data-theme='dark'] .wf-node-card {
-  background: var(--panel);
-  border-color: var(--line);
-  color: var(--ink);
-}
-[data-theme='dark'] .wf-node-card.decision-node {
-  background: var(--surface-elevated);
-  border-color: var(--border-strong);
-}
-[data-theme='dark'] .wf-node-card.highlighted-node {
-  background: var(--tone-info-bg);
-  border-color: var(--tone-info-border);
-}
-[data-theme='dark'] .wf-node-card.success-node {
-  background: var(--tone-success-bg);
-  border-color: var(--tone-success-border);
-}
-[data-theme='dark'] .wf-node-card.danger-node {
-  background: var(--tone-danger-bg);
-  border-color: var(--tone-danger-border);
-}
-[data-theme='dark'] .wf-node-card h4 {
-  color: var(--ink);
-}
-[data-theme='dark'] .wf-node-card h4 code,
-[data-theme='dark'] .wf-node-card p code {
-  background: var(--surface-elevated);
-  border-color: var(--line);
-  color: var(--ink);
-}
-[data-theme='dark'] .wf-node-card p {
-  color: var(--muted);
-}
-[data-theme='dark'] .wf-ribbon-step,
-[data-theme='dark'] .wf-invariant-card {
-  background: var(--panel);
-  border-color: var(--line);
-}
-
-@media (max-width: 900px) {
-  .workflow-ribbon-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .wf-invariants-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 768px) {
-  .wf-tab-btn {
-    min-height: 44px;
-  }
-}
-
-@media (max-width: 560px) {
-  .workflow-ribbon-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-
-/* ─── Phase 2 Design System: Node Contrast & Stage Tab Sizing ─── */
-.wf-node-id {
-  color: var(--muted);
-}
-.wf-stage-tab:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
-}
-[data-theme="dark"] .wf-section-badge.s4 {
-  background: var(--tone-success-bg);
-  color: var(--tone-success-fg);
-}
-[data-theme="dark"] .wf-stage-tab {
-  color: var(--muted);
-}
-[data-theme="dark"] .wf-stage-tab.active {
-  color: var(--tone-info-fg);
-}
-@media (max-width: 768px) {
-  .wf-stage-tab {
-    min-height: 44px;
-  }
-}
-
-[data-theme="dark"] .wf-guard-tag.active {
-  background: var(--tone-success-bg);
-  color: var(--tone-success-fg);
-  border-color: var(--tone-success-border);
-}
-[data-theme="dark"] .wf-action-link {
-  color: var(--tone-info-fg);
-}
-
-[data-theme="dark"] .wf-section-badge.s1 {
-  background: var(--tone-info-bg);
-  color: var(--tone-info-fg);
-}
-[data-theme="dark"] .wf-section-badge.s2 {
-  background: var(--tone-info-bg);
-  color: var(--tone-info-fg);
-}
-[data-theme="dark"] .wf-section-badge.s3 {
-  background: var(--tone-purple-bg);
-  color: var(--tone-purple-fg);
+@media (max-width: 1100px) {
+  .wf-layout { grid-template-columns: 1fr; }
+  .wf-side { position: static; }
+  .wf-canvas { height: 70vh; min-height: 460px; }
 }

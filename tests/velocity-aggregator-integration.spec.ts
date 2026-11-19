@@ -520,8 +520,34 @@ describe('Velocity Aggregator Integration & Business Rules', () => {
       expect(pdfBuffer).not.toBeNull();
       expect(pdfBuffer!.subarray(0, 4).toString()).toBe('%PDF');
       expect(prismaStub.shipment.updateMany).toHaveBeenCalledWith({
-        where: { waybillNumber: 'VEL123456' },
+        where: { waybillNumber: 'VEL123456', courier: 'Velocity' },
         data: { labelUrl: 'https://s3.amazonaws.com/velocity-labels/VEL123456.pdf' },
+      });
+    });
+
+    it('skips an expired stored label link and downloads the fresh label_url from tracking', async () => {
+      const expired = 'https://velocity-shazam-prod.s3.ap-south-1.amazonaws.com/old?X-Amz-Date=20200101T000000Z&X-Amz-Expires=600';
+      const fresh = 'https://velocity-shazam-prod.s3.ap-south-1.amazonaws.com/new';
+      vi.spyOn(velocityService, 'trackShipment').mockResolvedValueOnce({
+        awb: 'VEL777',
+        shipmentStatus: 'in_transit',
+        currentStatus: 'In Transit',
+        activities: [],
+        raw: { label_url: fresh },
+      });
+      mockAxiosStatic.get.mockResolvedValue({
+        status: 200,
+        data: Buffer.from('%PDF-1.4 fresh label bytes padding 1234567890'),
+      });
+
+      const pdf = await velocityService.fetchOfficialLabelPdf('VEL777', expired);
+
+      expect(pdf!.subarray(0, 4).toString()).toBe('%PDF');
+      expect(mockAxiosStatic.get).toHaveBeenCalledTimes(1);
+      expect(mockAxiosStatic.get.mock.calls[0][0]).toBe(fresh);
+      expect(prismaStub.shipment.updateMany).toHaveBeenCalledWith({
+        where: { waybillNumber: 'VEL777', courier: 'Velocity' },
+        data: { labelUrl: fresh },
       });
     });
 

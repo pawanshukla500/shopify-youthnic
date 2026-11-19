@@ -7,7 +7,7 @@ import shopifyService from '../modules/shopify/shopify.service';
 import delhiveryDocumentFetcher from '../modules/delhivery/delhivery-document-fetcher.service';
 import { runAccountsMaintenance } from '../modules/accounts/accounts.service';
 import { backfillMissingRefundTrailEvents } from '../modules/accounts/account-trail.service';
-import { sendDueMonthlyReport } from '../modules/accounts/accounts-report.service';
+import { sendDueMonthlyPack } from '../modules/accounts/monthly-pack.service';
 import { estimatePendingShippingCosts } from '../modules/accounts/shipping-cost.service';
 import { syncGatewaySettlements } from '../modules/accounts/gateway-settlement.service';
 import gmailSettlementService from '../modules/accounts/gmail-settlement.service';
@@ -83,31 +83,31 @@ class Scheduler {
           logger.error('[CRON] Retry failed RTO refunds error', { error: error.message });
         }
         // Accounts: fill delivery dates, close orders that reached Payment
-        // Received, and send last month's report if the 8th was missed.
+        // Received, and send last month's accounts pack if the 15th was missed.
         try {
           await runAccountsMaintenance();
         } catch (error: any) {
           logger.error('[CRON] Accounts closing failed', { error: error.message });
         }
         try {
-          await sendDueMonthlyReport();
+          await sendDueMonthlyPack();
         } catch (error: any) {
-          logger.error('[CRON] Monthly accounts report catch-up failed', { error: error.message });
+          logger.error('[CRON] Monthly accounts pack catch-up failed', { error: error.message });
         }
       })
     );
 
-    // 5. Monthly accounts closing report: last month's orders, emailed on the 8th (IST).
+    // 5. Monthly accounts pack: last month's five reports zipped, emailed on the 15th (IST); held if checks fail.
     this.jobs.push(
       cron.schedule(
         config.accounts.reportCron,
         async () => {
-          logger.info('[CRON] Sending monthly accounts report...');
+          logger.info('[CRON] Sending monthly accounts pack...');
           try {
-            const month = await sendDueMonthlyReport();
-            logger.info('[CRON] Monthly accounts report', { month: month || 'already sent or no recipients' });
+            const result = await sendDueMonthlyPack();
+            logger.info('[CRON] Monthly accounts pack', result ? { month: result.month, held: result.held, to: result.sentTo } : { result: 'not due, or already sent/held' });
           } catch (error: any) {
-            logger.error('[CRON] Monthly accounts report failed', { error: error.message });
+            logger.error('[CRON] Monthly accounts pack failed', { error: error.message });
           }
         },
         { timezone: 'Asia/Kolkata' }

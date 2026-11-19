@@ -1,9 +1,8 @@
 /**
  * Monthly accounts closing report (Excel) & State-Wise Tally Ledger Matrix.
  *
- * Automated monthly email dispatch on the 10th of every month to:
- *   To: accounts2@vbexports.co.in
- *   CC: returnorders@vbexports.co.in, vaibhav@vbexports.co.in, accounts@vbexports.co.in
+ * Downloadable and emailed on request. The automatic monthly email is the accounts pack
+ * (five reports zipped) on the 15th: see monthly-pack.service.ts.
  *
  * Accounting formula:
  *   State-wise Monthly Sales - Returns Deducted - Payment Received = Net Outstanding
@@ -1935,7 +1934,7 @@ export async function generateMonthlyReport(
   ] = await Promise.all([
     prisma.order.findMany({
       where: { shopifyCreatedAt: { gte: start, lt: end } },
-      include: { shipment: true, returns: true },
+      include: { shipment: true, returns: true, items: true },
       orderBy: { shopifyCreatedAt: 'asc' },
     }),
     prisma.return.findMany({
@@ -1947,7 +1946,7 @@ export async function generateMonthlyReport(
       },
       include: {
         order: {
-          include: { shipment: true },
+          include: { shipment: true, items: true },
         },
       },
       orderBy: { createdAt: 'asc' },
@@ -2030,7 +2029,7 @@ export async function generateDateRangeReport(
   ] = await Promise.all([
     prisma.order.findMany({
       where: { shopifyCreatedAt: { gte: start, lt: end } },
-      include: { shipment: true, returns: true },
+      include: { shipment: true, returns: true, items: true },
       orderBy: { shopifyCreatedAt: 'asc' },
     }),
     prisma.return.findMany({
@@ -2042,7 +2041,7 @@ export async function generateDateRangeReport(
       },
       include: {
         order: {
-          include: { shipment: true },
+          include: { shipment: true, items: true },
         },
       },
       orderBy: { createdAt: 'asc' },
@@ -2128,7 +2127,7 @@ export async function getStateMonthlyAccounting(
   ] = await Promise.all([
     prisma.order.findMany({
       where: { shopifyCreatedAt: { gte: start, lt: end } },
-      include: { shipment: true, returns: true },
+      include: { shipment: true, returns: true, items: true },
       orderBy: { shopifyCreatedAt: 'asc' },
     }),
     prisma.return.findMany({
@@ -2140,7 +2139,7 @@ export async function getStateMonthlyAccounting(
       },
       include: {
         order: {
-          include: { shipment: true },
+          include: { shipment: true, items: true },
         },
       },
       orderBy: { createdAt: 'asc' },
@@ -2297,7 +2296,6 @@ export async function setReportRecipients(value: string, ccValue?: string): Prom
 }
 
 const CLAIM_PREFIX = 'SENDING:';
-const STALE_CLAIM_MS = 30 * 60 * 1000;
 
 /** When and to whom the month's report was emailed, or null if it has not been. */
 export async function reportSentAt(month: string): Promise<{ sentAt: string; to: string[] } | null> {
@@ -2310,24 +2308,6 @@ export async function reportSentAt(month: string): Promise<{ sentAt: string; to:
   }
 }
 
-/**
- * Claim the month's automatic send so only one sender emails it.
- */
-async function claimMonthlySend(month: string, now: Date): Promise<boolean> {
-  const key = sentKey(month);
-  const claim = `${CLAIM_PREFIX}${now.toISOString()}`;
-  try {
-    await prisma.setting.create({ data: { key, value: claim } });
-    return true;
-  } catch {
-    const row = await prisma.setting.findUnique({ where: { key } });
-    if (!row?.value.startsWith(CLAIM_PREFIX)) return false;
-    const claimedAt = Date.parse(row.value.slice(CLAIM_PREFIX.length));
-    if (Number.isFinite(claimedAt) && now.getTime() - claimedAt < STALE_CLAIM_MS) return false;
-    const taken = await prisma.setting.updateMany({ where: { key, value: row.value }, data: { value: claim } });
-    return taken.count === 1;
-  }
-}
 
 function escapeHtml(str: string): string {
   return String(str || '')
@@ -2532,35 +2512,3 @@ export async function emailMonthlyReport(
   return { sentTo: to, ccTo: cc, fileName };
 }
 
-/** The report hour on the report day (IST); the email never goes out earlier. */
-const REPORT_HOUR_IST = 9;
-
-/**
- * Called at 09:00 IST on the 10th by cron and hourly as a catch-up: emails last
- * month's report once, from 09:00 on the configured day (10th) onwards, if it has not
- * gone out yet.
- */
-export async function sendDueMonthlyReport(now: Date = new Date()): Promise<string | null> {
-  const ist = new Date(now.getTime() + IST_OFFSET_MS);
-  const day = ist.getUTCDate();
-  const reportDay = config.accounts.reportDayOfMonth;
-  if (day < reportDay || (day === reportDay && ist.getUTCHours() < REPORT_HOUR_IST)) return null;
-
-  const month = previousMonth(now);
-  if (await reportSentAt(month)) return null;
-  const recipients = await getReportRecipients();
-  const ccRecipients = await getReportCcRecipients();
-  if (!recipients.length) {
-    logger.warn('Monthly accounts report is due but no recipients are set', { month });
-    return null;
-  }
-  if (!(await claimMonthlySend(month, now))) return null;
-  try {
-    await emailMonthlyReport(month, recipients, ccRecipients);
-  } catch (error) {
-    // Release the claim so the next hourly run tries again.
-    await prisma.setting.delete({ where: { key: sentKey(month) } }).catch(() => undefined);
-    throw error;
-  }
-  return month;
-}

@@ -23,7 +23,6 @@ vi.mock('../src/database/prisma', () => ({ default: prismaStub }));
 vi.mock('../src/modules/email/resend.service', () => ({ default: { sendInternalEmail: vi.fn() } }));
 
 import {
-  getProviderReconciliation,
   providerTallyRows,
   reconcileProvider,
   validateProviderInvoice,
@@ -90,38 +89,6 @@ describe('provider bill reconciliation', () => {
     expect(() => validateProviderInvoice({ ...ok, provider: 'RAZORPAY' })).toThrow(/Provider/);
     expect(() => validateProviderInvoice({ ...ok, igst: -1 })).toThrow(/non-negative/);
   });
-
-  it('counts each Easebuzz transaction once and Velocity freight per leg, including exchange legs', async () => {
-    prismaStub.providerInvoice.findMany.mockResolvedValueOnce([
-      { ...easebuzzOct, provider: 'EASEBUZZ', period: '2026-10', invoiceDate: new Date('2026-10-31'), note: null } as any,
-    ]);
-    prismaStub.gatewaySettlementOrder.findMany.mockResolvedValueOnce([
-      { id: 1, easebuzzTrxnId: 'E1', merchantTrxnId: 'M1', serviceCharge: 4000, gst: 720 },
-      { id: 2, easebuzzTrxnId: 'E1', merchantTrxnId: 'M1', serviceCharge: 4000, gst: 720 }, // same txn in a re-uploaded batch
-      { id: 3, easebuzzTrxnId: 'E2', merchantTrxnId: 'M2', serviceCharge: 426.11, gst: 76.7 },
-    ] as any);
-    prismaStub.shipment.findMany.mockResolvedValue([
-      { courier: 'Velocity', labelUrl: null, waybillNumber: 'V1', status: 'DELIVERED', forwardCharge: 118, rtoCharge: null, shippingCostSource: 'ACTUAL', rtoChargeSource: null },
-      { courier: 'Velocity', labelUrl: null, waybillNumber: 'V2', status: 'RTO_DELIVERED', forwardCharge: 59, rtoCharge: 59, shippingCostSource: 'ACTUAL', rtoChargeSource: 'ACTUAL' },
-      { courier: 'Delhivery', labelUrl: null, waybillNumber: 'D1', status: 'DELIVERED', forwardCharge: 70, rtoCharge: null, shippingCostSource: 'ESTIMATE', rtoChargeSource: null },
-    ] as any);
-    prismaStub.return.findMany.mockResolvedValue([
-      { carrier: 'Velocity', shippingCharge: 80, shippingCostSource: 'ESTIMATE' }, // exchange reverse pickup
-    ] as any);
-
-    const rows = await getProviderReconciliation('2026-10');
-    const easebuzz = rows.find((r) => r.provider === 'EASEBUZZ')!;
-    expect(easebuzz.consumption).toMatchObject({ taxable: 4426.11, gst: 796.7, total: 5222.81, lines: 2 });
-    expect(easebuzz.status).toBe('MATCHED');
-
-    const velocity = rows.find((r) => r.provider === 'VELOCITY')!;
-    expect(velocity.consumption.total).toBe(316);
-    expect(velocity.consumption.lines).toBe(4);
-    expect(velocity.consumption.estimated).toBe(1);
-    expect(rows.find((r) => r.provider === 'DELHIVERY')!.consumption.total).toBe(70);
-    prismaStub.shipment.findMany.mockReset().mockResolvedValue([]);
-    prismaStub.return.findMany.mockReset().mockResolvedValue([]);
-  });
 });
 
 function regOrder(overrides: Record<string, any> = {}) {
@@ -141,12 +108,21 @@ function regOrder(overrides: Record<string, any> = {}) {
 }
 
 describe('sales & returns register (Tally Shopify format)', () => {
-  it('adds CGST + SGST lines into one rate but sends mixed-rate orders to GST review', () => {
+  it('rates GST from item prices (government slab), not from Shopify/GoKwik tax lines', () => {
+    // GoKwik put IGST 18% on a ₹599 kurta: the slab says 5%.
+    expect(gstService.determineOrderGstRate(regOrder({ taxLines: [{ rate: 0.18, title: 'IGST' }], items: [{ title: 'Kurta', price: 599, quantity: 1 }], totalDiscounts: 59.9 }))).toBe(5);
+    // A discount can only lower the piece value: ₹2,800 less 20% = ₹2,240 → 5%.
+    expect(gstService.determineOrderGstRate(regOrder({ items: [{ price: 2800, quantity: 1 }], totalDiscounts: 560 }))).toBe(5);
+    expect(gstService.determineOrderGstRate(regOrder({ items: [{ price: 2800, quantity: 1 }], totalDiscounts: 0 }))).toBe(18);
+    // Without items, Shopify tax lines are the fallback: CGST + SGST add up, one title at two rates is mixed.
     expect(gstService.determineOrderGstRate({ totalAmount: 1050, taxLines: [{ rate: 0.025, title: 'CGST' }, { rate: 0.025, title: 'SGST' }] })).toBe(5);
     expect(() => gstService.determineOrderGstRate({ totalAmount: 3000, taxLines: [{ rate: 0.05, title: 'IGST' }, { rate: 0.18, title: 'IGST' }] })).toThrow(/Mixed GST/);
-    const reg = buildGstRegister('2026-10', [regOrder({ taxLines: [{ rate: 0.05, title: 'IGST' }, { rate: 0.18, title: 'IGST' }] })], []);
-    expect(reg.sales['Delivery-COD']).toHaveLength(0);
-    expect(reg.review[0].reason).toMatch(/Mixed GST/);
+    // An order with items in both slabs is split by line, sharing the total (shipping included) by value.
+    const lines = gstService.orderGstLines(regOrder({ totalAmount: 4100, totalDiscounts: 0, items: [{ title: 'Kurta', price: 1000, quantity: 1 }, { title: 'Lehenga', price: 3000, quantity: 1 }] }));
+    expect(lines).toEqual([
+      { rate: 5, amount: 1025, qty: 1, titles: ['Kurta'] },
+      { rate: 18, amount: 3075, qty: 1, titles: ['Lehenga'] },
+    ]);
   });
 
   it('picks the channel from courier for COD and gateway for prepaid', () => {
@@ -163,7 +139,7 @@ describe('sales & returns register (Tally Shopify format)', () => {
       regOrder({ shopifyOrderName: '#26YOU3', customerState: 'Karnataka', paymentMethod: 'Pre-paid', paymentProvider: 'PhonePe', totalAmount: 2100 }),
       regOrder({ shopifyOrderName: '#26YOU4', status: 'CANCELLED' }),
       regOrder({ shopifyOrderName: '26YOU1-EX-FWD', shopifyOrderId: 'EX-FWD-1', paymentMethod: 'EXCHANGE', totalAmount: 0 }),
-      regOrder({ shopifyOrderName: '#26YOU5', taxLines: null, totalTax: null, totalDiscounts: 100 }),
+      regOrder({ shopifyOrderName: '#26YOU5', taxLines: null, totalTax: null, items: [] }),
     ];
     const returns = [
       { isExchange: false, returnStatus: 'RECEIVED', refundAmount: 1050, order: orders[2], items: [{ quantity: 1, orderItem: { title: 'Kurta set' } }] },

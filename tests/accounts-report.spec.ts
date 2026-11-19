@@ -37,7 +37,6 @@ import {
   previousMonth,
   renderWorkbook,
   resolvePaymentRailName,
-  sendDueMonthlyReport,
 } from '../src/modules/accounts/accounts-report.service';
 
 const DAY = 24 * 3600 * 1000;
@@ -400,64 +399,3 @@ describe('state-monthly settlements across periods', () => {
   });
 });
 
-describe('sendDueMonthlyReport', () => {
-  beforeEach(() => {
-    for (const group of [...Object.values(prismaStub), resendStub]) {
-      for (const fn of Object.values(group)) (fn as any).mockReset();
-    }
-    prismaStub.order.findMany.mockResolvedValue([order()]);
-    prismaStub.return.findMany.mockResolvedValue([]);
-    prismaStub.setting.upsert.mockResolvedValue({});
-    prismaStub.setting.create.mockResolvedValue({});
-    prismaStub.setting.delete.mockResolvedValue({});
-    resendStub.sendInternalEmail.mockResolvedValue({ id: 'em_1' });
-  });
-
-  function settings(values: Record<string, string>) {
-    prismaStub.setting.findUnique.mockImplementation(async ({ where }: any) =>
-      values[where.key] !== undefined ? { key: where.key, value: values[where.key] } : null
-    );
-  }
-
-  it('waits until 09:00 IST on the 10th of the month', async () => {
-    settings({ accounts_report_recipients: 'accounts2@vbexports.co.in' });
-    expect(await sendDueMonthlyReport(new Date('2026-11-10T03:00:00.000Z'))).toBeNull(); // 08:30 IST
-    expect(resendStub.sendInternalEmail).not.toHaveBeenCalled();
-    expect(await sendDueMonthlyReport(new Date('2026-11-10T03:30:00.000Z'))).toBe('2026-10'); // 09:00 IST
-  });
-
-  it('does nothing before the 10th', async () => {
-    settings({ accounts_report_recipients: 'accounts2@vbexports.co.in' });
-    expect(await sendDueMonthlyReport(new Date('2026-11-09T10:00:00.000Z'))).toBeNull();
-    expect(resendStub.sendInternalEmail).not.toHaveBeenCalled();
-  });
-
-  it('releases the claim when the email fails, so the next hour retries', async () => {
-    settings({ accounts_report_recipients: 'accounts2@vbexports.co.in' });
-    resendStub.sendInternalEmail.mockRejectedValue(new Error('Resend 500'));
-    await expect(sendDueMonthlyReport(new Date('2026-11-10T10:00:00.000Z'))).rejects.toThrow('Resend 500');
-    expect(prismaStub.setting.delete).toHaveBeenCalledWith({ where: { key: 'accounts_report_sent:2026-10' } });
-  });
-
-  it('emails last month on or after the 10th, with the workbook attached and CC recipients', async () => {
-    settings({
-      accounts_report_recipients: 'accounts2@vbexports.co.in',
-      accounts_report_cc_recipients: 'returnorders@vbexports.co.in,vaibhav@vbexports.co.in,accounts@vbexports.co.in',
-    });
-    expect(await sendDueMonthlyReport(new Date('2026-11-10T10:00:00.000Z'))).toBe('2026-10');
-
-    const email = resendStub.sendInternalEmail.mock.calls[0][0];
-    expect(email.to).toEqual(['accounts2@vbexports.co.in']);
-    expect(email.cc).toEqual(['returnorders@vbexports.co.in', 'vaibhav@vbexports.co.in', 'accounts@vbexports.co.in']);
-    expect(email.subject).toContain('Youthnic Accounts Closing & Tally Report');
-    expect(email.attachments[0].filename).toBe('Youthnic-Accounts-2026-10.xlsx');
-    expect(prismaStub.setting.upsert.mock.calls[0][0].where).toEqual({ key: 'accounts_report_sent:2026-10' });
-
-    settings({
-      accounts_report_recipients: 'accounts2@vbexports.co.in',
-      'accounts_report_sent:2026-10': '{"sentAt":"x"}',
-    });
-    expect(await sendDueMonthlyReport(new Date('2026-11-10T11:00:00.000Z'))).toBeNull();
-    expect(resendStub.sendInternalEmail).toHaveBeenCalledTimes(1);
-  });
-});

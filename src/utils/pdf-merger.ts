@@ -285,7 +285,7 @@ export async function create4x6InvoicePdf(
   y -= 12;
 
   const sumRows: Array<[string, number]> = [
-    ...(d.shipping > 0 ? ([['Shipping', d.shipping]] as Array<[string, number]>) : []),
+    ...(d.shipping > 0 ? ([[`Shipping (incl. GST ${money(d.shippingGst)})`, d.shipping]] as Array<[string, number]>) : []),
     ...(d.otherCharges > 0 ? ([['Other Charges', d.otherCharges]] as Array<[string, number]>) : []),
     ['Total', d.total],
     ['Payment Received', d.received],
@@ -309,7 +309,9 @@ export async function create4x6InvoicePdf(
     textC(String(l.qty), col.qty, by, 6);
     textR(money(l.amount), col.amount, by, 6);
     textR(l.discount.toFixed(2), col.discount, by, 6);
-    textR(`${l.gst.toFixed(2)} | ${d.gstRate}%`, col.gst, by, 6);
+    const gstText = `${l.gst.toFixed(2)} | ${l.gstRate}%`;
+    // Long amounts at 18% need a smaller size to stay clear of the Discount column.
+    textR(gstText, col.gst, by, gstText.length > 11 ? 5 : 6);
     textR(money(l.net), col.net, by, 6);
     y -= rowH;
     hline(y);

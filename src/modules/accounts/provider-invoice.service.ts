@@ -13,9 +13,7 @@
  *                          the prepaid wallet for courier freight)
  * The provider ledger then closes to zero; anything left is a real variance to raise with them.
  */
-import prisma from '../../database/prisma';
-import { isVelocityCourier } from '../../utils/courier';
-import { monthRange, money, sum, resolvePaymentRailName } from './accounts-report.service';
+import { monthRange, money, sum } from './accounts-report.service';
 
 export type ProviderCode = 'EASEBUZZ' | 'PHONEPE' | 'VELOCITY' | 'DELHIVERY';
 
@@ -98,12 +96,6 @@ export interface ProviderReconRow {
 
 const n = (v: unknown): number => Number(v) || 0;
 
-/** GST-inclusive amount → taxable + 18% GST (gateway and courier services). */
-function split18(total: number): { taxable: number; gst: number } {
-  const gst = money((total * 18) / 118) || 0;
-  return { taxable: money(total - gst) || 0, gst };
-}
-
 /** Compare one provider's invoices for the month with what it already deducted. Pure. */
 export function reconcileProvider(
   provider: ProviderCode,
@@ -174,112 +166,14 @@ export function providerTallyRows(row: ProviderReconRow, monthEnd: Date): Array<
   return out;
 }
 
-async function gatewayConsumption(provider: ProviderCode, start: Date, end: Date): Promise<Consumption> {
-  // Easebuzz settlement files carry the real per-transaction fee/GST split and transaction date.
-  if (provider === 'EASEBUZZ' && typeof prisma.gatewaySettlementOrder?.findMany === 'function') {
-    const rows = await prisma.gatewaySettlementOrder.findMany({
-      where: { transactionDate: { gte: start, lt: end }, batch: { gateway: 'EASEBUZZ' } },
-      select: { id: true, easebuzzTrxnId: true, merchantTrxnId: true, serviceCharge: true, gst: true },
-    });
-    // The same transaction can appear in more than one uploaded batch.
-    const unique = new Map(rows.map((r) => [r.easebuzzTrxnId || r.merchantTrxnId || `row-${r.id}`, r]));
-    if (unique.size) {
-      const taxable = sum([...unique.values()].map((r) => n(r.serviceCharge)));
-      const gst = sum([...unique.values()].map((r) => n(r.gst)));
-      return { taxable, gst, total: money(taxable + gst) || 0, lines: unique.size, estimated: 0, basis: 'Easebuzz settlement rows by transaction date' };
-    }
-  }
-  // Fallback: fee + GST recorded on each prepaid order, by order (transaction) date.
-  const rail = provider === 'PHONEPE' ? 'PhonePe' : 'EaseBuzz';
-  const orders = await prisma.order.findMany({
-    where: { shopifyCreatedAt: { gte: start, lt: end }, gatewayFee: { gt: 0 } },
-    select: {
-      gatewayFee: true, paymentMethod: true, paymentGateway: true, paymentProvider: true,
-      paymentAggregator: true, paymentReceivedSource: true, tags: true,
-    },
-  });
-  const fees = orders
-    .filter((o) => o.paymentMethod !== 'COD' && resolvePaymentRailName({ ...o, shipment: null }) === rail)
-    .map((o) => n(o.gatewayFee));
-  const total = sum(fees);
-  return { ...split18(total), total, lines: fees.length, estimated: 0, basis: 'Order gateway fees by order date (GST split at 18%)' };
-}
-
-async function freightConsumption(provider: ProviderCode, start: Date, end: Date): Promise<Consumption> {
-  const velocity = provider === 'VELOCITY';
-  const inMonth = { gte: start, lt: end };
-  const [shipments, reverses] = await Promise.all([
-    // shortcut: a leg is counted in the month the parcel was manifested, not when the courier billed an RTO; widen if bills lag.
-    prisma.shipment.findMany({
-      where: {
-        waybillNumber: { not: null },
-        status: { not: 'CANCELLED' },
-        OR: [{ omsManifestedAt: inMonth }, { omsManifestedAt: null, createdAt: inMonth }],
-      },
-      select: {
-        courier: true, labelUrl: true, waybillNumber: true, status: true,
-        forwardCharge: true, rtoCharge: true, shippingCostSource: true, rtoChargeSource: true,
-      },
-    }),
-    prisma.return.findMany({
-      where: { createdAt: inMonth, returnWaybillNumber: { not: null }, returnStatus: { not: 'CANCELLED' } },
-      select: { carrier: true, shippingCharge: true, shippingCostSource: true },
-    }),
-  ]);
-  let lines = 0;
-  let estimated = 0;
-  const amounts: number[] = [];
-  const leg = (value: number | null | undefined, source: string | null | undefined) => {
-    lines++;
-    if (value === null || value === undefined || source !== 'ACTUAL') estimated++;
-    amounts.push(value || 0);
-  };
-  for (const s of shipments) {
-    if (isVelocityCourier(s.courier, s.labelUrl, s.waybillNumber) !== velocity) continue;
-    leg(s.forwardCharge, s.shippingCostSource);
-    if (s.rtoCharge !== null || /^RTO/.test(s.status)) leg(s.rtoCharge, s.rtoChargeSource);
-  }
-  for (const r of reverses) {
-    if (/velocity/i.test(r.carrier || '') !== velocity) continue;
-    leg(r.shippingCharge, r.shippingCostSource);
-  }
-  const total = sum(amounts);
-  return { ...split18(total), total, lines, estimated, basis: 'Per-AWB charges (forward, RTO, reverse and exchange legs) by manifest date' };
-}
-
-export async function computeConsumption(provider: ProviderCode, period: string): Promise<Consumption> {
-  const { start, end } = monthRange(period);
-  return PROVIDERS[provider].kind === 'GATEWAY'
-    ? gatewayConsumption(provider, start, end)
-    : freightConsumption(provider, start, end);
-}
-
-/** Every provider's bill-vs-consumption row for the month. */
+/**
+ * Every provider's bill-vs-consumption row for the month. Consumption is the actual lines of the
+ * monthly pack's Other Charges report, so the Provider Bills tab and the pack always agree.
+ */
 export async function getProviderReconciliation(period: string): Promise<ProviderReconRow[]> {
   monthRange(period); // validates YYYY-MM
-  const invoices = await prisma.providerInvoice.findMany({ where: { period }, orderBy: { invoiceDate: 'asc' } });
-  return Promise.all(
-    PROVIDER_CODES.map(async (provider) =>
-      reconcileProvider(
-        provider,
-        period,
-        invoices
-          .filter((i) => i.provider === provider)
-          .map((i) => ({
-            id: i.id,
-            invoiceNumber: i.invoiceNumber,
-            invoiceDate: i.invoiceDate,
-            taxableAmount: n(i.taxableAmount),
-            igst: n(i.igst),
-            cgst: n(i.cgst),
-            sgst: n(i.sgst),
-            totalAmount: n(i.totalAmount),
-            note: i.note,
-          })),
-        await computeConsumption(provider, period)
-      )
-    )
-  );
+  const { loadPackData, computeMonth } = await import('./monthly-pack.service');
+  return computeMonth(await loadPackData(period), period, new Date()).bills;
 }
 
 /** Validate a bill typed in from the provider's PDF. Throws a readable message. Pure. */

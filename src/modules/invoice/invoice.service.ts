@@ -1,6 +1,7 @@
 import { Order, OrderItem } from '@prisma/client';
 import { config } from '../../config';
 import { YOUTHNIC_LOGO_BASE64 } from '../delhivery/label-logos';
+import { gstService } from '../accounts/gst.service';
 
 export interface OrderWithDetails extends Order {
   items: OrderItem[];
@@ -15,6 +16,7 @@ export interface InvoiceLine {
   amount: number; // qty x unit price, before discount
   discount: number;
   gst: number; // GST included in net
+  gstRate: number; // apparel slab for this line's per-piece value after discount
   net: number;
 }
 
@@ -31,6 +33,7 @@ export interface InvoiceData {
   gstRate: number;
   lines: InvoiceLine[];
   shipping: number;
+  shippingGst: number; // GST included in shipping, at the goods' rate (composite supply)
   otherCharges: number;
   total: number;
   received: number;
@@ -38,7 +41,7 @@ export interface InvoiceData {
   words: string;
 }
 
-// Apparel GST rate and HSN used across invoices (prices are GST-inclusive)
+// Default apparel GST rate and HSN on invoices (prices are GST-inclusive); each line's rate follows the slab.
 export const INVOICE_GST_RATE = 5;
 export const INVOICE_HSN = '6204';
 // Rows that fit on a 4x6" page; the rest are summarised in one line
@@ -170,6 +173,7 @@ export class InvoiceService {
       const discount = Math.min(Math.max(share, 0), gross[idx]);
       allocated = round2(allocated + discount);
       const net = round2(gross[idx] - discount);
+      const gstRate = gstService.apparelRate(net / (item.quantity || 1), order.shopifyCreatedAt || new Date());
       return {
         title: item.variantTitle && !item.title.includes(item.variantTitle) ? `${item.title} - ${item.variantTitle}` : item.title,
         sku: item.sku || '',
@@ -177,12 +181,20 @@ export class InvoiceService {
         qty: item.quantity || 1,
         amount: gross[idx],
         discount,
-        gst: round2(net - net / (1 + INVOICE_GST_RATE / 100)),
+        gst: round2(net - net / (1 + gstRate / 100)),
+        gstRate,
         net,
       };
     });
 
     const linesNet = round2(lines.reduce((a, l) => a + l.net, 0));
+    // Shipping is taxed with the goods: share it over the lines by value at each line's rate.
+    const shippingGst = linesNet > 0
+      ? round2(lines.reduce((a, l) => {
+          const part = (shipping * l.net) / linesNet;
+          return a + part - part / (1 + l.gstRate / 100);
+        }, 0))
+      : round2(shipping - shipping / (1 + INVOICE_GST_RATE / 100));
     const otherCharges = Math.max(0, round2(total - shipping - linesNet));
     const isCod = order.paymentMethod === 'COD' || order.shipment?.paymentMode === 'COD';
     const fs = String(order.financialStatus || '').toLowerCase();
@@ -213,9 +225,10 @@ export class InvoiceService {
         address: config.company?.address || '7004, HTC Market-1, Surat, Gujarat - 395002',
         gstin: config.company?.gstin || config.delhivery?.seller?.gstin || '24AERPB8666E1ZB',
       },
-      gstRate: INVOICE_GST_RATE,
+      gstRate: lines.reduce((max, l) => Math.max(max, l.gstRate), INVOICE_GST_RATE),
       lines,
       shipping,
+      shippingGst,
       otherCharges,
       total,
       received: isPaid ? total : 0,
@@ -245,7 +258,7 @@ export class InvoiceService {
             <td class="c">${l.qty}</td>
             <td class="r">${money(l.amount)}</td>
             <td class="r">${l.discount.toFixed(2)}</td>
-            <td class="r">${l.gst.toFixed(2)} | ${d.gstRate}%</td>
+            <td class="r">${l.gst.toFixed(2)} | ${l.gstRate}%</td>
             <td class="r">${money(l.net)}</td>
           </tr>`)
       .join('');
@@ -301,7 +314,7 @@ export class InvoiceService {
           <tbody>
             ${rows}
             ${hidden > 0 ? `<tr class="inv-sum"><td colspan="7">+ ${hidden} more item${hidden > 1 ? 's' : ''} (included in the total)</td></tr>` : ''}
-            ${d.shipping > 0 ? sumRow('Shipping', d.shipping) : ''}
+            ${d.shipping > 0 ? sumRow(`Shipping (incl. GST ${money(d.shippingGst)})`, d.shipping) : ''}
             ${d.otherCharges > 0 ? sumRow('Other Charges', d.otherCharges) : ''}
             ${sumRow('Total', d.total)}
             ${sumRow('Payment Received', d.received)}

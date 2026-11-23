@@ -644,8 +644,12 @@ export async function syncOrderRefundDetails(
     throw new Error(`Order not found: ${orderId}`);
   }
 
-  const priorRrn = cleanStr(order.refundRrn);
-  const priorArn = cleanStr(order.refundArn);
+  const priorFromAttrs = extractRefundDetailsFromShopify({
+    noteAttributes: order.additionalDetails as any,
+    tags: order.tags,
+  });
+  const priorRrn = cleanStr(order.refundRrn) || priorFromAttrs.refundRrn;
+  const priorArn = cleanStr(order.refundArn) || priorFromAttrs.refundArn;
 
   // Lazy-import shopifyService to avoid circular module dependency
   const shopifyService = (await import('../shopify/shopify.service')).default;
@@ -768,9 +772,12 @@ export async function syncOrderRefundDetails(
 
   let emailSent = false;
   if (options.sendEmailOnNewRrn && newReferenceFound && summary.isRefunded && (refreshedOrder || order).customerEmail) {
-    const processedAt = summary.refundProcessedAt ? new Date(summary.refundProcessedAt) : null;
+    const activeOrder = refreshedOrder || order;
+    const processedAt = summary.refundProcessedAt
+      ? new Date(summary.refundProcessedAt)
+      : activeOrder.shopifyUpdatedAt || activeOrder.shopifyCreatedAt || null;
     const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
-    const isRecentRefund = !processedAt || Date.now() - processedAt.getTime() <= sevenDaysMs;
+    const isRecentRefund = Boolean(processedAt && Date.now() - processedAt.getTime() <= sevenDaysMs);
     if (isRecentRefund) {
       try {
         const notificationEngine = (await import('../notifications/notification.service')).default;
@@ -815,11 +822,10 @@ export async function syncPendingRefundDetails(limit = 30): Promise<{
       AND: [
         {
           OR: [
-            { refundRrn: null },
-            { refundArn: null },
-            { refundSource: null },
             { refundGatewayStatus: null },
             { refundGatewayStatus: 'INITIATED' },
+            { AND: [{ refundRrn: null }, { refundArn: null }] },
+            { refundSource: null },
           ],
         },
       ],

@@ -2422,6 +2422,8 @@ class ShopifyService {
         dispatchedAt: true,
         status: true,
         shopifyUpdatedAt: true,
+        tags: true,
+        additionalDetails: true,
         paymentInstrument: true,
         refundRrn: true,
         refundArn: true,
@@ -2462,8 +2464,14 @@ class ShopifyService {
       refunds: shopifyRefunds,
     });
 
-    const priorRefundRrn = (existingDispatch as any)?.refundRrn || null;
-    const priorRefundArn = (existingDispatch as any)?.refundArn || null;
+    const priorFromAttrs = existingDispatch
+      ? extractRefundDetailsFromShopify({
+          noteAttributes: (existingDispatch as any)?.additionalDetails as any,
+          tags: (existingDispatch as any)?.tags,
+        })
+      : null;
+    const priorRefundRrn = (existingDispatch as any)?.refundRrn || priorFromAttrs?.refundRrn || null;
+    const priorRefundArn = (existingDispatch as any)?.refundArn || priorFromAttrs?.refundArn || null;
     const resolvedPaymentInstrument =
       extractedRefund.paymentInstrument || (existingDispatch as any)?.paymentInstrument || null;
     const resolvedRefundRrn = extractedRefund.refundRrn || priorRefundRrn || null;
@@ -2734,8 +2742,12 @@ class ShopifyService {
           // automatically send the customer their RRN credit confirmation email (strictly deduped).
           const isExistingOrder = Boolean(existingDispatch);
           if (isExistingOrder && refundRefNewlyCaptured && dbOrder.customerEmail && isOrderRefundedOnShopify) {
-            const refundTimestamp = extractedRefund.refundProcessedAt || returnsToUpdate[0]?.refundProcessedAt || new Date();
-            const isRecent = Date.now() - refundTimestamp.getTime() <= 7 * 24 * 60 * 60 * 1000;
+            const refundTimestamp =
+              extractedRefund.refundProcessedAt ||
+              returnsToUpdate[0]?.refundProcessedAt ||
+              dbOrder.shopifyUpdatedAt ||
+              dbOrder.shopifyCreatedAt;
+            const isRecent = Boolean(refundTimestamp && Date.now() - refundTimestamp.getTime() <= 7 * 24 * 60 * 60 * 1000);
             if (isRecent) {
               const notificationEngine = (await import('../notifications/notification.service')).default;
               const summary = resolveOrderRefundSummary({

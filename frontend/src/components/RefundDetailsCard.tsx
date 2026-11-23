@@ -31,6 +31,13 @@ function stageMeta(stage: string | null | undefined, hasBankRef: boolean, isManu
   headline: string
 } {
   const s = (stage || '').toUpperCase()
+  if (s === 'FAILED') {
+    return {
+      label: 'Gateway Refund Failed',
+      toneClass: 'is-danger',
+      headline: 'Refund Failed',
+    }
+  }
   if (s === 'SETTLED') {
     return {
       label: 'Settled in Gateway Payout',
@@ -45,18 +52,11 @@ function stageMeta(stage: string | null | undefined, hasBankRef: boolean, isManu
       headline: 'Manual COD Refund Recorded',
     }
   }
-  if (s === 'CREDITED' || hasBankRef) {
+  if (s === 'CREDITED' || (!s && hasBankRef)) {
     return {
       label: 'Credited · Bank Ref Verified',
       toneClass: 'is-success',
       headline: 'Refund Credited to Source',
-    }
-  }
-  if (s === 'FAILED') {
-    return {
-      label: 'Gateway Refund Failed',
-      toneClass: 'is-danger',
-      headline: 'Refund Failed',
     }
   }
   return {
@@ -82,8 +82,7 @@ export function RefundDetailsCard({
   const isManualCod = Boolean(
     summary?.isManualCod ||
     returnRecord?.refundGatewayStatus === 'MANUAL_RECORDED' ||
-    order.refundGatewayStatus === 'MANUAL_RECORDED' ||
-    isCodOrder
+    order.refundGatewayStatus === 'MANUAL_RECORDED'
   )
 
   const fallbackRrn = findAttr(order, ['Refund RRN', 'refund_rrn', 'return_rrn'])
@@ -96,10 +95,12 @@ export function RefundDetailsCard({
       : fallbackMethod
     : null
 
+  const isPartial = order.financialStatus === 'partially_refunded' || Boolean(summary?.isPartial)
+
   const refundAmount =
     (typeof returnRecord?.refundAmount === 'number' && returnRecord.refundAmount > 0 ? returnRecord.refundAmount : null) ??
     summary?.refundAmount ??
-    order.totalAmount
+    (isPartial ? null : order.totalAmount)
 
   const refundRrn = returnRecord?.refundRrn || summary?.refundRrn || order.refundRrn || fallbackRrn || null
   const refundArn = returnRecord?.refundArn || summary?.refundArn || order.refundArn || fallbackArn || null
@@ -115,7 +116,9 @@ export function RefundDetailsCard({
       ? `${fallbackInstrument}${order.paymentProvider ? ` · ${order.paymentProvider}` : ''}`
       : isManualCod
         ? 'Manual Bank / UPI Transfer'
-        : order.paymentProvider || order.paymentGateway || 'Original Payment Source')
+        : isCodOrder
+          ? 'COD Order (Manual Payout Pending)'
+          : order.paymentProvider || order.paymentGateway || 'Original Payment Source')
 
   const gatewayStatus =
     returnRecord?.refundGatewayStatus ||
@@ -128,7 +131,6 @@ export function RefundDetailsCard({
   const emailSentAt = returnRecord?.refundEmailSentAt || summary?.emailSentAt || null
   const rrnEmailSentAt = summary?.rrnEmailSentAt || null
   const checkoutRef = summary?.checkoutReference || order.paymentReference || null
-  const isPartial = order.financialStatus === 'partially_refunded' || Boolean(summary?.isPartial)
 
   const badge = stageMeta(gatewayStatus, Boolean(refundRrn || refundArn), isManualCod)
   const logoUrl = !isManualCod
@@ -210,7 +212,12 @@ export function RefundDetailsCard({
           <div>
             <div className="refund-card-title-row">
               <strong className="refund-card-title">
-                {badge.headline}: <span className="refund-amount-figure">{formatMoney(refundAmount, order.currency)}</span>
+                {badge.headline}
+                {refundAmount != null ? (
+                  <>: <span className="refund-amount-figure">{formatMoney(refundAmount, order.currency)}</span></>
+                ) : (
+                  <>: <span className="refund-amount-figure">Amount pending sync</span></>
+                )}
               </strong>
               {isPartial && <span className="refund-inline-pill is-warn">Partial</span>}
               <span className={`refund-stage-pill ${badge.toneClass}`}>{badge.label}</span>

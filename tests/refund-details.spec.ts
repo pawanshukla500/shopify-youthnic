@@ -375,6 +375,18 @@ describe('Refund customer email templates & delivery deduplication', () => {
     expect(html).toContain('104611223344');
     expect(html).toContain('R9ABC12345');
     expect(html).toContain('Original UPI (@ptaxis) via Easebuzz');
+
+    // Verify preheader also HTML-escapes crafted source / RRN strings
+    const xssRes = renderRefundRrnUpdateEmail({
+      orderName: '#26YOU6197',
+      customerName: 'Tanisha',
+      refundAmount: 1273.02,
+      refundRrn: '<img src=x onerror=alert(1)>',
+      refundSource: '<b>Easebuzz</b>',
+    });
+    expect(xssRes.html).not.toContain('<img src=x');
+    expect(xssRes.html).not.toContain('<b>Easebuzz</b>');
+    expect(xssRes.html).toContain('&lt;img src=x onerror=alert(1)&gt;');
   });
 
   it('deduplicates automated REFUND_RRN_UPDATE emails but permits explicit operator force resend', async () => {
@@ -552,5 +564,68 @@ describe('Refund customer email templates & delivery deduplication', () => {
       }),
     });
     expect(notifySpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('syncOrderRefundDetails backfills pre-migration additionalDetails RRN without firing a duplicate RRN email', async () => {
+    const preMigrationOrder = {
+      id: 2020,
+      shopifyOrderId: '18968329158999',
+      shopifyOrderName: '#26YOU6138',
+      shopifyOrderNumber: 6138,
+      customerName: 'Khushbu',
+      customerEmail: 'khushbu@example.com',
+      customerPhone: '919999999999',
+      totalAmount: 2105.04,
+      paymentMethod: 'Pre-paid',
+      paymentGateway: 'Gokwik UPI',
+      paymentProvider: 'Easebuzz',
+      financialStatus: 'refunded',
+      status: 'REFUNDED',
+      tags: 'GoKwik, Refund_initiated, Refund_credited, Refunded',
+      additionalDetails: [
+        { name: 'Payment_Method', value: 'UPI' },
+        { name: 'Payment_Sub_Method', value: '@okicici' },
+        { name: 'Refund RRN', value: '104519502377' },
+        { name: 'Refund ARN', value: 'RVL9Z7IJ39' },
+      ],
+      refundRrn: null,
+      refundArn: null,
+      refundSource: null,
+      refundGatewayStatus: null,
+      items: [],
+      returns: [],
+      accountTrailEvents: [],
+    };
+
+    prismaStub.order.findUnique
+      .mockResolvedValueOnce(preMigrationOrder)
+      .mockResolvedValueOnce({
+        ...preMigrationOrder,
+        refundRrn: '104519502377',
+        refundArn: 'RVL9Z7IJ39',
+        refundSource: 'UPI (@okicici) · Easebuzz',
+        refundGatewayStatus: 'CREDITED',
+      });
+    prismaStub.gatewaySettlementRefund.findMany.mockResolvedValue([]);
+    prismaStub.emailLog.findMany.mockResolvedValue([]);
+    prismaStub.order.update.mockResolvedValue({});
+
+    vi.spyOn(shopifyService, 'fetchOrderRefundData').mockResolvedValueOnce({
+      order: {
+        tags: preMigrationOrder.tags,
+        payment_gateway_names: ['Gokwik UPI'],
+        note_attributes: preMigrationOrder.additionalDetails,
+      },
+      refunds: [],
+      transactions: [],
+    });
+
+    const notifySpy = vi.spyOn(notificationEngine, 'notifyRefundRrnUpdated');
+    const res = await syncOrderRefundDetails(2020, { sendEmailOnNewRrn: true });
+
+    expect(res.updated).toBe(true);
+    expect(res.newReferenceFound).toBe(false);
+    expect(res.emailSent).toBe(false);
+    expect(notifySpy).not.toHaveBeenCalled();
   });
 });

@@ -895,19 +895,34 @@ export function OrderDetail() {
     <div className="detail-grid">
       <div className="detail-main">
         <section className="order-section" id="order-section-overview" role="tabpanel" aria-labelledby="order-tab-overview" tabIndex={-1} hidden={section !== 'overview'}>
-        {(order.returns || []).length > 0 ? (
-          <OrderReturnRefundOverviewCard
-            order={order}
-            onOpenReturns={() => openSection('returns')}
-            onOpenPayments={() => openSection('payments')}
-          />
-        ) : (order.refundSummary?.isRefunded ||
-          order.financialStatus === 'refunded' ||
-          order.financialStatus === 'partially_refunded' ||
-          order.status === 'REFUNDED' ||
-          Boolean(order.refundRrn || order.refundArn)) ? (
-          <RefundDetailsCard order={order} standalone />
-        ) : null}
+        {(() => {
+          const activeReturns = (order.returns || []).filter((r: any) => r.returnStatus !== 'CANCELLED')
+          const hasReturnLevelRefund = activeReturns.some(
+            (r: any) => r.refundStatus === 'PROCESSED' || r.returnStatus === 'REFUNDED'
+          )
+          const hasOrderRefund = Boolean(
+            order.refundSummary?.isRefunded ||
+            order.financialStatus === 'refunded' ||
+            order.financialStatus === 'partially_refunded' ||
+            order.status === 'REFUNDED' ||
+            order.refundRrn ||
+            order.refundArn
+          )
+          return (
+            <>
+              {activeReturns.length > 0 && (
+                <OrderReturnRefundOverviewCard
+                  order={order}
+                  onOpenReturns={() => openSection('returns')}
+                  onOpenPayments={() => openSection('payments')}
+                />
+              )}
+              {hasOrderRefund && !hasReturnLevelRefund && (
+                <RefundDetailsCard order={order} standalone />
+              )}
+            </>
+          )
+        })()}
         <Panel className="shopify-card" style={{ padding: 0 }}>
           <div className="shopify-card-head">
             <h2>Order items <span className="order-item-count">{itemCount}</span></h2>

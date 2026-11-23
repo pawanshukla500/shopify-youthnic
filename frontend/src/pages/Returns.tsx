@@ -564,8 +564,29 @@ export function Returns() {
                           <span className="badge-pill badge-exchange">Size Replacement (No Cash Refund)</span>
                         ) : isRefunded ? (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
-                            <span className="badge-pill badge-settled">
-                              {item.refundRrn || item.refundArn ? '✓ Credited' : '✓ Refunded'}
+                            <span
+                              className="badge-pill badge-settled"
+                              style={
+                                item.refundGatewayStatus === 'FAILED'
+                                  ? { background: 'var(--tone-danger-bg)', color: 'var(--tone-danger-fg)' }
+                                  : item.refundGatewayStatus === 'INITIATED'
+                                    ? { background: 'var(--tone-warning-bg)', color: 'var(--tone-warning-fg)' }
+                                    : undefined
+                              }
+                            >
+                              {item.refundGatewayStatus === 'SETTLED'
+                                ? '✓ Settled'
+                                : item.refundGatewayStatus === 'CREDITED'
+                                  ? '✓ Credited'
+                                  : item.refundGatewayStatus === 'MANUAL_RECORDED'
+                                    ? '✓ Manual COD'
+                                    : item.refundGatewayStatus === 'FAILED'
+                                      ? '✕ Failed'
+                                      : item.refundGatewayStatus === 'INITIATED'
+                                        ? '⏳ Initiated'
+                                        : item.refundRrn
+                                          ? '✓ Credited'
+                                          : '✓ Refunded'}
                             </span>
                             {item.refundRrn && (
                               <span

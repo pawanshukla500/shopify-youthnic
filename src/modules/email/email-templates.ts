@@ -476,13 +476,13 @@ export function renderReturnRefundEmail(data: EmailTemplateData): { subject: str
     : `Refund Processed: ₹${refundFormatted} for Order ${data.orderName} · Youthnic`;
 
   const primaryRefLabel = safeRrn
-    ? `Refund RRN: ${data.refundRrn}`
+    ? `Refund RRN: ${safeRrn}`
     : safeArn
-      ? `Refund ARN: ${data.refundArn}`
-      : data.refundId
-        ? `Refund ID: ${data.refundId}`
-        : `Order ${data.orderName}`;
-  const preheader = `Your refund of ₹${refundFormatted} for order ${data.orderName} has been processed to ${resolvedSource}. ${primaryRefLabel}.`;
+      ? `Refund ARN: ${safeArn}`
+      : safeRefundId
+        ? `Refund ID: ${safeRefundId}`
+        : `Order ${safeOrderName}`;
+  const preheader = `Your refund of ₹${refundFormatted} for order ${safeOrderName} has been processed to ${safeSource}. ${primaryRefLabel}.`;
 
   const bannerTitle = isCredited
     ? isManualCod
@@ -743,7 +743,7 @@ export function renderRefundRrnUpdateEmail(data: EmailTemplateData): { subject: 
       ? `Refund Credited · Ref ${data.refundArn} for Order ${data.orderName} · Youthnic`
       : `Refund Credit Confirmed for Order ${data.orderName} · Youthnic`;
 
-  const preheader = `Bank confirmation received for your ₹${refundFormatted} refund on order ${data.orderName} to ${resolvedSource}.${safeRrn ? ` Refund RRN: ${data.refundRrn}.` : ''}${safeArn ? ` Refund ARN: ${data.refundArn}.` : ''}`;
+  const preheader = `Bank confirmation received for your ₹${refundFormatted} refund on order ${safeOrderName} to ${safeSource}.${safeRrn ? ` Refund RRN: ${safeRrn}.` : ''}${safeArn ? ` Refund ARN: ${safeArn}.` : ''}`;
 
   const dateDisplay = data.refundProcessedAt && !Number.isNaN(Date.parse(data.refundProcessedAt))
     ? new Date(data.refundProcessedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })

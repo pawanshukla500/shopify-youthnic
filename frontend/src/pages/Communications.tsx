@@ -1201,7 +1201,10 @@ function getSampleHtmlForPreview(type: EmailTemplateType): string {
     currentLocation: 'Bhiwandi Sorting Center Hub',
     delayReason: 'High transit volume at regional hub & routing inspection',
     newEstimatedDelivery: 'Saturday, 28-Sep-2026',
-    refundId: 'RF-26YOU5752',
+    refundId: '1118855626951',
+    refundRrn: '104519502377',
+    refundArn: 'RVL9Z7IJ39',
+    refundSource: 'Original UPI (@okicici) via Easebuzz',
     refundAmount: 1899,
     items: sampleItems,
     totalAmount: 1899,
@@ -1270,10 +1273,12 @@ function getSampleHtmlForPreview(type: EmailTemplateType): string {
         <p>Dear ${data.customerName},</p>
         <p style="font-size: 13.5px; color: #475569;">Your return has cleared quality inspection. We have processed a 100% refund of ₹${data.refundAmount}.</p>
         <div class="status-card">
-          <div><strong>Refund ID:</strong> <code>${data.refundId}</code></div>
+          <div><strong>Bank / UPI Refund RRN:</strong> <code>${data.refundRrn || '104519502377'}</code></div>
+          <div style="margin-top: 4px;"><strong>Gateway Refund ARN:</strong> <code>${data.refundArn || 'RVL9Z7IJ39'}</code></div>
+          <div style="margin-top: 4px;"><strong>Shopify Refund ID:</strong> <code>${data.refundId}</code></div>
           <div style="margin-top: 4px;"><strong>Refund Amount:</strong> ₹${data.refundAmount}</div>
-          <div style="margin-top: 4px;"><strong>Payment Rail:</strong> ${data.paymentMethod}</div>
-          <div style="margin-top: 4px;"><strong>Credit SLA:</strong> UPI: Instant · Cards: 2-4 days</div>
+          <div style="margin-top: 4px;"><strong>Refund Source:</strong> ${data.refundSource || `Original ${data.paymentMethod || 'UPI'} via Easebuzz`}</div>
+          <div style="margin-top: 4px;"><strong>Credit SLA:</strong> UPI: Instant to 2 hrs · Cards: 2–5 business days</div>
         </div>
       `
           : type === 'SUPPORT_REPLY'

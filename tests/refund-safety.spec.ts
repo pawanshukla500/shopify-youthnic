@@ -551,8 +551,12 @@ describe('returnService.refundOrder (direct refund from the order page)', () => 
     expect(shopifyService.createRefund).toHaveBeenCalledWith('333', 200, [], false);
     expect(prismaStub.order.update).toHaveBeenCalledWith({
       where: { id: 3 },
-      data: { financialStatus: 'partially_refunded' },
+      data: expect.objectContaining({
+        financialStatus: 'partially_refunded',
+        refundGatewayStatus: 'INITIATED',
+      }),
     });
+    expect(prismaStub.order.update.mock.calls[0][0].data.status).toBeUndefined();
     expect(prismaStub.return.update).not.toHaveBeenCalled();
   });
 

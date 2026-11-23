@@ -206,6 +206,13 @@ export interface Order {
   paymentVerifiedAt: string | null
   paymentVerificationSource: string | null
   paymentReference: string | null
+  paymentInstrument?: string | null
+  refundRrn?: string | null
+  refundArn?: string | null
+  refundSource?: string | null
+  refundGatewayStatus?: 'INITIATED' | 'CREDITED' | 'SETTLED' | 'MANUAL_RECORDED' | 'FAILED' | string | null
+  refundReferenceUpdatedAt?: string | null
+  refundSummary?: OrderRefundSummary | null
   status: OrderStatus
   shopifyCreatedAt: string
   shopifyUpdatedAt: string | null
@@ -247,6 +254,32 @@ export interface Order {
 }
 
 
+export interface OrderRefundSummary {
+  isRefunded: boolean
+  isPartial: boolean
+  isManualCod: boolean
+  refundAmount: number | null
+  shopifyRefundId: string | null
+  refundTransactionId: string | null
+  refundRrn: string | null
+  refundArn: string | null
+  settlementBatchUtr: string | null
+  refundSource: string | null
+  customerRefundSource: string | null
+  paymentInstrument: string | null
+  paymentProvider: string | null
+  refundGatewayStatus: 'INITIATED' | 'CREDITED' | 'SETTLED' | 'MANUAL_RECORDED' | 'FAILED' | null
+  refundProcessedAt: string | null
+  refundCreditedAt: string | null
+  checkoutReference: string | null
+  manualAccountUsed: string | null
+  manualRefundMode: string | null
+  emailSentAt: string | null
+  emailTemplateType: string | null
+  rrnEmailSentAt: string | null
+  evidenceUrl: string | null
+}
+
 export interface ReturnRecord {
   id: number
   orderId: number
@@ -266,7 +299,14 @@ export interface ReturnRecord {
   refundStatus: RefundStatus
   refundAmount: number | null
   shopifyRefundId: string | null
+  refundTransactionId?: string | null
+  refundRrn?: string | null
+  refundArn?: string | null
+  refundSource?: string | null
+  refundGatewayStatus?: 'INITIATED' | 'CREDITED' | 'SETTLED' | 'MANUAL_RECORDED' | 'FAILED' | string | null
   refundProcessedAt: string | null
+  refundCreditedAt?: string | null
+  refundEmailSentAt?: string | null
   qcStatus: QcStatus | null
   qcRemark: string | null
   qcCheckedAt: string | null

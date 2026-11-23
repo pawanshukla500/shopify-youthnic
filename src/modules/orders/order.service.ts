@@ -9,7 +9,13 @@ import notificationEngine from '../notifications/notification.service';
 import paymentService from '../payments/payment.service';
 import gokwikService from '../payments/gokwik.service';
 import whatsappGatewayService from '../whatsapp/whatsapp-gateway.service';
-import { recordAccountTrailEvent, type AccountTrailActor } from '../accounts/account-trail.service';
+import { recordAccountTrailEvent, presentAccountTrailEvent, type AccountTrailActor } from '../accounts/account-trail.service';
+import {
+  extractRefundDetailsFromShopify,
+  formatRefundSource,
+  pickHigherRefundStage,
+  resolveOrderRefundSummary,
+} from '../returns/refund-details';
 import { queueManifestForPickup } from '../delhivery/pickup-batch.service';
 import logger from '../../utils/logger';
 import { Order } from '@prisma/client';
@@ -1688,7 +1694,73 @@ class OrderService {
     });
 
     if (!order) return null;
-    return this.enrichOrderMetadata(order);
+
+    // Load linked refund audit trail, gateway settlement refund rows, and refund email logs
+    // (each guarded so unit tests with partial Prisma stubs never fail).
+    let refundTrails: any[] = [];
+    let gwRefunds: any[] = [];
+    let refundEmails: any[] = [];
+    try {
+      if (typeof (prisma as any)?.accountTrailEvent?.findMany === 'function') {
+        const rawTrails = await prisma.accountTrailEvent.findMany({
+          where: { orderId, eventType: { in: ['REFUND_AUTOMATIC', 'REFUND_MANUAL', 'REFUND_SETTLED'] } },
+          orderBy: { createdAt: 'desc' },
+        });
+        refundTrails = await Promise.all(rawTrails.map((ev) => presentAccountTrailEvent(ev)));
+      }
+      if (typeof (prisma as any)?.gatewaySettlementRefund?.findMany === 'function') {
+        gwRefunds = await prisma.gatewaySettlementRefund.findMany({
+          where: { orderId },
+          orderBy: { createdAt: 'desc' },
+        });
+      }
+      if (typeof (prisma as any)?.emailLog?.findMany === 'function') {
+        refundEmails = await prisma.emailLog.findMany({
+          where: { orderId, templateType: { in: ['RETURN_REFUND', 'REFUND_RRN_UPDATE'] } },
+          orderBy: { createdAt: 'desc' },
+          take: 10,
+          select: { id: true, templateType: true, status: true, subject: true, sentAt: true, createdAt: true, metadata: true },
+        });
+      }
+    } catch (err: any) {
+      logger.debug('Optional refund enrichment lookup skipped in getOrder', { orderId, error: err?.message });
+    }
+
+    const refundSummary = resolveOrderRefundSummary({
+      order,
+      returns: order.returns,
+      accountTrailEvents: refundTrails,
+      gatewaySettlementRefunds: gwRefunds,
+      refundEmailLogs: refundEmails,
+    });
+
+    const enrichedOrder = this.enrichOrderMetadata({
+      ...order,
+      paymentInstrument: order.paymentInstrument || refundSummary.paymentInstrument,
+      refundRrn: order.refundRrn || refundSummary.refundRrn,
+      refundArn: order.refundArn || refundSummary.refundArn,
+      refundSource: order.refundSource || refundSummary.refundSource,
+      refundGatewayStatus: order.refundGatewayStatus || refundSummary.refundGatewayStatus,
+      returns: (order.returns || []).map((ret: any) => {
+        if (ret.isExchange || ret.returnStatus === 'CANCELLED') return ret;
+        const isRetRefunded = ret.refundStatus === 'PROCESSED' || ret.returnStatus === 'REFUNDED' || Boolean(ret.shopifyRefundId);
+        if (!isRetRefunded) return ret;
+        return {
+          ...ret,
+          refundRrn: ret.refundRrn || refundSummary.refundRrn,
+          refundArn: ret.refundArn || refundSummary.refundArn,
+          refundSource: ret.refundSource || refundSummary.refundSource,
+          refundGatewayStatus: ret.refundGatewayStatus || refundSummary.refundGatewayStatus,
+          refundCreditedAt: ret.refundCreditedAt || refundSummary.refundCreditedAt,
+          refundEmailSentAt: ret.refundEmailSentAt || refundSummary.emailSentAt,
+        };
+      }),
+    });
+
+    return {
+      ...enrichedOrder,
+      refundSummary,
+    };
   }
 
   /**
@@ -1912,12 +1984,43 @@ class OrderService {
     // Shopify has the refund now. Bookkeeping failures below are logged and
     // must never send this order back through the refund path.
     const refundedAmount = refundResult.amount;
+    const orderExtracted = extractRefundDetailsFromShopify({
+      noteAttributes: Array.isArray(order.additionalDetails) ? (order.additionalDetails as any) : undefined,
+      tags: order.tags,
+      paymentGateway: order.paymentGateway,
+      paymentProvider: order.paymentProvider,
+      paymentMethod: order.paymentMethod,
+    });
+    const resolvedInstrument = refundResult.paymentInstrument || order.paymentInstrument || orderExtracted.paymentInstrument || null;
+    const resolvedRefundRrn = refundResult.refundRrn || order.refundRrn || orderExtracted.refundRrn || null;
+    const resolvedRefundArn = refundResult.refundArn || order.refundArn || orderExtracted.refundArn || null;
+    const resolvedRefundSource = refundResult.moneyMoved
+      ? refundResult.refundSource ||
+        formatRefundSource({
+          paymentInstrument: resolvedInstrument,
+          paymentProvider: order.paymentProvider || orderExtracted.paymentProvider,
+          paymentGateway: order.paymentGateway,
+        }) ||
+        order.refundSource ||
+        null
+      : null;
+    const resolvedRefundStage = refundResult.moneyMoved
+      ? pickHigherRefundStage(order.refundGatewayStatus, refundResult.refundGatewayStatus || (resolvedRefundRrn || resolvedRefundArn ? 'CREDITED' : 'INITIATED'))
+      : null;
+    const processedAt = new Date();
+
     try {
       await prisma.order.update({
         where: { id: order.id },
         data: {
           status: 'REFUNDED',
           financialStatus: 'refunded',
+          ...(resolvedInstrument ? { paymentInstrument: resolvedInstrument } : {}),
+          ...(resolvedRefundRrn ? { refundRrn: resolvedRefundRrn } : {}),
+          ...(resolvedRefundArn ? { refundArn: resolvedRefundArn } : {}),
+          ...(resolvedRefundSource ? { refundSource: resolvedRefundSource } : {}),
+          ...(resolvedRefundStage ? { refundGatewayStatus: resolvedRefundStage } : {}),
+          ...(resolvedRefundRrn || resolvedRefundArn ? { refundReferenceUpdatedAt: processedAt } : {}),
           ...(order.supportFlag?.startsWith('RTO_REFUND') ? { supportFlag: null, hasUrgentSupport: false } : {}),
         },
       });
@@ -1941,13 +2044,20 @@ class OrderService {
         currency: order.currency || 'INR',
         refundMode: refundResult.moneyMoved ? 'ORIGINAL_PAYMENT_METHOD' : null,
         accountUsed: refundResult.moneyMoved
-          ? order.paymentProvider || order.paymentGateway || 'Shopify original payment method'
+          ? resolvedRefundSource || order.paymentProvider || order.paymentGateway || 'Shopify original payment method'
           : null,
         externalReference: refundResult.refundId,
         note: refundResult.moneyMoved
           ? 'Automatically refunded after Delhivery confirmed RTO delivery.'
           : 'Shopify refund record created, but no captured payment moved; review for manual payout.',
-        metadata: { moneyMoved: refundResult.moneyMoved, alreadyRefunded: refundResult.alreadyRefunded },
+        metadata: {
+          moneyMoved: refundResult.moneyMoved,
+          alreadyRefunded: refundResult.alreadyRefunded,
+          ...(refundResult.refundTransactionId ? { refundTransactionId: refundResult.refundTransactionId } : {}),
+          ...(resolvedRefundRrn ? { refundRrn: resolvedRefundRrn } : {}),
+          ...(resolvedRefundArn ? { refundArn: resolvedRefundArn } : {}),
+          ...(resolvedRefundSource ? { refundSource: resolvedRefundSource } : {}),
+        },
       });
     } catch (auditError: any) {
       logger.error('RTO refund succeeded but account-trail event could not be written', {
@@ -1970,7 +2080,7 @@ class OrderService {
     }
 
     // Append refund details note on Shopify and OMS
-    const rtoNote = `[Prepaid RTO Refunded - ${new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }).format(new Date())}] Undelivered parcel returned to warehouse. Auto-refunded ₹${refundedAmount.toFixed(2)} (Shopify Refund ID: ${refundResult.refundId}). AWB: ${waybill || 'N/A'}`;
+    const rtoNote = `[Prepaid RTO Refunded - ${new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }).format(processedAt)}] Undelivered parcel returned to warehouse. Auto-refunded ₹${refundedAmount.toFixed(2)} (Shopify Refund ID: ${refundResult.refundId}${resolvedRefundRrn ? ` | RRN: ${resolvedRefundRrn}` : ''}${resolvedRefundArn ? ` | ARN: ${resolvedRefundArn}` : ''}${resolvedRefundSource ? ` | Source: ${resolvedRefundSource}` : ''}). AWB: ${waybill || 'N/A'}`;
     Promise.resolve(shopifyService.appendOrderNote(order.shopifyOrderId, rtoNote)).catch((e) =>
       logger.warn('Failed to append Shopify order note for RTO refund', { error: e.message })
     );
@@ -1982,20 +2092,37 @@ class OrderService {
         order,
         refundAmount: refundedAmount,
         shopifyRefundId: refundResult.refundId,
+        refundRrn: resolvedRefundRrn,
+        refundArn: resolvedRefundArn,
+        refundSource: resolvedRefundSource,
       })
     ).catch((waErr) =>
       logger.warn('Failed to dispatch Ekta WhatsApp notification for prepaid RTO refund', { error: waErr.message })
     );
 
-    // Tell the customer only when money actually moved back to them.
+    // Tell the customer only when money actually moved back to them (WhatsApp + Refund Receipt Email).
     if (refundResult.moneyMoved) {
       try {
         await notificationEngine.sendCustomMessage(
           order,
-          `Hi ${order.customerName}, your returned package for order ${order.shopifyOrderName} has been safely received at our Surat warehouse. A refund of ₹${refundedAmount} has been processed to your original payment mode (${order.paymentProvider || order.paymentGateway || 'Prepaid'}). Refund ID: ${refundResult.refundId}.`
+          `Hi ${order.customerName}, your returned package for order ${order.shopifyOrderName} has been safely received at our Surat warehouse. A refund of ₹${refundedAmount} has been processed to ${resolvedRefundSource || order.paymentProvider || order.paymentGateway || 'your original payment source'}. Refund ID: ${refundResult.refundId}${resolvedRefundRrn ? ` · RRN: ${resolvedRefundRrn}` : ''}.`
         );
       } catch (notifErr: any) {
         logger.warn('Failed to send refund WhatsApp notification', { error: notifErr.message });
+      }
+      try {
+        await notificationEngine.notifyRefundProcessed(order, refundedAmount, undefined, {
+          shopifyRefundId: refundResult.refundId,
+          refundRrn: resolvedRefundRrn,
+          refundArn: resolvedRefundArn,
+          refundSource: resolvedRefundSource,
+          refundGatewayStatus: resolvedRefundStage,
+          refundProcessedAt: processedAt,
+          refundContext: 'RTO',
+          skipWhatsApp: true,
+        });
+      } catch (emailErr: any) {
+        logger.warn('Failed to send RTO refund receipt email', { error: emailErr.message });
       }
     }
 

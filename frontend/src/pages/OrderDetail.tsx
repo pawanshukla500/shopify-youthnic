@@ -36,6 +36,7 @@ import { OrderTrackingHistory } from '../components/OrderTrackingHistory'
 import { OrderActivityFeed } from '../components/OrderActivityFeed'
 import { OrderPaymentEvidence } from '../components/OrderPaymentEvidence'
 import { OrderPickupStatus } from '../components/OrderPickupStatus'
+import { RefundDetailsCard } from '../components/RefundDetailsCard'
 import { ORDER_SECTIONS, contactPhone, hasCustomerDelivery, type OrderSection } from '../order-workspace'
 import type { AccountTrailEvent, Order, OrderItem, ReturnRecord } from '../types'
 import './OrderDetail.css'
@@ -894,13 +895,19 @@ export function OrderDetail() {
     <div className="detail-grid">
       <div className="detail-main">
         <section className="order-section" id="order-section-overview" role="tabpanel" aria-labelledby="order-tab-overview" tabIndex={-1} hidden={section !== 'overview'}>
-        {(order.returns || []).length > 0 && (
+        {(order.returns || []).length > 0 ? (
           <OrderReturnRefundOverviewCard
             order={order}
             onOpenReturns={() => openSection('returns')}
             onOpenPayments={() => openSection('payments')}
           />
-        )}
+        ) : (order.refundSummary?.isRefunded ||
+          order.financialStatus === 'refunded' ||
+          order.financialStatus === 'partially_refunded' ||
+          order.status === 'REFUNDED' ||
+          Boolean(order.refundRrn || order.refundArn)) ? (
+          <RefundDetailsCard order={order} standalone />
+        ) : null}
         <Panel className="shopify-card" style={{ padding: 0 }}>
           <div className="shopify-card-head">
             <h2>Order items <span className="order-item-count">{itemCount}</span></h2>
@@ -1187,9 +1194,14 @@ export function OrderDetail() {
                   </div>
                 )}
                 {isRefundedOrder && (
-                  <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: '1px dashed var(--line)', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--tone-success-fg)', fontSize: '12px', fontWeight: 600 }}>
-                    <Icon name="check" size={16} />
-                    <span>Order has been refunded (Single refund completed).</span>
+                  <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: '1px dashed var(--line)' }}>
+                    <RefundDetailsCard
+                      order={order}
+                      returnRecord={
+                        order.returns?.find((r) => r.refundStatus === 'PROCESSED' || r.returnStatus === 'REFUNDED') ||
+                        null
+                      }
+                    />
                   </div>
                 )}
               </div>
@@ -2911,31 +2923,17 @@ function OrderReturnRefundOverviewCard({
                 </div>
               )}
 
-              <div
-                style={{
-                  background: isRefunded ? 'var(--tone-success-bg)' : isReceived ? 'var(--tone-warning-bg)' : 'var(--panel)',
-                  border: `1px solid ${isRefunded ? 'var(--tone-success-border)' : isReceived ? 'var(--tone-warning-border)' : 'var(--line)'}`,
-                  borderRadius: '8px',
-                  padding: '12px 14px',
-                }}
-              >
-                {isRefunded ? (
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
-                    <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--tone-success-fg)', fontWeight: 700, fontSize: '13px' }}>
-                        <Icon name="check" size={16} />
-                        <span>Refund Processed: {formatMoney(ret.refundAmount || order.totalAmount, order.currency)}</span>
-                      </div>
-                      <div style={{ fontSize: '12px', color: 'var(--tone-success-fg)', marginTop: '3px' }}>
-                        {ret.shopifyRefundId && <span>Shopify Refund ID: <strong className="mono">{ret.shopifyRefundId}</strong> · </span>}
-                        {ret.refundProcessedAt && <span>Date: {formatDate(ret.refundProcessedAt)}</span>}
-                      </div>
-                    </div>
-                    <span style={{ fontSize: '12px', color: 'var(--tone-success-fg)', fontWeight: 600 }}>
-                      Credited to customer payment source
-                    </span>
-                  </div>
-                ) : (
+              {isRefunded ? (
+                <RefundDetailsCard order={order} returnRecord={ret} />
+              ) : (
+                <div
+                  style={{
+                    background: isReceived ? 'var(--tone-warning-bg)' : 'var(--panel)',
+                    border: `1px solid ${isReceived ? 'var(--tone-warning-border)' : 'var(--line)'}`,
+                    borderRadius: '8px',
+                    padding: '12px 14px',
+                  }}
+                >
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
                     <div>
                       <div style={{ fontSize: '12.5px', fontWeight: 700, color: isReceived ? 'var(--tone-warning-fg)' : 'var(--ink-secondary)' }}>
@@ -2983,8 +2981,8 @@ function OrderReturnRefundOverviewCard({
                       </div>
                     )}
                   </div>
-                )}
-              </div>
+                </div>
+              )}
             </div>
           )
         })}
@@ -3370,54 +3368,60 @@ function ActiveReturnCard({ record, order }: { record: ReturnRecord; order?: Ord
         </div>
       )}
 
-      <div style={{
-        background: isRefunded ? 'var(--tone-success-bg)' : isReceived ? 'var(--tone-warning-bg)' : 'var(--surface-elevated)',
-        border: `1px solid ${isRefunded ? 'var(--tone-success-border)' : isReceived ? 'var(--tone-warning-border)' : 'var(--line)'}`,
-        borderRadius: '6px',
-        padding: '10px 12px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        flexWrap: 'wrap',
-        gap: '8px',
-      }}>
-        {isRefunded ? (
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--tone-success-fg)', fontWeight: 700, fontSize: '12.5px' }}>
-              <Icon name="check" size={15} />
-              <span>Refund Processed: {formatMoney(record.refundAmount || order?.totalAmount || 0)}</span>
-            </div>
-            <div style={{ fontSize: '12px', color: 'var(--tone-success-fg)', marginTop: '2px' }}>
-              {record.shopifyRefundId && <span>Shopify Refund ID: <strong className="mono">{record.shopifyRefundId}</strong> · </span>}
-              {record.refundProcessedAt && <span>Date: {formatDate(record.refundProcessedAt)}</span>}
-            </div>
-          </div>
-        ) : (
-          <>
+      {isRefunded && order ? (
+        <RefundDetailsCard order={order} returnRecord={record} compact />
+      ) : (
+        <div style={{
+          background: isRefunded ? 'var(--tone-success-bg)' : isReceived ? 'var(--tone-warning-bg)' : 'var(--surface-elevated)',
+          border: `1px solid ${isRefunded ? 'var(--tone-success-border)' : isReceived ? 'var(--tone-warning-border)' : 'var(--line)'}`,
+          borderRadius: '6px',
+          padding: '10px 12px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '8px',
+        }}>
+          {isRefunded ? (
             <div>
-              <div style={{ fontSize: '12px', fontWeight: 700, color: isReceived ? 'var(--tone-warning-fg)' : 'var(--ink-secondary)' }}>
-                {isReceived ? 'Return Received at Warehouse · Refund Pending' : 'Return in Transit'}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--tone-success-fg)', fontWeight: 700, fontSize: '12.5px' }}>
+                <Icon name="check" size={15} />
+                <span>Refund Processed: {formatMoney(record.refundAmount || 0)}</span>
               </div>
-              <div style={{ fontSize: '12px', color: isReceived ? 'var(--tone-warning-fg)' : 'var(--muted)' }}>
-                {isCod
-                  ? 'COD Order: Transfer refund manually to customer UPI/Bank.'
-                  : 'Prepaid Order: Automatic refund will credit customer payment source.'}
+              <div style={{ fontSize: '12px', color: 'var(--tone-success-fg)', marginTop: '2px' }}>
+                {record.refundRrn && <span>RRN: <strong className="mono">{record.refundRrn}</strong> · </span>}
+                {record.refundArn && <span>ARN: <strong className="mono">{record.refundArn}</strong> · </span>}
+                {record.shopifyRefundId && <span>Shopify Refund ID: <strong className="mono">{record.shopifyRefundId}</strong> · </span>}
+                {record.refundProcessedAt && <span>Date: {formatDate(record.refundProcessedAt)}</span>}
               </div>
             </div>
-            {isReceived && !isCod && (
-              <button
-                type="button"
-                className="button button-primary"
-                disabled={refunding}
-                onClick={handleProcessRefund}
-                style={{ fontSize: '12px', padding: '5px 12px', background: 'var(--emerald-solid)', borderColor: 'var(--emerald-solid)', color: '#ffffff', cursor: 'pointer' }}
-              >
-                {refunding ? 'Refunding…' : 'Approve QC & Issue Refund'}
-              </button>
-            )}
-          </>
-        )}
-      </div>
+          ) : (
+            <>
+              <div>
+                <div style={{ fontSize: '12px', fontWeight: 700, color: isReceived ? 'var(--tone-warning-fg)' : 'var(--ink-secondary)' }}>
+                  {isReceived ? 'Return Received at Warehouse · Refund Pending' : 'Return in Transit'}
+                </div>
+                <div style={{ fontSize: '12px', color: isReceived ? 'var(--tone-warning-fg)' : 'var(--muted)' }}>
+                  {isCod
+                    ? 'COD Order: Transfer refund manually to customer UPI/Bank.'
+                    : 'Prepaid Order: Automatic refund will credit customer payment source.'}
+                </div>
+              </div>
+              {isReceived && !isCod && (
+                <button
+                  type="button"
+                  className="button button-primary"
+                  disabled={refunding}
+                  onClick={handleProcessRefund}
+                  style={{ fontSize: '12px', padding: '5px 12px', background: 'var(--emerald-solid)', borderColor: 'var(--emerald-solid)', color: '#ffffff', cursor: 'pointer' }}
+                >
+                  {refunding ? 'Refunding…' : 'Approve QC & Issue Refund'}
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      )}
     </div>
   )
 }

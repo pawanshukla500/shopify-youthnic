@@ -512,6 +512,10 @@ class GoKwikService {
     merchantOrderId?: string;
     paymentId?: string;
     refundId?: string;
+    rrn?: string;
+    arn?: string;
+    paymentMethod?: string;
+    paymentSubMethod?: string;
     amount?: number;
     provider?: string;
     status?: string;
@@ -534,6 +538,24 @@ class GoKwikService {
 
     const paymentId = data.paymentId || data.transactionPaymentId || data.transaction_id;
     const refundId = data.refundId || data.refund_id;
+    const rrn =
+      data.rrn ||
+      data.refund_rrn ||
+      data.refundRrn ||
+      data.bank_reference_number ||
+      data.bankReferenceNumber ||
+      data.reference_id ||
+      data.referenceId ||
+      undefined;
+    const arn =
+      data.arn ||
+      data.refund_arn ||
+      data.refundArn ||
+      data.acquirer_reference_number ||
+      refundId ||
+      undefined;
+    const paymentMethod = data.payment_method || data.paymentMethod || data.payment_mode || data.paymentMode || undefined;
+    const paymentSubMethod = data.payment_sub_method || data.paymentSubMethod || data.vpa || data.card_network || undefined;
     const amount = data.amount !== undefined ? Number(data.amount) : undefined;
     const provider = data.provider || 'gokwik';
 
@@ -543,6 +565,10 @@ class GoKwikService {
       merchantOrderId,
       paymentId,
       refundId,
+      rrn: rrn ? String(rrn).trim() : undefined,
+      arn: arn ? String(arn).trim() : undefined,
+      paymentMethod: paymentMethod ? String(paymentMethod).trim() : undefined,
+      paymentSubMethod: paymentSubMethod ? String(paymentSubMethod).trim() : undefined,
       amount,
       provider,
       status: data.status || event,

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, apiError, getReturns } from '../api'
+import { api, apiError, getReturns, syncAllRefundDetails } from '../api'
 import { RETURN_STATUSES, formatDate, formatMoney, labelize } from '../lib'
 import { Button, EmptyState, ErrorBox, FormField, Icon, LoadingState, PageIntro, Panel, PanelHeading, StatusBadge, useDocumentTitle, useToast } from '../components/UI'
 import { ManualRefundModal } from '../components/ManualRefundModal'
@@ -52,6 +52,18 @@ export function Returns() {
   } | null>(null)
 
   const query = useQuery({ queryKey: ['returns', status || 'all'], queryFn: () => getReturns(status), retry: false })
+
+  const syncRrn = useMutation({
+    mutationFn: () => syncAllRefundDetails(30),
+    onSuccess: (res) => {
+      toast.toast(
+        'success',
+        `Refund details synced: ${res.synced.updated + res.backfill.returnsUpdated} updated${res.synced.emailed ? ` · ${res.synced.emailed} RRN email(s) sent` : ''}.`
+      )
+      queryClient.invalidateQueries({ queryKey: ['returns'] })
+    },
+    onError: (err) => toast.toast('error', apiError(err)),
+  })
 
   const scan = useMutation({
     mutationFn: async () => {
@@ -166,7 +178,11 @@ export function Returns() {
       const awbMatch = (item.returnWaybillNumber || '').toLowerCase().includes(q)
       const reasonMatch = (item.returnReason || '').toLowerCase().includes(q)
       const customerMatch = (item.order?.customerName || '').toLowerCase().includes(q)
-      return orderMatch || awbMatch || reasonMatch || customerMatch
+      const rrnMatch = (item.refundRrn || '').toLowerCase().includes(q)
+      const arnMatch = (item.refundArn || '').toLowerCase().includes(q)
+      const refundIdMatch = (item.shopifyRefundId || '').toLowerCase().includes(q)
+      const sourceMatch = (item.refundSource || '').toLowerCase().includes(q)
+      return orderMatch || awbMatch || reasonMatch || customerMatch || rrnMatch || arnMatch || refundIdMatch || sourceMatch
     })
   }, [returnsList, filterTab, search])
 
@@ -355,6 +371,17 @@ export function Returns() {
                 )}
               </div>
 
+              <Button
+                className="button-secondary button-small"
+                loading={syncRrn.isPending}
+                onClick={() => syncRrn.mutate()}
+                title="Fetch latest Refund RRN, ARN and refund sources from Shopify"
+                style={{ height: '36px' }}
+              >
+                <Icon name="refresh" size={13} />
+                Sync RRN Details
+              </Button>
+
               <FormField label="Status">
                 <select
                   value={status}
@@ -536,7 +563,38 @@ export function Returns() {
                         {item.isExchange ? (
                           <span className="badge-pill badge-exchange">Size Replacement (No Cash Refund)</span>
                         ) : isRefunded ? (
-                          <span className="badge-pill badge-settled">✓ Refunded</span>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
+                            <span className="badge-pill badge-settled">
+                              {item.refundRrn || item.refundArn ? '✓ Credited' : '✓ Refunded'}
+                            </span>
+                            {item.refundRrn && (
+                              <span
+                                className="waybill-chip"
+                                onClick={() => copyWaybill(item.refundRrn || '')}
+                                title="Click to copy Refund RRN"
+                                style={{ fontSize: '11px', padding: '1px 6px' }}
+                              >
+                                <span>RRN: {item.refundRrn}</span>
+                                <Icon name="copy" size={10} />
+                              </span>
+                            )}
+                            {!item.refundRrn && item.refundArn && (
+                              <span
+                                className="waybill-chip"
+                                onClick={() => copyWaybill(item.refundArn || '')}
+                                title="Click to copy Gateway Refund ARN"
+                                style={{ fontSize: '11px', padding: '1px 6px' }}
+                              >
+                                <span>ARN: {item.refundArn}</span>
+                                <Icon name="copy" size={10} />
+                              </span>
+                            )}
+                            {item.refundSource && (
+                              <span className="cell-muted" style={{ fontSize: '11.5px' }}>
+                                {item.refundSource}
+                              </span>
+                            )}
+                          </div>
                         ) : isCod && (item.qcStatus === 'APPROVED' || item.qcStatus === 'PARTIAL' || item.returnStatus === 'QC_PENDING' || item.trackingStatus === 'DTO' || Boolean(item.receivedAt)) ? (
                           <span className="badge-pill badge-refund-due">Manual Refund Due</span>
                         ) : !isCod && (item.refundStatus === 'NONE' || item.refundStatus === 'FAILED') && Boolean(item.receivedAt || item.returnStatus === 'RECEIVED' || item.returnStatus === 'QC_PENDING' || item.trackingStatus === 'DTO') ? (

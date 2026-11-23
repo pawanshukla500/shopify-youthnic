@@ -60,6 +60,14 @@ model Order {
   paymentVerifiedAt         DateTime?
   paymentVerificationSource String? // shopify_transaction, gokwik_easebuzz, phonepe_api
   paymentReference          String? // merchant transaction reference / UTR at gateway (e.g. 614686239240)
+  paymentInstrument         String? // resolved customer payment source e.g. "UPI (@ptaxis)", "Cards (VISA)"
+
+  // Refund tracking (populated from Shopify refund/note_attributes, GoKwik/Easebuzz webhooks, settlements, or manual COD payout)
+  refundRrn                String? // Bank / NPCI Retrieval Reference Number (e.g. 104519502377) or manual COD Bank UTR
+  refundArn                String? // Acquirer / Gateway Refund Reference ID (e.g. RVL9Z7IJ39)
+  refundSource             String? // Canonical refund destination e.g. "UPI (@ptaxis) · Easebuzz" or "Manual UPI · HDFC"
+  refundGatewayStatus      String? // INITIATED | CREDITED | SETTLED | MANUAL_RECORDED | FAILED
+  refundReferenceUpdatedAt DateTime? // When refund RRN/ARN/credited status was last captured
 
   // Our internal status
   status OrderStatus @default(NEW)
@@ -144,6 +152,8 @@ model Order {
   // Reconciliation uploads and return-scan sync look orders up by exact order
   // name (#1001 / 1001 variants) — reconciliation.service findOrderByReference.
   @@index([shopifyOrderName])
+  @@index([refundRrn])
+  @@index([refundArn])
 }
 
 model OrderItem {
@@ -336,13 +346,20 @@ model Return {
   receivedAt           DateTime?
 
   // Refund
-  refundStatus      RefundStatus @default(NONE)
-  refundAmount      Float?
-  shopifyRefundId   String?
-  refundProcessedAt DateTime?
+  refundStatus        RefundStatus @default(NONE)
+  refundAmount        Float?
+  shopifyRefundId     String?
+  refundTransactionId String? // Shopify refund transaction payment_id/id (e.g. #26YOU6197.2)
+  refundRrn           String? // Bank / NPCI Refund RRN (e.g. 104519502377) or manual COD Bank UTR
+  refundArn           String? // Acquirer / Gateway Refund Reference ID (e.g. RVL9Z7IJ39)
+  refundSource        String? // Canonical refund destination e.g. "UPI (@ptaxis) · Easebuzz"
+  refundGatewayStatus String? // INITIATED | CREDITED | SETTLED | MANUAL_RECORDED | FAILED
+  refundProcessedAt   DateTime?
+  refundCreditedAt    DateTime? // When gateway confirmed credit (Refund_credited / RRN / manual payout)
+  refundEmailSentAt   DateTime? // When customer refund receipt / RRN email was sent
   // Failed refund attempts. The hourly retry stops at the cap and leaves the
   // return for a person instead of retrying forever.
-  refundAttempts    Int          @default(0)
+  refundAttempts      Int          @default(0)
 
   // Quality check on returned goods
   qcStatus    QcStatus? // set when return is scanned/delivered back
@@ -394,6 +411,8 @@ model Return {
   // Hourly retryFailedRefunds cron: refundStatus = FAILED and
   // refundAttempts < cap.
   @@index([refundStatus, refundAttempts])
+  @@index([refundRrn])
+  @@index([refundArn])
 }
 
 // One open warehouse pickup per location per day. Delhivery's pickup API

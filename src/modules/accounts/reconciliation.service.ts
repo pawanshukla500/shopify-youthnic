@@ -1160,9 +1160,56 @@ export async function importGatewaySettlement(
         continue;
       }
 
-      const matchingReturn = await prisma.return.findFirst({
-        where: { orderId: order.id, refundStatus: { not: 'PROCESSED' } },
-      });
+      // Match settlement debit to the actual refunded return (never hijack a newly-opened return when an older refund settles):
+      // 1) Exact match by Gateway Refund ARN / Shopify Refund ID
+      // 2) Oldest already-processed return awaiting settlement
+      // 3) Any already-processed return (duplicate/re-imported settlement row)
+      // 4) Fallback to an open non-cancelled return only when NO processed return exists on the order
+      let matchingReturn = rawRefundId
+        ? await prisma.return.findFirst({
+            where: {
+              orderId: order.id,
+              isExchange: false,
+              returnStatus: { not: 'CANCELLED' },
+              OR: [{ refundArn: rawRefundId }, { shopifyRefundId: rawRefundId }],
+            },
+            orderBy: { createdAt: 'asc' },
+          })
+        : null;
+      if (!matchingReturn) {
+        matchingReturn = await prisma.return.findFirst({
+          where: {
+            orderId: order.id,
+            isExchange: false,
+            returnStatus: { not: 'CANCELLED' },
+            refundStatus: 'PROCESSED',
+            OR: [{ refundGatewayStatus: null }, { refundGatewayStatus: { not: 'SETTLED' } }],
+          },
+          orderBy: { createdAt: 'asc' },
+        });
+      }
+      if (!matchingReturn) {
+        const anyProcessedReturn = await prisma.return.findFirst({
+          where: {
+            orderId: order.id,
+            isExchange: false,
+            returnStatus: { not: 'CANCELLED' },
+            refundStatus: 'PROCESSED',
+          },
+          orderBy: { createdAt: 'desc' },
+        });
+        matchingReturn =
+          anyProcessedReturn ||
+          (await prisma.return.findFirst({
+            where: {
+              orderId: order.id,
+              isExchange: false,
+              returnStatus: { not: 'CANCELLED' },
+              refundStatus: { not: 'PROCESSED' },
+            },
+            orderBy: { createdAt: 'asc' },
+          }));
+      }
       if (matchingReturn) {
         await prisma.return.update({
           where: { id: matchingReturn.id },
@@ -1170,8 +1217,24 @@ export async function importGatewaySettlement(
             refundStatus: 'PROCESSED',
             refundAmount: matchingReturn.refundAmount ?? debitAmount,
             refundProcessedAt: matchingReturn.refundProcessedAt || at,
+            ...(rawRefundId && !matchingReturn.refundArn ? { refundArn: rawRefundId } : {}),
+            refundGatewayStatus: 'SETTLED',
+            refundCreditedAt: matchingReturn.refundCreditedAt || at,
           },
         });
+      }
+
+      try {
+        await prisma.order.update({
+          where: { id: order.id },
+          data: {
+            ...(rawRefundId && !(order as any).refundArn ? { refundArn: rawRefundId } : {}),
+            refundGatewayStatus: 'SETTLED',
+            refundReferenceUpdatedAt: at,
+          },
+        });
+      } catch {
+        // Non-fatal: settlement trail still recorded below
       }
 
       await recordAccountTrailEvent({

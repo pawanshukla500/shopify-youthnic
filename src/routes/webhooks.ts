@@ -139,11 +139,24 @@ router.post('/shopify', async (req: Request, res: Response): Promise<void> => {
         break;
       }
 
-      case 'refunds/create':
+      case 'refunds/create': {
+        const parentOrderId = payload?.order_id;
         logger.info('Refund webhook received (refund processed on Shopify)', {
-          orderId: payload.order_id,
+          orderId: parentOrderId,
+          refundId: payload?.id,
         });
+        if (parentOrderId) {
+          const parentOrder = await shopifyService.fetchOrder(parentOrderId.toString());
+          if (payload?.id) {
+            const existingRefunds = Array.isArray((parentOrder as any).refunds) ? (parentOrder as any).refunds : [];
+            if (!existingRefunds.some((r: any) => String(r?.id) === String(payload.id))) {
+              (parentOrder as any).refunds = [...existingRefunds, payload];
+            }
+          }
+          await shopifyService.syncOrderToDb(parentOrder);
+        }
         break;
+      }
 
       default:
         logger.info('Unhandled webhook topic', { topic });

@@ -1,6 +1,6 @@
 # Shopify OMS — System Handoff & Operational State
 
-> **Last Verified**: 2026-11-19  
+> **Last Verified**: 2026-11-23  
 > **Repository**: [pawanshukla500/shopify-youthnic](https://github.com/pawanshukla500/shopify-youthnic) (Branch: `main`)  
 > **TaskFlow Pro Project**: `Shopify Youthnic OMS` (`a7f820cb-4885-486d-92d2-c8e4a63054f4`)  
 
@@ -107,6 +107,13 @@ Automated Order Management System for **youthnic2024.myshopify.com** (Brand: You
    - **Accounts page** regrouped into 5 tabs: Monthly Reports (checks, Download ZIP, each file, Send to accounts team, recipients), Sales & Returns, Charges & Bills, Payments, Tally & Ledger. Routes: `GET /api/accounts/pack`, `/pack/file?file=1-5`, `/pack/checks`, `POST /pack/email {month, force}`.
    - Provider Bills now reuse the pack's charge lines, so the tab and the pack always agree.
    - Review fixes (PR #108): customer invoices show the GST inside shipping (shared over lines at their rates, as in the pack); long 18% GST amounts use a smaller PDF size; the contribution report splits mixed-slab orders by line instead of dropping them; download blob URLs are revoked after a delay.
+
+14. **Refund RRN, Gateway ARN, Refund Source Tracking & Customer Emails (2026-11-23)**:
+   - **Schema & Storage**: Added additive nullable columns on `Order` (`paymentInstrument`, `refundRrn`, `refundArn`, `refundSource`, `refundGatewayStatus`, `refundReferenceUpdatedAt`) and `Return` (`refundTransactionId`, `refundRrn`, `refundArn`, `refundSource`, `refundGatewayStatus`, `refundCreditedAt`, `refundEmailSentAt`) with indexes on `refundRrn` and `refundArn`.
+   - **Extraction & Async Capture (`src/modules/returns/refund-details.ts`)**: Extracts Bank/UPI `Refund RRN`, Gateway `Refund ARN`, Shopify Refund & Transaction IDs, exact payment instrument + provider (`UPI (@ptaxis) · Easebuzz`, `VISA Card · Easebuzz`, or manual COD mode + account), and gateway credit stage (`INITIATED` → `CREDITED` → `SETTLED` / `MANUAL_RECORDED` / `FAILED`) without ever confusing checkout `Payment_Reference_ID` for Refund RRN. Captured automatically across Shopify `orders/updated` + `refunds/create` webhooks (now wired instead of no-op), `shopifyService.syncOrderToDb`, hourly `syncPendingRefundDetails()` cron, Easebuzz settlement refund imports (`GatewaySettlementRefund`), GoKwik webhooks, and Manual COD refund recording.
+   - **Customer Refund Emails (`refunds@youthnic.com`)**: Unified all refund email dispatch through `notificationEngine.notifyRefundProcessed` and `notifyRefundRrnUpdated` (removing duplicate/shadowed `resendService.sendEmail` calls in `api.ts`). `RETURN_REFUND` now includes real Shopify Refund ID, Refund RRN, Refund ARN, customer-safe Refund Source (never exposing internal Youthnic merchant bank accounts), refunded items, and context-aware copy (`RETURN`, `RTO`, `ORDER`, `MANUAL_COD`). When RRN/ARN arrives asynchronously later, a deduplicated `REFUND_RRN_UPDATE` email + WhatsApp alert notifies the customer once; operators can also resend on demand (`force: true`).
+   - **API & Highlighted UI**: Added `POST /api/orders/:id/refund-details/sync`, `POST /api/orders/:id/refund-email`, and `POST /api/returns/sync-refund-details`. Added `RefundDetailsCard` on Order Overview (both return-linked and standalone RTO/direct refunds), Returns tab, Payments tab (`OrderPaymentEvidence`), and RRN/ARN/Source chips + search + Sync RRN button on `/returns`.
+   - Review fixes (PR #109): HTML-escaped refund email preheaders; preserved standalone refund card when only cancelled/unrefunded returns exist; respected explicit `FAILED`/`INITIATED` gateway stages in `RefundDetailsCard` & `/returns`; avoided treating unsynced COD Shopify refunds as manual payouts or showing full order total for partial refunds with unknown amount; prioritized exact ARN / processed returns when matching settlement debits; skipped re-emailing pre-migration `additionalDetails` RRNs and stopped hourly re-polling settled/credited card refunds.
 
 ---
 

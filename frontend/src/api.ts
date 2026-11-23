@@ -279,6 +279,48 @@ export async function processRtoRefund(orderId: number): Promise<{
   return response.data
 }
 
+export async function syncOrderRefundDetails(
+  orderId: number,
+  sendEmail: boolean = true
+): Promise<{
+  success: boolean
+  updated: boolean
+  newReferenceFound: boolean
+  emailSent: boolean
+  refundSummary: Order['refundSummary']
+  order: Order
+}> {
+  const response = await api.post(`/api/orders/${orderId}/refund-details/sync`, { sendEmail })
+  return response.data
+}
+
+export async function sendOrderRefundEmail(
+  orderId: number,
+  returnId?: number
+): Promise<{
+  success: boolean
+  emailDispatched: boolean
+  recipient: string
+  refundRrn: string | null
+  refundArn: string | null
+  refundSource: string | null
+  order: Order
+}> {
+  const response = await api.post(`/api/orders/${orderId}/refund-email`, {
+    ...(returnId ? { returnId } : {}),
+  })
+  return response.data
+}
+
+export async function syncAllRefundDetails(limit = 30): Promise<{
+  success: boolean
+  backfill: { ordersUpdated: number; returnsUpdated: number }
+  synced: { checked: number; updated: number; emailed: number }
+}> {
+  const response = await api.post('/api/returns/sync-refund-details', { limit })
+  return response.data
+}
+
 export async function handleNdrAction(
   orderId: number,
   action: 'RE-ATTEMPT' | 'RTO',

@@ -35,6 +35,16 @@ import { isExpiredSignedUrl, isUsableHttpUrl } from '../utils/signed-url';
 import { queueManifestForPickup, scheduleWaitingParcels, submitPickupBatch } from '../modules/delhivery/pickup-batch.service';
 import { addStaffNote, getOrderActivity, recordOrderAction } from '../modules/orders/order-activity.service';
 import returnScanService from '../modules/returns/return-scan.service';
+import notificationEngine from '../modules/notifications/notification.service';
+import {
+  backfillStoredRefundDetails,
+  extractPaymentInstrument,
+  formatRefundSource,
+  pickHigherRefundStage,
+  resolveOrderRefundSummary,
+  syncOrderRefundDetails,
+  syncPendingRefundDetails,
+} from '../modules/returns/refund-details';
 import shippingRouterService, { CarrierPriority, CourierChoice } from '../modules/shipping/shipping-router.service';
 import velocityService from '../modules/velocity/velocity.service';
 import { isVelocityCourier, getTrackingUrl } from '../utils/courier';
@@ -917,7 +927,159 @@ router.post('/orders/:id/refunds/manual', async (req: AuthenticatedRequest, res:
       evidence,
       actor: req.user,
     });
-    res.status(201).json({ event: await presentAccountTrailEvent(event) });
+
+    // Best-effort customer refund confirmation email with Bank UTR / UPI RRN
+    let emailDispatched = false;
+    try {
+      const orderWithItems = await prisma.order.findUnique({
+        where: { id: orderId },
+        include: { items: true },
+      });
+      const linkedReturn = returnId
+        ? await prisma.return.findUnique({
+            where: { id: returnId },
+            include: { items: { include: { orderItem: true } } },
+          })
+        : null;
+      if (orderWithItems?.customerEmail) {
+        const notifyRes = await notificationEngine.notifyRefundProcessed(
+          orderWithItems,
+          Number(body.amount),
+          linkedReturn,
+          {
+            refundRrn: event.externalReference,
+            manualMode: event.refundMode,
+            refundGatewayStatus: 'MANUAL_RECORDED',
+            refundProcessedAt: event.createdAt,
+            refundContext: 'MANUAL_COD',
+          }
+        );
+        emailDispatched = notifyRes?.emailDispatched ?? false;
+      }
+    } catch (mailErr: any) {
+      logger.warn('Failed to send manual COD refund receipt email', { orderId, error: mailErr?.message });
+    }
+
+    res.status(201).json({ event: await presentAccountTrailEvent(event), emailDispatched });
+  } catch (error: any) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// Live fetch latest refund details (Bank RRN, Gateway ARN, Refund Source, Credit Status) from Shopify & settlement records
+router.post('/orders/:id/refund-details/sync', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const orderId = parsePositiveInt(req.params.id);
+    if (!orderId) {
+      res.status(400).json({ error: 'Valid positive integer order ID is required' });
+      return;
+    }
+    const syncRes = await syncOrderRefundDetails(orderId, {
+      sendEmailOnNewRrn: req.body?.sendEmail !== false,
+    });
+    const order = await orderService.getOrder(orderId);
+    res.json({
+      success: true,
+      updated: syncRes.updated,
+      newReferenceFound: syncRes.newReferenceFound,
+      emailSent: syncRes.emailSent,
+      refundSummary: syncRes.summary,
+      order,
+    });
+  } catch (error: any) {
+    logger.error('Order refund details sync failed', { orderId: req.params.id, error: error.message });
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// Send or resend the official Refund Receipt Email (with RRN, ARN, Shopify Refund ID & Refund Source) to the customer
+router.post('/orders/:id/refund-email', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user?.uid) {
+      res.status(401).json({ error: 'Authentication required to send customer refund email.' });
+      return;
+    }
+    const orderId = parsePositiveInt(req.params.id);
+    if (!orderId) {
+      res.status(400).json({ error: 'Valid positive integer order ID is required' });
+      return;
+    }
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: {
+        items: true,
+        returns: { include: { items: { include: { orderItem: true } } }, orderBy: { createdAt: 'desc' } },
+        accountTrailEvents: {
+          where: { eventType: { in: ['REFUND_AUTOMATIC', 'REFUND_MANUAL', 'REFUND_SETTLED'] } },
+          orderBy: { createdAt: 'desc' },
+        },
+      },
+    });
+    if (!order) {
+      res.status(404).json({ error: 'Order not found' });
+      return;
+    }
+    if (!order.customerEmail?.trim()) {
+      res.status(400).json({ error: 'No customer email address is recorded on this order.' });
+      return;
+    }
+    const gwRefunds = await prisma.gatewaySettlementRefund.findMany({
+      where: { orderId },
+      orderBy: { createdAt: 'desc' },
+    });
+    const summary = resolveOrderRefundSummary({
+      order,
+      returns: order.returns,
+      accountTrailEvents: order.accountTrailEvents,
+      gatewaySettlementRefunds: gwRefunds,
+    });
+    if (!summary.isRefunded) {
+      res.status(400).json({ error: 'This order does not have a processed refund yet.' });
+      return;
+    }
+
+    const requestedReturnId = req.body?.returnId ? parsePositiveInt(String(req.body.returnId)) : null;
+    const primaryReturn =
+      (requestedReturnId ? order.returns.find((r) => r.id === requestedReturnId) : null) ||
+      order.returns.find((r) => r.refundStatus === 'PROCESSED' || r.returnStatus === 'REFUNDED') ||
+      null;
+
+    const notifyRes = await notificationEngine.notifyRefundProcessed(
+      order,
+      summary.refundAmount ?? order.totalAmount,
+      primaryReturn,
+      {
+        shopifyRefundId: summary.shopifyRefundId,
+        refundRrn: summary.refundRrn,
+        refundArn: summary.refundArn,
+        refundSource: summary.customerRefundSource,
+        manualMode: summary.isManualCod ? summary.manualRefundMode || 'BANK_TRANSFER' : null,
+        refundGatewayStatus: summary.refundGatewayStatus,
+        refundProcessedAt: summary.refundProcessedAt,
+        refundContext: summary.isManualCod ? 'MANUAL_COD' : primaryReturn ? 'RETURN' : 'ORDER',
+        forceEmail: true,
+        skipWhatsApp: Boolean(req.body?.skipWhatsApp),
+      }
+    );
+
+    if (!notifyRes.emailDispatched) {
+      res.status(502).json({
+        success: false,
+        error: notifyRes.emailResult?.error || 'Could not dispatch refund receipt email.',
+      });
+      return;
+    }
+
+    res.json({
+      success: true,
+      emailDispatched: true,
+      recipient: order.customerEmail,
+      refundRrn: summary.refundRrn,
+      refundArn: summary.refundArn,
+      refundSource: summary.customerRefundSource,
+      emailResult: notifyRes.emailResult,
+      order: await orderService.getOrder(orderId),
+    });
   } catch (error: any) {
     res.status(400).json({ error: error.message });
   }
@@ -2434,63 +2596,7 @@ router.post('/orders/:id/refund', async (req: AuthenticatedRequest, res: Respons
       res.status(400).json({ error: 'Refund could not be processed.' });
       return;
     }
-
-    // Send Refund Processed Email from Youthnic Refunds <refunds@youthnic.com>
-    // only when money went back (a COD order has no online payment to refund).
-    let emailDispatched = false;
-    let emailResult: any = null;
-    try {
-      const order = result.moneyMoved
-        ? await prisma.order.findUnique({
-            where: { id: orderId },
-            include: { items: true },
-          })
-        : null;
-      if (order?.customerEmail) {
-        emailResult = await resendService.sendEmail({
-          to: order.customerEmail,
-          templateType: 'RETURN_REFUND',
-          fromEmail: 'Youthnic Refunds <refunds@youthnic.com>',
-          replyTo: 'refunds@youthnic.com',
-          orderId: order.id,
-          data: {
-            orderName: order.shopifyOrderName,
-            customerName: order.customerName,
-            recipientEmail: order.customerEmail,
-            refundId: result.refundId || `RF-${order.shopifyOrderNumber}`,
-            refundAmount: result.refundAmount,
-            paymentMethod: order.paymentMethod || 'Prepaid',
-            settlementGateway: order.paymentMethod || 'Easebuzz / PhonePe',
-            items: order.items.map((i: any) => ({
-              title: i.title,
-              variantTitle: i.variantTitle,
-              quantity: i.quantity,
-              price: i.price,
-              imageUrl: i.imageUrl,
-            })),
-            totalAmount: order.totalAmount,
-          },
-        });
-        emailDispatched = emailResult?.success ?? false;
-
-        await firebaseService.syncCustomerHistory(order.customerEmail, {
-          type: 'OUTBOUND_EMAIL',
-          channel: 'EMAIL',
-          title: `Refund Processed: ₹${result.refundAmount} for Order ${order.shopifyOrderName}`,
-          description: `Refund ID: ${result.refundId}. Funds credited to original payment source.`,
-          timestamp: new Date().toISOString(),
-          sender: 'Youthnic Refunds <refunds@youthnic.com>',
-          recipient: order.customerEmail,
-          orderId: order.id,
-          shopifyOrderName: order.shopifyOrderName,
-          status: 'SENT',
-        });
-      }
-    } catch (e: any) {
-      logger.warn('Failed to send refund email on order refund:', e.message);
-    }
-
-    res.json({ ...result, emailDispatched, emailResult });
+    res.json(result);
   } catch (error: any) {
     res.status(400).json({ error: error.message });
   }
@@ -2503,7 +2609,7 @@ router.post('/orders/:id/refund', async (req: AuthenticatedRequest, res: Respons
  *   1. Marks the return as received
  *   2. Runs QC
  *   3. Auto-processes refund on Shopify if QC passes (no issue)
- *   4. Automatically notifies consumer from refunds@youthnic.com with Refund ID
+ *   4. Automatically notifies consumer from refunds@youthnic.com with Refund ID, RRN, ARN & Source
  *
  * Body: { waybillNumber, qcStatus: 'APPROVED'|'REJECTED'|'PARTIAL', qcRemark? }
  */
@@ -2523,70 +2629,11 @@ router.post('/returns/scan', async (req: AuthenticatedRequest, res: Response): P
       req.user
     );
 
-    // If refund was processed (item received, no issue, QC approved) -> dispatch email from refunds@youthnic.com with refund ID
-    let emailDispatched = false;
-    let emailResult: any = null;
-    if (result.refundProcessed && result.moneyMoved !== false) {
-      try {
-        const returnRec = await prisma.return.findUnique({
-          where: { id: result.returnId },
-          include: { order: { include: { items: true } } },
-        });
-        if (returnRec?.order?.customerEmail) {
-          const finalRefundAmount = result.refundAmount || returnRec.refundAmount || returnRec.order.totalAmount;
-          const finalRefundId = returnRec.shopifyRefundId || `RF-${returnRec.order.shopifyOrderNumber}`;
-
-          emailResult = await resendService.sendEmail({
-            to: returnRec.order.customerEmail,
-            templateType: 'RETURN_REFUND',
-            fromEmail: 'Youthnic Refunds <refunds@youthnic.com>',
-            replyTo: 'refunds@youthnic.com',
-            orderId: returnRec.order.id,
-            data: {
-              orderName: returnRec.order.shopifyOrderName,
-              customerName: returnRec.order.customerName,
-              recipientEmail: returnRec.order.customerEmail,
-              refundId: finalRefundId,
-              refundAmount: finalRefundAmount,
-              paymentMethod: returnRec.order.paymentMethod || 'Prepaid',
-              settlementGateway: returnRec.order.paymentMethod || 'Easebuzz / PhonePe',
-              qcStatus: qcStatus || 'APPROVED',
-              qcRemark: qcRemark || undefined,
-              items: returnRec.order.items.map((i: any) => ({
-                title: i.title,
-                variantTitle: i.variantTitle,
-                quantity: i.quantity,
-                price: i.price,
-                imageUrl: i.imageUrl,
-              })),
-              totalAmount: returnRec.order.totalAmount,
-            },
-          });
-          emailDispatched = emailResult?.success ?? false;
-
-          await firebaseService.syncCustomerHistory(returnRec.order.customerEmail, {
-            type: 'OUTBOUND_EMAIL',
-            channel: 'EMAIL',
-            title: `Refund Processed: ₹${finalRefundAmount} for Order ${returnRec.order.shopifyOrderName}`,
-            description: `Return verified with 0 issues. Refund ID: ${finalRefundId}.`,
-            timestamp: new Date().toISOString(),
-            sender: 'Youthnic Refunds <refunds@youthnic.com>',
-            recipient: returnRec.order.customerEmail,
-            orderId: returnRec.order.id,
-            shopifyOrderName: returnRec.order.shopifyOrderName,
-            status: 'SENT',
-          });
-        }
-      } catch (e: any) {
-        logger.warn('Failed to send refund email on return scan:', e.message);
-      }
-    }
-
     res.json({
       success: true,
       ...result,
-      emailDispatched,
-      emailResult,
+      emailDispatched: result.emailDispatched ?? false,
+      emailResult: result.emailResult ?? null,
       message: result.message || (result.refundProcessed
         ? result.moneyMoved === false
           ? 'Return received and QC passed. Shopify recorded the refund, but this order has no online payment (COD): pay the customer by UPI/bank transfer.'
@@ -2633,6 +2680,18 @@ router.post('/returns/cod-refund-digest', async (_req: AuthenticatedRequest, res
   }
 });
 
+// Batch sync & backfill refund RRN / ARN / refund source details for refunded orders
+router.post('/returns/sync-refund-details', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const backfill = await backfillStoredRefundDetails();
+    const limit = req.body?.limit ? parsePositiveInt(String(req.body.limit)) || 30 : 30;
+    const synced = await syncPendingRefundDetails(limit);
+    res.json({ success: true, backfill, synced });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // Process refund for a return
 router.post('/returns/:id/refund', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
@@ -2650,71 +2709,16 @@ router.post('/returns/:id/refund', async (req: AuthenticatedRequest, res: Respon
       return;
     }
 
-    // Send Refund Processed Email from Youthnic Refunds <refunds@youthnic.com>
-    // only when money went back (a COD order has no online payment to refund).
-    let emailDispatched = false;
-    let emailResult: any = null;
-    if (result.moneyMoved) {
-      try {
-        const returnRec = await prisma.return.findUnique({
-          where: { id: returnId },
-          include: { order: { include: { items: true } } },
-        });
-        if (returnRec?.order?.customerEmail) {
-          const finalRefundAmount = result.refundAmount || returnRec.refundAmount || returnRec.order.totalAmount;
-          const finalRefundId = result.shopifyRefundId || returnRec.shopifyRefundId || `RF-${returnRec.order.shopifyOrderNumber}`;
-
-          emailResult = await resendService.sendEmail({
-            to: returnRec.order.customerEmail,
-            templateType: 'RETURN_REFUND',
-            fromEmail: 'Youthnic Refunds <refunds@youthnic.com>',
-            replyTo: 'refunds@youthnic.com',
-            orderId: returnRec.order.id,
-            data: {
-              orderName: returnRec.order.shopifyOrderName,
-              customerName: returnRec.order.customerName,
-              recipientEmail: returnRec.order.customerEmail,
-              refundId: finalRefundId,
-              refundAmount: finalRefundAmount,
-              paymentMethod: returnRec.order.paymentMethod || 'Prepaid',
-              settlementGateway: returnRec.order.paymentMethod || 'Easebuzz / PhonePe',
-              items: returnRec.order.items.map((i: any) => ({
-                title: i.title,
-                variantTitle: i.variantTitle,
-                quantity: i.quantity,
-                price: i.price,
-                imageUrl: i.imageUrl,
-              })),
-              totalAmount: returnRec.order.totalAmount,
-            },
-          });
-          emailDispatched = emailResult?.success ?? false;
-
-          await firebaseService.syncCustomerHistory(returnRec.order.customerEmail, {
-            type: 'OUTBOUND_EMAIL',
-            channel: 'EMAIL',
-            title: `Refund Processed: ₹${finalRefundAmount} for Order ${returnRec.order.shopifyOrderName}`,
-            description: `Refund ID: ${finalRefundId}. Credited to customer account.`,
-            timestamp: new Date().toISOString(),
-            sender: 'Youthnic Refunds <refunds@youthnic.com>',
-            recipient: returnRec.order.customerEmail,
-            orderId: returnRec.order.id,
-            shopifyOrderName: returnRec.order.shopifyOrderName,
-            status: 'SENT',
-          });
-        }
-      } catch (e: any) {
-        logger.warn('Failed to send refund email on return refund:', e.message);
-      }
-    }
-
     res.json({
       success: result.success,
       refundAmount: result.refundAmount,
       moneyMoved: result.moneyMoved,
       shopifyRefundId: result.shopifyRefundId,
-      emailDispatched,
-      emailResult,
+      refundRrn: result.refundRrn ?? null,
+      refundArn: result.refundArn ?? null,
+      refundSource: result.refundSource ?? null,
+      emailDispatched: result.emailDispatched ?? false,
+      emailResult: result.emailResult ?? null,
     });
   } catch (error: any) {
     res.status(400).json({ error: error.message });
@@ -6129,38 +6133,114 @@ router.post('/webhooks/gokwik', async (req: Request, res: Response): Promise<voi
       }
     }
 
-    if (parsed.isRefund && parsed.merchantOrderId) {
-      const returnRecord = await prisma.return.findFirst({
+    if (parsed.isRefund && (parsed.merchantOrderId || parsed.paymentId)) {
+      const order = await prisma.order.findFirst({
         where: {
-          order: {
-            OR: [
-              { shopifyOrderName: parsed.merchantOrderId },
-              { gokwikPaymentId: parsed.paymentId || undefined },
-            ],
-          },
+          OR: [
+            ...(parsed.merchantOrderId ? [{ shopifyOrderName: parsed.merchantOrderId }] : []),
+            ...(parsed.paymentId ? [{ gokwikPaymentId: parsed.paymentId }, { paymentProviderPaymentId: parsed.paymentId }] : []),
+          ],
         },
-        include: { order: true },
+        include: {
+          items: true,
+          returns: { include: { items: { include: { orderItem: true } } }, orderBy: { createdAt: 'desc' } },
+        },
       });
 
-      if (returnRecord) {
-        if (parsed.event === 'refund.successful') {
-          await prisma.return.update({
-            where: { id: returnRecord.id },
-            data: {
-              refundStatus: 'PROCESSED',
-              returnStatus: 'REFUNDED',
-              refundAmount: parsed.amount ?? returnRecord.refundAmount,
-              refundProcessedAt: new Date(),
+      if (order) {
+        const now = new Date();
+        const instrument =
+          extractPaymentInstrument({
+            receipt: {
+              payment_method: parsed.paymentMethod,
+              payment_sub_method: parsed.paymentSubMethod,
             },
-          });
-        } else if (parsed.event === 'refund.failure') {
-          await prisma.return.update({
-            where: { id: returnRecord.id },
-            data: {
-              refundStatus: 'FAILED',
-              errorMessage: `GoKwik refund failed: ${parsed.event}`,
+            paymentGateway: order.paymentGateway,
+            paymentMethod: order.paymentMethod,
+          }) || order.paymentInstrument;
+        const resolvedSource =
+          formatRefundSource({
+            paymentInstrument: instrument,
+            paymentProvider: parsed.provider !== 'gokwik' ? parsed.provider : order.paymentProvider,
+            paymentGateway: order.paymentGateway,
+          }) || order.refundSource;
+        const nextStage =
+          parsed.event === 'refund.successful'
+            ? pickHigherRefundStage(order.refundGatewayStatus, 'CREDITED')
+            : parsed.event === 'refund.failure'
+              ? 'FAILED'
+              : pickHigherRefundStage(order.refundGatewayStatus, 'INITIATED');
+        const newRefArrived = Boolean(
+          (parsed.rrn && parsed.rrn !== order.refundRrn) ||
+          (parsed.arn && parsed.arn !== order.refundArn)
+        );
+
+        await prisma.order.update({
+          where: { id: order.id },
+          data: {
+            ...(instrument ? { paymentInstrument: instrument } : {}),
+            ...(parsed.rrn ? { refundRrn: parsed.rrn } : {}),
+            ...(parsed.arn ? { refundArn: parsed.arn } : {}),
+            ...(resolvedSource ? { refundSource: resolvedSource } : {}),
+            ...(nextStage ? { refundGatewayStatus: nextStage } : {}),
+            ...(parsed.rrn || parsed.arn || parsed.event === 'refund.successful' ? { refundReferenceUpdatedAt: now } : {}),
+          },
+        });
+
+        const returnRecord = order.returns.find((r) => !r.isExchange && r.returnStatus !== 'CANCELLED') || null;
+        if (returnRecord) {
+          if (parsed.event === 'refund.successful') {
+            await prisma.return.update({
+              where: { id: returnRecord.id },
+              data: {
+                refundStatus: 'PROCESSED',
+                returnStatus: 'REFUNDED',
+                refundAmount: parsed.amount ?? returnRecord.refundAmount,
+                ...(parsed.rrn ? { refundRrn: parsed.rrn } : {}),
+                ...(parsed.arn ? { refundArn: parsed.arn } : {}),
+                ...(resolvedSource ? { refundSource: resolvedSource } : {}),
+                refundGatewayStatus: nextStage || 'CREDITED',
+                refundProcessedAt: returnRecord.refundProcessedAt || now,
+                refundCreditedAt: now,
+              },
+            });
+          } else if (parsed.event === 'refund.failure') {
+            await prisma.return.update({
+              where: { id: returnRecord.id },
+              data: {
+                refundStatus: 'FAILED',
+                refundGatewayStatus: 'FAILED',
+                errorMessage: `GoKwik refund failed: ${parsed.event}`,
+              },
+            });
+          } else if (parsed.rrn || parsed.arn || resolvedSource) {
+            await prisma.return.update({
+              where: { id: returnRecord.id },
+              data: {
+                ...(parsed.rrn ? { refundRrn: parsed.rrn } : {}),
+                ...(parsed.arn ? { refundArn: parsed.arn } : {}),
+                ...(resolvedSource ? { refundSource: resolvedSource } : {}),
+                ...(nextStage ? { refundGatewayStatus: nextStage } : {}),
+              },
+            });
+          }
+        }
+
+        if (newRefArrived && order.customerEmail && parsed.event !== 'refund.failure') {
+          const summary = resolveOrderRefundSummary({
+            order: {
+              ...order,
+              paymentInstrument: instrument,
+              refundRrn: parsed.rrn || order.refundRrn,
+              refundArn: parsed.arn || order.refundArn,
+              refundSource: resolvedSource,
+              refundGatewayStatus: nextStage,
             },
+            returns: order.returns,
           });
+          notificationEngine.notifyRefundRrnUpdated(order, summary, returnRecord).catch((err) =>
+            logger.warn('Failed to send RRN email from GoKwik webhook', { orderId: order.id, error: err?.message })
+          );
         }
       }
     }

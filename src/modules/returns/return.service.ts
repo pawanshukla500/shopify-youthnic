@@ -10,6 +10,7 @@ import whatsappGatewayService from '../whatsapp/whatsapp-gateway.service';
 import logger from '../../utils/logger';
 import { applyReturnCarrierScan } from './return-tracking';
 import { mapReturnReason, reverseProductDescription } from './return-reasons';
+import { extractRefundDetailsFromShopify, formatRefundSource, pickHigherRefundStage } from './refund-details';
 
 /** Failed refund attempts before the hourly retry leaves a return for a person. */
 export const REFUND_MAX_ATTEMPTS = 5;
@@ -903,7 +904,17 @@ class ReturnService {
     refundAmount?: number,
     reason?: string,
     actor?: AccountTrailActor | null
-  ): Promise<{ success: boolean; refundId: string; refundAmount: number; moneyMoved: boolean }> {
+  ): Promise<{
+    success: boolean;
+    refundId: string;
+    refundAmount: number;
+    moneyMoved: boolean;
+    refundRrn?: string | null;
+    refundArn?: string | null;
+    refundSource?: string | null;
+    emailDispatched?: boolean;
+    emailResult?: any;
+  }> {
     if (refundsInFlight.has(orderId)) {
       throw new Error('A refund for this order is already in progress.');
     }
@@ -920,7 +931,17 @@ class ReturnService {
     refundAmount?: number,
     reason?: string,
     actor?: AccountTrailActor | null
-  ): Promise<{ success: boolean; refundId: string; refundAmount: number; moneyMoved: boolean }> {
+  ): Promise<{
+    success: boolean;
+    refundId: string;
+    refundAmount: number;
+    moneyMoved: boolean;
+    refundRrn?: string | null;
+    refundArn?: string | null;
+    refundSource?: string | null;
+    emailDispatched?: boolean;
+    emailResult?: any;
+  }> {
     const order = await prisma.order.findUnique({
       where: { id: orderId },
       include: { items: true, returns: true },
@@ -987,6 +1008,30 @@ class ReturnService {
       !isPartial
     );
     const refundedAmount = refundResult.amount;
+    const orderExtracted = extractRefundDetailsFromShopify({
+      noteAttributes: Array.isArray(order.additionalDetails) ? (order.additionalDetails as any) : undefined,
+      tags: order.tags,
+      paymentGateway: order.paymentGateway,
+      paymentProvider: order.paymentProvider,
+      paymentMethod: order.paymentMethod,
+    });
+    const resolvedInstrument = refundResult.paymentInstrument || order.paymentInstrument || orderExtracted.paymentInstrument || null;
+    const resolvedRefundRrn = refundResult.refundRrn || order.refundRrn || orderExtracted.refundRrn || null;
+    const resolvedRefundArn = refundResult.refundArn || order.refundArn || orderExtracted.refundArn || null;
+    const resolvedRefundSource = refundResult.moneyMoved
+      ? refundResult.refundSource ||
+        formatRefundSource({
+          paymentInstrument: resolvedInstrument,
+          paymentProvider: order.paymentProvider || orderExtracted.paymentProvider,
+          paymentGateway: order.paymentGateway,
+        }) ||
+        order.refundSource ||
+        null
+      : null;
+    const resolvedRefundStage = refundResult.moneyMoved
+      ? pickHigherRefundStage(order.refundGatewayStatus, refundResult.refundGatewayStatus || (resolvedRefundRrn || resolvedRefundArn ? 'CREDITED' : 'INITIATED'))
+      : null;
+    const processedAt = new Date();
 
     // Shopify has the refund now. Bookkeeping failures below are logged, never
     // reported as a failed refund (which would invite a second one).
@@ -996,9 +1041,17 @@ class ReturnService {
       // still be delivered and tracked normally.
       await prisma.order.update({
         where: { id: order.id },
-        data: isPartial
-          ? { financialStatus: 'partially_refunded' }
-          : { status: 'REFUNDED', financialStatus: 'refunded' },
+        data: {
+          ...(isPartial
+            ? { financialStatus: 'partially_refunded' }
+            : { status: 'REFUNDED', financialStatus: 'refunded' }),
+          ...(resolvedInstrument ? { paymentInstrument: resolvedInstrument } : {}),
+          ...(resolvedRefundRrn ? { refundRrn: resolvedRefundRrn } : {}),
+          ...(resolvedRefundArn ? { refundArn: resolvedRefundArn } : {}),
+          ...(resolvedRefundSource ? { refundSource: resolvedRefundSource } : {}),
+          ...(resolvedRefundStage ? { refundGatewayStatus: resolvedRefundStage } : {}),
+          ...(resolvedRefundRrn || resolvedRefundArn ? { refundReferenceUpdatedAt: processedAt } : {}),
+        },
       });
 
       // Close the open return. Its later warehouse scan sees PROCESSED,
@@ -1011,7 +1064,13 @@ class ReturnService {
             refundStatus: 'PROCESSED',
             refundAmount: refundedAmount,
             shopifyRefundId: refundResult.refundId,
-            refundProcessedAt: new Date(),
+            ...(refundResult.refundTransactionId ? { refundTransactionId: refundResult.refundTransactionId } : {}),
+            ...(resolvedRefundRrn ? { refundRrn: resolvedRefundRrn } : {}),
+            ...(resolvedRefundArn ? { refundArn: resolvedRefundArn } : {}),
+            ...(resolvedRefundSource ? { refundSource: resolvedRefundSource } : {}),
+            ...(resolvedRefundStage ? { refundGatewayStatus: resolvedRefundStage } : {}),
+            refundProcessedAt: processedAt,
+            ...(resolvedRefundStage === 'CREDITED' ? { refundCreditedAt: processedAt } : {}),
             ...(refundResult.moneyMoved ? {} : { errorMessage: NO_ONLINE_PAYMENT_NOTE }),
           },
         });
@@ -1023,7 +1082,7 @@ class ReturnService {
           syncType: 'REFUND_PROCESS',
           status: 'SUCCESS',
           message: refundResult.moneyMoved
-            ? `Refund of ₹${refundedAmount} processed on Shopify. Refund ID: ${refundResult.refundId}. Reason: ${reason || 'Customer refund'}`
+            ? `Refund of ₹${refundedAmount} processed on Shopify. Refund ID: ${refundResult.refundId}${resolvedRefundRrn ? ` | RRN: ${resolvedRefundRrn}` : ''}${resolvedRefundArn ? ` | ARN: ${resolvedRefundArn}` : ''}${resolvedRefundSource ? ` | Source: ${resolvedRefundSource}` : ''}. Reason: ${reason || 'Customer refund'}`
             : `Refund recorded on Shopify (Refund ID: ${refundResult.refundId}) with no money moved. ${NO_ONLINE_PAYMENT_NOTE}`,
         },
       });
@@ -1049,11 +1108,19 @@ class ReturnService {
         currency: order.currency || 'INR',
         refundMode: refundResult.moneyMoved ? 'ORIGINAL_PAYMENT_METHOD' : null,
         accountUsed: refundResult.moneyMoved
-          ? order.paymentProvider || order.paymentGateway || 'Shopify original payment method'
+          ? resolvedRefundSource || order.paymentProvider || order.paymentGateway || 'Shopify original payment method'
           : null,
         externalReference: refundResult.refundId,
         note: reason || 'Refund initiated from order details.',
-        metadata: { moneyMoved: refundResult.moneyMoved, isPartial, alreadyRefunded: refundResult.alreadyRefunded },
+        metadata: {
+          moneyMoved: refundResult.moneyMoved,
+          isPartial,
+          alreadyRefunded: refundResult.alreadyRefunded,
+          ...(refundResult.refundTransactionId ? { refundTransactionId: refundResult.refundTransactionId } : {}),
+          ...(resolvedRefundRrn ? { refundRrn: resolvedRefundRrn } : {}),
+          ...(resolvedRefundArn ? { refundArn: resolvedRefundArn } : {}),
+          ...(resolvedRefundSource ? { refundSource: resolvedRefundSource } : {}),
+        },
       });
     } catch (auditError: any) {
       logger.error('Refund succeeded but account-trail event could not be written', {
@@ -1065,15 +1132,38 @@ class ReturnService {
 
     // Append refund details note on Shopify and OMS
     const itemNames = (order.items || []).map((i: any) => `${i.title || 'Item'} (x${i.quantity})`).join(', ');
-    const refundNote = `[Refund Processed - ${new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }).format(new Date())}] ${isPartial ? 'Partial refund' : 'Refund'} processed ₹${refundedAmount.toFixed(2)} (Shopify Refund ID: ${refundResult.refundId}) | Items: ${itemNames}`;
+    const refundNote = `[Refund Processed - ${new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }).format(processedAt)}] ${isPartial ? 'Partial refund' : 'Refund'} processed ₹${refundedAmount.toFixed(2)} (Shopify Refund ID: ${refundResult.refundId}${resolvedRefundRrn ? ` | RRN: ${resolvedRefundRrn}` : ''}${resolvedRefundArn ? ` | ARN: ${resolvedRefundArn}` : ''}${resolvedRefundSource ? ` | Source: ${resolvedRefundSource}` : ''}) | Items: ${itemNames}`;
     Promise.resolve(shopifyService.appendOrderNote(order.shopifyOrderId, refundNote)).catch((e) =>
       logger.warn('Failed to append Shopify order note for refund', { error: e.message })
     );
     Promise.resolve(prisma.order.update({ where: { id: order.id }, data: { shopifyNote: refundNote } })).catch(() => undefined);
 
     // Tell the customer only when money actually went back to them.
+    let emailDispatched = false;
+    let emailResult: any = null;
     if (refundResult.moneyMoved) {
-      await notificationEngine.notifyRefundProcessed(order, refundedAmount, activeReturn);
+      const updatedReturnSnapshot = activeReturn
+        ? {
+            ...activeReturn,
+            shopifyRefundId: refundResult.refundId,
+            refundRrn: resolvedRefundRrn,
+            refundArn: resolvedRefundArn,
+            refundSource: resolvedRefundSource,
+            refundGatewayStatus: resolvedRefundStage,
+            refundProcessedAt: processedAt,
+          }
+        : undefined;
+      const notifyRes = await notificationEngine.notifyRefundProcessed(order, refundedAmount, updatedReturnSnapshot, {
+        shopifyRefundId: refundResult.refundId,
+        refundRrn: resolvedRefundRrn,
+        refundArn: resolvedRefundArn,
+        refundSource: resolvedRefundSource,
+        refundGatewayStatus: resolvedRefundStage,
+        refundProcessedAt: processedAt,
+        refundContext: activeReturn ? 'RETURN' : 'ORDER',
+      });
+      emailDispatched = notifyRes?.emailDispatched ?? false;
+      emailResult = notifyRes?.emailResult ?? null;
     }
 
     return {
@@ -1081,6 +1171,11 @@ class ReturnService {
       refundId: refundResult.refundId,
       refundAmount: refundedAmount,
       moneyMoved: refundResult.moneyMoved,
+      refundRrn: resolvedRefundRrn,
+      refundArn: resolvedRefundArn,
+      refundSource: resolvedRefundSource,
+      emailDispatched,
+      emailResult,
     };
   }
 
@@ -1104,6 +1199,12 @@ class ReturnService {
     returnId: number;
     refundProcessed: boolean;
     refundAmount?: number;
+    shopifyRefundId?: string;
+    refundRrn?: string | null;
+    refundArn?: string | null;
+    refundSource?: string | null;
+    emailDispatched?: boolean;
+    emailResult?: any;
     moneyMoved?: boolean;
     refundError?: string;
     alreadyRefunded?: boolean;
@@ -1306,6 +1407,12 @@ class ReturnService {
         returnId: returnRecord.id,
         refundProcessed: refundResult.success,
         refundAmount: refundResult.refundAmount,
+        shopifyRefundId: refundResult.shopifyRefundId,
+        refundRrn: refundResult.refundRrn,
+        refundArn: refundResult.refundArn,
+        refundSource: refundResult.refundSource,
+        emailDispatched: refundResult.emailDispatched,
+        emailResult: refundResult.emailResult,
         moneyMoved: refundResult.moneyMoved,
         refundError: refundResult.error,
       };
@@ -1352,7 +1459,18 @@ class ReturnService {
     partial?: boolean,
     actor?: AccountTrailActor | null,
     approveQc?: boolean
-  ): Promise<{ success: boolean; refundAmount: number; shopifyRefundId?: string; moneyMoved?: boolean; error?: string }> {
+  ): Promise<{
+    success: boolean;
+    refundAmount: number;
+    shopifyRefundId?: string;
+    moneyMoved?: boolean;
+    refundRrn?: string | null;
+    refundArn?: string | null;
+    refundSource?: string | null;
+    emailDispatched?: boolean;
+    emailResult?: any;
+    error?: string;
+  }> {
     const returnRecord = await prisma.return.findUnique({
       where: { id: returnId },
       include: {
@@ -1522,6 +1640,35 @@ class ReturnService {
     // must never mark the refund FAILED, which would make the cron retry it.
     const refundAmount = refundResult.amount;
     const isPartialReturn = orderUnits > 0 && returnedUnits < orderUnits;
+    const orderExtracted = extractRefundDetailsFromShopify({
+      noteAttributes: Array.isArray(returnRecord.order.additionalDetails) ? (returnRecord.order.additionalDetails as any) : undefined,
+      tags: returnRecord.order.tags,
+      paymentGateway: returnRecord.order.paymentGateway,
+      paymentProvider: returnRecord.order.paymentProvider,
+      paymentMethod: returnRecord.order.paymentMethod,
+    });
+    const resolvedInstrument =
+      refundResult.paymentInstrument || returnRecord.order.paymentInstrument || orderExtracted.paymentInstrument || null;
+    const resolvedRefundRrn = refundResult.refundRrn || returnRecord.order.refundRrn || orderExtracted.refundRrn || null;
+    const resolvedRefundArn = refundResult.refundArn || returnRecord.order.refundArn || orderExtracted.refundArn || null;
+    const resolvedRefundSource = refundResult.moneyMoved
+      ? refundResult.refundSource ||
+        formatRefundSource({
+          paymentInstrument: resolvedInstrument,
+          paymentProvider: returnRecord.order.paymentProvider || orderExtracted.paymentProvider,
+          paymentGateway: returnRecord.order.paymentGateway,
+        }) ||
+        returnRecord.order.refundSource ||
+        null
+      : null;
+    const resolvedRefundStage = refundResult.moneyMoved
+      ? pickHigherRefundStage(
+          returnRecord.order.refundGatewayStatus,
+          refundResult.refundGatewayStatus || (resolvedRefundRrn || resolvedRefundArn ? 'CREDITED' : 'INITIATED')
+        )
+      : null;
+    const processedAt = new Date();
+
     try {
       await prisma.return.update({
         where: { id: returnId },
@@ -1530,12 +1677,24 @@ class ReturnService {
           refundStatus: 'PROCESSED',
           refundAmount,
           shopifyRefundId: refundResult.refundId,
-          refundProcessedAt: new Date(),
+          ...(refundResult.refundTransactionId ? { refundTransactionId: refundResult.refundTransactionId } : {}),
+          ...(resolvedRefundRrn ? { refundRrn: resolvedRefundRrn } : {}),
+          ...(resolvedRefundArn ? { refundArn: resolvedRefundArn } : {}),
+          ...(resolvedRefundSource ? { refundSource: resolvedRefundSource } : {}),
+          ...(resolvedRefundStage ? { refundGatewayStatus: resolvedRefundStage } : {}),
+          refundProcessedAt: processedAt,
+          ...(resolvedRefundStage === 'CREDITED' ? { refundCreditedAt: processedAt } : {}),
           errorMessage: refundResult.moneyMoved ? null : NO_ONLINE_PAYMENT_NOTE,
           order: {
             update: {
               status: isPartialReturn ? (returnRecord.order.deliveredAt ? 'DELIVERED' : 'RETURN_RECEIVED') : 'REFUNDED',
               financialStatus: isPartialReturn ? 'partially_refunded' : 'refunded',
+              ...(resolvedInstrument ? { paymentInstrument: resolvedInstrument } : {}),
+              ...(resolvedRefundRrn ? { refundRrn: resolvedRefundRrn } : {}),
+              ...(resolvedRefundArn ? { refundArn: resolvedRefundArn } : {}),
+              ...(resolvedRefundSource ? { refundSource: resolvedRefundSource } : {}),
+              ...(resolvedRefundStage ? { refundGatewayStatus: resolvedRefundStage } : {}),
+              ...(resolvedRefundRrn || resolvedRefundArn ? { refundReferenceUpdatedAt: processedAt } : {}),
             },
           },
         },
@@ -1547,7 +1706,7 @@ class ReturnService {
           syncType: 'REFUND_PROCESS',
           status: 'SUCCESS',
           message: refundResult.moneyMoved
-            ? `Refund of Rs. ${refundAmount} processed on Shopify. Refund ID: ${refundResult.refundId}`
+            ? `Refund of Rs. ${refundAmount} processed on Shopify. Refund ID: ${refundResult.refundId}${resolvedRefundRrn ? ` | RRN: ${resolvedRefundRrn}` : ''}${resolvedRefundArn ? ` | ARN: ${resolvedRefundArn}` : ''}${resolvedRefundSource ? ` | Source: ${resolvedRefundSource}` : ''}`
             : `Return refund recorded on Shopify (Refund ID: ${refundResult.refundId}) with no money moved. ${NO_ONLINE_PAYMENT_NOTE}`,
         },
       });
@@ -1572,7 +1731,7 @@ class ReturnService {
         currency: returnRecord.order.currency || 'INR',
         refundMode: refundResult.moneyMoved ? 'ORIGINAL_PAYMENT_METHOD' : null,
         accountUsed: refundResult.moneyMoved
-          ? returnRecord.order.paymentProvider || returnRecord.order.paymentGateway || 'Shopify original payment method'
+          ? resolvedRefundSource || returnRecord.order.paymentProvider || returnRecord.order.paymentGateway || 'Shopify original payment method'
           : null,
         externalReference: refundResult.refundId,
         note: refundResult.moneyMoved ? 'Automatically refunded after warehouse QC.' : NO_ONLINE_PAYMENT_NOTE,
@@ -1580,6 +1739,10 @@ class ReturnService {
           moneyMoved: refundResult.moneyMoved,
           alreadyRefunded: refundResult.alreadyRefunded,
           qcStatus: returnRecord.qcStatus,
+          ...(refundResult.refundTransactionId ? { refundTransactionId: refundResult.refundTransactionId } : {}),
+          ...(resolvedRefundRrn ? { refundRrn: resolvedRefundRrn } : {}),
+          ...(resolvedRefundArn ? { refundArn: resolvedRefundArn } : {}),
+          ...(resolvedRefundSource ? { refundSource: resolvedRefundSource } : {}),
         },
       });
     } catch (auditError: any) {
@@ -1592,7 +1755,7 @@ class ReturnService {
 
     // Append refund details note on Shopify and OMS
     const itemNames = returnRecord.items.map((i: any) => `${i.orderItem?.title || 'Item'} (x${i.quantity})`).join(', ');
-    const refundNote = `[Refund Processed - ${new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }).format(new Date())}] ${isPartialReturn ? 'Partial return' : 'Return'} auto-refunded ₹${refundAmount.toFixed(2)} (Shopify Refund ID: ${refundResult.refundId}) | Items: ${itemNames} | AWB: ${returnRecord.returnWaybillNumber || 'N/A'}`;
+    const refundNote = `[Refund Processed - ${new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' }).format(processedAt)}] ${isPartialReturn ? 'Partial return' : 'Return'} auto-refunded ₹${refundAmount.toFixed(2)} (Shopify Refund ID: ${refundResult.refundId}${resolvedRefundRrn ? ` | RRN: ${resolvedRefundRrn}` : ''}${resolvedRefundArn ? ` | ARN: ${resolvedRefundArn}` : ''}${resolvedRefundSource ? ` | Source: ${resolvedRefundSource}` : ''}) | Items: ${itemNames} | AWB: ${returnRecord.returnWaybillNumber || 'N/A'}`;
     Promise.resolve(shopifyService.appendOrderNote(returnRecord.order.shopifyOrderId, refundNote)).catch((e) =>
       logger.warn('Failed to append Shopify order note for return refund', { error: e.message })
     );
@@ -1602,9 +1765,18 @@ class ReturnService {
     Promise.resolve(
       whatsappGatewayService.notifyEktaPrepaidReturnRefund({
         order: returnRecord.order,
-        returnRecord,
+        returnRecord: {
+          ...returnRecord,
+          shopifyRefundId: refundResult.refundId,
+          refundRrn: resolvedRefundRrn,
+          refundArn: resolvedRefundArn,
+          refundSource: resolvedRefundSource,
+        },
         refundAmount,
         shopifyRefundId: refundResult.refundId,
+        refundRrn: resolvedRefundRrn,
+        refundArn: resolvedRefundArn,
+        refundSource: resolvedRefundSource,
         isPartialReturn,
       })
     ).catch((waErr) =>
@@ -1612,8 +1784,36 @@ class ReturnService {
     );
 
     // Tell the customer only when money actually went back to them.
+    let emailDispatched = false;
+    let emailResult: any = null;
     if (refundResult.moneyMoved) {
-      await notificationEngine.notifyRefundProcessed(returnRecord.order, refundAmount, returnRecord);
+      const updatedReturnSnapshot = {
+        ...returnRecord,
+        shopifyRefundId: refundResult.refundId,
+        refundRrn: resolvedRefundRrn,
+        refundArn: resolvedRefundArn,
+        refundSource: resolvedRefundSource,
+        refundGatewayStatus: resolvedRefundStage,
+        refundProcessedAt: processedAt,
+      };
+      const notifyRes = await notificationEngine.notifyRefundProcessed(
+        returnRecord.order,
+        refundAmount,
+        updatedReturnSnapshot,
+        {
+          shopifyRefundId: refundResult.refundId,
+          refundRrn: resolvedRefundRrn,
+          refundArn: resolvedRefundArn,
+          refundSource: resolvedRefundSource,
+          refundGatewayStatus: resolvedRefundStage,
+          refundProcessedAt: processedAt,
+          refundContext: 'RETURN',
+          qcStatus: returnRecord.qcStatus,
+          qcRemark: returnRecord.qcRemark,
+        }
+      );
+      emailDispatched = notifyRes?.emailDispatched ?? false;
+      emailResult = notifyRes?.emailResult ?? null;
     }
 
     logger.info('Refund processed successfully', {
@@ -1621,6 +1821,9 @@ class ReturnService {
       refundAmount,
       moneyMoved: refundResult.moneyMoved,
       shopifyRefundId: refundResult.refundId,
+      refundRrn: resolvedRefundRrn,
+      refundArn: resolvedRefundArn,
+      refundSource: resolvedRefundSource,
     });
 
     return {
@@ -1628,6 +1831,11 @@ class ReturnService {
       refundAmount,
       shopifyRefundId: refundResult.refundId,
       moneyMoved: refundResult.moneyMoved,
+      refundRrn: resolvedRefundRrn,
+      refundArn: resolvedRefundArn,
+      refundSource: resolvedRefundSource,
+      emailDispatched,
+      emailResult,
     };
   }
 
@@ -1635,7 +1843,7 @@ class ReturnService {
    * Get all returns with optional status filter.
    */
   async getReturns(status?: string): Promise<any[]> {
-    return prisma.return.findMany({
+    const rows = await prisma.return.findMany({
       where: status ? { returnStatus: status as any } : undefined,
       include: {
         order: {
@@ -1649,6 +1857,15 @@ class ReturnService {
             totalAmount: true,
             paymentMethod: true,
             paymentGateway: true,
+            paymentProvider: true,
+            paymentAggregator: true,
+            paymentInstrument: true,
+            refundRrn: true,
+            refundArn: true,
+            refundSource: true,
+            refundGatewayStatus: true,
+            additionalDetails: true,
+            tags: true,
             financialStatus: true,
             status: true,
             items: true,
@@ -1657,6 +1874,26 @@ class ReturnService {
         items: { include: { orderItem: true } },
       },
       orderBy: { createdAt: 'desc' },
+    });
+
+    // Fallback enrichment so historical returns immediately surface RRN/ARN/Source even before backfill
+    return rows.map((row: any) => {
+      const ord = row.order;
+      if (!ord) return row;
+      const extracted = extractRefundDetailsFromShopify({
+        noteAttributes: Array.isArray(ord.additionalDetails) ? ord.additionalDetails : undefined,
+        tags: ord.tags,
+        paymentGateway: ord.paymentGateway,
+        paymentProvider: ord.paymentProvider,
+        paymentMethod: ord.paymentMethod,
+      });
+      return {
+        ...row,
+        refundRrn: row.refundRrn || ord.refundRrn || extracted.refundRrn || null,
+        refundArn: row.refundArn || ord.refundArn || extracted.refundArn || null,
+        refundSource: row.refundSource || ord.refundSource || extracted.refundSource || null,
+        refundGatewayStatus: row.refundGatewayStatus || ord.refundGatewayStatus || extracted.refundGatewayStatus || null,
+      };
     });
   }
 

@@ -100,6 +100,36 @@ export function OrderPaymentEvidence({ order }: { order: Order }) {
                 {order.paymentReference ? <CopyableBadge text={order.paymentReference} /> : 'Not recorded'}
               </dd>
             </div>
+            {(order.refundSummary?.isRefunded || order.refundRrn || order.refundArn || order.refundSource) && (
+              <>
+                <div>
+                  <dt>Refund RRN (Bank / UPI)</dt>
+                  <dd>
+                    {order.refundSummary?.refundRrn || order.refundRrn ? (
+                      <CopyableBadge text={(order.refundSummary?.refundRrn || order.refundRrn)!} />
+                    ) : (
+                      'Awaiting bank RRN'
+                    )}
+                  </dd>
+                </div>
+                {(order.refundSummary?.refundArn || order.refundArn) && (
+                  <div>
+                    <dt>Gateway Refund ARN</dt>
+                    <dd>
+                      <CopyableBadge text={(order.refundSummary?.refundArn || order.refundArn)!} />
+                    </dd>
+                  </div>
+                )}
+                {(order.refundSummary?.refundSource || order.refundSource) && (
+                  <div>
+                    <dt>Refund Source</dt>
+                    <dd>
+                      <strong>{order.refundSummary?.refundSource || order.refundSource}</strong>
+                    </dd>
+                  </div>
+                )}
+              </>
+            )}
           </dl>
           <p>
             {isCod

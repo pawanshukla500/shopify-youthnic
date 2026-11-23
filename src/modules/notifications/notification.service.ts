@@ -2,10 +2,17 @@ import prisma from '../../database/prisma';
 import { config } from '../../config';
 import kwikengageService from '../whatsapp/kwikengage.service';
 import resendService, { EmailTemplateType } from '../email/resend.service';
+import emailLogService from '../email/email-log.service';
+import firebaseService from '../firebase/firebase.service';
 import logger from '../../utils/logger';
 import { Order, Return } from '@prisma/client';
 import { EmailTemplateData } from '../email/email-templates';
 import { isVelocityCourier } from '../../utils/courier';
+import {
+  extractRefundDetailsFromShopify,
+  formatCustomerRefundSource,
+  OrderRefundSummary,
+} from '../returns/refund-details';
 
 /**
  * Notification Engine
@@ -23,14 +30,18 @@ class NotificationEngine {
   private async sendLifecycleEmail(
     order: Order,
     templateType: EmailTemplateType,
-    extra: Partial<EmailTemplateData> = {}
-  ): Promise<void> {
+    extra: Partial<EmailTemplateData> = {},
+    options: { fromEmail?: string; replyTo?: string; force?: boolean } = {}
+  ): Promise<any> {
     const to = order.customerEmail?.trim();
-    if (!to) return;
+    if (!to) return null;
     try {
       const result = await resendService.sendEmail({
         to,
         templateType,
+        fromEmail: options.fromEmail,
+        replyTo: options.replyTo,
+        force: options.force,
         orderId: order.id,
         syncWhatsApp: false, // Prevent duplicate WhatsApp dispatch since notificationEngine handles it directly
         data: {
@@ -53,12 +64,14 @@ class NotificationEngine {
           error: 'error' in result ? result.error : undefined,
         });
       }
+      return result;
     } catch (err: any) {
       logger.warn('Lifecycle email failed', {
         templateType,
         orderId: order.id,
         error: err?.message,
       });
+      return null;
     }
   }
 
@@ -308,21 +321,311 @@ class NotificationEngine {
   }
 
   /**
-   * Refund processed — sent when Shopify or GoKwik refund is completed.
-   * Dispatches WhatsApp refund notice + Email refund confirmation.
+   * Refund processed — sent when Shopify, GoKwik, RTO, or manual COD refund is completed.
+   * Dispatches WhatsApp refund notice + official Refund Receipt Email from refunds@youthnic.com
+   * with exact Refund RRN, Gateway ARN, Shopify Refund ID, Refund Source, and refunded items.
    */
-  async notifyRefundProcessed(order: Order, refundAmount: number, returnRecord?: Return): Promise<void> {
-    try {
-      await kwikengageService.sendCriticalTrigger('REFUND_PROCESSED', order, {
-        customText: `A refund of ₹${Math.round(refundAmount)} for order ${order.shopifyOrderName} has been processed to your original payment method.`,
-      });
-    } catch (err) {
-      logger.warn('KwikEngage send failed for REFUND_PROCESSED', { err });
-    }
-    await this.sendLifecycleEmail(order, 'RETURN_REFUND', {
-      refundAmount,
-      refundId: returnRecord?.shopifyRefundId || `RF-${order.shopifyOrderNumber}`,
+  async notifyRefundProcessed(
+    order: Order & { items?: any[] },
+    refundAmount: number,
+    returnRecord?: (Return & { items?: any[] }) | null,
+    options: {
+      shopifyRefundId?: string | null;
+      refundRrn?: string | null;
+      refundArn?: string | null;
+      refundSource?: string | null;
+      manualMode?: string | null;
+      refundGatewayStatus?: string | null;
+      refundProcessedAt?: Date | string | null;
+      refundContext?: 'RETURN' | 'RTO' | 'ORDER' | 'MANUAL_COD';
+      qcStatus?: string | null;
+      qcRemark?: string | null;
+      forceEmail?: boolean;
+      skipWhatsApp?: boolean;
+    } = {}
+  ): Promise<{ emailDispatched: boolean; emailResult: any }> {
+    const extracted = extractRefundDetailsFromShopify({
+      noteAttributes: Array.isArray(order.additionalDetails) ? (order.additionalDetails as any) : undefined,
+      tags: order.tags,
+      paymentGateway: order.paymentGateway,
+      paymentProvider: order.paymentProvider,
+      paymentMethod: order.paymentMethod,
     });
+
+    const shopifyRefundId =
+      options.shopifyRefundId ||
+      returnRecord?.shopifyRefundId ||
+      undefined;
+    const refundRrn =
+      options.refundRrn ||
+      returnRecord?.refundRrn ||
+      order.refundRrn ||
+      extracted.refundRrn ||
+      undefined;
+    const refundArn =
+      options.refundArn ||
+      returnRecord?.refundArn ||
+      order.refundArn ||
+      extracted.refundArn ||
+      undefined;
+
+    const customerSource = formatCustomerRefundSource({
+      paymentInstrument: order.paymentInstrument || extracted.paymentInstrument,
+      paymentProvider: order.paymentProvider || extracted.paymentProvider,
+      paymentGateway: order.paymentGateway,
+      refundSource: options.refundSource || returnRecord?.refundSource || order.refundSource || extracted.refundSource,
+      manualMode: options.manualMode,
+    });
+
+    const gatewayStatus =
+      options.refundGatewayStatus ||
+      returnRecord?.refundGatewayStatus ||
+      order.refundGatewayStatus ||
+      extracted.refundGatewayStatus ||
+      undefined;
+
+    const refParts: string[] = [];
+    if (refundRrn) refParts.push(`RRN: ${refundRrn}`);
+    if (refundArn) refParts.push(`ARN: ${refundArn}`);
+    if (shopifyRefundId) refParts.push(`Refund ID: ${shopifyRefundId}`);
+    const refSuffix = refParts.length ? ` (${refParts.join(' · ')})` : '';
+
+    if (!options.skipWhatsApp) {
+      try {
+        await kwikengageService.sendCriticalTrigger('REFUND_PROCESSED', order, {
+          customText: `A refund of ₹${refundAmount.toFixed(2)} for order ${order.shopifyOrderName} has been processed to ${customerSource}${refSuffix}.`,
+        });
+      } catch (err) {
+        logger.warn('KwikEngage send failed for REFUND_PROCESSED', { err });
+      }
+    }
+
+    // Resolve refunded items (prefer returned items if partial return, else order items)
+    let emailItems: EmailTemplateData['items'] = undefined;
+    if (Array.isArray(returnRecord?.items) && returnRecord.items.length > 0) {
+      emailItems = returnRecord.items.map((ri: any) => ({
+        title: ri.orderItem?.title || 'Returned Item',
+        variantTitle: ri.orderItem?.variantTitle || null,
+        quantity: ri.quantity || 1,
+        price: ri.orderItem?.price || 0,
+        imageUrl: ri.orderItem?.imageUrl || null,
+      }));
+    } else if (Array.isArray(order.items) && order.items.length > 0) {
+      emailItems = order.items.map((i: any) => ({
+        title: i.title,
+        variantTitle: i.variantTitle || null,
+        quantity: i.quantity || 1,
+        price: i.price || 0,
+        imageUrl: i.imageUrl || null,
+      }));
+    } else if (order.id && typeof (prisma as any)?.orderItem?.findMany === 'function') {
+      try {
+        const dbItems = await prisma.orderItem.findMany({ where: { orderId: order.id } });
+        if (dbItems.length > 0) {
+          emailItems = dbItems.map((i) => ({
+            title: i.title,
+            variantTitle: i.variantTitle || null,
+            quantity: i.quantity,
+            price: i.price,
+            imageUrl: i.imageUrl || null,
+          }));
+        }
+      } catch {
+        // Non-fatal: email still sends without item breakdown if DB query unavailable
+      }
+    }
+
+    const processedAtIso =
+      options.refundProcessedAt instanceof Date
+        ? options.refundProcessedAt.toISOString()
+        : typeof options.refundProcessedAt === 'string'
+          ? options.refundProcessedAt
+          : returnRecord?.refundProcessedAt
+            ? new Date(returnRecord.refundProcessedAt).toISOString()
+            : new Date().toISOString();
+
+    const emailResult = await this.sendLifecycleEmail(
+      order,
+      'RETURN_REFUND',
+      {
+        refundAmount,
+        refundId: shopifyRefundId || (!refundRrn && !refundArn ? `RF-${order.shopifyOrderNumber}` : undefined),
+        refundRrn,
+        refundArn,
+        refundSource: customerSource,
+        settlementGateway: customerSource,
+        refundGatewayStatus: gatewayStatus,
+        refundProcessedAt: processedAtIso,
+        refundContext: options.refundContext || (returnRecord ? 'RETURN' : 'ORDER'),
+        returnWaybill: returnRecord?.returnWaybillNumber || undefined,
+        qcStatus: options.qcStatus || returnRecord?.qcStatus || undefined,
+        qcRemark: options.qcRemark || returnRecord?.qcRemark || undefined,
+        items: emailItems,
+      },
+      {
+        fromEmail: 'Youthnic Refunds <refunds@youthnic.com>',
+        replyTo: 'refunds@youthnic.com',
+        force: options.forceEmail,
+      }
+    );
+
+    const emailDispatched = Boolean(emailResult?.success && emailResult?.mode !== 'SKIPPED');
+
+    if (emailDispatched && returnRecord?.id && typeof (prisma as any)?.return?.update === 'function') {
+      prisma.return
+        .update({ where: { id: returnRecord.id }, data: { refundEmailSentAt: new Date() } })
+        .catch(() => undefined);
+    }
+
+    if (emailDispatched && order.customerEmail) {
+      firebaseService
+        .syncCustomerHistory(order.customerEmail, {
+          type: 'OUTBOUND_EMAIL',
+          channel: 'EMAIL',
+          title: `Refund Processed: ₹${refundAmount.toFixed(2)} for Order ${order.shopifyOrderName}`,
+          description: `Source: ${customerSource}${refSuffix}.`,
+          timestamp: new Date().toISOString(),
+          sender: 'Youthnic Refunds <refunds@youthnic.com>',
+          recipient: order.customerEmail,
+          orderId: order.id,
+          shopifyOrderName: order.shopifyOrderName,
+          status: 'SENT',
+        })
+        .catch(() => undefined);
+    }
+
+    return { emailDispatched, emailResult };
+  }
+
+  /**
+   * Sends the Bank RRN / Gateway ARN credit confirmation email once the gateway confirms
+   * the bank reference asynchronously (typically 1–2 hours after Shopify refund initiation).
+   * Strictly deduplicated: sends at most once per order, and skips if the initial refund
+   * email already carried the same RRN/ARN.
+   */
+  async notifyRefundRrnUpdated(
+    order: Order & { items?: any[] },
+    summary: OrderRefundSummary,
+    returnRecord?: (Return & { items?: any[] }) | null
+  ): Promise<boolean> {
+    const to = order.customerEmail?.trim();
+    if (!to) return false;
+    if (!summary.refundRrn && !summary.refundArn) return false;
+
+    const priorRefundEmail =
+      typeof emailLogService.findDeliveredNotification === 'function'
+        ? await emailLogService.findDeliveredNotification(order.id, 'RETURN_REFUND')
+        : null;
+
+    // If no refund email was ever sent yet, send the full RETURN_REFUND receipt directly with RRN/ARN!
+    if (!priorRefundEmail) {
+      const { emailDispatched } = await this.notifyRefundProcessed(
+        order,
+        summary.refundAmount ?? order.totalAmount,
+        returnRecord,
+        {
+          shopifyRefundId: summary.shopifyRefundId,
+          refundRrn: summary.refundRrn,
+          refundArn: summary.refundArn,
+          refundSource: summary.customerRefundSource,
+          refundGatewayStatus: summary.refundGatewayStatus,
+          refundProcessedAt: summary.refundProcessedAt,
+          refundContext: summary.isManualCod ? 'MANUAL_COD' : returnRecord ? 'RETURN' : 'ORDER',
+        }
+      );
+      return emailDispatched;
+    }
+
+    // If the earlier RETURN_REFUND email already contained this exact RRN (or ARN when no RRN), skip
+    const priorMeta = (priorRefundEmail.metadata && typeof priorRefundEmail.metadata === 'object'
+      ? priorRefundEmail.metadata
+      : {}) as Record<string, any>;
+    if (summary.refundRrn && priorMeta.refundRrn === summary.refundRrn) {
+      return false;
+    }
+    if (!summary.refundRrn && summary.refundArn && priorMeta.refundArn === summary.refundArn) {
+      return false;
+    }
+
+    const customerSource = summary.customerRefundSource || 'Original Payment Method';
+    const amount = summary.refundAmount ?? order.totalAmount;
+
+    let emailItems: EmailTemplateData['items'] = undefined;
+    if (Array.isArray(returnRecord?.items) && returnRecord.items.length > 0) {
+      emailItems = returnRecord.items.map((ri: any) => ({
+        title: ri.orderItem?.title || 'Returned Item',
+        variantTitle: ri.orderItem?.variantTitle || null,
+        quantity: ri.quantity || 1,
+        price: ri.orderItem?.price || 0,
+        imageUrl: ri.orderItem?.imageUrl || null,
+      }));
+    } else if (Array.isArray(order.items) && order.items.length > 0) {
+      emailItems = order.items.map((i: any) => ({
+        title: i.title,
+        variantTitle: i.variantTitle || null,
+        quantity: i.quantity || 1,
+        price: i.price || 0,
+        imageUrl: i.imageUrl || null,
+      }));
+    }
+
+    const emailResult = await this.sendLifecycleEmail(
+      order,
+      'REFUND_RRN_UPDATE',
+      {
+        refundAmount: amount,
+        refundId: summary.shopifyRefundId || undefined,
+        refundRrn: summary.refundRrn || undefined,
+        refundArn: summary.refundArn || undefined,
+        refundSource: customerSource,
+        settlementGateway: customerSource,
+        refundGatewayStatus: summary.refundGatewayStatus || 'CREDITED',
+        refundProcessedAt: summary.refundProcessedAt || undefined,
+        returnWaybill: returnRecord?.returnWaybillNumber || undefined,
+        items: emailItems,
+      },
+      {
+        fromEmail: 'Youthnic Refunds <refunds@youthnic.com>',
+        replyTo: 'refunds@youthnic.com',
+      }
+    );
+
+    const dispatched = Boolean(emailResult?.success && emailResult?.mode !== 'SKIPPED');
+    if (dispatched) {
+      if (returnRecord?.id && typeof (prisma as any)?.return?.update === 'function') {
+        prisma.return
+          .update({ where: { id: returnRecord.id }, data: { refundEmailSentAt: new Date() } })
+          .catch(() => undefined);
+      }
+
+      const refLabel = summary.refundRrn
+        ? `Bank RRN: ${summary.refundRrn}`
+        : `Refund ARN: ${summary.refundArn}`;
+      try {
+        await kwikengageService.sendCriticalTrigger('REFUND_PROCESSED', order, {
+          customText: `Your refund of ₹${amount.toFixed(2)} for order ${order.shopifyOrderName} has been credited to ${customerSource}. ${refLabel}.`,
+        });
+      } catch (err) {
+        logger.warn('KwikEngage send failed for REFUND_RRN_UPDATE', { err });
+      }
+
+      firebaseService
+        .syncCustomerHistory(to, {
+          type: 'OUTBOUND_EMAIL',
+          channel: 'EMAIL',
+          title: `Refund Credited (${refLabel}) · Order ${order.shopifyOrderName}`,
+          description: `₹${amount.toFixed(2)} credited to ${customerSource}. ${refLabel}.`,
+          timestamp: new Date().toISOString(),
+          sender: 'Youthnic Refunds <refunds@youthnic.com>',
+          recipient: to,
+          orderId: order.id,
+          shopifyOrderName: order.shopifyOrderName,
+          status: 'SENT',
+        })
+        .catch(() => undefined);
+    }
+
+    return dispatched;
   }
 
   /**

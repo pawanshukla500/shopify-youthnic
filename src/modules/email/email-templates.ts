@@ -46,6 +46,14 @@ export interface EmailTemplateData {
   actionUrl?: string;
   // Specific return & refund fields
   refundId?: string;
+  refundRrn?: string;
+  refundArn?: string;
+  refundSource?: string;
+  refundTransactionId?: string;
+  refundGatewayStatus?: string;
+  refundProcessedAt?: string;
+  refundContext?: 'RETURN' | 'RTO' | 'ORDER' | 'MANUAL_COD';
+  returnWaybill?: string;
   refundAmount?: number;
   settlementGateway?: string;
   settlementTimeline?: string;
@@ -56,6 +64,35 @@ export interface EmailTemplateData {
   ticketCategory?: string;
   ticketUrgency?: string;
   badgeText?: string;
+}
+
+function escapeEmailHtml(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function formatInrAmount(amount: number): string {
+  const n = Number.isFinite(amount) ? amount : 0;
+  return n.toLocaleString('en-IN', {
+    minimumFractionDigits: Number.isInteger(n) ? 0 : 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function resolveRefundCreditTimeline(source: string): string {
+  const low = source.toLowerCase();
+  if (low.includes('upi')) return 'UPI: Instant to 2 hours (reflects in linked bank statement)';
+  if (low.includes('card') || low.includes('visa') || low.includes('mastercard') || low.includes('rupay')) {
+    return 'Cards: 2–5 business days depending on your issuing bank';
+  }
+  if (low.includes('bank transfer') || low.includes('imps') || low.includes('neft')) {
+    return 'IMPS: Instant · NEFT: Within 2–24 business hours';
+  }
+  return 'UPI: Instant to 2 hrs · Cards/NetBanking: 2–5 business days';
 }
 
 const BRAND_NAME = 'Youthnic';
@@ -406,23 +443,93 @@ export function renderReturnInitiatedEmail(data: EmailTemplateData): { subject: 
 
 /**
  * 3. RETURN REFUND EMAIL TEMPLATE (From: refunds@youthnic.com)
- * Sent AFTER the return is received, quality check passes with no issue, and refund is completed.
+ * Sent when a return, RTO, order, or manual COD refund is processed.
+ * Highlights exact Refund RRN, Gateway Refund ARN, Shopify Refund ID, and Refund Source.
  */
 export function renderReturnRefundEmail(data: EmailTemplateData): { subject: string; html: string } {
-  const refundFormatted = (data.refundAmount || data.totalAmount || 0).toLocaleString('en-IN');
-  const subject = `Refund Processed: ₹${refundFormatted} for Order ${data.orderName} · Youthnic`;
-  const preheader = `Your refund of ₹${refundFormatted} for order ${data.orderName} has been processed successfully. Refund ID: ${data.refundId || 'RF-' + data.orderName}.`;
+  const numericAmount = data.refundAmount ?? data.totalAmount ?? 0;
+  const refundFormatted = formatInrAmount(numericAmount);
+  const safeOrderName = escapeEmailHtml(data.orderName);
+  const safeCustomerName = escapeEmailHtml(data.customerName || 'Valued Customer');
+  const safeRefundId = data.refundId ? escapeEmailHtml(data.refundId) : '';
+  const safeRrn = data.refundRrn ? escapeEmailHtml(data.refundRrn) : '';
+  const safeArn = data.refundArn ? escapeEmailHtml(data.refundArn) : '';
+  const resolvedSource =
+    data.refundSource ||
+    data.settlementGateway ||
+    (data.paymentMethod && !/^(cod|cash)/i.test(data.paymentMethod) ? `Original Payment Method (${data.paymentMethod})` : 'Original Payment Method');
+  const safeSource = escapeEmailHtml(resolvedSource);
+  const safeWaybill = escapeEmailHtml(data.returnWaybill || data.waybillNumber || '');
+  const context = data.refundContext || 'RETURN';
+  const isManualCod = context === 'MANUAL_COD' || data.refundGatewayStatus === 'MANUAL_RECORDED';
+  const hasBankRef = Boolean(safeRrn || safeArn);
+  const isCredited =
+    hasBankRef ||
+    ['CREDITED', 'SETTLED', 'MANUAL_RECORDED'].includes(String(data.refundGatewayStatus || '').toUpperCase());
+
+  const dateDisplay = data.refundProcessedAt && !Number.isNaN(Date.parse(data.refundProcessedAt))
+    ? new Date(data.refundProcessedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })
+    : new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' });
+
+  const subject = safeRrn
+    ? `Refund Processed: ₹${refundFormatted} (RRN ${data.refundRrn}) · Order ${data.orderName} · Youthnic`
+    : `Refund Processed: ₹${refundFormatted} for Order ${data.orderName} · Youthnic`;
+
+  const primaryRefLabel = safeRrn
+    ? `Refund RRN: ${safeRrn}`
+    : safeArn
+      ? `Refund ARN: ${safeArn}`
+      : safeRefundId
+        ? `Refund ID: ${safeRefundId}`
+        : `Order ${safeOrderName}`;
+  const preheader = `Your refund of ₹${refundFormatted} for order ${safeOrderName} has been processed to ${safeSource}. ${primaryRefLabel}.`;
+
+  const bannerTitle = isCredited
+    ? isManualCod
+      ? 'COD Refund Transferred & Confirmed'
+      : 'Refund Processed & Reference Confirmed'
+    : 'Refund Initiated & Sent to Payment Gateway';
+
+  const bannerSub =
+    context === 'RTO'
+      ? 'Undelivered parcel arrived back at our Surat hub. Funds have been released to your payment source.'
+      : context === 'MANUAL_COD'
+        ? 'Your manual COD refund has been remitted directly to your bank / UPI account.'
+        : context === 'ORDER'
+          ? 'Your refund has been processed and routed directly to your original payment source.'
+          : 'Returned item passed quality inspection at our Surat hub. Funds have been released to your payment source.';
+
+  const introParagraph =
+    context === 'RTO'
+      ? `Your undelivered package for order <strong>${safeOrderName}</strong> has safely returned to our Surat fulfillment center. We have processed a refund of <strong>₹${refundFormatted}</strong> back to <strong>${safeSource}</strong>.`
+      : context === 'MANUAL_COD'
+        ? `We have transferred your refund of <strong>₹${refundFormatted}</strong> for order <strong>${safeOrderName}</strong> via <strong>${safeSource}</strong>. Please find your official transaction reference below.`
+        : context === 'ORDER'
+          ? `We have processed a refund of <strong>₹${refundFormatted}</strong> for order <strong>${safeOrderName}</strong> back to <strong>${safeSource}</strong>. Please find your official refund details below.`
+          : `Great news! Your returned package for order <strong>${safeOrderName}</strong> has arrived safely at our Surat fulfillment center and cleared quality inspection. We have processed your refund of <strong>₹${refundFormatted}</strong> to <strong>${safeSource}</strong>.`;
+
+  const statusText = isManualCod
+    ? 'Transferred Directly'
+    : isCredited
+      ? 'Credited / Confirmed by Gateway'
+      : 'Initiated (Bank RRN Generating)';
+
+  const quoteParts: string[] = [];
+  if (safeRrn) quoteParts.push(`<strong>${isManualCod ? 'Bank UTR / RRN' : 'Refund RRN'}: ${safeRrn}</strong>`);
+  if (safeArn) quoteParts.push(`<strong>Refund ARN: ${safeArn}</strong>`);
+  if (safeRefundId) quoteParts.push(`<strong>Refund ID: ${safeRefundId}</strong>`);
+  const quoteSummary = quoteParts.length > 0 ? quoteParts.join(' · ') : `<strong>Order ${safeOrderName}</strong>`;
 
   const content = `
     <!-- Emerald Success Banner -->
     <div style="background-color: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 12px; padding: 16px 20px; margin-bottom: 24px;">
       <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
         <tr>
-          <td width="36" valign="middle" style="font-size: 26px;">💸</td>
+          <td width="38" valign="middle" style="font-size: 24px;">✓</td>
           <td>
-            <div style="font-size: 14.5px; font-weight: 800; color: #065f46;">Full Refund Completed & Verified</div>
+            <div style="font-size: 14.5px; font-weight: 800; color: #065f46;">${bannerTitle}</div>
             <div style="font-size: 12px; color: #047857; margin-top: 2px;">
-              Returned item passed inspection at Surat hub. 100% funds released to your account.
+              ${bannerSub}
             </div>
           </td>
         </tr>
@@ -431,28 +538,70 @@ export function renderReturnRefundEmail(data: EmailTemplateData): { subject: str
 
     <!-- Salutation -->
     <h2 class="hero-title" style="margin: 0 0 12px 0; font-size: 22px; font-weight: 800; color: #0f172a; line-height: 1.3;">
-      Dear ${data.customerName || 'Valued Customer'},
+      Dear ${safeCustomerName},
     </h2>
     <p style="margin: 0 0 20px 0; font-size: 14px; line-height: 1.6; color: #475569;">
-      Great news! Your returned package for order <strong>${data.orderName}</strong> has safely arrived at our Surat fulfillment center and successfully passed quality inspection. We have processed a full refund of <strong>₹${refundFormatted}</strong> to your original payment method.
+      ${introParagraph}
     </p>
 
-    <!-- 21st.dev Inspired Digital Receipt Card -->
-    <div style="background-color: #ffffff; border: 2px solid #a7f3d0; border-radius: 14px; padding: 22px; margin-bottom: 24px; box-shadow: 0 4px 15px rgba(5, 150, 105, 0.06);">
-      <div style="display: flex; justify-content: space-between; border-bottom: 1px dashed #cbd5e1; padding-bottom: 14px; margin-bottom: 16px;">
-        <span style="font-size: 12px; font-weight: 800; color: #059669; text-transform: uppercase; letter-spacing: 0.5px;">Official Settlement Receipt</span>
-        <span style="font-size: 12px; color: #64748b;">${new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+    ${
+      safeRrn || safeArn
+        ? `
+    <!-- Highlighted Bank Tracking Reference Box -->
+    <div style="background-color: #f0fdf4; border: 1.5px solid #34d399; border-radius: 12px; padding: 16px 20px; margin-bottom: 20px;">
+      <div style="font-size: 11px; font-weight: 800; color: #047857; text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 8px;">
+        Bank / Gateway Tracking Reference
       </div>
-
-      <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="font-size: 13px;">
+      <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
+        ${
+          safeRrn
+            ? `
         <tr>
-          <td style="color: #64748b; padding-bottom: 12px;">Official Refund ID:</td>
-          <td align="right" style="padding-bottom: 12px;">
-            <code style="background: #ecfdf5; border: 1px solid #a7f3d0; padding: 4px 10px; border-radius: 6px; font-weight: 800; color: #065f46; font-size: 13px; font-family: monospace;">
-              ${data.refundId || 'RF-' + data.orderName}
+          <td style="font-size: 12.5px; color: #065f46; font-weight: 600; padding-bottom: ${safeArn ? '8px' : '0'};">
+            ${isManualCod ? 'Bank UTR / UPI RRN' : 'Bank / UPI Refund RRN'}
+          </td>
+          <td align="right" style="padding-bottom: ${safeArn ? '8px' : '0'};">
+            <code style="background: #ffffff; border: 1px solid #6ee7b7; padding: 5px 12px; border-radius: 6px; font-weight: 800; color: #065f46; font-size: 14px; letter-spacing: 0.4px; font-family: 'JetBrains Mono', Menlo, Consolas, monospace;">
+              ${safeRrn}
             </code>
           </td>
+        </tr>`
+            : ''
+        }
+        ${
+          safeArn
+            ? `
+        <tr>
+          <td style="font-size: 12.5px; color: #065f46; font-weight: 600;">
+            Gateway Refund ARN / Ref ID
+          </td>
+          <td align="right">
+            <code style="background: #ffffff; border: 1px solid #a7f3d0; padding: 4px 10px; border-radius: 6px; font-weight: 700; color: #0f172a; font-size: 13px; letter-spacing: 0.3px; font-family: 'JetBrains Mono', Menlo, Consolas, monospace;">
+              ${safeArn}
+            </code>
+          </td>
+        </tr>`
+            : ''
+        }
+      </table>
+    </div>`
+        : ''
+    }
+
+    <!-- Official Settlement Receipt Card -->
+    <div style="background-color: #ffffff; border: 2px solid #a7f3d0; border-radius: 14px; padding: 22px; margin-bottom: 24px; box-shadow: 0 4px 15px rgba(5, 150, 105, 0.06);">
+      <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="border-bottom: 1px dashed #cbd5e1; margin-bottom: 16px;">
+        <tr>
+          <td style="font-size: 12px; font-weight: 800; color: #059669; text-transform: uppercase; letter-spacing: 0.5px; padding-bottom: 12px;">
+            Official Refund Receipt
+          </td>
+          <td align="right" style="font-size: 12px; color: #64748b; padding-bottom: 12px;">
+            ${dateDisplay}
+          </td>
         </tr>
+      </table>
+
+      <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="font-size: 13px;">
         <tr>
           <td style="color: #64748b; padding-bottom: 12px;">Refunded Amount:</td>
           <td align="right" style="font-weight: 900; color: #059669; font-size: 18px; padding-bottom: 12px;">
@@ -460,27 +609,90 @@ export function renderReturnRefundEmail(data: EmailTemplateData): { subject: str
           </td>
         </tr>
         <tr>
+          <td style="color: #64748b; padding-bottom: 12px;">Refund Source / Credited To:</td>
+          <td align="right" style="font-weight: 700; color: #1d4ed8; padding-bottom: 12px;">
+            ${safeSource}
+          </td>
+        </tr>
+        <tr>
+          <td style="color: #64748b; padding-bottom: 12px;">Refund Status:</td>
+          <td align="right" style="font-weight: 700; color: #065f46; padding-bottom: 12px;">
+            ${statusText}
+          </td>
+        </tr>
+        ${
+          safeRrn
+            ? `
+        <tr>
+          <td style="color: #64748b; padding-bottom: 12px;">${isManualCod ? 'Bank UTR / RRN:' : 'Refund RRN (Bank / UPI):'}</td>
+          <td align="right" style="padding-bottom: 12px;">
+            <code style="background: #ecfdf5; border: 1px solid #a7f3d0; padding: 3px 9px; border-radius: 6px; font-weight: 800; color: #065f46; font-size: 13px; font-family: 'JetBrains Mono', Menlo, Consolas, monospace;">
+              ${safeRrn}
+            </code>
+          </td>
+        </tr>`
+            : !isManualCod
+              ? `
+        <tr>
+          <td style="color: #64748b; padding-bottom: 12px;">Refund RRN (Bank / UPI):</td>
+          <td align="right" style="font-size: 12px; color: #b45309; font-weight: 600; padding-bottom: 12px;">
+            Generating via bank network (emailed once confirmed)
+          </td>
+        </tr>`
+              : ''
+        }
+        ${
+          safeArn
+            ? `
+        <tr>
+          <td style="color: #64748b; padding-bottom: 12px;">Gateway Refund ARN:</td>
+          <td align="right" style="padding-bottom: 12px;">
+            <code style="background: #f1f5f9; border: 1px solid #cbd5e1; padding: 3px 9px; border-radius: 6px; font-weight: 700; color: #0f172a; font-size: 12.5px; font-family: 'JetBrains Mono', Menlo, Consolas, monospace;">
+              ${safeArn}
+            </code>
+          </td>
+        </tr>`
+            : ''
+        }
+        ${
+          safeRefundId
+            ? `
+        <tr>
+          <td style="color: #64748b; padding-bottom: 12px;">Shopify Refund ID:</td>
+          <td align="right" style="padding-bottom: 12px;">
+            <code style="background: #f8fafc; border: 1px solid #e2e8f0; padding: 3px 9px; border-radius: 6px; font-weight: 700; color: #334155; font-size: 12.5px; font-family: 'JetBrains Mono', Menlo, Consolas, monospace;">
+              ${safeRefundId}
+            </code>
+          </td>
+        </tr>`
+            : ''
+        }
+        ${
+          safeWaybill
+            ? `
+        <tr>
+          <td style="color: #64748b; padding-bottom: 12px;">Return Waybill (AWB):</td>
+          <td align="right" style="font-weight: 600; color: #334155; font-family: 'JetBrains Mono', Menlo, Consolas, monospace; font-size: 12.5px; padding-bottom: 12px;">
+            ${safeWaybill}
+          </td>
+        </tr>`
+            : ''
+        }
+        ${
+          context === 'RETURN'
+            ? `
+        <tr>
           <td style="color: #64748b; padding-bottom: 12px;">Quality Control (QC):</td>
           <td align="right" style="font-weight: 700; color: #065f46; padding-bottom: 12px;">
-            Passed 100% (No Defects / Approved)
+            ${data.qcStatus === 'PARTIAL' ? 'Approved (Partial Return)' : 'Passed & Approved'}
           </td>
-        </tr>
-        <tr>
-          <td style="color: #64748b; padding-bottom: 12px;">Settlement Method:</td>
-          <td align="right" style="font-weight: 600; color: #0f172a; padding-bottom: 12px;">
-            Original Payment Method (UPI / Bank Account)
-          </td>
-        </tr>
-        <tr>
-          <td style="color: #64748b; padding-bottom: 12px;">Payment Gateway Rail:</td>
-          <td align="right" style="font-weight: 600; color: #2563eb; padding-bottom: 12px;">
-            ${data.settlementGateway || data.paymentMethod || 'Easebuzz / PhonePe UPI'}
-          </td>
-        </tr>
+        </tr>`
+            : ''
+        }
         <tr style="border-top: 1px dashed #cbd5e1;">
           <td style="color: #0f172a; font-weight: 750; padding-top: 12px;">Credit Timeline:</td>
           <td align="right" style="font-weight: 700; color: #047857; padding-top: 12px; font-size: 12.5px;">
-            UPI: Instant to 2 hrs · Cards/NetBanking: 2-4 days
+            ${escapeEmailHtml(data.settlementTimeline || resolveRefundCreditTimeline(resolvedSource))}
           </td>
         </tr>
       </table>
@@ -488,14 +700,145 @@ export function renderReturnRefundEmail(data: EmailTemplateData): { subject: str
 
     <!-- Assurance Callout -->
     <div style="background: #f0fdf4; border-left: 4px solid #059669; border-radius: 6px; padding: 14px 18px; margin-bottom: 24px; font-size: 12.5px; color: #166534; line-height: 1.6;">
-      <strong>Settlement Note:</strong> Depending on your banking institution, credits usually appear immediately for UPI or within 2 to 4 business days for credit/debit card statements. If you do not see the credit after 4 business days, please reply directly to this email at <strong>refunds@youthnic.com</strong> quoting your <strong>Refund ID: ${data.refundId || 'RF-' + data.orderName}</strong>.
+      <strong>How to track your refund:</strong> You can trace this credit directly in your UPI / bank app using ${quoteSummary}. If you do not see the credit within the expected window, reply to this email or contact us at <strong>${CONTACT_EMAIL}</strong> / WhatsApp <strong>${SUPPORT_PHONE}</strong>.
     </div>
 
     <p style="margin: 0 0 20px 0; font-size: 13.5px; color: #64748b; line-height: 1.6;">
       We truly appreciate your patronage and hope to welcome you back soon on Youthnic!
     </p>
 
-    ${renderItemsSummary(data.items, data.refundAmount || data.totalAmount)}
+    ${renderItemsSummary(data.items, numericAmount)}
+  `;
+
+  return {
+    subject,
+    html: baseEmailLayout(content, preheader, {
+      badgeText: 'refunds@youthnic.com',
+      badgeBg: '#ecfdf5',
+      badgeColor: '#059669',
+      badgeBorder: '#a7f3d0',
+    }),
+  };
+}
+
+/**
+ * 3b. REFUND RRN / CREDIT CONFIRMATION EMAIL TEMPLATE (From: refunds@youthnic.com)
+ * Sent automatically when the payment gateway / bank confirms the Bank Refund RRN
+ * or Acquirer Refund ARN after a refund was initially initiated.
+ */
+export function renderRefundRrnUpdateEmail(data: EmailTemplateData): { subject: string; html: string } {
+  const numericAmount = data.refundAmount ?? data.totalAmount ?? 0;
+  const refundFormatted = formatInrAmount(numericAmount);
+  const safeOrderName = escapeEmailHtml(data.orderName);
+  const safeCustomerName = escapeEmailHtml(data.customerName || 'Valued Customer');
+  const safeRrn = data.refundRrn ? escapeEmailHtml(data.refundRrn) : '';
+  const safeArn = data.refundArn ? escapeEmailHtml(data.refundArn) : '';
+  const safeRefundId = data.refundId ? escapeEmailHtml(data.refundId) : '';
+  const resolvedSource = data.refundSource || data.settlementGateway || 'Original Payment Method';
+  const safeSource = escapeEmailHtml(resolvedSource);
+
+  const subject = safeRrn
+    ? `Refund Credited · Bank RRN ${data.refundRrn} for Order ${data.orderName} · Youthnic`
+    : safeArn
+      ? `Refund Credited · Ref ${data.refundArn} for Order ${data.orderName} · Youthnic`
+      : `Refund Credit Confirmed for Order ${data.orderName} · Youthnic`;
+
+  const preheader = `Bank confirmation received for your ₹${refundFormatted} refund on order ${safeOrderName} to ${safeSource}.${safeRrn ? ` Refund RRN: ${safeRrn}.` : ''}${safeArn ? ` Refund ARN: ${safeArn}.` : ''}`;
+
+  const dateDisplay = data.refundProcessedAt && !Number.isNaN(Date.parse(data.refundProcessedAt))
+    ? new Date(data.refundProcessedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })
+    : new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' });
+
+  const content = `
+    <!-- Confirmed Bank Reference Banner -->
+    <div style="background-color: #ecfdf5; border: 1px solid #6ee7b7; border-radius: 12px; padding: 16px 20px; margin-bottom: 24px;">
+      <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
+        <tr>
+          <td width="38" valign="middle" style="font-size: 24px;">✓</td>
+          <td>
+            <div style="font-size: 14.5px; font-weight: 800; color: #065f46;">Refund Credited · Bank Reference Confirmed</div>
+            <div style="font-size: 12px; color: #047857; margin-top: 2px;">
+              Your payment gateway has confirmed credit to ${safeSource}.
+            </div>
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    <h2 class="hero-title" style="margin: 0 0 12px 0; font-size: 22px; font-weight: 800; color: #0f172a; line-height: 1.3;">
+      Dear ${safeCustomerName},
+    </h2>
+    <p style="margin: 0 0 20px 0; font-size: 14px; line-height: 1.6; color: #475569;">
+      Your refund of <strong>₹${refundFormatted}</strong> for order <strong>${safeOrderName}</strong> has been confirmed as credited to <strong>${safeSource}</strong>. Here are your official bank tracking reference numbers for your records.
+    </p>
+
+    <!-- Primary RRN / ARN Highlight Box -->
+    <div style="background-color: #f0fdf4; border: 2px solid #10b981; border-radius: 14px; padding: 20px; margin-bottom: 24px;">
+      <div style="font-size: 11px; font-weight: 800; color: #047857; text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 12px;">
+        Official Bank Credit Reference
+      </div>
+      <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="font-size: 13px;">
+        ${
+          safeRrn
+            ? `
+        <tr>
+          <td style="color: #065f46; font-weight: 700; padding-bottom: 10px;">Bank / UPI Refund RRN:</td>
+          <td align="right" style="padding-bottom: 10px;">
+            <code style="background: #ffffff; border: 1.5px solid #34d399; padding: 5px 12px; border-radius: 6px; font-weight: 800; color: #065f46; font-size: 15px; letter-spacing: 0.4px; font-family: 'JetBrains Mono', Menlo, Consolas, monospace;">
+              ${safeRrn}
+            </code>
+          </td>
+        </tr>`
+            : ''
+        }
+        ${
+          safeArn
+            ? `
+        <tr>
+          <td style="color: #065f46; font-weight: 600; padding-bottom: 10px;">Gateway Refund ARN / ID:</td>
+          <td align="right" style="padding-bottom: 10px;">
+            <code style="background: #ffffff; border: 1px solid #a7f3d0; padding: 4px 10px; border-radius: 6px; font-weight: 700; color: #0f172a; font-size: 13px; font-family: 'JetBrains Mono', Menlo, Consolas, monospace;">
+              ${safeArn}
+            </code>
+          </td>
+        </tr>`
+            : ''
+        }
+        <tr>
+          <td style="color: #475569; padding-bottom: 10px;">Refunded Amount:</td>
+          <td align="right" style="font-weight: 900; color: #059669; font-size: 17px; padding-bottom: 10px;">
+            ₹${refundFormatted}
+          </td>
+        </tr>
+        <tr>
+          <td style="color: #475569; padding-bottom: 10px;">Credited Source:</td>
+          <td align="right" style="font-weight: 700; color: #1d4ed8; padding-bottom: 10px;">
+            ${safeSource}
+          </td>
+        </tr>
+        ${
+          safeRefundId
+            ? `
+        <tr>
+          <td style="color: #475569; padding-bottom: 10px;">Shopify Refund ID:</td>
+          <td align="right" style="font-family: 'JetBrains Mono', Menlo, Consolas, monospace; font-size: 12.5px; font-weight: 700; color: #334155; padding-bottom: 10px;">
+            ${safeRefundId}
+          </td>
+        </tr>`
+            : ''
+        }
+        <tr>
+          <td style="color: #475569;">Refund Date:</td>
+          <td align="right" style="font-weight: 600; color: #334155;">${dateDisplay}</td>
+        </tr>
+      </table>
+    </div>
+
+    <div style="background: #f8fafc; border-left: 4px solid #2563eb; border-radius: 6px; padding: 14px 18px; margin-bottom: 20px; font-size: 12.5px; color: #334155; line-height: 1.6;">
+      <strong>Need help locating the credit?</strong> Search your bank or UPI statement for <strong>${safeRrn || safeArn || safeRefundId || safeOrderName}</strong>. You can also share this reference with your bank's support desk, or reach us at <strong>${CONTACT_EMAIL}</strong> / WhatsApp <strong>${SUPPORT_PHONE}</strong>.
+    </div>
+
+    ${renderItemsSummary(data.items, numericAmount)}
   `;
 
   return {

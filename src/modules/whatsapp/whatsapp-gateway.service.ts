@@ -192,10 +192,13 @@ export class WhatsAppGatewayService {
     returnRecord?: any;
     refundAmount: number;
     shopifyRefundId?: string;
+    refundRrn?: string | null;
+    refundArn?: string | null;
+    refundSource?: string | null;
     isPartialReturn?: boolean;
     scan?: any;
   }): Promise<WhatsAppSendResult> {
-    const { order, returnRecord, refundAmount, shopifyRefundId, isPartialReturn, scan } = params;
+    const { order, returnRecord, refundAmount, shopifyRefundId, refundRrn, refundArn, refundSource, isPartialReturn, scan } = params;
     const recipient = config.whatsappGateway.ektaJid;
     const orderId = typeof order?.id === 'number' ? order.id : undefined;
     const returnId = typeof returnRecord?.id === 'number' ? returnRecord.id : undefined;
@@ -243,6 +246,9 @@ export class WhatsAppGatewayService {
       `• *Items Returned:*`,
       ...returnedItemsList,
       `• *Refund Processed:* ₹${refundAmount.toFixed(2)}`,
+      ...(refundSource ? [`• *Refund Source:* ${refundSource}`] : []),
+      ...(refundRrn ? [`• *Refund RRN:* ${refundRrn}`] : []),
+      ...(refundArn ? [`• *Refund ARN:* ${refundArn}`] : []),
       `• *Shopify Refund ID:* ${refundId}`,
       `• *QC Status:* Verified Clear / No issue`,
       ``,
@@ -261,9 +267,12 @@ export class WhatsAppGatewayService {
     order: any;
     refundAmount: number;
     shopifyRefundId?: string;
+    refundRrn?: string | null;
+    refundArn?: string | null;
+    refundSource?: string | null;
     scan?: any;
   }): Promise<WhatsAppSendResult> {
-    const { order, refundAmount, shopifyRefundId, scan } = params;
+    const { order, refundAmount, shopifyRefundId, refundRrn, refundArn, refundSource, scan } = params;
     const recipient = config.whatsappGateway.ektaJid;
     const orderId = typeof order?.id === 'number' ? order.id : undefined;
     const dedupKey = `EKTA_WA:PREPAID_RTO:${orderId || order?.shopifyOrderId || 'unknown'}`;
@@ -287,6 +296,9 @@ export class WhatsAppGatewayService {
       `• *Tracking/AWB:* ${waybill}`,
       ...(itemsList.length ? [`• *Items:*`, ...itemsList] : []),
       `• *Refund Processed:* ₹${refundAmount.toFixed(2)}`,
+      ...(refundSource ? [`• *Refund Source:* ${refundSource}`] : []),
+      ...(refundRrn ? [`• *Refund RRN:* ${refundRrn}`] : []),
+      ...(refundArn ? [`• *Refund ARN:* ${refundArn}`] : []),
       `• *Shopify Refund ID:* ${refundId}`,
       `• *Status:* Undelivered parcel returned to warehouse`,
       ``,

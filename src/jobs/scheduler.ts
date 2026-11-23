@@ -14,6 +14,7 @@ import gmailSettlementService from '../modules/accounts/gmail-settlement.service
 import logger from '../utils/logger';
 import { processPickupBatches } from '../modules/delhivery/pickup-batch.service';
 import returnScanService from '../modules/returns/return-scan.service';
+import { syncPendingRefundDetails } from '../modules/returns/refund-details';
 
 /**
  * Scheduler
@@ -81,6 +82,16 @@ class Scheduler {
           await orderService.retryFailedRtoRefunds();
         } catch (error: any) {
           logger.error('[CRON] Retry failed RTO refunds error', { error: error.message });
+        }
+        // Pull async Bank Refund RRN / Gateway Refund ARN updates from Shopify
+        // for recent refunded prepaid orders and notify customers when RRN arrives.
+        try {
+          const rrnRes = await syncPendingRefundDetails();
+          if (rrnRes.updated > 0 || rrnRes.emailed > 0) {
+            logger.info('[CRON] Synced pending refund RRN/ARN details', rrnRes);
+          }
+        } catch (error: any) {
+          logger.error('[CRON] Pending refund details sync error', { error: error.message });
         }
         // Accounts: fill delivery dates, close orders that reached Payment
         // Received, and send last month's accounts pack if the 15th was missed.

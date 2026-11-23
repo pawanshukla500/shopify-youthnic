@@ -3,6 +3,7 @@ import { Prisma, SyncType } from '@prisma/client';
 import prisma from '../../database/prisma';
 import firebaseService from '../firebase/firebase.service';
 import logger from '../../utils/logger';
+import { formatManualRefundSource } from '../returns/refund-details';
 
 export const REFUND_MODES = ['ORIGINAL_PAYMENT_METHOD', 'UPI', 'BANK_TRANSFER', 'CASH', 'OTHER'] as const;
 export type RefundMode = (typeof REFUND_MODES)[number];
@@ -406,12 +407,19 @@ async function recordManualRefundUnlocked(
     }
   }
 
+  const manualRefundSource = formatManualRefundSource(input.refundMode, accountUsed);
+  const now = new Date();
+
   try {
     await prisma.order.update({
       where: { id: input.orderId },
       data: {
         financialStatus: isPartialReturn ? 'partially_refunded' : 'refunded',
         status: isPartialReturn ? (order.status === 'DELIVERED' ? 'DELIVERED' : 'RETURN_RECEIVED') : 'REFUNDED',
+        ...(externalReference ? { refundRrn: externalReference } : {}),
+        refundSource: manualRefundSource,
+        refundGatewayStatus: 'MANUAL_RECORDED',
+        refundReferenceUpdatedAt: now,
       },
     });
   } catch (err: any) {
@@ -426,9 +434,13 @@ async function recordManualRefundUnlocked(
           refundStatus: 'PROCESSED',
           returnStatus: 'REFUNDED',
           refundAmount: amount,
-          refundProcessedAt: new Date(),
+          ...(externalReference ? { refundRrn: externalReference } : {}),
+          refundSource: manualRefundSource,
+          refundGatewayStatus: 'MANUAL_RECORDED',
+          refundProcessedAt: now,
+          refundCreditedAt: now,
           qcStatus: 'APPROVED',
-          qcCheckedAt: new Date(),
+          qcCheckedAt: now,
         },
       });
     } catch (err: any) {

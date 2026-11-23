@@ -35,6 +35,67 @@ ORDER = {
                "quantity": 1, "returnable": True, "imageUrl": None}],
 }
 
+REFUNDED_ORDER = {
+    "id": 1884, "shopifyOrderId": "18968329158855", "shopifyOrderName": "#26YOU6197",
+    "shopifyOrderNumber": 6197, "customerName": "Tanisha Aggarwal", "customerPhone": "919878412263",
+    "customerEmail": "aggarwaltanisha42@gmail.com", "customerAddress": "Pazo premium ladies pg, Vinayak nagar",
+    "customerCity": "BANGALORE", "customerState": "Karnataka", "customerPincode": "560063",
+    "customerCountry": "India", "totalAmount": 1273.02, "totalShipping": 0,
+    "totalDiscounts": 225.98, "totalTax": 60.62, "taxesIncluded": True,
+    "shippingTitle": "Free Shipping", "discountCodes": [], "taxLines": [{"title": "IGST", "rate": 0.05, "price": "60.62"}],
+    "currency": "INR", "paymentMethod": "Pre-paid", "paymentGateway": "Gokwik UPI",
+    "paymentProvider": "Easebuzz", "paymentInstrument": "UPI (@ptaxis)", "paymentReference": "630059793263",
+    "financialStatus": "refunded", "fulfillmentStatus": "fulfilled", "status": "REFUNDED",
+    "paymentVerified": True, "salesChannel": "Youthnic <> GoKwik",
+    "shopifyCreatedAt": "2026-11-18T11:13:00Z", "createdAt": "2026-11-18T11:13:00Z",
+    "tags": "GoKwik, Refund_initiated, Refund_credited, Refunded, UPI",
+    "refundRrn": "104519502377", "refundArn": "RVL9Z7IJ39",
+    "refundSource": "UPI (@ptaxis) · Easebuzz", "refundGatewayStatus": "CREDITED",
+    "refundReferenceUpdatedAt": "2026-11-23T08:15:00Z",
+    "refundSummary": {
+        "isRefunded": True, "isPartial": False, "isManualCod": False,
+        "refundAmount": 1273.02, "shopifyRefundId": "1118855626951",
+        "refundTransactionId": "#26YOU6197.2", "refundRrn": "104519502377",
+        "refundArn": "RVL9Z7IJ39", "settlementBatchUtr": "HDFCH01421070008",
+        "refundSource": "UPI (@ptaxis) · Easebuzz",
+        "customerRefundSource": "Original UPI (@ptaxis) via Easebuzz",
+        "paymentInstrument": "UPI (@ptaxis)", "paymentProvider": "Easebuzz",
+        "refundGatewayStatus": "CREDITED",
+        "refundProcessedAt": "2026-11-23T07:20:39Z",
+        "refundCreditedAt": "2026-11-23T08:15:00Z",
+        "emailSentAt": None, "rrnEmailSentAt": None,
+        "checkoutReference": "630059793263",
+    },
+    "returns": [{
+        "id": 24, "orderId": 1884, "returnWaybillNumber": "VELR1494131364",
+        "carrier": "VELOCITY", "returnStatus": "REFUNDED", "qcStatus": "APPROVED",
+        "refundStatus": "PROCESSED", "refundAmount": 1273.02,
+        "shopifyRefundId": "1118855626951", "refundTransactionId": "#26YOU6197.2",
+        "refundRrn": "104519502377", "refundArn": "RVL9Z7IJ39",
+        "refundSource": "UPI (@ptaxis) · Easebuzz", "refundGatewayStatus": "CREDITED",
+        "refundProcessedAt": "2026-11-23T07:20:39Z", "refundCreditedAt": "2026-11-23T08:15:00Z",
+        "refundEmailSentAt": None, "returnReason": "not suiting on me",
+        "createdAt": "2026-11-20T09:00:00Z",
+        "items": [{"id": 10, "quantity": 1, "orderItem": {
+            "id": 2, "title": "Dusty Blue Linen Floral Print Straight Short Kurti With Farshi Set",
+            "variantTitle": "M", "sku": "BT165-Nishi-Dusty-Blue_M", "price": 1499, "quantity": 1,
+            "returnable": True, "imageUrl": None,
+        }}],
+    }],
+    "shipment": None,
+    "shopifyNote": None,
+    "additionalDetails": [
+        {"name": "Payment_Provider_Name", "value": "easebuzz"},
+        {"name": "Payment_Method", "value": "UPI"},
+        {"name": "Payment_Sub_Method", "value": "@ptaxis"},
+        {"name": "Refund RRN", "value": "104519502377"},
+        {"name": "Refund ARN", "value": "RVL9Z7IJ39"},
+    ],
+    "items": [{"id": 2, "title": "Dusty Blue Linen Floral Print Straight Short Kurti With Farshi Set",
+               "variantTitle": "M", "sku": "BT165-Nishi-Dusty-Blue_M", "price": 1499,
+               "quantity": 1, "returnable": True, "imageUrl": None}],
+}
+
 
 def run():
     artifacts = Path(os.environ.get("ORDER_UI_ARTIFACT_DIR") or tempfile.mkdtemp(prefix="youthnic-order-ui-"))
@@ -72,6 +133,7 @@ def run():
                 ))
                 mutations = []
                 current = dict(ORDER)
+                refunded = json.loads(json.dumps(REFUNDED_ORDER))
 
                 def api(route):
                     path = route.request.url.split("/api/")[-1]
@@ -79,10 +141,29 @@ def run():
                         mutations.append(path)
                         if path.endswith("/refresh-shopify"):
                             current.update(ORDER)
+                        elif path == "orders/1884/refund-details/sync":
+                            route.fulfill(content_type="application/json", body=json.dumps({
+                                "success": True, "updated": True, "newReferenceFound": True,
+                                "emailSent": False, "refundSummary": refunded["refundSummary"],
+                            }))
+                            return
+                        elif path == "orders/1884/refund-email":
+                            refunded["refundSummary"]["emailSentAt"] = "2026-11-23T08:30:00Z"
+                            refunded["returns"][0]["refundEmailSentAt"] = "2026-11-23T08:30:00Z"
+                            route.fulfill(content_type="application/json", body=json.dumps({
+                                "success": True, "recipient": refunded["customerEmail"],
+                                "refundRrn": "104519502377", "refundArn": "RVL9Z7IJ39",
+                                "refundSource": "Original UPI (@ptaxis) via Easebuzz",
+                            }))
+                            return
                     if path == "orders/1883" or path.endswith("/refresh-shopify"):
                         data = {"order": current}
                     elif path == "orders/1883/payment":
                         data = {"payment": current}
+                    elif path == "orders/1884":
+                        data = {"order": refunded}
+                    elif path == "orders/1884/payment":
+                        data = {"payment": refunded}
                     elif path.endswith("/account-trail"):
                         data = {"events": []}
                     elif path == "health":
@@ -129,9 +210,57 @@ def run():
                 expect(rows.filter(has_text="Shipping")).to_contain_text("Not synced")
                 expect(rows.filter(has_text="Discount")).to_contain_text("Not synced")
                 expect(rows.filter(has_text="Taxes")).to_contain_text("Not synced")
+
+                # Verify highlighted Refund Details card (RRN, ARN, Source, Sync RRN, Email Receipt)
+                page.set_viewport_size({"width": 1440, "height": 1000})
+                page.goto(BASE + "/orders/1884")
+                expect(page.get_by_role("heading", name="#26YOU6197")).to_be_visible()
+                card = page.locator(".refund-highlight-card").first
+                expect(card).to_be_visible()
+                expect(card).to_contain_text("104519502377")
+                expect(card).to_contain_text("RVL9Z7IJ39")
+                expect(card).to_contain_text("UPI (@ptaxis) · Easebuzz")
+                expect(card).to_contain_text("1118855626951")
+                expect(card).to_contain_text("HDFCH01421070008")
+                expect(card).to_contain_text("Credited · Bank Ref Verified")
+                page.screenshot(path=str(artifacts / "refund-order-light.png"), full_page=True)
+
+                page.get_by_role("button", name="Sync RRN", exact=True).click()
+                expect(page.get_by_text("Refund details updated", exact=False)).to_be_visible()
+                page.get_by_role("button", name="Email Receipt", exact=True).click()
+                expect(page.get_by_text("Refund receipt emailed to aggarwaltanisha42@gmail.com", exact=False).first).to_be_visible()
+                expect(page.get_by_role("button", name="Resend Receipt", exact=True)).to_be_visible()
+                assert "orders/1884/refund-details/sync" in mutations, mutations
+                assert "orders/1884/refund-email" in mutations, mutations
+
+                # Verify Payments tab & Returns tab also highlight RRN/ARN/Source
+                page.get_by_role("tab", name="Payments").click()
+                payments_panel = page.locator("#order-section-payments")
+                expect(payments_panel.locator(".refund-highlight-card")).to_be_visible()
+                expect(payments_panel).to_contain_text("104519502377")
+                expect(payments_panel).to_contain_text("RVL9Z7IJ39")
+                expect(payments_panel).to_contain_text("UPI (@ptaxis) · Easebuzz")
+                page.get_by_role("tab", name="Returns").click()
+                returns_panel = page.locator("#order-section-returns")
+                expect(returns_panel.locator(".refund-highlight-card.is-compact").first).to_be_visible()
+                expect(returns_panel).to_contain_text("104519502377")
+                page.get_by_role("tab", name="Overview").click()
+
+                for width in [375, 768, 1440]:
+                    page.set_viewport_size({"width": width, "height": 900})
+                    page.wait_for_timeout(150)
+                    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), f"refund-{width}"
+                page.set_viewport_size({"width": 375, "height": 900})
+                page.wait_for_timeout(150)
+                page.screenshot(path=str(artifacts / "refund-order-mobile.png"), full_page=True)
+                page.set_viewport_size({"width": 1440, "height": 1000})
+                page.get_by_role("button", name="Dark", exact=True).click()
+                page.wait_for_timeout(150)
+                page.screenshot(path=str(artifacts / "refund-order-dark.png"), full_page=True)
+
                 assert not errors, errors
                 browser.close()
-                print(f"PASS: amounts, unknown data, safe notes, refresh, menu, 375/768/1440px. Screenshots: {artifacts}")
+                print(f"PASS: amounts, unknown data, safe notes, refresh, menu, refund RRN/ARN/source card, 375/768/1440px. Screenshots: {artifacts}")
         finally:
             server.terminate()
             server.wait(timeout=15)

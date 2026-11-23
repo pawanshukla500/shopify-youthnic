@@ -18,6 +18,12 @@ import {
   trackingLabelFromShopify,
 } from '../orders/order-tabs';
 import { OMS_OWNED_ORDER_STATUSES } from '../orders/order-lifecycle';
+import {
+  extractRefundDetailsFromShopify,
+  pickHigherRefundStage,
+  resolveOrderRefundSummary,
+  RefundGatewayStage,
+} from '../returns/refund-details';
 
 /**
  * Shopify Service
@@ -379,7 +385,19 @@ class ShopifyService {
     refundLineItems: Array<{ lineItemId: number; quantity: number; restockType?: string }>,
     refundShipping: boolean = false,
     options: { idempotencyKey?: string } = {}
-  ): Promise<{ refundId: string; success: boolean; amount: number; moneyMoved: boolean; alreadyRefunded: boolean }> {
+  ): Promise<{
+    refundId: string;
+    success: boolean;
+    amount: number;
+    moneyMoved: boolean;
+    alreadyRefunded: boolean;
+    refundTransactionId?: string;
+    refundRrn?: string;
+    refundArn?: string;
+    refundSource?: string;
+    paymentInstrument?: string;
+    refundGatewayStatus?: RefundGatewayStage;
+  }> {
     try {
       if (options.idempotencyKey) {
         const existing = await this.findRefundByKey(shopifyOrderId, options.idempotencyKey);
@@ -483,13 +501,15 @@ class ShopifyService {
         refundPayload
       );
 
-      const refundId = response.data.refund?.id?.toString() || 'REFUND-' + Date.now();
+      const createdRefund = response.data.refund;
+      const refundId = createdRefund?.id?.toString() || 'REFUND-' + Date.now();
       const refundAmountLabel = moneyMoved ? amount : 0;
       logger.info('Refund created on Shopify', { shopifyOrderId, refundId, amount: refundAmountLabel, moneyMoved });
 
+      let orderData: any = null;
       // Update order tags and notes on Shopify
       try {
-        const orderData = await this.fetchOrder(shopifyOrderId);
+        orderData = await this.fetchOrder(shopifyOrderId);
         const existingTags = orderData.tags ? orderData.tags.split(',').map((t: string) => t.trim()) : [];
         const newTags = Array.from(new Set([...existingTags, 'Refunded', `Refund-Processed:Rs${Math.round(refundAmountLabel)}`]));
         const timestamp = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
@@ -507,7 +527,27 @@ class ShopifyService {
         logger.warn('Could not append refund tag/note to Shopify order', { error: tagErr.message });
       }
 
-      return { refundId, success: true, amount: refundAmountLabel, moneyMoved, alreadyRefunded: false };
+      const extracted = extractRefundDetailsFromShopify({
+        noteAttributes: orderData?.note_attributes,
+        tags: orderData?.tags,
+        paymentGateway: orderData?.payment_gateway_names?.[0] || transactionsPayload[0]?.gateway || null,
+        refunds: createdRefund ? [createdRefund] : [],
+        transactions: Array.isArray(createdRefund?.transactions) ? createdRefund.transactions : [],
+      });
+
+      return {
+        refundId,
+        success: true,
+        amount: refundAmountLabel,
+        moneyMoved,
+        alreadyRefunded: false,
+        ...(extracted.refundTransactionId ? { refundTransactionId: extracted.refundTransactionId } : {}),
+        ...(extracted.refundRrn ? { refundRrn: extracted.refundRrn } : {}),
+        ...(extracted.refundArn ? { refundArn: extracted.refundArn } : {}),
+        ...(extracted.refundSource ? { refundSource: extracted.refundSource } : {}),
+        ...(extracted.paymentInstrument ? { paymentInstrument: extracted.paymentInstrument } : {}),
+        ...(extracted.refundGatewayStatus ? { refundGatewayStatus: extracted.refundGatewayStatus } : {}),
+      };
     } catch (error: any) {
       logger.error('Failed to create refund on Shopify', {
         shopifyOrderId,
@@ -540,6 +580,27 @@ class ShopifyService {
         .reduce((sum: number, t: any) => sum + (parseFloat(t.amount) || 0), 0)
     );
     return { refundId: String(match.id), amount, moneyMoved: amount > 0 };
+  }
+
+  /**
+   * Fetch an order's live Shopify order payload, refunds list, and transactions list
+   * for refund RRN / ARN / payment source inspection and reconciliation.
+   */
+  async fetchOrderRefundData(shopifyOrderId: string): Promise<{
+    order: any | null;
+    refunds: any[];
+    transactions: any[];
+  }> {
+    const [orderRes, refundsRes, txRes] = await Promise.allSettled([
+      this.fetchOrder(shopifyOrderId),
+      this.client.get(`/orders/${shopifyOrderId}/refunds.json`),
+      this.client.get(`/orders/${shopifyOrderId}/transactions.json`),
+    ]);
+    return {
+      order: orderRes.status === 'fulfilled' ? orderRes.value : null,
+      refunds: refundsRes.status === 'fulfilled' ? refundsRes.value.data?.refunds || [] : [],
+      transactions: txRes.status === 'fulfilled' ? txRes.value.data?.transactions || [] : [],
+    };
   }
 
   /**
@@ -2245,15 +2306,21 @@ class ShopifyService {
 
     const paymentAggregator = isGoKwik ? 'GoKwik' : rawGateway.includes('phonepe') ? 'PhonePe' : (paymentGateway || null);
 
-    // Fetch transactions from Shopify to capture exact gateway receipt fields (Easebuzz ID, UTR, auth key)
-    if (paymentMethod === 'Pre-paid' || order.financial_status === 'paid' || isGoKwik) {
+    // Fetch transactions (and refunds if refunded) from Shopify to capture exact gateway receipt & refund RRN/ARN fields
+    let shopifyTransactions: any[] = [];
+    let shopifyRefunds: any[] = Array.isArray((order as any).refunds) ? (order as any).refunds : [];
+    const isOrderRefundedOnShopify =
+      ['refunded', 'partially_refunded'].includes((order.financial_status || '').toLowerCase()) ||
+      /refund_credited|refund_initiated/i.test(order.tags || '');
+
+    if (paymentMethod === 'Pre-paid' || order.financial_status === 'paid' || isGoKwik || isOrderRefundedOnShopify) {
       try {
         const txRes = await this.client.get(`/orders/${order.id}/transactions.json`);
-        const transactions = txRes.data.transactions || [];
+        shopifyTransactions = txRes.data.transactions || [];
         const captureTx =
-          transactions.find((t: any) => t.status === 'success' && ['capture', 'sale'].includes(t.kind)) ||
-          transactions.find((t: any) => t.status === 'success') ||
-          transactions[0];
+          shopifyTransactions.find((t: any) => t.status === 'success' && ['capture', 'sale'].includes(t.kind)) ||
+          shopifyTransactions.find((t: any) => t.status === 'success') ||
+          shopifyTransactions[0];
 
         if (captureTx) {
           if (captureTx.authorization && !paymentAuthorizationKey) {
@@ -2272,6 +2339,15 @@ class ShopifyService {
         }
       } catch (err: any) {
         logger.debug('Failed to fetch transactions for order in syncOrderToDb', { orderId: order.id, error: err.message });
+      }
+    }
+
+    if (isOrderRefundedOnShopify && shopifyRefunds.length === 0) {
+      try {
+        const refRes = await this.client.get(`/orders/${order.id}/refunds.json`);
+        shopifyRefunds = refRes.data?.refunds || [];
+      } catch (err: any) {
+        logger.debug('Failed to fetch refunds for order in syncOrderToDb', { orderId: order.id, error: err.message });
       }
     }
 
@@ -2346,6 +2422,14 @@ class ShopifyService {
         dispatchedAt: true,
         status: true,
         shopifyUpdatedAt: true,
+        tags: true,
+        additionalDetails: true,
+        paymentInstrument: true,
+        refundRrn: true,
+        refundArn: true,
+        refundSource: true,
+        refundGatewayStatus: true,
+        refundReferenceUpdatedAt: true,
         shipment: {
           select: {
             status: true,
@@ -2369,6 +2453,45 @@ class ShopifyService {
       });
       return;
     }
+
+    const extractedRefund = extractRefundDetailsFromShopify({
+      noteAttributes,
+      tags: order.tags,
+      paymentGateway,
+      paymentProvider,
+      paymentMethod,
+      transactions: shopifyTransactions,
+      refunds: shopifyRefunds,
+    });
+
+    const priorFromAttrs = existingDispatch
+      ? extractRefundDetailsFromShopify({
+          noteAttributes: (existingDispatch as any)?.additionalDetails as any,
+          tags: (existingDispatch as any)?.tags,
+        })
+      : null;
+    const priorRefundRrn = (existingDispatch as any)?.refundRrn || priorFromAttrs?.refundRrn || null;
+    const priorRefundArn = (existingDispatch as any)?.refundArn || priorFromAttrs?.refundArn || null;
+    const resolvedPaymentInstrument =
+      extractedRefund.paymentInstrument || (existingDispatch as any)?.paymentInstrument || null;
+    const resolvedRefundRrn = extractedRefund.refundRrn || priorRefundRrn || null;
+    const resolvedRefundArn = extractedRefund.refundArn || priorRefundArn || null;
+    const isPriorManualCod = (existingDispatch as any)?.refundGatewayStatus === 'MANUAL_RECORDED';
+    const resolvedRefundSource = isPriorManualCod
+      ? (existingDispatch as any)?.refundSource || extractedRefund.refundSource || null
+      : extractedRefund.refundSource || (existingDispatch as any)?.refundSource || null;
+    const resolvedRefundGatewayStatus = pickHigherRefundStage(
+      (existingDispatch as any)?.refundGatewayStatus,
+      extractedRefund.refundGatewayStatus
+    );
+    const refundRefNewlyCaptured = Boolean(
+      (resolvedRefundRrn && resolvedRefundRrn !== priorRefundRrn) ||
+      (resolvedRefundArn && resolvedRefundArn !== priorRefundArn)
+    );
+    const resolvedRefundRefUpdatedAt: Date | null = refundRefNewlyCaptured
+      ? new Date()
+      : (existingDispatch as any)?.refundReferenceUpdatedAt ||
+        (resolvedRefundRrn || resolvedRefundArn ? new Date() : null);
 
     if (existingDispatch?.shipment?.trackingUpdatedAt) {
       const liveStatus = orderStatusFromLiveTracking(existingDispatch.shipment);
@@ -2421,6 +2544,12 @@ class ShopifyService {
           gatewayTransactionId,
           paymentAuthorizationKey,
           paymentReference,
+          ...(resolvedPaymentInstrument ? { paymentInstrument: resolvedPaymentInstrument } : {}),
+          ...(resolvedRefundRrn ? { refundRrn: resolvedRefundRrn } : {}),
+          ...(resolvedRefundArn ? { refundArn: resolvedRefundArn } : {}),
+          ...(resolvedRefundSource ? { refundSource: resolvedRefundSource } : {}),
+          ...(resolvedRefundGatewayStatus ? { refundGatewayStatus: resolvedRefundGatewayStatus } : {}),
+          ...(resolvedRefundRefUpdatedAt ? { refundReferenceUpdatedAt: resolvedRefundRefUpdatedAt } : {}),
           paymentVerified,
           paymentVerifiedAt,
           paymentVerificationSource,
@@ -2479,6 +2608,12 @@ class ShopifyService {
           gatewayTransactionId,
           paymentAuthorizationKey,
           paymentReference,
+          ...(resolvedPaymentInstrument ? { paymentInstrument: resolvedPaymentInstrument } : {}),
+          ...(resolvedRefundRrn ? { refundRrn: resolvedRefundRrn } : {}),
+          ...(resolvedRefundArn ? { refundArn: resolvedRefundArn } : {}),
+          ...(resolvedRefundSource ? { refundSource: resolvedRefundSource } : {}),
+          ...(resolvedRefundGatewayStatus ? { refundGatewayStatus: resolvedRefundGatewayStatus } : {}),
+          ...(resolvedRefundRefUpdatedAt ? { refundReferenceUpdatedAt: resolvedRefundRefUpdatedAt } : {}),
           paymentVerified,
           paymentVerifiedAt,
           paymentVerificationSource,
@@ -2555,6 +2690,91 @@ class ShopifyService {
               },
             });
           }
+        }
+      }
+
+      // ─── Propagate Refund RRN / ARN / Source onto linked Return(s) & trigger RRN email on new capture ───
+      if (
+        (resolvedRefundRrn || resolvedRefundArn || resolvedRefundSource || resolvedRefundGatewayStatus || extractedRefund.shopifyRefundId) &&
+        typeof (prisma as any)?.return?.findMany === 'function'
+      ) {
+        try {
+          const orderReturns = await prisma.return.findMany({
+            where: { orderId: dbOrder.id, isExchange: false, returnStatus: { not: 'CANCELLED' } },
+            include: { items: { include: { orderItem: true } } },
+            orderBy: { createdAt: 'desc' },
+          });
+          const targets = orderReturns.filter(
+            (r) => r.refundStatus === 'PROCESSED' || r.returnStatus === 'REFUNDED' || Boolean(r.shopifyRefundId)
+          );
+          const returnsToUpdate = targets.length > 0
+            ? targets
+            : orderReturns.length === 1 && isOrderRefundedOnShopify
+              ? [orderReturns[0]]
+              : [];
+          const now = new Date();
+          for (const ret of returnsToUpdate) {
+            const retPatch: Record<string, any> = {};
+            if (resolvedRefundRrn && !ret.refundRrn) retPatch.refundRrn = resolvedRefundRrn;
+            if (resolvedRefundArn && !ret.refundArn) retPatch.refundArn = resolvedRefundArn;
+            if (extractedRefund.refundTransactionId && !ret.refundTransactionId) {
+              retPatch.refundTransactionId = extractedRefund.refundTransactionId;
+            }
+            if (extractedRefund.shopifyRefundId && !ret.shopifyRefundId) {
+              retPatch.shopifyRefundId = extractedRefund.shopifyRefundId;
+            }
+            if (resolvedRefundSource && ret.refundGatewayStatus !== 'MANUAL_RECORDED' && ret.refundSource !== resolvedRefundSource) {
+              retPatch.refundSource = resolvedRefundSource;
+            }
+            const nextRetStage = pickHigherRefundStage(ret.refundGatewayStatus, resolvedRefundGatewayStatus);
+            if (nextRetStage && nextRetStage !== ret.refundGatewayStatus) {
+              retPatch.refundGatewayStatus = nextRetStage;
+            }
+            if (!ret.refundCreditedAt && (nextRetStage === 'CREDITED' || nextRetStage === 'SETTLED')) {
+              retPatch.refundCreditedAt = now;
+            }
+            if (Object.keys(retPatch).length > 0) {
+              await prisma.return.update({ where: { id: ret.id }, data: retPatch });
+            }
+          }
+
+          // When a bank Refund RRN or Gateway ARN newly arrives for an existing recent order,
+          // automatically send the customer their RRN credit confirmation email (strictly deduped).
+          const isExistingOrder = Boolean(existingDispatch);
+          if (isExistingOrder && refundRefNewlyCaptured && dbOrder.customerEmail && isOrderRefundedOnShopify) {
+            const refundTimestamp =
+              extractedRefund.refundProcessedAt ||
+              returnsToUpdate[0]?.refundProcessedAt ||
+              dbOrder.shopifyUpdatedAt ||
+              dbOrder.shopifyCreatedAt;
+            const isRecent = Boolean(refundTimestamp && Date.now() - refundTimestamp.getTime() <= 7 * 24 * 60 * 60 * 1000);
+            if (isRecent) {
+              const notificationEngine = (await import('../notifications/notification.service')).default;
+              const summary = resolveOrderRefundSummary({
+                order: {
+                  ...dbOrder,
+                  paymentInstrument: resolvedPaymentInstrument,
+                  refundRrn: resolvedRefundRrn,
+                  refundArn: resolvedRefundArn,
+                  refundSource: resolvedRefundSource,
+                  refundGatewayStatus: resolvedRefundGatewayStatus,
+                },
+                returns: returnsToUpdate.map((r) => ({
+                  ...r,
+                  refundRrn: r.refundRrn || resolvedRefundRrn,
+                  refundArn: r.refundArn || resolvedRefundArn,
+                  refundSource: r.refundSource || resolvedRefundSource,
+                  shopifyRefundId: r.shopifyRefundId || extractedRefund.shopifyRefundId,
+                })),
+              });
+              await notificationEngine.notifyRefundRrnUpdated(dbOrder as any, summary, returnsToUpdate[0] || null);
+            }
+          }
+        } catch (refSyncErr: any) {
+          logger.warn('Failed to propagate refund RRN/ARN details during syncOrderToDb', {
+            orderId: dbOrder.id,
+            error: refSyncErr?.message,
+          });
         }
       }
 

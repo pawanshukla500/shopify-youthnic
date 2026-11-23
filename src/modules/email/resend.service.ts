@@ -15,6 +15,7 @@ import {
   renderReturnInitiatedEmail,
   renderReturnReceivedEmail,
   renderReturnRefundEmail,
+  renderRefundRrnUpdateEmail,
   renderSupportReplyEmail,
   renderCustomEmail,
   EmailTemplateData,
@@ -31,6 +32,7 @@ export type EmailTemplateType =
   | 'RETURN_INITIATED'
   | 'RETURN_RECEIVED'
   | 'RETURN_REFUND'
+  | 'REFUND_RRN_UPDATE'
   | 'SUPPORT_REPLY'
   | 'CUSTOM';
 
@@ -44,6 +46,8 @@ export interface SendEmailOptions {
   replyTo?: string;
   syncWhatsApp?: boolean;
   customerPhone?: string;
+  /** Bypass duplicate suppression ONLY for explicit operator-triggered resends. */
+  force?: boolean;
 }
 
 export interface ResendStatus {
@@ -54,7 +58,7 @@ export interface ResendStatus {
   message?: string;
 }
 
-const NEVER_REPEAT_TEMPLATES = new Set<EmailTemplateType>(['RETURN_REFUND']);
+const NEVER_REPEAT_TEMPLATES = new Set<EmailTemplateType>(['RETURN_REFUND', 'REFUND_RRN_UPDATE']);
 const DELAY_NOTIFICATION_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
 class ResendService {
@@ -194,6 +198,8 @@ class ResendService {
         return renderReturnReceivedEmail(data);
       case 'RETURN_REFUND':
         return renderReturnRefundEmail(data);
+      case 'REFUND_RRN_UPDATE':
+        return renderRefundRrnUpdateEmail(data);
       case 'SUPPORT_REPLY':
         return renderSupportReplyEmail(data);
       case 'CUSTOM':
@@ -209,8 +215,8 @@ class ResendService {
     const { to, templateType, orderId, data, subject: customSubject, replyTo } = options;
 
     // A completed refund is a terminal event and must never be emailed twice
-    // for the same order. Transit notices may be resent only after 24 hours.
-    if (orderId && (NEVER_REPEAT_TEMPLATES.has(templateType) || templateType === 'TRANSIT_DELAY')) {
+    // automatically for the same order. Transit notices may be resent only after 24 hours.
+    if (!options.force && orderId && (NEVER_REPEAT_TEMPLATES.has(templateType) || templateType === 'TRANSIT_DELAY')) {
       const existingNotification = await emailLogService.findDeliveredNotification(
         orderId,
         templateType,
@@ -240,6 +246,18 @@ class ResendService {
     const finalSubject = customSubject || rendered.subject;
     const finalHtml = rendered.html;
 
+    const refundMetadata =
+      templateType === 'RETURN_REFUND' || templateType === 'REFUND_RRN_UPDATE'
+        ? {
+            refundId: data.refundId || null,
+            refundRrn: data.refundRrn || null,
+            refundArn: data.refundArn || null,
+            refundSource: data.refundSource || null,
+            refundAmount: data.refundAmount ?? null,
+            refundGatewayStatus: data.refundGatewayStatus || null,
+          }
+        : undefined;
+
     // 1. Pre-create pending EmailLog
     const log = await emailLogService.createLog({
       orderId: orderId || undefined,
@@ -255,6 +273,7 @@ class ResendService {
       delayReason: data.delayReason,
       expectedDeliveryDate: data.newEstimatedDelivery,
       htmlPreview: finalHtml,
+      metadata: refundMetadata,
     });
 
     // 2. Attach tracking link using log ID
@@ -444,6 +463,7 @@ class ResendService {
         RETURN_INITIATED: 'RETURN_INITIATED',
         RETURN_RECEIVED: 'RETURN_RECEIVED',
         RETURN_REFUND: 'REFUND_PROCESSED',
+        REFUND_RRN_UPDATE: 'REFUND_PROCESSED',
         SUPPORT_REPLY: 'SUPPORT_REPLY',
         CUSTOM: 'CUSTOM',
       };
@@ -494,6 +514,7 @@ export function senderForTemplate(templateType: EmailTemplateType): { from: stri
     case 'RETURN_RECEIVED':
       return { from: 'Youthnic Returns <returns@youthnic.com>', replyTo: 'returns@youthnic.com' };
     case 'RETURN_REFUND':
+    case 'REFUND_RRN_UPDATE':
       return { from: 'Youthnic Refunds <refunds@youthnic.com>', replyTo: 'refunds@youthnic.com' };
     case 'SUPPORT_REPLY':
     case 'ORDER_CONFIRMED':
